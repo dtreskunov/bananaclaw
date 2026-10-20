@@ -2338,17 +2338,59 @@ nav.tab-bar-strip.group-strip {
   max-height: max(0px, calc(100cqh - var(--chat-dock-height, 0px) - 2 * var(--transcript-edge-space)));
 }
 .chat-main .message-scroll {
-  --message-edge-fade: min(3lh, 30%);
   min-width: 0;
   min-height: 0;
   overflow: auto;
   scrollbar-width: thin;
 }
-.chat-main .message-scroll.scroll-fade-top {
-  --fade-top: var(--message-edge-fade);
+.chat-main .msg:is(.in, .out) {
+  --message-edge-fade: min(3lh, calc((100% - var(--message-padding-top) - var(--message-padding-block)) * 0.3));
+  isolation: isolate;
 }
-.chat-main .message-scroll.scroll-fade-bottom {
-  --fade-bottom: var(--message-edge-fade);
+.chat-main .msg:is(.in, .out)::before,
+.chat-main .msg:is(.in, .out)::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset-inline: 0;
+  border-radius: inherit;
+  box-shadow: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+.chat-main .msg:is(.in, .out)::before {
+  top: 0;
+  height: calc(var(--message-padding-top) + var(--message-edge-fade));
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      var(--bubble-tint),
+      transparent),
+    linear-gradient(
+      to bottom,
+      var(--surface),
+      transparent);
+}
+.chat-main .msg:is(.in, .out)::after {
+  bottom: 0;
+  height: calc(var(--message-padding-block) + var(--message-edge-fade));
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  background:
+    linear-gradient(
+      to top,
+      var(--bubble-tint),
+      transparent),
+    linear-gradient(
+      to top,
+      var(--surface),
+      transparent);
+}
+.chat-main .msg:has(> .message-scroll.scroll-fade-top)::before,
+.chat-main .msg:has(> .message-scroll.scroll-fade-bottom)::after {
+  opacity: 1;
 }
 .chat-main .log .msg:has(> .message-scroll:focus-visible) {
   outline: 2px solid var(--focus-ring);
@@ -2361,6 +2403,7 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
 }
 .chat-main .msg.in {
+  --bubble-tint: var(--accent);
   align-self: flex-end;
   background: linear-gradient(var(--accent), var(--accent)) var(--surface);
 }
@@ -2371,6 +2414,7 @@ nav.tab-bar-strip.group-strip {
   font-weight: 700;
 }
 .chat-main .msg.out {
+  --bubble-tint: var(--wash-strong);
   align-self: flex-start;
   background: linear-gradient(var(--wash-strong), var(--wash-strong)) var(--surface);
 }

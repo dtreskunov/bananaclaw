@@ -49,7 +49,7 @@ describe('scrollable message bubble', () => {
     expect(node.props.class).toBe('msg out');
     expect(node.props['data-msg-id']).toBe('reply');
     expect(node.ref).toEqual({ current: hooks.bubble });
-    expect(node.props.children.props.class).toBe('message-scroll scroll-edge-fade');
+    expect(node.props.children.props.class).toBe('message-scroll');
     expect(node.props.children.props.children).toBe('Complete response');
     expect(hooks.effects[0]()).toBe(dispose);
     const [element, axes, update] = hooks.attach.mock.calls[0];

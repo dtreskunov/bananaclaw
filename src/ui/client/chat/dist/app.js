@@ -23804,7 +23804,7 @@ function MessageBubble({ class: className, "data-msg-id": id2, elementRef, revea
       bubble.scrollTop += match2.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll scroll-edge-fade", ref: scrollRef, children }) });
+  return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children }) });
 }
 
 // src/components/QuestionAnswerBubble.tsx

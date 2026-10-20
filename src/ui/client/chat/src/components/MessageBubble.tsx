@@ -42,7 +42,7 @@ export function MessageBubble({ class: className, 'data-msg-id': id, elementRef,
   }, [reveal]);
   return (
     <div class={className} data-msg-id={id} ref={ref}>
-      <div class="message-scroll scroll-edge-fade" ref={scrollRef}>
+      <div class="message-scroll" ref={scrollRef}>
         {children}
       </div>
     </div>

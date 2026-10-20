@@ -206,7 +206,8 @@ describe('theme CSS contract', () => {
     expect(content).toContain('overflow: auto');
     const bubble = read('./components/MessageBubble.tsx');
     expect(bubble).toContain('class={className}');
-    expect(bubble).toContain('class="message-scroll scroll-edge-fade"');
+    expect(bubble).toContain('class="message-scroll"');
+    expect(bubble).not.toContain('scroll-edge-fade');
     expect(css).toContain('.msg:has(> .message-scroll:focus-visible)');
     expect(css).toContain('.msg:not(.display-card) > .message-scroll > .turn-technical-details');
     expect(css).toContain('.msg.markdown > .message-scroll > :first-child');
@@ -217,17 +218,53 @@ describe('theme CSS contract', () => {
     expect(card).toContain('gap: 8px');
   });
 
-  it('sizes bubble fades to three text lines while preserving a readable center in small viewports', () => {
+  it('fades bubble edges with static full-width overlays instead of masking the scroller', () => {
     const css = read('./components/ChatMain.css');
     const content = css.match(/\.chat-main \.message-scroll \{([^}]+)\}/)?.[1];
-    expect(content).toContain('--message-edge-fade: min(3lh, 30%)');
-    for (const edge of ['top', 'bottom']) {
-      const state = css.match(new RegExp(`\\.chat-main \\.message-scroll\\.scroll-fade-${edge} \\{([^}]+)\\}`))?.[1];
-      expect(state).toContain(`--fade-${edge}: var(--message-edge-fade)`);
+    expect(content).not.toContain('mask');
+    expect(css).not.toMatch(/\.message-scroll\.scroll-fade-(top|bottom) \{/);
+    const size = css.match(/\.chat-main \.msg:is\(\.in, \.out\) \{([^}]+)\}/)?.[1];
+    expect(size).toContain(
+      '--message-edge-fade: min(3lh, calc((100% - var(--message-padding-top) - var(--message-padding-block)) * 0.3))',
+    );
+    expect(size).toContain('isolation: isolate');
+    const shared = css.match(
+      /\.chat-main \.msg:is\(\.in, \.out\)::before,\s*\.chat-main \.msg:is\(\.in, \.out\)::after \{([^}]+)\}/,
+    )?.[1];
+    for (const declaration of [
+      'position: absolute',
+      'inset-inline: 0',
+      'border-radius: inherit',
+      'box-shadow: inherit',
+      'pointer-events: none',
+      'opacity: 0',
+    ])
+      expect(shared).toContain(declaration);
+    expect(css).not.toMatch(/\.msg:is\(\.in, \.out\)::(before|after) \{[^}]*mask/);
+    for (const [edge, side, direction, padding] of [
+      ['before', 'top', 'to bottom', 'top'],
+      ['after', 'bottom', 'to top', 'block'],
+    ]) {
+      const rule = [
+        ...css.matchAll(new RegExp(`\\.chat-main \\.msg:is\\(\\.in, \\.out\\)::${edge} \\{([^}]+)\\}`, 'g')),
+      ].at(-1)?.[1];
+      expect(rule).toContain(`${side}: 0`);
+      for (const corner of edge === 'before' ? ['end-start', 'end-end'] : ['start-start', 'start-end'])
+        expect(rule).toContain(`border-${corner}-radius: 0`);
+      expect(rule).toContain(`height: calc(var(--message-padding-${padding}) + var(--message-edge-fade))`);
+      for (const color of ['--bubble-tint', '--surface'])
+        expect(rule).toContain(`linear-gradient(${direction}, var(${color}), transparent)`);
     }
-    const global = read('./styles/global.css');
-    expect(global).toContain('.scroll-edge-fade.scroll-fade-top { --fade-top: 12px; }');
-    expect(global).toContain('.scroll-edge-fade.scroll-fade-bottom { --fade-bottom: 12px; }');
+    expect(css).toContain('.chat-main .msg:has(> .message-scroll.scroll-fade-top)::before');
+    expect(css).toContain('.chat-main .msg:has(> .message-scroll.scroll-fade-bottom)::after { opacity: 1; }');
+    for (const [kind, tint] of [
+      ['in', 'accent'],
+      ['out', 'wash-strong'],
+    ]) {
+      const rule = css.match(new RegExp(`\\.chat-main \\.msg\\.${kind} \\{([^}]+)\\}`))?.[1];
+      expect(rule).toContain(`--bubble-tint: var(--${tint})`);
+      expect(rule).toContain(`background: linear-gradient(var(--${tint}), var(--${tint})) var(--surface)`);
+    }
   });
 
   it('keeps pending controls visible and status captions consistent with delivery labels', () => {

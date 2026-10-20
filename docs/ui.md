@@ -225,7 +225,12 @@ Only the inset content scrolls and receives edge fades; the bubble's padding,
 solid background, and rounded corners stay unchanged when scrolling starts.
 Edge fades span up to three text lines, capped at 30% of the content viewport
 per edge. This keeps truncation visible across blank-line and paragraph gaps
-while leaving a clear reading area in small bubbles. Overflowing content
+while leaving a clear reading area in small bubbles. The fades are static,
+full-width gradient overlays above the content, with no masks: masking the
+scroller re-composites the whole moving bubble on every frame, and even masking
+the overlays visibly costs smoothness on phones. Each overlay repeats the
+bubble's tint-over-surface colors, fading continuously from the bubble's outer
+edge into the content, and keeps the bubble's corners and provenance rail. Overflowing content
 supports keyboard focus and scrolling; search
 navigation reveals matching text inside them. Copy still includes the complete
 message, not just its visible portion. There is no separate full-message reader.
