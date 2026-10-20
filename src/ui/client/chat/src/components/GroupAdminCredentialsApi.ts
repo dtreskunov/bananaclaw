@@ -17,7 +17,7 @@
 //   DELETE /credentials/accounts/:key
 //   POST   /credentials/requests/:id/approve   { values, copyFrom }
 //   POST   /credentials/requests/:id/reject
-//   GET    /credentials/activity?before=&filter=  ActivityPageDto
+//   GET    /credentials/activity?before=&filter=all|keys|problems  ActivityPageDto
 //   PUT    /credentials/network                { unmatched, allowPrivate }
 //
 // When the gateway is down, every route answers 503 { error: 'gateway_unreachable' }.
@@ -190,7 +190,9 @@ export interface ActivityPageDto {
   nextBefore: string | null;
 }
 
-export type AccountStartInput = { provider: string; scopeSets: string[]; replaceKey?: string } | { mcpServer: string };
+export type AccountStartInput =
+  | { provider: string; scopeSets: string[]; replaceKey?: string; requestId?: string }
+  | { mcpServer: string };
 
 export interface AccountStartDto {
   state: string;

@@ -751,6 +751,29 @@ advance the same turn into a reply to verify trace ownership and frozen elapsed
 time across settlement. Generated fixture assets are ignored and rebuilt from
 `src/ui/client/chat/fixtures/`.
 
+A second fixture renders the production Agent Settings dialog with the proposed
+**Credentials** tab (see
+[credential-gateway-agent-vault-fork-proposal.md](credential-gateway-agent-vault-fork-proposal.md)).
+The tab is hidden in the app until `credentialsUiEnabled` is turned on. The
+fixture mocks every `/admin/credentials/*` route in the page:
+
+```bash
+pnpm --dir src/ui/client/chat run fixture:credentials
+```
+
+This typechecks, builds into `data/dev-fixtures/credentials/`, and serves it at
+`http://127.0.0.1:4175/`, rebuilding on change. `PORT` overrides the port, and
+`?tab=mcp` opens the MCP servers tab. Sign-ins open a simulated provider window
+with Allow and Deny. The fixture panel can:
+
+- switch between typical and new-group data,
+- add latency,
+- simulate the gateway being down, view-only access, a failed change or a
+  blocked sign-in popup,
+- show the API calls made, with credential values masked.
+
+Nothing leaves the page.
+
 Your own pending native web-chat messages instead offer an **Edit** icon
 while the connected runner advertises input editing. This changes text in place,
 preserving attachments, ordering, message identity, and steering/queue intent;

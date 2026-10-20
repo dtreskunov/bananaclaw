@@ -288,26 +288,41 @@ also work, but are then stored unencrypted on disk.
 ### 6.1 Group settings → Credentials
 
 There's a new `credentials` tab in
-[GroupAdmin.tsx](../src/ui/client/chat/src/components/GroupAdmin.tsx) (added to
-`SETTINGS_SECTIONS`), plus an auth-status column in the MCP tab
-([GroupAdminMcp.tsx](../src/ui/client/chat/src/components/GroupAdminMcp.tsx)).
+[GroupAdmin.tsx](../src/ui/client/chat/src/components/GroupAdmin.tsx), hidden
+until `credentialsUiEnabled` is on. The MCP server editor
+([GroupAdminMcp.tsx](../src/ui/client/chat/src/components/GroupAdminMcp.tsx))
+gains a **Sign-in** row for HTTP servers. It shows whether the server uses a key
+or a sign-in and offers **Sign in**, or links to the key in Credentials.
 Routes extend the existing `/api/groups/:gid/admin/*` dispatcher in
 [group-admin.ts](../src/ui/server/chat/group-admin.ts).
 
-| Section     | Shows / does                                                                                                                                                                                                                        | Host route (`…/admin/credentials`)                                                                       | Gateway API                                      |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| Secrets     | Key, type, status (set, needs value, connected, needs reconnect), last used, allowed hosts, and which other groups hold the same key. Set or replace (write-only), optionally in those groups too; copy from another group; delete. | `PUT /secrets/:key {value, alsoGroups?}`, `POST /secrets/copy {fromGroup, keys}`, `DELETE /secrets/:key` | Set/delete credentials (no reveal, F6); F12 copy |
-| Services    | Host/path pattern, auth type, referenced keys, approval mode and rules (F3). Add from catalog presets.                                                                                                                              | `POST /services`, `PATCH`/`DELETE /services/:name`, `GET /catalog`                                       | Set/delete services; catalog                     |
-| Connections | OAuth accounts (Google…) and MCP OAuth (F4): status, scopes; connect, reconnect, disconnect                                                                                                                                         | `POST /oauth/start {app \| mcpUrl, scopes}` returns `{authorizeUrl}`; `DELETE /connections/:key`         | F11 connect; F4                                  |
-| Requests    | Pending agent proposals: fill in credential slots, approve or reject                                                                                                                                                                | `POST /proposals/:id/approve`, `POST /proposals/:id/reject`                                              | Approve/reject proposals                         |
-| Activity    | Recent proxied requests: time, session, host, method, path, status, decision                                                                                                                                                        | `GET /usage?before=`                                                                                     | Request log                                      |
-| Egress      | Unmatched-host mode, private allowlist (F5)                                                                                                                                                                                         | `PATCH /egress`                                                                                          | Vault settings                                   |
+The UI uses plain-language names: **keys** (gateway credentials), **accounts**
+(OAuth connections), **rules** (services), **requests** (proposals) and
+**network** (egress policy). The wire contract is in
+[GroupAdminCredentialsApi.ts](../src/ui/client/chat/src/components/GroupAdminCredentialsApi.ts),
+and a mocked fixture of the whole tab is described in
+[ui.md](ui.md). All routes are under `…/admin/credentials`:
+
+| View     | Shows / does                                                                                                                                                                                                                                   | Host routes                                                                                                                       | Gateway API                                      |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Requests | Pending agent proposals: fill in each credential slot (or copy it from another group), sign in for account requests, approve or decline                                                                                                        | `POST /requests/:id/approve {values, copyFrom}`, `POST /requests/:id/reject`                                                      | Approve/reject proposals                         |
+| Keys     | Name, key name, needs-value / out-of-date status, hosts it's sent to, last used, copied-from and also-in groups. Add (preset or custom; optionally to other groups too), replace (optionally in other groups), copy to or from groups, delete. | `POST /keys`, `PUT /keys/:key {value, alsoGroups}`, `POST /keys/copy`, `POST /keys/:key/share`, `DELETE /keys/:key`, `GET /peers` | Set/delete credentials (no reveal, F6); F12 copy |
+| Accounts | OAuth accounts and MCP sign-ins: status, access, last used; connect, change access, reconnect, disconnect                                                                                                                                      | `POST /accounts/start` → `{state, authorizeUrl}`, `GET /accounts/start/:state`, `DELETE /accounts/:key`                           | F11 connect; F4                                  |
+| Rules    | Host/path match, how the key is sent, approval mode (allow, ask before changes, ask always, ask for listed calls), pause/resume                                                                                                                | `POST /rules`, `PUT /rules/:name`, `DELETE /rules/:name`                                                                          | Set/delete services; F3                          |
+| Activity | Recent requests: time, method, host, path, outcome, key, thread; filters for key use and problems                                                                                                                                              | `GET /activity?filter=&before=`                                                                                                   | Request log                                      |
+| Network  | Unmatched requests (allow without a key, or block), private-network allowlist; operator-wide entries shown read-only                                                                                                                           | `PUT /network`                                                                                                                    | Vault settings; F5                               |
+
+`GET /credentials` returns everything the tab needs in one call, including the
+MCP servers' sign-in status that the MCP tab shows. When the gateway is down,
+every route answers `503 {error: "gateway_unreachable"}`, and the tab shows an
+operator hint instead of data.
 
 **OAuth callback.** There are two global UI-server routes: `GET /oauth/callback`
 and `GET /oauth/client-metadata.json` (the latter is served from F11).
 
-- **Start:** `POST /oauth/start` records `state → (user, group)` with a
-  10-minute expiry.
+- **Start:** `POST …/credentials/accounts/start` records `state → (user, group)`
+  with a 10-minute expiry and returns the authorize URL, which the UI opens in a
+  popup.
 - **Callback:** completes only for the **same signed-in NanoClaw user**.
   - It forwards `{code, state}` to `POST /v1/oauth/complete`.
   - It then returns the user to the tab.

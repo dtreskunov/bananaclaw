@@ -17,7 +17,7 @@ import {
   type RuleDto,
   type RuleInput,
 } from './GroupAdminCredentialsApi';
-import { APPROVAL_HELP, APPROVAL_LABELS, KEY_NAME_RE, SecretInput } from './GroupAdminCredentialsParts';
+import { APPROVAL_HELP, APPROVAL_LABELS, KEY_NAME_RE, SecretInput, ago, useEscapeClose } from './GroupAdminCredentialsParts';
 import { GroupAdminField as Field } from './GroupAdminField';
 import { MobileDialog, MobileDialogFooter, MobileDialogItem, MobileDialogList } from './MobileDialog';
 import { showToast } from './Toast';
@@ -122,6 +122,7 @@ export function ConfirmDialog({
   onClose: () => void;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
+  useEscapeClose(onClose, busy);
   return (
     <MobileDialog title={title} onClose={onClose} maxWidth="440px" className="ga-confirm-modal" closeDisabled={busy}>
       <div class="settings-body ga-cred-dialog-body">{children}</div>
@@ -246,12 +247,18 @@ export function AddKeyDialog({
   gid,
   presets,
   existingKeys,
+  initialMatch,
+  onExisting,
   onClose,
   onSaved,
 }: {
   gid: string;
   presets: KeyPresetDto[];
   existingKeys: string[];
+  /** Host pattern to start from, e.g. when adding a key for an MCP server. */
+  initialMatch?: string;
+  /** Called instead of adding when the chosen preset's key already exists. */
+  onExisting: (key: string) => void;
   onClose: () => void;
   onSaved: () => void;
 }): JSX.Element {
@@ -267,6 +274,15 @@ export function AddKeyDialog({
   const [askRules, setAskRules] = useState<AskRuleDto[]>([]);
   const [alsoGroups, setAlsoGroups] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  useEscapeClose(onClose, busy);
+
+  useEffect(() => {
+    if (!initialMatch) return;
+    const host = initialMatch.split('/')[0];
+    const match = presets.find((p) => p.match.split('/')[0] === host);
+    pick(match ?? 'custom');
+    if (!match) setMatch(initialMatch);
+  }, []);
 
   function pick(next: KeyPresetDto | 'custom'): void {
     setPreset(next);
@@ -292,7 +308,11 @@ export function AddKeyDialog({
         </div>
         <MobileDialogList className="ga-cred-preset-list">
           {presets.map((p) => (
-            <MobileDialogItem key={p.id} label={p.label} sublabel={p.match} chevron onClick={() => pick(p)} />
+            existingKeys.includes(p.key) ? (
+              <MobileDialogItem key={p.id} label={p.label} sublabel={`Already added (${p.key}) · replace its value`} chevron onClick={() => onExisting(p.key)} />
+            ) : (
+              <MobileDialogItem key={p.id} label={p.label} sublabel={p.match} chevron onClick={() => pick(p)} />
+            )
           ))}
           <MobileDialogItem label="Another service" sublabel="Any host; choose how the key is sent" chevron onClick={() => pick('custom')} />
         </MobileDialogList>
@@ -402,6 +422,7 @@ export function ReplaceKeyDialog({
   const [value, setValue] = useState('');
   const [alsoGroups, setAlsoGroups] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  useEscapeClose(onClose, busy);
   const editable = item.alsoIn.filter((g) => g.canEdit);
   const locked = item.alsoIn.filter((g) => !g.canEdit);
   const verb = item.status === 'needs_value' ? 'Set' : 'Replace';
@@ -422,7 +443,7 @@ export function ReplaceKeyDialog({
   return (
     <MobileDialog title={`${verb} ${item.label}`} onClose={onClose} maxWidth="480px" className="ga-cred-dialog" closeDisabled={busy}>
       <form id="ga-cred-replace" class="settings-body ga-cred-dialog-body" onSubmit={save}>
-        <p class="group-admin-help"><code>{item.key}</code>{item.status === 'set' ? ` · current value set ${new Date(item.updatedAt ?? '').toLocaleDateString()}` : ''}</p>
+        <p class="group-admin-help"><code>{item.key}</code>{item.status === 'set' && item.updatedAt ? ` · current value set ${ago(item.updatedAt)}` : ''}</p>
         <Field label="New value">
           <SecretInput value={value} onInput={setValue} autoFocus />
         </Field>
@@ -464,6 +485,7 @@ export function ShareKeyDialog({
   const peers = usePeers(gid);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  useEscapeClose(onClose, busy);
   const editable = (peers ?? []).filter((p) => p.canEdit);
   return (
     <MobileDialog title={`Copy ${item.label} to other groups`} onClose={onClose} maxWidth="480px" className="ga-cred-dialog" closeDisabled={busy}>
@@ -516,6 +538,7 @@ export function CopyFromDialog({
   const [from, setFrom] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  useEscapeClose(onClose, busy);
   const source = sources.find((p) => p.groupId === from) ?? null;
 
   useEffect(() => {
@@ -599,6 +622,7 @@ export function RuleDialog({
   const [approval, setApproval] = useState<ApprovalMode>(rule?.approval ?? 'allow');
   const [askRules, setAskRules] = useState<AskRuleDto[]>(rule?.askRules ?? []);
   const [busy, setBusy] = useState(false);
+  useEscapeClose(onClose, busy);
   const needsKey = injection.type !== 'passthrough';
   const canSave = !busy && match.trim() !== '' && (!needsKey || !!injection.key);
 
@@ -658,6 +682,7 @@ export function ConnectAccountDialog({
   const [app, setApp] = useState<OAuthAppDto | null>(() => (reconnect ? apps.find((a) => a.id === reconnect.provider) ?? null : null));
   const [scopes, setScopes] = useState<string[]>(() => reconnect?.scopes ?? []);
   const [busy, setBusy] = useState(false);
+  useEscapeClose(onClose, busy);
   const mcpSignIns = mcp.filter((m) => m.auth === 'oauth');
 
   async function begin(input: AccountStartInput): Promise<void> {

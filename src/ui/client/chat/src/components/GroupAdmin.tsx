@@ -5,7 +5,7 @@ import './GroupAdmin.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
-import { groupAdminOpen, groupId, groups, isMobile } from '../state';
+import { credentialsUiEnabled, groupAdminOpen, groupAdminTabRequest, groupId, groups, isMobile } from '../state';
 import { returnToUserMenu, selectGroup } from '../actions';
 import { Combobox, type ComboboxOption } from './Combobox';
 import { ModelPickerDialog } from './ModelPickerDialog';
@@ -15,6 +15,7 @@ import { useBackButtonCloses } from '../modalBackButton';
 import { TabBar, type TabItem } from './TabBar';
 import { MobileDialog, MobileDialogFooter, MobileDialogItem, MobileDialogList } from './MobileDialog';
 import { MembersTab, RolesTab } from './GroupAdminAccess';
+import { CredentialsTab } from './GroupAdminCredentials';
 import { apiPath, call, errMsg } from './GroupAdminApi';
 import { DestinationsTab } from './GroupAdminDestinations';
 import { GroupAdminField as Field } from './GroupAdminField';
@@ -23,7 +24,7 @@ import { ModelParamsEditor } from './GroupAdminModelParams';
 import { PackagesSection } from './GroupAdminPackages';
 import { SkillsSection, type AvailableSkillDto } from './GroupAdminSkills';
 
-type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'members' | 'roles' | 'destinations';
+type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'credentials' | 'members' | 'roles' | 'destinations';
 
 const SETTINGS_SECTIONS = new Set<Tab>(['models', 'settings', 'packages', 'mcp', 'skills']);
 
@@ -33,6 +34,7 @@ const TAB_ITEMS: TabItem[] = [
   { id: 'packages', label: 'Packages', sublabel: 'apt / npm / pip in the image' },
   { id: 'mcp', label: 'MCP servers', sublabel: 'External tools wired to the agent' },
   { id: 'skills', label: 'Skills', sublabel: 'Container skills mounted at runtime' },
+  { id: 'credentials', label: 'Credentials', sublabel: 'Keys and accounts the agent can use' },
   { id: 'members', label: 'Members', sublabel: 'Who can use this group' },
   { id: 'roles', label: 'Admins', sublabel: 'Admins for this group' },
   { id: 'destinations', label: 'Destinations', sublabel: 'Where this group can send messages' },
@@ -162,6 +164,17 @@ export function GroupAdmin(): JSX.Element | null {
   useBackButtonCloses(open, () => {
     groupAdminOpen.value = false;
   });
+  const requestedTab = groupAdminTabRequest.value;
+  useEffect(() => {
+    if (!open || !requestedTab) return;
+    groupAdminTabRequest.value = null;
+    if (actionsRef.current?.canSave) {
+      showToast('Save or discard your changes first', 'err');
+      return;
+    }
+    setTab(requestedTab as Tab);
+  }, [open, requestedTab]);
+  const tabItems = credentialsUiEnabled.value ? TAB_ITEMS : TAB_ITEMS.filter((it) => it.id !== 'credentials');
 
   if (!open || !gid) return null;
   const group = groups.value.find((g) => g.id === gid);
@@ -223,13 +236,13 @@ export function GroupAdmin(): JSX.Element | null {
           ariaLabel="Group settings sections"
           mobileSheetTitle="Settings sections"
           activeId={activeTab}
-          items={TAB_ITEMS}
+          items={tabItems}
           onSelect={(id) => setTab(id as Tab)}
           className="group-admin-tab-bar tab-bar-header"
         />
       ) : null}
       {mobile && activeTab === null ? (
-        <MobileSectionList items={TAB_ITEMS} onSelect={(id) => setTab(id as Tab)} />
+        <MobileSectionList items={tabItems} onSelect={(id) => setTab(id as Tab)} />
       ) : (
         <div class={`settings-body${activeTab === 'mcp' ? ' ga-mcp-settings-body' : ''}`}>
           {activeTab !== null && SETTINGS_SECTIONS.has(activeTab) ? (
@@ -240,6 +253,7 @@ export function GroupAdmin(): JSX.Element | null {
               onActions={setActions}
             />
           ) : null}
+          {activeTab === 'credentials' && credentialsUiEnabled.value ? <CredentialsTab gid={gid} /> : null}
           {activeTab === 'members' ? <MembersTab gid={gid} /> : null}
           {activeTab === 'roles' ? <RolesTab gid={gid} /> : null}
           {activeTab === 'destinations' ? <DestinationsTab gid={gid} /> : null}
@@ -986,7 +1000,14 @@ function SettingsTab({
       ) : null}
 
       {section === 'mcp' ? (
-        <McpServersSection value={draftMcpServers} busy={busy} onChange={setDraftMcpServers} onTest={testMcpServer} />
+        <McpServersSection
+          value={draftMcpServers}
+          busy={busy}
+          onChange={setDraftMcpServers}
+          onTest={testMcpServer}
+          credentialsGid={credentialsUiEnabled.value ? gid : undefined}
+          savedServers={data.mcpServers}
+        />
       ) : null}
 
       {section === 'skills' ? (

@@ -115,6 +115,23 @@ export function SecretInput({
   );
 }
 
+/**
+ * Escape closes only the topmost credentials dialog. Runs in the capture phase
+ * so Agent Settings' own Escape handler doesn't close the whole settings dialog.
+ */
+export function useEscapeClose(onClose: () => void, busy = false): void {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key !== 'Escape') return;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      if (!busy) onClose();
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose, busy]);
+}
+
 export interface SignInWaiting {
   state: string;
   label: string;

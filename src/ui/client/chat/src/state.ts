@@ -116,6 +116,10 @@ export const completionSoundMutedSig: Signal<boolean> = signal(false);
 export const userMenuOpen: Signal<boolean> = signal(false);
 export const settingsOpen: Signal<boolean> = signal(false);
 export const groupAdminOpen: Signal<boolean> = signal(false);
+/** Agent Settings tab to switch to on the next render (consumed by GroupAdmin). */
+export const groupAdminTabRequest: Signal<string | null> = signal<string | null>(null);
+/** Shows group settings → Credentials. Off until the credential gateway backend ships. */
+export const credentialsUiEnabled: Signal<boolean> = signal(false);
 export const groupPickerOpen: Signal<boolean> = signal(false);
 export const groupPickerMode: Signal<'all' | 'non-members'> = signal('all');
 export const shareModalRequest: Signal<ShareModalRequest | null> = signal<ShareModalRequest | null>(null);

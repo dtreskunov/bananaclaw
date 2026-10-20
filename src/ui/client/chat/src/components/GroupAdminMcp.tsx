@@ -2,7 +2,8 @@ import './GroupAdminMcp.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
-import { isMobile } from '../state';
+import { groupAdminTabRequest, isMobile } from '../state';
+import { McpServerAuth } from './GroupAdminCredentials';
 import { MobileDialog, MobileDialogFooter } from './MobileDialog';
 
 interface McpStdioServerDto {
@@ -40,11 +41,16 @@ export function McpServersSection({
   busy,
   onChange,
   onTest,
+  credentialsGid,
+  savedServers,
 }: {
   value: Record<string, McpServerConfigDto>;
   busy: boolean;
   onChange: (next: Record<string, McpServerConfigDto>) => void;
   onTest: (name: string, server: McpServerConfigDto) => Promise<McpProbeResultDto>;
+  /** Shows each HTTP server's key / sign-in status from the credential gateway. */
+  credentialsGid?: string;
+  savedServers?: Record<string, McpServerConfigDto>;
 }): JSX.Element {
   const mobile = isMobile.value;
   const names = Object.keys(value);
@@ -153,6 +159,20 @@ export function McpServersSection({
       onChange={(next) => updateServer(selectedName, next)}
       onRemove={() => removeServer(selectedName)}
       onTest={() => onTest(selectedName, selectedValue)}
+      auth={credentialsGid && mcpServerType(selectedValue) !== 'stdio' ? (
+        JSON.stringify(savedServers?.[selectedName]) === JSON.stringify(selectedValue) ? (
+          <McpServerAuth
+            gid={credentialsGid}
+            server={selectedName}
+            onOpenCredentials={() => { groupAdminTabRequest.value = 'credentials'; }}
+          />
+        ) : (
+          <div class="ga-cred-mcp-auth">
+            <span class="ga-mcp-row-label">Sign-in</span>
+            <span class="muted">Save your changes to check whether this server needs a key or sign-in.</span>
+          </div>
+        )
+      ) : null}
     />
   ) : null;
 
@@ -398,6 +418,7 @@ function McpServerEditor({
   onChange,
   onRemove,
   onTest,
+  auth,
 }: {
   name: string;
   value: McpServerConfigDto;
@@ -405,6 +426,7 @@ function McpServerEditor({
   onChange: (next: McpServerConfigDto) => void;
   onRemove: () => void;
   onTest: () => Promise<McpProbeResultDto>;
+  auth?: JSX.Element | null;
 }): JSX.Element {
   const type = mcpServerType(value);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -546,6 +568,8 @@ function McpServerEditor({
           </label>
         </div>
       </details>
+
+      {auth}
 
       <div class="ga-mcp-test">
         <button
