@@ -23,7 +23,7 @@ This document covers only what differs.
 ## 1. Decision summary
 
 - **What to fork:** Agent Vault v0.40.0 (commit `872578e4cdf9`) into
-  `dtreskunov/agent-vault`, on a `nanoclaw` branch.
+  `dtreskunov/agent-vault`, on a `bananaclaw` branch.
 - **How to run it:** as `nanoclaw-gateway`, a single static Go binary.
 - **Where new code goes:** NanoClaw-specific and MCP features go into **new
   packages**, with small hooks in core files. Each change is offered upstream.
@@ -372,7 +372,7 @@ vault belongs to exactly one group, so the rules follow NanoClaw's group roles:
 
 ## 7. Maintaining the fork
 
-- **Branch model:** the `nanoclaw` branch is rebased onto each upstream release
+- **Branch model:** the `bananaclaw` branch is rebased onto each upstream release
   tag. Fork commits are kept as one commit per F-change.
 - **Code placement:** new code goes in `internal/nanoclaw/`, `internal/mcpauth/`,
   `internal/approval/` and `internal/sockets/`. Core files get only short hooks
@@ -417,8 +417,10 @@ one proposal with credential slots for the keys it was granted.
 ## 9. Plan
 
 **Spike (go/no-go before anything else):** build F1, F2 and the F10 bootstrap,
-with a minimal NanoClaw integration (spawn, plus `ncl credentials set` in place
-of the UI) for one canary group.
+with a minimal NanoClaw integration (spawn and the egress relay) for one canary
+group whose vault is configured with Agent Vault's own CLI. The work split and
+interface contract are in
+[credential-gateway-spike.md](credential-gateway-spike.md).
 
 | Criterion    | Pass if                                                                                                                                            |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
