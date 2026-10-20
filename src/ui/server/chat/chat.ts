@@ -1047,7 +1047,7 @@ export interface HistoryMessage {
   timelinePosition?: number;
   /** Human sender attribution for inbound messages. */
   author?: { userId: string; displayName: string };
-  direction: 'in' | 'out' | 'internal' | 'event';
+  direction: 'in' | 'out' | 'event';
   // messages_in.id / messages_out.id — stable per-row id the client uses
   // as the dedup key against live WS pushes.
   id: string;
@@ -1302,19 +1302,6 @@ export function readChatHistory(
       const editsByTarget = new Map<string, string>();
 
       for (const r of rows) {
-        if (r.kind === 'internal') {
-          const parsed = parseOutboundContent(r.content);
-          messages.push({
-            direction: 'internal',
-            id: r.id,
-            ...(r.turn_id ? { turnId: r.turn_id } : {}),
-            timestamp: r.timestamp,
-            text: parsed.text,
-            files: parsed.files,
-            ...(parsed.timelinePosition !== undefined ? { timelinePosition: parsed.timelinePosition } : {}),
-          });
-          continue;
-        }
         if (r.kind === 'chat-sdk') {
           // Durable ask_question rows render through the question lifecycle
           // returned by /sync. Adding a history bubble here duplicates the

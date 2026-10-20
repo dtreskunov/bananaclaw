@@ -129,7 +129,7 @@ export interface ThreadCtx {
   canSend: boolean;
 }
 
-export type Direction = 'in' | 'out' | 'internal' | 'event';
+export type Direction = 'in' | 'out' | 'event';
 
 export interface ChatMessageFile {
   filename: string;

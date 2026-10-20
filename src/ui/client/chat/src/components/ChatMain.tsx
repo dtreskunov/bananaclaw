@@ -800,7 +800,6 @@ function Message(
             live={m.turnTraceLive}
           />
         : null}
-      {m.direction === 'internal' ? <div class="internal-label">internal</div> : null}
       {m.direction === 'in' && m.author && m.author.userId !== currentUserId.value
         ? <div class="message-author">{m.author.displayName}</div>
         : null}
@@ -953,10 +952,9 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
   );
 }
 
-interface ThoughtsGroup { kind: 'thoughts'; thoughts: ChatMessage[]; answer: ChatMessage }
 interface SingleGroup { kind: 'single'; m: ChatMessage }
 interface EventsGroup { kind: 'events'; events: ChatMessage[] }
-type MsgGroup = ThoughtsGroup | SingleGroup | EventsGroup
+type MsgGroup = SingleGroup | EventsGroup
   | { kind: 'starting'; row: Extract<TranscriptRow, { kind: 'starting' }> }
   | { kind: 'turn'; row: Extract<TranscriptRow, { kind: 'turn' }> }
   | { kind: 'question-answer'; row: Extract<TranscriptRow, { kind: 'question-answer' }> };
@@ -971,7 +969,6 @@ function groupKey(group: MsgGroup, responseTurnId: string | null): string {
     return 'response:active';
   if (group.kind === 'turn') return `turn:${group.row.turn.id}`;
   if (group.kind === 'question-answer') return `question-answer:${group.row.answer.id}`;
-  if (group.kind === 'thoughts') return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === 'events') return `events:${messageKey(group.events[0]!)}`;
   return `single:${messageKey(group.m)}`;
 }
@@ -979,16 +976,12 @@ function groupKey(group: MsgGroup, responseTurnId: string | null): string {
 function groupContains(group: MsgGroup, messageId: string): boolean {
   if (group.kind === 'turn' || group.kind === 'starting') return false;
   if (group.kind === 'question-answer') return group.row.answer.id === messageId;
-  if (group.kind === 'thoughts') {
-    return group.answer.id === messageId || group.thoughts.some((t) => t.id === messageId);
-  }
   if (group.kind === 'events') return group.events.some((e) => e.id === messageId);
   return group.m.id === messageId;
 }
 
 function groupMessages(list: TranscriptRow[]): MsgGroup[] {
   const out: MsgGroup[] = [];
-  let pendingMsgs: ChatMessage[] = [];
   let events: ChatMessage[] = [];
   // A run of consecutive task-run events (e.g. a daily job) collapses into a
   // single expandable pill so it doesn't flood the transcript. A lone event
@@ -1002,8 +995,6 @@ function groupMessages(list: TranscriptRow[]): MsgGroup[] {
   for (const row of list) {
     if (row.kind !== 'message') {
       flushEvents();
-      for (const message of pendingMsgs) out.push({ kind: 'single', m: message });
-      pendingMsgs = [];
       if (row.kind === 'starting') out.push({ kind: 'starting', row });
       else if (row.kind === 'turn') out.push({ kind: 'turn', row });
       else out.push({ kind: 'question-answer', row });
@@ -1011,24 +1002,13 @@ function groupMessages(list: TranscriptRow[]): MsgGroup[] {
     }
     const m = row.message;
     if (m.direction === 'event') {
-      // Keep timeline order: flush any buffered internal thoughts first.
-      for (const t of pendingMsgs) out.push({ kind: 'single', m: t });
-      pendingMsgs = [];
       events.push(m);
       continue;
     }
     flushEvents();
-    if (m.direction === 'internal') {
-      pendingMsgs.push(m);
-    } else if (m.direction === 'out' && pendingMsgs.length > 0) {
-      out.push({ kind: 'thoughts', thoughts: pendingMsgs, answer: m });
-      pendingMsgs = [];
-    } else {
-      out.push({ kind: 'single', m });
-    }
+    out.push({ kind: 'single', m });
   }
   flushEvents();
-  for (const t of pendingMsgs) out.push({ kind: 'single', m: t });
   return out;
 }
 
@@ -1066,36 +1046,6 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
       </span>
       <span class="event-meta">last&nbsp;<RelativeTime ts={last.ts} /></span>
     </button>
-  );
-}
-
-function ThoughtGroup({
-  thoughts,
-  answer,
-  allowContinue,
-  isLatest,
-}: {
-  thoughts: ChatMessage[];
-  answer: ChatMessage;
-  allowContinue: boolean;
-  isLatest: boolean;
-}) {
-  const [showThoughts, setShowThoughts] = useState(false);
-  const n = thoughts.length;
-  const label = showThoughts ? 'answer' : (n > 1 ? `thoughts (${n})` : 'thoughts');
-  const title = showThoughts ? 'Show final answer' : 'Show agent thoughts leading to this answer';
-  return (
-    <div class={'thought-group' + (showThoughts ? ' showing-thoughts' : ' showing-answer')}>
-      {showThoughts
-        ? thoughts.map((t) => <MessageRow key={messageKey(t)} m={t} />)
-        : <MessageRow m={answer} allowContinue={allowContinue} isLatest={isLatest} />}
-      <button
-        type="button"
-        class="thoughts-toggle"
-        title={title}
-        onClick={() => setShowThoughts((v) => !v)}
-      >{label}</button>
-    </div>
   );
 }
 
@@ -1617,7 +1567,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
     const row = list[index]!;
     if (row.kind !== 'message') continue;
     const message = row.message;
-    if (message.direction !== 'internal' && message.direction !== 'event') {
+    if (message.direction !== 'event') {
       latestConversationalMessage = message;
       break;
     }
@@ -1636,14 +1586,6 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                     ? <ResponseStatusRow key={key} source={g.row} />
                     : g.kind === 'question-answer'
                       ? <QuestionAnswer key={key} question={g.row.question} answer={g.row.answer} />
-                    : g.kind === 'thoughts'
-                    ? <ThoughtGroup
-                        key={key}
-                        thoughts={g.thoughts}
-                        answer={g.answer}
-                        allowContinue={g.answer === latestConversationalMessage}
-                        isLatest={g.answer === latestConversationalMessage}
-                      />
                     : g.kind === 'events'
                       ? <EventsGroup key={key} events={g.events} />
                       : <MessageRow

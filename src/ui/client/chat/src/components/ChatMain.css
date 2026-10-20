@@ -177,25 +177,18 @@
 .chat-main .msg.out { --bubble-tint: var(--wash-strong); align-self: flex-start; background: linear-gradient(var(--wash-strong), var(--wash-strong)) var(--surface); }
 .chat-main .msg.agent-action,
 .chat-main .msg.out.system-notice,
-.chat-main .msg.internal,
 .chat-main .msg.input-applied,
 .chat-main .msg.input-follow-up,
 .chat-main .msg.input-steering {
   box-shadow: inset 2px 0 var(--provenance-rail-color, var(--border-strong));
 }
 .chat-main .msg.agent-action { --provenance-rail-color: var(--accent-strong-opaque, var(--accent-strong)); }
-.chat-main :where(.msg.out.system-notice, .msg.internal) {
-  --provenance-rail-color: var(--border-strong, var(--muted));
-}
+.chat-main .msg.out.system-notice { --provenance-rail-color: var(--border-strong, var(--muted)); }
 .chat-main :is(.msg, .typing).provenance-warning,
 .chat-main .msg.input-follow-up { --provenance-rail-color: var(--warning-border, var(--warning)); }
 .chat-main :is(.msg, .typing).provenance-error { --provenance-rail-color: var(--error-soft, var(--danger)); }
 .chat-main .msg.input-applied,
 .chat-main .msg.input-steering { --provenance-rail-color: var(--input-steering-accent, var(--approve)); }
-.chat-main .msg.internal { align-self: flex-start; background: transparent !important; color: var(--muted); opacity: 0.85; max-width: 92%; }
-.chat-main .msg.internal, .chat-main .msg.internal * { font-style: italic; }
-.chat-main .msg.internal .internal-label { font-size: var(--font-2xs); font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; opacity: 0.7; }
-.chat-main .msg.internal pre, .chat-main .msg.internal code { background: transparent; }
 .chat-main .msg.event {
   align-self: center;
   background: transparent;
@@ -277,29 +270,6 @@
 }
 .chat-main .events-group.open .events-collapse:hover { color: var(--fg, inherit); }
 .chat-main .events-group.open .msg.event { align-self: center; }
-.chat-main .thought-group {
-  position: relative;
-  display: flex; flex-direction: column;
-  align-self: flex-start;
-  width: fit-content;
-  max-width: 92%;
-  gap: 4px;
-}
-.chat-main .thought-group > .msg { max-width: 100%; padding-right: 60px; }
-.chat-main .thought-group .thoughts-toggle {
-  position: absolute; right: 6px; bottom: 6px;
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 8px;
-  background: var(--wash-strong, var(--wash));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--muted);
-  font: inherit; font-size: var(--font-2xs); font-style: italic;
-  cursor: pointer; line-height: 1.2;
-  opacity: 0.75;
-  z-index: 1;
-}
-.chat-main .thought-group .thoughts-toggle:hover { opacity: 1; color: var(--fg); }
 .chat-main .msg .files { font-size: var(--font-xs); color: var(--muted); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; }
 .chat-main .msg .file-chip { font: inherit; color: inherit; background: var(--wash-strong); border: 1px solid var(--border, transparent); border-radius: var(--radius-md); padding: 2px 6px; cursor: pointer; }
 .chat-main .msg .file-chip:hover { background: var(--accent); color: var(--fg); }

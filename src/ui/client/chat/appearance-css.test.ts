@@ -361,7 +361,7 @@ describe('theme CSS contract', () => {
     expect(railRule?.[0]).not.toContain('.msg.input-queued');
     const action = css.match(/\.chat-main \.msg\.agent-action \{([^}]+)\}/)?.[1];
     expect(action).toContain('--provenance-rail-color: var(--accent-strong-opaque, var(--accent-strong))');
-    const neutral = css.match(/\.chat-main :where\(\.msg\.out\.system-notice, \.msg\.internal\) \{([^}]+)\}/)?.[1];
+    const neutral = css.match(/\.chat-main \.msg\.out\.system-notice \{([^}]+)\}/)?.[1];
     expect(neutral).toContain('--provenance-rail-color: var(--border-strong, var(--muted))');
     expect(css).not.toContain('.chat-main .msg.out.system-notice { background: transparent; }');
     const warning = css.match(

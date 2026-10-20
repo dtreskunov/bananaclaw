@@ -472,7 +472,7 @@ describe('durable input state history', () => {
     const db = openOutboundDbRw('agent', 'session-1');
     db.prepare(
       `INSERT INTO messages_out (id, seq, kind, timestamp, channel_type, platform_id, thread_id, content)
-       VALUES ('out-test', 1, 'internal', ?, 'web', 'group:agent', 'thread-1', ?)`,
+       VALUES ('out-test', 1, 'chat', ?, 'web', 'group:agent', 'thread-1', ?)`,
     ).run(NOW, JSON.stringify(content));
     db.close();
     const frames: Record<string, unknown>[] = [];
@@ -491,7 +491,7 @@ describe('durable input state history', () => {
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     try {
       expect(socketView(frames).messages[0].timelinePosition).toBe(timelinePosition);
-      await createWebAdapter().deliver('group:agent', 'thread-1', { id: 'out-test', kind: 'internal', content });
+      await createWebAdapter().deliver('group:agent', 'thread-1', { id: 'out-test', kind: 'chat', content });
       expect(frames).toHaveLength(1);
       expect(socketView(frames).messages[0]).toMatchObject({ id: 'out-test', timelinePosition, timestamp: NOW });
       expect(history()[0].timelinePosition).toBe(timelinePosition);

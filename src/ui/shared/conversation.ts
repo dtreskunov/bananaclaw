@@ -19,7 +19,7 @@ export interface ConversationUsage {
 
 export interface ConversationMessage {
   id: string;
-  direction: 'in' | 'out' | 'internal' | 'event';
+  direction: 'in' | 'out' | 'event';
   timestamp: string;
   text: string;
   questionId?: string;

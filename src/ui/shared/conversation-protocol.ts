@@ -91,7 +91,7 @@ const reportedUsage = shape(
 );
 const message = shape({
   id,
-  direction: oneOf('in', 'out', 'internal', 'event'),
+  direction: oneOf('in', 'out', 'event'),
   timestamp: text,
   text,
   questionId: optional(id),

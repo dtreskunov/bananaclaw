@@ -58,12 +58,7 @@ describe('findEditBranchAnchorId', () => {
   });
 
   it('skips non-conversational timeline rows', () => {
-    const messages = [
-      message('a1', 'out'),
-      message('event-1', 'event'),
-      message('internal-1', 'internal'),
-      message('u2', 'in'),
-    ];
+    const messages = [message('a1', 'out'), message('event-1', 'event'), message('u2', 'in')];
 
     expect(findEditBranchAnchorId(messages, 'u2')).toBe('a1');
   });

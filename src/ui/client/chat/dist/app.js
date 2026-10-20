@@ -18748,7 +18748,7 @@ var reportedUsage = shape(
 );
 var message = shape({
   id,
-  direction: oneOf("in", "out", "internal", "event"),
+  direction: oneOf("in", "out", "event"),
   timestamp: text,
   text,
   questionId: optional(id),
@@ -24796,7 +24796,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             live: m6.turnTraceLive
           }
         ) : null,
-        m6.direction === "internal" ? /* @__PURE__ */ u4("div", { class: "internal-label", children: "internal" }) : null,
         m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
         /* @__PURE__ */ u4(MessageText, { text: m6.text, md }),
         singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
@@ -24948,22 +24947,17 @@ function groupKey(group, responseTurnId) {
     return "response:active";
   if (group.kind === "turn") return `turn:${group.row.turn.id}`;
   if (group.kind === "question-answer") return `question-answer:${group.row.answer.id}`;
-  if (group.kind === "thoughts") return `thoughts:${messageKey(group.answer)}`;
   if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
   return `single:${messageKey(group.m)}`;
 }
 function groupContains(group, messageId) {
   if (group.kind === "turn" || group.kind === "starting") return false;
   if (group.kind === "question-answer") return group.row.answer.id === messageId;
-  if (group.kind === "thoughts") {
-    return group.answer.id === messageId || group.thoughts.some((t4) => t4.id === messageId);
-  }
   if (group.kind === "events") return group.events.some((e4) => e4.id === messageId);
   return group.m.id === messageId;
 }
 function groupMessages(list) {
   const out = [];
-  let pendingMsgs = [];
   let events = [];
   const flushEvents = () => {
     if (events.length === 0) return;
@@ -24974,8 +24968,6 @@ function groupMessages(list) {
   for (const row of list) {
     if (row.kind !== "message") {
       flushEvents();
-      for (const message2 of pendingMsgs) out.push({ kind: "single", m: message2 });
-      pendingMsgs = [];
       if (row.kind === "starting") out.push({ kind: "starting", row });
       else if (row.kind === "turn") out.push({ kind: "turn", row });
       else out.push({ kind: "question-answer", row });
@@ -24983,23 +24975,13 @@ function groupMessages(list) {
     }
     const m6 = row.message;
     if (m6.direction === "event") {
-      for (const t4 of pendingMsgs) out.push({ kind: "single", m: t4 });
-      pendingMsgs = [];
       events.push(m6);
       continue;
     }
     flushEvents();
-    if (m6.direction === "internal") {
-      pendingMsgs.push(m6);
-    } else if (m6.direction === "out" && pendingMsgs.length > 0) {
-      out.push({ kind: "thoughts", thoughts: pendingMsgs, answer: m6 });
-      pendingMsgs = [];
-    } else {
-      out.push({ kind: "single", m: m6 });
-    }
+    out.push({ kind: "single", m: m6 });
   }
   flushEvents();
-  for (const t4 of pendingMsgs) out.push({ kind: "single", m: t4 });
   return out;
 }
 function EventsGroup({ events }) {
@@ -25033,30 +25015,6 @@ function EventsGroup({ events }) {
       "last\xA0",
       /* @__PURE__ */ u4(RelativeTime, { ts: last.ts })
     ] })
-  ] });
-}
-function ThoughtGroup({
-  thoughts,
-  answer,
-  allowContinue,
-  isLatest
-}) {
-  const [showThoughts, setShowThoughts] = h2(false);
-  const n3 = thoughts.length;
-  const label = showThoughts ? "answer" : n3 > 1 ? `thoughts (${n3})` : "thoughts";
-  const title = showThoughts ? "Show final answer" : "Show agent thoughts leading to this answer";
-  return /* @__PURE__ */ u4("div", { class: "thought-group" + (showThoughts ? " showing-thoughts" : " showing-answer"), children: [
-    showThoughts ? thoughts.map((t4) => /* @__PURE__ */ u4(MessageRow, { m: t4 }, messageKey(t4))) : /* @__PURE__ */ u4(MessageRow, { m: answer, allowContinue, isLatest }),
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "thoughts-toggle",
-        title,
-        onClick: () => setShowThoughts((v5) => !v5),
-        children: label
-      }
-    )
   ] });
 }
 function ApprovalsBanner() {
@@ -25555,7 +25513,7 @@ function MessageLog({ dockRef }) {
     const row = list[index];
     if (row.kind !== "message") continue;
     const message2 = row.message;
-    if (message2.direction !== "internal" && message2.direction !== "event") {
+    if (message2.direction !== "event") {
       latestConversationalMessage = message2;
       break;
     }
@@ -25563,16 +25521,7 @@ function MessageLog({ dockRef }) {
   return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
     chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
       const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
-      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
-        ThoughtGroup,
-        {
-          thoughts: g8.thoughts,
-          answer: g8.answer,
-          allowContinue: g8.answer === latestConversationalMessage,
-          isLatest: g8.answer === latestConversationalMessage
-        },
-        key
-      ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
+      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
         MessageRow,
         {
           m: g8.m,
