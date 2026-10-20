@@ -26,15 +26,16 @@ export function VoiceButton({ target, controller, onStart, configured, unavailab
       type="button"
       id={id}
       class={`mic-overlay ${className}${listening ? ' voice-stopwatch' : ''}`}
-      title={connecting || listening || finalizing ? label : !configured ? 'Live voice input is not configured' : unavailable || label}
+      title={listening && !state.connected ? 'Recording - connecting to speech service. Press to stop.' : connecting || listening || finalizing ? label : !configured ? 'Live voice input is not configured' : unavailable || label}
       aria-label={label}
+      aria-description={listening && !state.connected ? 'Recording; connecting to speech service' : undefined}
       aria-busy={connecting || finalizing}
       disabled={blocked}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => { if (connecting || listening) controller.stop(); else onStart(); }}
     >
       {listening ? <>
-        <span class="voice-recording-dot" aria-hidden="true" />
+        <span class={state.connected ? 'voice-recording-dot' : 'voice-spinner'} aria-hidden="true" />
         <time aria-hidden="true">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</time>
       </> : connecting || finalizing ? <span class="voice-spinner" aria-hidden="true" /> : '\uD83C\uDF99\uFE0F'}
     </button>

@@ -2,9 +2,16 @@ import type { ComponentChildren, ComponentProps, JSX } from 'preact';
 import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import { appearance } from '../appearance-state';
 import { isMobile } from '../state';
+import type { VoiceSelection } from '../voice';
 import { VoiceButton } from './VoiceButton';
 
 type TextareaRef = { current: HTMLTextAreaElement | null };
+
+export function setVoiceTextareaText(input: HTMLTextAreaElement | null, text: string, selection?: VoiceSelection): void {
+  if (!input) return;
+  input.value = text;
+  if (selection) input.setSelectionRange(selection.start, selection.end);
+}
 
 export function useComposerTextarea(inputRef: TextareaRef, value?: string, maxHeight: number | null = 200) {
   const [multiLine, setMultiLine] = useState(false);

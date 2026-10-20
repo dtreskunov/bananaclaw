@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { VoiceController, type VoicePhase } from '../voice';
 import { VoiceButton } from './VoiceButton';
 
-function button(phase: VoicePhase, options: { target?: string; configured?: boolean; disabled?: boolean } = {}) {
+function button(
+  phase: VoicePhase,
+  options: { target?: string; configured?: boolean; disabled?: boolean; connected?: boolean } = {},
+) {
   const controller = new VoiceController({
     socket: () => {
       throw new Error('Unexpected connection');
@@ -11,6 +14,8 @@ function button(phase: VoicePhase, options: { target?: string; configured?: bool
       throw new Error('Unexpected capture');
     },
     origin: () => 'https://chat.example',
+    attemptId: () => '11111111-2222-4333-8444-555555555555',
+    report: vi.fn(),
   });
   controller.state.value = {
     phase,
@@ -18,6 +23,7 @@ function button(phase: VoicePhase, options: { target?: string; configured?: bool
     elapsedMs: 65_000,
     error: '',
     sending: false,
+    connected: options.connected ?? true,
   };
   const stop = vi.spyOn(controller, 'stop').mockImplementation(() => {});
   const start = vi.fn();
@@ -56,6 +62,17 @@ describe('single dictation control', () => {
 
   it('keeps stop available even if sending becomes disabled', () => {
     expect(button('listening', { disabled: true, configured: false }).view.props.disabled).toBe(false);
+  });
+
+  it('shows recording and connection progress together and keeps Stop available before ready', () => {
+    const { view, stop } = button('listening', { connected: false });
+    expect(view.props.title).toContain('Recording - connecting');
+    expect(view.props.class).toContain('voice-stopwatch');
+    expect(view.props.disabled).toBe(false);
+    expect(view.props.children.props.children[0].props.class).toBe('voice-spinner');
+    expect(view.props['aria-description']).toBe('Recording; connecting to speech service');
+    view.props.onClick();
+    expect(stop).toHaveBeenCalledOnce();
   });
 
   it('allows cancelling a pending connection', () => {

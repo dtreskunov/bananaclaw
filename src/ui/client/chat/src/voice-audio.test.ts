@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { captureVoice, voiceBrowserReason } from './voice-audio';
+import { captureVoice, reportVoiceDiagnostic, voiceBrowserReason } from './voice-audio';
+import type { VoiceDiagnostic } from '../../../shared/voice';
 
 const contexts: FakeContext[] = [];
 const nodes: FakeWorklet[] = [];
@@ -41,11 +42,105 @@ beforeEach(() => {
   vi.stubGlobal('AudioWorkletNode', FakeWorklet);
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
+describe('voice diagnostic delivery', () => {
+  const diagnostic: VoiceDiagnostic = {
+    attemptId: '11111111-2222-4333-8444-555555555555',
+    outcome: 'cancelled',
+    elapsedMs: 300,
+    peakQueuedBytes: 0,
+  };
+
+  it('uses an authenticated same-origin keepalive request so disconnects can still be diagnosed', async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetch);
+    const reporting = reportVoiceDiagnostic('a/b', diagnostic);
+    expect(fetch).toHaveBeenCalledWith('/ui/chat/api/groups/a%2Fb/voice/diagnostics', {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(diagnostic),
+    });
+    await reporting;
+  });
+
+  it.each([false, true])('reports failed diagnostic delivery safely (network failure: %s)', async (networkFailure) => {
+    const fetch = vi.fn();
+    if (networkFailure) fetch.mockRejectedValue(new Error('private network error'));
+    else fetch.mockResolvedValue({ ok: false, status: 403 });
+    vi.stubGlobal('fetch', fetch);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    reportVoiceDiagnostic('g', diagnostic);
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private');
+  });
+
+  it('contains synchronous transport errors so diagnostics cannot break dictation cleanup', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        throw new Error('private transport error');
+      }),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(reportVoiceDiagnostic('g', diagnostic)).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private');
+  });
+});
+
 describe('browser voice capture', () => {
+  it('requests permission and loads the worklet without waiting for audio context resume', async () => {
+    let resume!: () => void;
+    vi.stubGlobal(
+      'AudioContext',
+      class extends FakeContext {
+        override resume = vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resume = resolve;
+            }),
+        );
+      },
+    );
+    const starting = captureVoice(vi.fn(), vi.fn());
+    expect(getUserMedia).toHaveBeenCalledOnce();
+    expect(contexts[0].audioWorklet.addModule).toHaveBeenCalledOnce();
+    resume();
+    const capture = await starting;
+    capture.cancel();
+  });
+
+  it('releases late-granted tracks when worklet initialization has already failed', async () => {
+    let grant!: (value: typeof media) => void;
+    getUserMedia.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          grant = resolve;
+        }),
+    );
+    vi.stubGlobal(
+      'AudioContext',
+      class extends FakeContext {
+        override audioWorklet = {
+          addModule: vi.fn(async () => {
+            throw new Error('Worklet unavailable');
+          }),
+        };
+      },
+    );
+    await expect(captureVoice(vi.fn(), vi.fn())).rejects.toThrow('Worklet unavailable');
+    grant(media);
+    await Promise.resolve();
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(contexts[0].close).toHaveBeenCalledOnce();
+  });
+
   it('uses the native capture rate and flushes resampled PCM before releasing hardware', async () => {
     const chunks = vi.fn();
     const capture = await captureVoice(chunks, vi.fn());

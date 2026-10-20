@@ -1,4 +1,5 @@
 import { VoiceController, type VoiceCapture } from './voice';
+import type { VoiceDiagnostic } from '../../../shared/voice';
 
 export function voiceBrowserReason(): string | null {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia)
@@ -62,23 +63,31 @@ export async function captureVoice(
   try {
     checkCancelled();
     // Resume before getUserMedia's permission prompt consumes the user gesture.
-    await context.resume();
-    checkCancelled();
-    await context.audioWorklet.addModule('/ui/chat/voice-worklet.js');
-    checkCancelled();
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-    });
+    const resumed = context.resume();
+    const worklet = context.audioWorklet.addModule('/ui/chat/voice-worklet.js');
+    const microphone = navigator.mediaDevices
+      .getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      })
+      .then((value) => {
+        stream = value;
+        if (closed) {
+          stopTracks();
+          stream = null;
+        }
+        return value;
+      });
+    const [, , readyStream] = await Promise.all([resumed, worklet, microphone]);
     checkCancelled();
     node = new AudioWorkletNode(context, 'voice-pcm');
-    source = context.createMediaStreamSource(stream);
+    source = context.createMediaStreamSource(readyStream);
     source.connect(node);
     node.connect(context.destination); // Worklet outputs silence; never monitor the microphone.
     node.port.onmessage = ({ data }) => {
       if (!closed && data instanceof ArrayBuffer) onChunk(data);
     };
     node.onprocessorerror = () => onError('Audio capture failed. Current text has been kept.');
-    for (const track of stream.getTracks())
+    for (const track of readyStream.getTracks())
       track.onended = () => onError('Microphone disconnected. Current text has been kept.');
     return {
       cancel,
@@ -115,10 +124,28 @@ export async function captureVoice(
   }
 }
 
+export async function reportVoiceDiagnostic(groupId: string, diagnostic: VoiceDiagnostic): Promise<void> {
+  try {
+    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId)}/voice/diagnostics`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(diagnostic),
+    });
+    if (!response.ok)
+      console.warn('Voice diagnostics delivery failed', { attemptId: diagnostic.attemptId, status: response.status });
+  } catch {
+    console.warn('Voice diagnostics delivery failed', { attemptId: diagnostic.attemptId });
+  }
+}
+
 export const voice = new VoiceController({
   socket: (url) => new WebSocket(url),
   capture: captureVoice,
   origin: () => location.origin,
+  attemptId: () => crypto.randomUUID(),
+  report: reportVoiceDiagnostic,
 });
 
 if (typeof document !== 'undefined') {

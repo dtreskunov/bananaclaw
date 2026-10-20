@@ -23,7 +23,7 @@ import {
 import { requestConfirm } from './PromptModal';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia } from '../recorder';
 import { voice, voiceBrowserReason } from '../voice-audio';
-import { ComposerInput, useComposerTextarea } from './ComposerInput';
+import { ComposerInput, setVoiceTextareaText, useComposerTextarea } from './ComposerInput';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
 import { ToolStopButton } from './ToolStopButton';
 import { toolStopRequest } from '../stop-tool';
@@ -1801,10 +1801,10 @@ export function Composer() {
       key: target, groupId: gid, threadId: tid,
       channelType: channel, messagingGroupId: mg,
       getText: () => inputRef.current?.value || '',
-      setText: (text) => { if (inputRef.current) inputRef.current.value = text; autosize(); },
+      setText: (text, selection) => { setVoiceTextareaText(inputRef.current, text, selection); autosize(); },
       isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg,
       send: doSubmit,
-    }, el?.selectionStart ?? el?.value.length);
+    }, el?.selectionStart ?? el?.value.length, el?.selectionEnd ?? el?.value.length);
   };
   const startAudioAttachRecording = async (): Promise<void> => {
     if (currentPendingEditor()) return;

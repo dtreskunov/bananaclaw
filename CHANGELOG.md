@@ -4,6 +4,8 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **More reliable web dictation.** Microphone capture starts alongside connection setup with bounded, paced startup buffering; selected text is replaced correctly and the caret stays before the suffix. ElevenLabs removes filler words, including authoritative empty results. Zero-audio Stop avoids empty provider commits, and privacy-safe attempt diagnostics correlate browser, host, and provider failures.
+
 - **[BREAKING] Native MCP tool search defaults to lazy `always`; `auto` is removed.**
   Explicit `never` remains available for eager direct tools. There is no runtime
   database migration; update explicit `auto` settings and restart affected groups.

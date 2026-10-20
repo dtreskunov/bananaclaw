@@ -29,6 +29,7 @@ import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
 import type { PendingApproval } from '../../../types.js';
 import type { QuestionResponse } from '../../shared/question-response.js';
+import { isVoiceDiagnostic } from '../../shared/voice.js';
 import { presentApproval, type ApprovalPackageLists } from './approval-presentation.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
@@ -219,6 +220,25 @@ on(
   'POST',
   '/api/groups',
   authed((ctx, userId) => handleCreateGroup(ctx, userId)),
+);
+on(
+  'POST',
+  '/api/groups/:gid/voice/diagnostics',
+  authed(async (ctx, userId, params) => {
+    if (ctx.req.headers.origin !== new URL(uiBaseUrl()).origin) return json(ctx, 403, { error: 'invalid_origin' });
+    if (!canAccessAgentGroup(userId, params.gid).allowed) return json(ctx, 403, { error: 'forbidden' });
+    let diagnostic: unknown;
+    try {
+      diagnostic = await readJsonBody(ctx.req, 4096);
+    } catch {
+      return json(ctx, 400, { error: 'invalid_body' });
+    }
+    if (!isVoiceDiagnostic(diagnostic)) return json(ctx, 400, { error: 'invalid_diagnostic' });
+    const write = diagnostic.outcome === 'failed' ? log.warn : log.info;
+    write('Voice client attempt ended', { userId, groupId: params.gid, ...diagnostic });
+    ctx.res.writeHead(204, { 'Cache-Control': 'no-store' });
+    ctx.res.end();
+  }),
 );
 
 // File/dir resources: path-in-URL, single endpoint per kind.

@@ -1173,7 +1173,21 @@ A spinner indicates finalization, then the microphone returns and the draft
 can be edited normally. Press it again to dictate more at the cursor.
 The existing Send button finalizes active dictation before submitting once.
 There is no separate voice panel. Existing text and attachments are retained.
-Pressing the connecting indicator cancels startup without changing the draft.
+Capture initialization starts on the click, in parallel with the connection:
+microphone permission, audio-context resume, and worklet loading do not wait for
+the server. First-use browser permission is still required. The stopwatch shows
+recording even while connecting; a spinner beside it indicates pending connection.
+Up to four seconds of PCM is queued locally, then drained in order with relay
+headroom and rate limiting. An overflow stops with an explicit error rather than
+silently discarding the opening words. Stop while connecting retains and finalizes
+already captured audio. Pressing the startup spinner before capture is ready
+cancels acquisition without changing the draft.
+
+Dictation inserts at the caret or replaces the selection in both the composer
+and question answers. Interim revisions update only the original insertion
+range, preserve surrounding whitespace and punctuation, and keep the caret at the
+end of the inserted words, before the suffix. If no usable words remain, the
+original draft and selection are restored.
 
 Voice works with every agent model and with question-dock text answers. It is
 separate from attaching an audio file for a model to hear. Browser speech
@@ -1187,6 +1201,10 @@ Node **22 or newer**. Configure `ELEVENLABS_API_KEY` in the host's restricted
 configuration, or a browser build. The host reads the key explicitly and does
 not pass it to agent containers. This is a host-only credential exception to
 agent-side OneCLI routing; WebSocket STT does not go through OneCLI.
+Streaming uses VAD commits and `noVerbatim: true` (`no_verbatim` in the ElevenLabs
+API) to remove filler words and disfluencies. Interim hypotheses may still contain
+fillers until the provider commits the cleaned text; no separate LLM cleanup pass
+or paid fallback is used.
 
 In Agent Settings, voice input has a separate enable toggle and a **Voice input
 backend** selector for the server default or ElevenLabs. The database stores
@@ -1212,11 +1230,40 @@ minutes per capture, and bounded audio queues. Stopping and starting dictation
 creates a fresh stream. After an explicit Stop or Send, a clean provider stream
 ending can finalize the latest provisional text even without a provider final
 event. The same recovery applies to an SDK empty-transcript error when
-provisional text exists. Revisions retain their segment IDs rather than being
+provisional text exists without a provider-confirmed removal. Empty provider
+commits are authoritative: they clear that segment instead of reviving its old
+partial text. The adapter assigns distinct IDs even when the SDK reuses an ID
+after an empty commit. Zero-audio Stop aborts without an empty provider commit.
+Revisions retain their segment IDs rather than being
 appended again. Recovery is logged with a segment count, never transcript text.
 Other provider failures, a stream ending before Stop/Send, cancellation, and a
 ten-second finalization timeout do not promote provisional text or submit it.
 Silent audio and unrecognized speech have distinct error messages.
+
+Each capture has a UUID attempt ID shared by browser, host, and provider-socket
+logs. The browser sends one terminal diagnostic to the authenticated, same-origin,
+group-authorized `POST /api/groups/:gid/voice/diagnostics` endpoint, including
+failures before the WebSocket becomes ready. Its 4 KiB payload accepts only fixed
+categories, UUIDs, bounded counters, and phase timings; transcript text, draft
+contents, audio, arbitrary error messages, and credentials are rejected.
+The browser reports the outcome, a small failure category (including permission
+denial), its queue high-water mark, and click-relative capture, connection,
+first-audio, and first-transcript timings. Failed diagnostic delivery is contained
+and reported in the browser console.
+Host summaries include audio duration, peak/RMS level, clipped-sample count,
+queue high-water mark, provider readiness, first audio/transcript, and finalization
+latency. These host metrics are recorded once at session end; provider readiness
+and audio statistics are not mirrored into the browser protocol.
+Provider errors and rejected upgrades include the attempt ID. Abnormal
+socket closes caused by local teardown are debug-level; unexpected closes remain
+warnings. Provider retention remains disabled (`enableLogging: false`).
+
+For systemd installs, inspect the configured unit's journal and filter for
+`Voice input`, `Voice client`, `Voice upgrade`, and `ElevenLabs voice`; search an
+`attemptId` to correlate one capture. Validate changes with simulated delayed
+connections and the local SDK WebSocket fixtures before activating matched host
+and browser assets. Builds targeting the served `dist/` replace live assets, so
+use a staging output directory when testing outside a maintenance window.
 
 Hiding the page or leaving a conversation releases the microphone. Provider
 errors, disconnects, and quota exhaustion preserve recovered, editable text and

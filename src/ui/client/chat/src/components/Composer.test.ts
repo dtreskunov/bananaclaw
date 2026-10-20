@@ -225,7 +225,7 @@ function resetMount(text = '') {
   hooks.effects = [];
   hooks.capturePassive = false;
   hooks.passiveEffects = [];
-  input = { value: text, style: {}, scrollHeight: 32, focus: vi.fn() };
+  input = { value: text, style: {}, scrollHeight: 32, focus: vi.fn(), setSelectionRange: vi.fn() };
 }
 
 beforeEach(() => {
@@ -312,8 +312,14 @@ describe('main composer pending edits', () => {
       vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
     });
     render();
+    input.selectionStart = 2;
+    input.selectionEnd = 6;
     findComponent(tree, 'VoiceButton').props.onStart();
     expect(start).toHaveBeenCalledOnce();
+    expect(start.mock.calls[0].slice(1)).toEqual([2, 6]);
+    start.mock.calls[0][0].setText('Revised draft', { start: 7, end: 7 });
+    expect(input.value).toBe('Revised draft');
+    expect(input.setSelectionRange).toHaveBeenCalledWith(7, 7);
     expect(warmChat).toHaveBeenCalledOnce();
   });
 
@@ -1039,10 +1045,15 @@ describe('main composer pending edits', () => {
       const start = vi.spyOn(voice, 'start').mockImplementation(() => {});
       try {
         mount();
+        input.selectionStart = 0;
+        input.selectionEnd = 4;
         findComponent(tree, 'VoiceButton').props.onStart();
         const target = start.mock.calls[0][0];
         expect(target.key).toBe('group:thread:question:q');
-        target.setText('Dictated answer');
+        expect(start.mock.calls[0].slice(1)).toEqual([0, 4]);
+        target.setText('Dictated answer', { start: 14, end: 14 });
+        expect(input.value).toBe('Dictated answer');
+        expect(input.setSelectionRange).toHaveBeenCalledWith(14, 14);
         mount();
         expect(find(tree, 'textarea').props.value).toBe('Dictated answer');
         expect(await target.send()).toBe(true);

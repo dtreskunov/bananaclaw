@@ -15761,6 +15761,13 @@ function channelMeta(ct) {
   return ct && CHANNEL_META[ct] || { label: ct || "Channel", icon: "\u2022" };
 }
 
+// ../../shared/voice.ts
+var VOICE_SAMPLE_RATE = 16e3;
+var VOICE_BYTES_PER_SECOND = VOICE_SAMPLE_RATE * 2;
+var VOICE_MAX_FRAME_BYTES = 32768;
+var VOICE_MAX_BUFFER_BYTES = VOICE_BYTES_PER_SECOND * 4;
+var VOICE_UPLOAD_BURST_BYTES = VOICE_MAX_BUFFER_BYTES - VOICE_MAX_FRAME_BYTES;
+
 // src/voice.ts
 function replaceSegment(segments, next) {
   const index = segments.findIndex((segment) => segment.id === next.id);
@@ -15771,14 +15778,17 @@ function replaceSegment(segments, next) {
 }
 function insertVoiceText(prefix, text2, suffix) {
   if (!text2) return prefix + suffix;
-  return prefix + (prefix && !/\s$/.test(prefix) ? " " : "") + text2 + (suffix && !/^\s/.test(suffix) ? " " : "") + suffix;
+  const before = prefix && !/[\s([{]$/.test(prefix) && !/^[,.;:!?%)\]}]/.test(text2) ? " " : "";
+  const after = suffix && !/^[\s,.;:!?%)\]}]/.test(suffix) && !/[([{]$/.test(text2) ? " " : "";
+  return prefix + before + text2 + after + suffix;
 }
 var initialState = () => ({
   phase: "idle",
   target: null,
   elapsedMs: 0,
   error: "",
-  sending: false
+  sending: false,
+  connected: false
 });
 var VoiceController = class {
   constructor(deps) {
@@ -15792,9 +15802,17 @@ var VoiceController = class {
   captureAbort = null;
   timeout = null;
   timer = null;
+  drainTimer = null;
+  audioQueue = [];
+  queuedBytes = 0;
+  uploadAllowance = VOICE_UPLOAD_BURST_BYTES;
+  allowanceAt = 0;
+  captureFlushed = false;
+  startedAt = 0;
+  diagnostics = null;
   segments = [];
-  prefix = "";
-  suffix = "";
+  draft = "";
+  selection = { start: 0, end: 0 };
   intent = "stop";
   finishSent = false;
   update(patch) {
@@ -15803,123 +15821,196 @@ var VoiceController = class {
   current(generation2) {
     return this.generation === generation2 && !!this.target?.isCurrent();
   }
-  start(target, caret = target.getText().length) {
+  start(target, start = target.getText().length, end = start) {
     if (this.state.value.sending || !["idle", "error"].includes(this.state.value.phase)) return;
     this.detach();
     this.target = target;
     this.update({ target: target.key });
-    this.connect(caret);
+    this.connect(start, end);
   }
-  connect(caret) {
+  connect(start, end) {
     const target = this.target;
     const draft = target.getText();
-    this.prefix = draft.slice(0, caret);
-    this.suffix = draft.slice(caret);
+    this.draft = draft;
+    start = Math.max(0, Math.min(start, draft.length));
+    end = Math.max(start, Math.min(end, draft.length));
+    this.selection = { start, end };
     this.segments = [];
     this.intent = "stop";
     this.finishSent = false;
+    this.startedAt = Date.now();
+    this.diagnostics = { attemptId: this.deps.attemptId(), peakQueuedBytes: 0 };
+    this.captureFlushed = false;
+    this.uploadAllowance = VOICE_UPLOAD_BURST_BYTES;
     const generation2 = ++this.generation;
     this.update({ phase: "connecting", error: "" });
+    void this.acquireCapture(generation2);
+    if (!this.current(generation2)) return;
     const base = this.deps.origin().replace(/^http/, "ws");
     const params = new URLSearchParams();
+    params.set("attempt", this.diagnostics.attemptId);
     if (target.channelType && target.channelType !== "web") {
       params.set("channel", target.channelType);
       if (target.messagingGroupId) params.set("mg", target.messagingGroupId);
     }
-    const query = params.size ? `?${params.toString()}` : "";
     let socket;
     try {
       socket = this.deps.socket(
-        `${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream${query}`
+        `${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream?${params}`
       );
     } catch (error) {
-      this.fail(error instanceof Error ? error.message : "Could not connect to voice input.");
+      this.fail(error instanceof Error ? error.message : "Could not connect to voice input.", "connection");
       return;
     }
     this.socket = socket;
     this.timeout = setTimeout(() => {
-      if (this.current(generation2)) this.fail("Voice input did not become ready. Try again.");
+      if (this.current(generation2)) this.fail("Voice input did not become ready. Try again.", "connection");
     }, 15e3);
-    socket.onmessage = (event) => {
-      if (!this.current(generation2)) return;
-      let message2;
-      try {
-        message2 = JSON.parse(event.data);
-      } catch {
-        this.fail("Invalid voice server response.");
-        return;
-      }
-      if (!message2 || typeof message2 !== "object") {
-        this.fail("Invalid voice server response.");
-        return;
-      }
-      if (message2.type === "ready" && this.state.value.phase === "connecting") {
-        if (this.timeout) clearTimeout(this.timeout);
-        this.timeout = null;
-        this.update({ phase: "listening" });
-        const captureAbort = new AbortController();
-        this.captureAbort = captureAbort;
-        void this.deps.capture(
-          (chunk) => {
-            if (!this.current(generation2) || this.finishSent || socket.readyState !== 1) return;
-            if (socket.bufferedAmount > 1024 * 1024) {
-              this.fail("Voice connection is too slow. Current text has been kept.");
-              return;
-            }
-            try {
-              for (let offset = 0; offset < chunk.byteLength; offset += 32768) {
-                socket.send(chunk.slice(offset, offset + 32768));
-              }
-            } catch {
-              this.fail("Voice connection was interrupted. Current text has been kept.");
-            }
-          },
-          (message3) => {
-            if (this.current(generation2)) this.fail(message3);
-          },
-          captureAbort.signal
-        ).then((capture) => {
-          if (!this.current(generation2) || this.state.value.phase !== "listening") {
-            capture.cancel();
-            return;
-          }
-          this.capture = capture;
-          const started = Date.now();
-          const elapsed = this.state.value.elapsedMs;
-          this.timer = setInterval(() => this.update({ elapsedMs: elapsed + Date.now() - started }), 250);
-        }).catch((error) => {
-          if (this.current(generation2)) this.fail(error instanceof Error ? error.message : "Microphone unavailable.");
-        });
-      } else if (message2.type === "transcript" && (this.state.value.phase === "listening" || this.state.value.phase === "finalizing")) {
-        if (typeof message2.id !== "string" || typeof message2.sequence !== "number" || !Number.isSafeInteger(message2.sequence) || typeof message2.text !== "string" || typeof message2.final !== "boolean") {
-          this.fail("Invalid transcript response. Current text has been kept.");
-          return;
-        }
-        this.segments = replaceSegment(this.segments, message2);
-        const text2 = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
-        target.setText(insertVoiceText(this.prefix, text2, this.suffix));
-      } else if (message2.type === "finished" && this.state.value.phase === "finalizing" && this.finishSent) {
-        if (this.intent === "send" && !this.segments.some((segment) => segment.text.trim()) || this.segments.some((segment) => segment.text.trim() && !segment.final)) {
-          this.fail("No complete transcript was received. Review current text before using it.");
-          return;
-        }
-        const intent = this.intent;
-        this.release();
-        if (intent === "send") void this.sendDraft();
-        else this.detach();
-      } else if (message2.type === "error") {
-        this.fail(
-          typeof message2.message === "string" ? message2.message : "Voice input failed. Current text has been kept."
-        );
-      }
-    };
+    socket.onmessage = (event) => this.handleMessage(event.data, generation2);
     socket.onerror = () => {
-      if (this.current(generation2)) this.fail("Voice connection failed. Current text has been kept.");
+      if (this.current(generation2)) this.fail("Voice connection failed. Current text has been kept.", "connection");
     };
     socket.onclose = () => {
       if (this.current(generation2))
-        this.fail("Voice connection closed before finalization. Current text has been kept.");
+        this.fail("Voice connection closed before finalization. Current text has been kept.", "connection");
     };
+  }
+  async acquireCapture(generation2) {
+    const abort = new AbortController();
+    this.captureAbort = abort;
+    try {
+      const capture = await this.deps.capture(
+        (chunk) => this.enqueueAudio(chunk, generation2),
+        (message2) => {
+          if (this.current(generation2)) this.fail(message2, "capture");
+        },
+        abort.signal
+      );
+      if (!this.current(generation2)) {
+        capture.cancel();
+        return;
+      }
+      this.capture = capture;
+      if (this.diagnostics) this.diagnostics.captureReadyMs = this.elapsed();
+      this.update({ phase: "listening" });
+      const started = Date.now();
+      this.timer = setInterval(() => this.update({ elapsedMs: Date.now() - started }), 250);
+    } catch (error) {
+      if (this.current(generation2))
+        this.fail(
+          error instanceof Error ? error.message : "Microphone unavailable.",
+          error instanceof Error && error.name === "NotAllowedError" ? "permission" : "capture"
+        );
+    }
+  }
+  handleMessage(data, generation2) {
+    if (!this.current(generation2)) return;
+    const target = this.target;
+    let message2;
+    try {
+      message2 = JSON.parse(data);
+    } catch {
+      this.fail("Invalid voice server response.", "protocol");
+      return;
+    }
+    if (!message2 || typeof message2 !== "object") {
+      this.fail("Invalid voice server response.", "protocol");
+      return;
+    }
+    if (message2.type === "ready" && !this.state.value.connected) {
+      if (this.state.value.phase !== "finalizing") {
+        if (this.timeout) clearTimeout(this.timeout);
+        this.timeout = null;
+      }
+      this.update({ connected: true });
+      if (this.diagnostics) this.diagnostics.socketReadyMs = this.elapsed();
+      this.allowanceAt = Date.now();
+      this.drainAudio(generation2);
+    } else if (message2.type === "transcript" && (this.state.value.phase === "listening" || this.state.value.phase === "finalizing")) {
+      if (typeof message2.id !== "string" || typeof message2.sequence !== "number" || !Number.isSafeInteger(message2.sequence) || typeof message2.text !== "string" || typeof message2.final !== "boolean") {
+        this.fail("Invalid transcript response. Current text has been kept.", "protocol");
+        return;
+      }
+      if (this.diagnostics && this.diagnostics.firstTranscriptMs === void 0 && message2.text.trim()) {
+        this.diagnostics.firstTranscriptMs = this.elapsed();
+      }
+      this.segments = replaceSegment(this.segments, {
+        id: message2.id,
+        sequence: message2.sequence,
+        text: message2.text,
+        final: message2.final
+      });
+      const text2 = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
+      if (text2) {
+        const prefix = this.draft.slice(0, this.selection.start);
+        const suffix = this.draft.slice(this.selection.end);
+        const caret = insertVoiceText(prefix, text2, "").length;
+        target.setText(insertVoiceText(prefix, text2, suffix), { start: caret, end: caret });
+      } else {
+        target.setText(this.draft, this.selection);
+      }
+    } else if (message2.type === "finished" && this.state.value.phase === "finalizing" && this.finishSent) {
+      if (this.intent === "send" && !this.segments.some((segment) => segment.text.trim()) || this.segments.some((segment) => segment.text.trim() && !segment.final)) {
+        this.fail("No complete transcript was received. Review current text before using it.", "protocol");
+        return;
+      }
+      const intent = this.intent;
+      this.report("finished");
+      this.release();
+      if (intent === "send") void this.sendDraft();
+      else this.detach();
+    } else if (message2.type === "error") {
+      this.fail(
+        typeof message2.message === "string" ? message2.message : "Voice input failed. Current text has been kept."
+      );
+    }
+  }
+  enqueueAudio(chunk, generation2) {
+    if (!this.current(generation2) || this.finishSent) return;
+    if (this.diagnostics && this.diagnostics.firstAudioMs === void 0) this.diagnostics.firstAudioMs = this.elapsed();
+    if (this.queuedBytes + chunk.byteLength + (this.socket?.bufferedAmount ?? 0) > VOICE_MAX_BUFFER_BYTES) {
+      this.fail("Voice connection is too slow. Current text has been kept; please try again.", "buffer");
+      return;
+    }
+    for (let offset = 0; offset < chunk.byteLength; offset += VOICE_MAX_FRAME_BYTES) {
+      const frame = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
+      this.audioQueue.push(frame);
+      this.queuedBytes += frame.byteLength;
+    }
+    if (this.diagnostics)
+      this.diagnostics.peakQueuedBytes = Math.max(this.diagnostics.peakQueuedBytes, this.queuedBytes);
+    this.drainAudio(generation2);
+  }
+  drainAudio(generation2) {
+    const socket = this.socket;
+    if (!this.current(generation2) || !this.state.value.connected || socket?.readyState !== 1 || this.finishSent) return;
+    if (this.drainTimer) clearTimeout(this.drainTimer);
+    this.drainTimer = null;
+    const now = Date.now();
+    this.uploadAllowance = Math.min(
+      VOICE_UPLOAD_BURST_BYTES,
+      this.uploadAllowance + (now - this.allowanceAt) * VOICE_BYTES_PER_SECOND / 1e3
+    );
+    this.allowanceAt = now;
+    try {
+      while (this.audioQueue.length) {
+        const frame = this.audioQueue[0];
+        if (frame.byteLength > this.uploadAllowance || socket.bufferedAmount + frame.byteLength > VOICE_MAX_BUFFER_BYTES) {
+          this.drainTimer = setTimeout(() => this.drainAudio(generation2), 25);
+          return;
+        }
+        socket.send(frame);
+        this.uploadAllowance -= frame.byteLength;
+        this.audioQueue.shift();
+        this.queuedBytes -= frame.byteLength;
+      }
+      if (this.captureFlushed) {
+        socket.send(JSON.stringify({ type: "finish" }));
+        this.finishSent = true;
+      }
+    } catch {
+      this.fail("Voice connection was interrupted. Current text has been kept.", "connection");
+    }
   }
   stop() {
     if (this.state.value.sending) return;
@@ -15952,33 +16043,51 @@ var VoiceController = class {
     this.update({ phase: "finalizing" });
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.timeout) clearTimeout(this.timeout);
     const generation2 = this.generation;
     this.timeout = setTimeout(() => {
       if (this.current(generation2))
-        this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.");
+        this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.", "finalize");
     }, 2e4);
     const capture = this.capture;
     void (capture?.stop() ?? Promise.resolve()).then(() => {
       if (!this.current(generation2)) return;
       this.capture = null;
-      this.finishSent = true;
-      this.socket?.send(JSON.stringify({ type: "finish" }));
+      this.captureFlushed = true;
+      this.drainAudio(generation2);
     }).catch(() => {
-      if (this.current(generation2)) this.fail("Could not finalize voice input. Current text has been kept.");
+      if (this.current(generation2))
+        this.fail("Could not finalize voice input. Current text has been kept.", "finalize");
     });
   }
   /** Navigation/unmount invalidates callbacks before stopping hardware. No automatic resume. */
   detach() {
+    this.report("cancelled");
     this.release(true);
     this.target = null;
     this.state.value = initialState();
   }
   interrupt(reason = "Microphone stopped because this page is no longer active. Review current text before sending or dictating again.") {
     if (["connecting", "listening", "finalizing"].includes(this.state.value.phase)) {
-      this.fail(reason);
+      this.fail(reason, "interrupted");
     }
   }
-  fail(error) {
+  elapsed() {
+    return Math.max(0, Date.now() - this.startedAt);
+  }
+  report(outcome, failure) {
+    const diagnostic = this.diagnostics;
+    if (!diagnostic || !this.target) return;
+    this.diagnostics = null;
+    this.deps.report(this.target.groupId, {
+      ...diagnostic,
+      outcome,
+      elapsedMs: this.elapsed(),
+      ...failure ? { failure } : {}
+    });
+  }
+  fail(error, failure = "provider") {
+    this.report("failed", failure);
     this.release(true);
     this.intent = "stop";
     this.update({ phase: "error", error, sending: false });
@@ -15987,7 +16096,11 @@ var VoiceController = class {
     ++this.generation;
     if (this.timeout) clearTimeout(this.timeout);
     if (this.timer) clearInterval(this.timer);
+    if (this.drainTimer) clearTimeout(this.drainTimer);
     this.timeout = this.timer = null;
+    this.drainTimer = null;
+    this.audioQueue = [];
+    this.queuedBytes = 0;
     this.captureAbort?.abort();
     this.captureAbort = null;
     this.capture?.cancel();
@@ -16058,23 +16171,29 @@ async function captureVoice(onChunk, onError, signal) {
   };
   try {
     checkCancelled();
-    await context.resume();
-    checkCancelled();
-    await context.audioWorklet.addModule("/ui/chat/voice-worklet.js");
-    checkCancelled();
-    stream2 = await navigator.mediaDevices.getUserMedia({
+    const resumed = context.resume();
+    const worklet = context.audioWorklet.addModule("/ui/chat/voice-worklet.js");
+    const microphone = navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+    }).then((value) => {
+      stream2 = value;
+      if (closed) {
+        stopTracks();
+        stream2 = null;
+      }
+      return value;
     });
+    const [, , readyStream] = await Promise.all([resumed, worklet, microphone]);
     checkCancelled();
     node = new AudioWorkletNode(context, "voice-pcm");
-    source = context.createMediaStreamSource(stream2);
+    source = context.createMediaStreamSource(readyStream);
     source.connect(node);
     node.connect(context.destination);
     node.port.onmessage = ({ data }) => {
       if (!closed && data instanceof ArrayBuffer) onChunk(data);
     };
     node.onprocessorerror = () => onError("Audio capture failed. Current text has been kept.");
-    for (const track of stream2.getTracks())
+    for (const track of readyStream.getTracks())
       track.onended = () => onError("Microphone disconnected. Current text has been kept.");
     return {
       cancel,
@@ -16109,10 +16228,27 @@ async function captureVoice(onChunk, onError, signal) {
     throw error;
   }
 }
+async function reportVoiceDiagnostic(groupId2, diagnostic) {
+  try {
+    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/voice/diagnostics`, {
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(diagnostic)
+    });
+    if (!response.ok)
+      console.warn("Voice diagnostics delivery failed", { attemptId: diagnostic.attemptId, status: response.status });
+  } catch {
+    console.warn("Voice diagnostics delivery failed", { attemptId: diagnostic.attemptId });
+  }
+}
 var voice = new VoiceController({
   socket: (url) => new WebSocket(url),
   capture: captureVoice,
-  origin: () => location.origin
+  origin: () => location.origin,
+  attemptId: () => crypto.randomUUID(),
+  report: reportVoiceDiagnostic
 });
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
@@ -22415,8 +22551,9 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
       type: "button",
       id: id2,
       class: `mic-overlay ${className}${listening ? " voice-stopwatch" : ""}`,
-      title: connecting || listening || finalizing ? label : !configured ? "Live voice input is not configured" : unavailable || label,
+      title: listening && !state.connected ? "Recording - connecting to speech service. Press to stop." : connecting || listening || finalizing ? label : !configured ? "Live voice input is not configured" : unavailable || label,
       "aria-label": label,
+      "aria-description": listening && !state.connected ? "Recording; connecting to speech service" : void 0,
       "aria-busy": connecting || finalizing,
       disabled: blocked,
       onMouseDown: (event) => event.preventDefault(),
@@ -22425,7 +22562,7 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
         else onStart();
       },
       children: listening ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("span", { class: "voice-recording-dot", "aria-hidden": "true" }),
+        /* @__PURE__ */ u4("span", { class: state.connected ? "voice-recording-dot" : "voice-spinner", "aria-hidden": "true" }),
         /* @__PURE__ */ u4("time", { "aria-hidden": "true", children: [
           Math.floor(seconds / 60),
           ":",
@@ -22437,6 +22574,11 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
 }
 
 // src/components/ComposerInput.tsx
+function setVoiceTextareaText(input, text2, selection) {
+  if (!input) return;
+  input.value = text2;
+  if (selection) input.setSelectionRange(selection.start, selection.end);
+}
 function useComposerTextarea(inputRef, value, maxHeight = 200) {
   const [multiLine, setMultiLine] = h2(false);
   const density = appearance.value.preferences.density;
@@ -23231,14 +23373,16 @@ function QuestionPrompt({ question: q5 }) {
         channelType: channel,
         messagingGroupId: mg,
         getText: () => answerRef.current,
-        setText: (text2) => {
+        setText: (text2, selection) => {
+          setVoiceTextareaText(textareaRef.current, text2, selection);
           answerRef.current = text2;
           setAnswer(text2);
         },
         isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && current.current,
         send: submit
       },
-      textareaRef.current?.selectionStart ?? answerRef.current.length
+      textareaRef.current?.selectionStart ?? answerRef.current.length,
+      textareaRef.current?.selectionEnd ?? answerRef.current.length
     );
   };
   y2(() => {
@@ -25341,13 +25485,13 @@ function Composer() {
       channelType: channel,
       messagingGroupId: mg,
       getText: () => inputRef.current?.value || "",
-      setText: (text2) => {
-        if (inputRef.current) inputRef.current.value = text2;
+      setText: (text2, selection) => {
+        setVoiceTextareaText(inputRef.current, text2, selection);
         autosize();
       },
       isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg,
       send: doSubmit
-    }, el?.selectionStart ?? el?.value.length);
+    }, el?.selectionStart ?? el?.value.length, el?.selectionEnd ?? el?.value.length);
   };
   const startAudioAttachRecording = async () => {
     if (currentPendingEditor()) return;

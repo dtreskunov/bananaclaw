@@ -12,7 +12,7 @@ import {
 } from '../state';
 import type { PendingQuestionDto } from '../types';
 import { voice, voiceBrowserReason } from '../voice-audio';
-import { ComposerInput, useComposerTextarea } from './ComposerInput';
+import { ComposerInput, setVoiceTextareaText, useComposerTextarea } from './ComposerInput';
 
 export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }) {
   const [answer, setAnswer] = useState('');
@@ -96,7 +96,8 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
         channelType: channel,
         messagingGroupId: mg,
         getText: () => answerRef.current,
-        setText: (text) => {
+        setText: (text, selection) => {
+          setVoiceTextareaText(textareaRef.current, text, selection);
           answerRef.current = text;
           setAnswer(text);
         },
@@ -109,6 +110,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
         send: submit,
       },
       textareaRef.current?.selectionStart ?? answerRef.current.length,
+      textareaRef.current?.selectionEnd ?? answerRef.current.length,
     );
   };
   useEffect(() => {

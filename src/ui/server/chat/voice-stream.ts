@@ -1,5 +1,6 @@
 import type http from 'node:http';
 import type { Duplex } from 'node:stream';
+import { randomUUID } from 'node:crypto';
 
 import { createElevenLabs, type ElevenLabsProviderSettings } from '@ai-sdk/elevenlabs';
 import { experimental_streamTranscribe, NoTranscriptGeneratedError, type TranscriptionStreamPart } from 'ai';
@@ -9,12 +10,15 @@ import { getAgentGroup } from '../../../db/agent-groups.js';
 import { log } from '../../../log.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import { authenticate } from '../auth.js';
+import {
+  VOICE_BYTES_PER_SECOND as BYTES_PER_SECOND,
+  VOICE_MAX_BUFFER_BYTES as MAX_BUFFER_BYTES,
+  VOICE_MAX_FRAME_BYTES as MAX_FRAME_BYTES,
+  VOICE_SAMPLE_RATE as SAMPLE_RATE,
+  isVoiceAttemptId,
+} from '../../shared/voice.js';
 import { getVoiceInputApiKey, resolveVoiceInputConfig, VOICE_INPUT_MODEL } from './voice-input-config.js';
 
-const SAMPLE_RATE = 16_000;
-const BYTES_PER_SECOND = SAMPLE_RATE * 2;
-const MAX_FRAME_BYTES = 32_768;
-const MAX_BUFFER_BYTES = BYTES_PER_SECOND * 4;
 const MAX_BURST_BYTES = MAX_BUFFER_BYTES;
 const MAX_SESSION_MS = 5 * 60_000;
 const FINALIZE_TIMEOUT_MS = 10_000;
@@ -120,6 +124,7 @@ export class VoiceProviderSocket implements InstanceType<ProviderSocketConstruct
     url: string | URL,
     protocols?: string | string[],
     options?: { headers?: Record<string, string | undefined> },
+    private readonly context: { attemptId?: string } = {},
   ) {
     this.socket = new WebSocket(url, protocols, {
       ...options,
@@ -133,27 +138,39 @@ export class VoiceProviderSocket implements InstanceType<ProviderSocketConstruct
       try {
         const event = JSON.parse(text) as { message_type?: unknown };
         if (typeof event.message_type === 'string' && PROVIDER_ERROR_EVENT_TYPES.has(event.message_type)) {
-          log.warn('ElevenLabs voice stream error event', { eventType: event.message_type });
+          log.warn('ElevenLabs voice stream error event', { ...this.context, eventType: event.message_type });
         }
       } catch {
-        log.warn('ElevenLabs voice stream returned invalid JSON');
+        log.warn('ElevenLabs voice stream returned invalid JSON', this.context);
       }
       this.onmessage?.({ data: text });
     });
     this.socket.on('error', (error: Error & { code?: unknown }) => {
-      const code = typeof error.code === 'string' ? error.code : undefined;
+      const code = typeof error.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : undefined;
       const statusMatch = error.message.match(/^Unexpected server response: (\d{3})$/);
-      log.warn('ElevenLabs voice socket error', {
+      const write = this.closeRequested ? log.debug : log.warn;
+      write('ElevenLabs voice socket error', {
+        ...this.context,
+        closeRequested: this.closeRequested,
         ...(code ? { code } : {}),
         ...(statusMatch ? { httpStatus: Number(statusMatch[1]) } : {}),
       });
       this.onerror?.(error);
     });
     this.socket.on('close', (code) => {
-      if (code !== 1000) log.warn('ElevenLabs voice socket closed abnormally', { code });
+      if (code !== 1000) {
+        const write = this.closeRequested ? log.debug : log.warn;
+        write('ElevenLabs voice socket closed abnormally', {
+          ...this.context,
+          code,
+          closeRequested: this.closeRequested,
+        });
+      }
       this.onclose?.({ code });
     });
   }
+
+  private closeRequested = false;
 
   get readyState(): number {
     return this.socket.readyState;
@@ -165,6 +182,7 @@ export class VoiceProviderSocket implements InstanceType<ProviderSocketConstruct
     this.socket.send(data);
   }
   close(code?: number, reason?: string): void {
+    this.closeRequested = true;
     this.socket.close(code, reason);
   }
 }
@@ -174,14 +192,62 @@ export function elevenLabsTranscriber(
   webSocket: ProviderSocketConstructor = VoiceProviderSocket,
 ): VoiceTranscriber {
   const provider = createElevenLabs({ apiKey, webSocket });
-  return (audio, abortSignal) =>
-    experimental_streamTranscribe({
+  return async function* (audio, abortSignal) {
+    const result = experimental_streamTranscribe({
       model: provider.transcription(VOICE_INPUT_MODEL),
       audio,
       inputAudioFormat: { type: 'audio/pcm', rate: SAMPLE_RATE },
       abortSignal,
-      providerOptions: { elevenlabs: { streaming: { commitStrategy: 'vad', enableLogging: false } } },
-    }).fullStream;
+      includeRawChunks: true,
+      providerOptions: { elevenlabs: { streaming: { commitStrategy: 'vad', enableLogging: false, noVerbatim: true } } },
+    });
+    let segment = 0;
+    let confirmedEmpty = false;
+    let provisionalText = false;
+    try {
+      for await (const part of result.fullStream) {
+        if (part.type === 'raw') {
+          const event = part.rawValue;
+          if (
+            event &&
+            typeof event === 'object' &&
+            'message_type' in event &&
+            event.message_type === 'session_started'
+          ) {
+            yield { type: 'raw', rawValue: { message_type: 'session_started' } };
+          }
+          if (
+            event &&
+            typeof event === 'object' &&
+            'message_type' in event &&
+            (event.message_type === 'committed_transcript' || event.message_type === 'final_transcript') &&
+            'text' in event &&
+            typeof event.text === 'string' &&
+            !event.text.trim()
+          ) {
+            // The SDK suppresses empty finals and reuses their provider ID. Give every commit its own ID.
+            yield { type: 'transcript-final', id: `elevenlabs:${segment++}`, text: '' };
+            confirmedEmpty = true;
+            provisionalText = false;
+          }
+          continue;
+        }
+        if (part.type === 'error') {
+          yield part;
+          continue;
+        }
+        yield { ...part, id: `elevenlabs:${segment}` };
+        provisionalText =
+          part.type !== 'transcript-final' &&
+          (part.type === 'transcript-delta' ? !!part.delta.trim() : !!part.text.trim());
+        if (part.type === 'transcript-final') segment++;
+      }
+    } catch (error) {
+      if (confirmedEmpty && !provisionalText && !abortSignal.aborted && NoTranscriptGeneratedError.isInstance(error))
+        return;
+      throw error;
+    }
+  };
 }
 
 function rawBuffer(data: RawData): Buffer {
@@ -200,16 +266,25 @@ function transcriptionFailureKind(error: unknown): string {
 export function attachVoiceStream(
   ws: WebSocket,
   transcribe: VoiceTranscriber,
-  context: { userId: string; groupId: string },
+  context: { userId: string; groupId: string; attemptId?: string },
   onClose: () => void,
 ): void {
   const abort = new AbortController();
+  context = { ...context, attemptId: context.attemptId ?? randomUUID() };
+  const startedAt = Date.now();
   const transcript = new VoiceTranscriptNormalizer();
   let controller: ReadableStreamDefaultController<Uint8Array>;
   let inputEnded = false;
   let closed = false;
   let inputBytes = 0;
   let peakPcm = 0;
+  let squaredPcm = 0;
+  let clippedSamples = 0;
+  let peakQueuedBytes = 0;
+  let providerReadyMs: number | undefined;
+  let firstAudioMs: number | undefined;
+  let firstTranscriptMs: number | undefined;
+  let finalizingAt: number | undefined;
   let lastInput = Date.now();
   let allowance = MAX_BURST_BYTES;
   let allowanceAt = Date.now();
@@ -223,12 +298,29 @@ export function attachVoiceStream(
     { highWaterMark: MAX_BUFFER_BYTES, size: (chunk) => chunk.byteLength },
   );
 
-  const cleanup = (): void => {
+  log.info('Voice input started', context);
+  const cleanup = (outcome = 'disconnected', code = 'client_closed'): void => {
     if (closed) return;
     closed = true;
     clearTimeout(sessionTimer);
     clearTimeout(finalizingTimer);
     clearInterval(idleTimer);
+    log.info('Voice input ended', {
+      ...context,
+      outcome,
+      code,
+      elapsedMs: Date.now() - startedAt,
+      inputBytes,
+      audioMs: Math.round((inputBytes * 1000) / BYTES_PER_SECOND),
+      peakPcm,
+      rmsPcm: inputBytes ? Math.round(Math.sqrt(squaredPcm / (inputBytes / 2))) : 0,
+      clippedSamples,
+      peakQueuedBytes,
+      providerReadyMs,
+      firstAudioMs,
+      firstTranscriptMs,
+      ...(finalizingAt === undefined ? {} : { finalizationMs: Date.now() - finalizingAt }),
+    });
     abort.abort();
     onClose();
   };
@@ -239,16 +331,16 @@ export function attachVoiceStream(
     if (closed) return;
     log.warn('Voice input stopped', { ...context, code });
     send({ type: 'error', code, message });
-    cleanup();
+    cleanup('failed', code);
     ws.close(1008, code);
   };
-  const finish = (): void => {
+  const finish = (promoteProvisional = true): void => {
     if (closed) return;
     if (ws.bufferedAmount > MAX_BUFFER_BYTES) {
       fail('client_backpressure', 'Voice connection cannot keep up. Review your current text.');
       return;
     }
-    const finalized = transcript.finalizeProvisionalText();
+    const finalized = promoteProvisional ? transcript.finalizeProvisionalText() : [];
     if (finalized.length > 0) {
       log.warn('Voice input finalized provisional text without a provider final', {
         ...context,
@@ -257,7 +349,7 @@ export function attachVoiceStream(
     }
     for (const segment of finalized) send(segment);
     send({ type: 'finished' });
-    cleanup();
+    cleanup('finished', inputBytes ? 'completed' : 'empty_audio');
     ws.close(1000);
   };
   const sessionTimer = setTimeout(
@@ -274,7 +366,7 @@ export function attachVoiceStream(
   }, 5_000);
   sessionTimer.unref();
   idleTimer.unref();
-  ws.on('close', cleanup);
+  ws.on('close', () => cleanup());
   ws.on('error', () => fail('connection_error', 'Voice connection failed. Your current text has been kept.'));
   ws.on('message', (raw, binary) => {
     if (closed) return;
@@ -293,8 +385,12 @@ export function attachVoiceStream(
           'Audio upload stayed ahead of real time. Your text is kept; press the microphone to try again.',
         );
       inputBytes += data.byteLength;
+      if (firstAudioMs === undefined) firstAudioMs = Date.now() - startedAt;
       for (let offset = 0; offset < data.byteLength; offset += 2) {
-        peakPcm = Math.max(peakPcm, Math.abs(data.readInt16LE(offset)));
+        const sample = data.readInt16LE(offset);
+        peakPcm = Math.max(peakPcm, Math.abs(sample));
+        squaredPcm += sample * sample;
+        if (Math.abs(sample) >= 32767) clippedSamples++;
       }
       lastInput = now;
       if (inputBytes > (BYTES_PER_SECOND * MAX_SESSION_MS) / 1000)
@@ -306,6 +402,7 @@ export function attachVoiceStream(
         );
       }
       controller.enqueue(new Uint8Array(data));
+      peakQueuedBytes = Math.max(peakQueuedBytes, MAX_BUFFER_BYTES - (controller.desiredSize ?? MAX_BUFFER_BYTES));
       return;
     }
     let message: unknown;
@@ -318,10 +415,15 @@ export function attachVoiceStream(
       return fail('invalid_message', 'Invalid voice control message.');
     }
     if (message.type === 'cancel') {
-      cleanup();
+      cleanup('cancelled', 'client_cancelled');
       ws.close(1000);
     } else if (message.type === 'finish' && !inputEnded) {
       inputEnded = true;
+      finalizingAt = Date.now();
+      if (inputBytes === 0) {
+        finish(false);
+        return;
+      }
       controller.close();
       finalizingTimer = setTimeout(
         () =>
@@ -340,12 +442,27 @@ export function attachVoiceStream(
       for await (const part of transcribe(audio, abort.signal)) {
         if (closed) return;
         if (part.type === 'error') throw part.error;
+        if (
+          providerReadyMs === undefined &&
+          part.type === 'raw' &&
+          part.rawValue &&
+          typeof part.rawValue === 'object' &&
+          'message_type' in part.rawValue &&
+          part.rawValue.message_type === 'session_started'
+        ) {
+          providerReadyMs = Date.now() - startedAt;
+        }
         if (ws.bufferedAmount > MAX_BUFFER_BYTES) {
           fail('client_backpressure', 'Voice connection cannot keep up. Review your current text.');
           return;
         }
         const normalized = transcript.accept(part);
-        if (normalized) send(normalized);
+        if (normalized) {
+          if (firstTranscriptMs === undefined && normalized.text.trim()) {
+            firstTranscriptMs = Date.now() - startedAt;
+          }
+          send(normalized);
+        }
       }
       if (closed) return;
       if (!inputEnded) {
@@ -398,33 +515,55 @@ export function handleVoiceUpgrade(
   const url = new URL(req.url ?? '/', 'http://localhost');
   const match = url.pathname.match(/^\/ui\/chat\/api\/groups\/([^/]+)\/chat\/([^/]+)\/voice\/stream$/);
   if (!match) return false;
-  const reject = (status: number, reason: string): true => {
+  const requestedAttempt = url.searchParams.get('attempt');
+  const attemptId = isVoiceAttemptId(requestedAttempt) ? requestedAttempt : randomUUID();
+  const reject = (status: number, reason: string, code: string): true => {
+    log.warn('Voice upgrade rejected', { attemptId, status, code });
     socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     return true;
   };
-  if (req.headers.origin !== options.expectedOrigin) return reject(403, 'Forbidden');
+  if (requestedAttempt !== null && !isVoiceAttemptId(requestedAttempt))
+    return reject(400, 'Bad Request', 'invalid_attempt');
+  if (req.headers.origin !== options.expectedOrigin) return reject(403, 'Forbidden', 'origin');
   const session = authenticate(req);
-  if (!session) return reject(401, 'Unauthorized');
+  if (!session) return reject(401, 'Unauthorized', 'unauthenticated');
   let groupId: string;
   try {
     groupId = decodeURIComponent(match[1]);
     const threadId = decodeURIComponent(match[2]);
-    if (!threadId || threadId.length > 256 || /[\0/]/.test(threadId)) return reject(400, 'Bad Request');
+    if (!threadId || threadId.length > 256 || /[\0/]/.test(threadId))
+      return reject(400, 'Bad Request', 'invalid_thread');
   } catch {
-    return reject(400, 'Bad Request');
+    return reject(400, 'Bad Request', 'invalid_path');
   }
-  if (!canAccessAgentGroup(session.userId, groupId).allowed) return reject(403, 'Forbidden');
-  if (!getAgentGroup(groupId)) return reject(404, 'Not Found');
-  if (!options.canSend(session.userId, groupId, url.searchParams)) return reject(403, 'Forbidden');
+  if (!canAccessAgentGroup(session.userId, groupId).allowed) return reject(403, 'Forbidden', 'group_access');
+  if (!getAgentGroup(groupId)) return reject(404, 'Not Found', 'group_not_found');
+  if (!options.canSend(session.userId, groupId, url.searchParams)) return reject(403, 'Forbidden', 'read_only');
   const config = resolveVoiceInputConfig(groupId);
   const apiKey = getVoiceInputApiKey();
-  if (!config.ready || config.backend !== 'elevenlabs' || !apiKey) return reject(503, 'Service Unavailable');
-  if (activeUsers.has(session.userId) || activeUsers.size >= MAX_SESSIONS) return reject(429, 'Too Many Requests');
+  if (!config.ready || config.backend !== 'elevenlabs' || !apiKey)
+    return reject(503, 'Service Unavailable', 'unconfigured');
+  if (activeUsers.has(session.userId) || activeUsers.size >= MAX_SESSIONS)
+    return reject(429, 'Too Many Requests', 'session_limit');
   voiceWss.handleUpgrade(req, socket, head, (ws) => {
     activeUsers.add(session.userId);
-    attachVoiceStream(ws, elevenLabsTranscriber(apiKey), { userId: session.userId, groupId }, () => {
-      activeUsers.delete(session.userId);
-    });
+    class AttemptSocket extends VoiceProviderSocket {
+      constructor(
+        url: string | URL,
+        protocols?: string | string[],
+        options?: { headers?: Record<string, string | undefined> },
+      ) {
+        super(url, protocols, options, { attemptId });
+      }
+    }
+    attachVoiceStream(
+      ws,
+      elevenLabsTranscriber(apiKey, AttemptSocket),
+      { userId: session.userId, groupId, attemptId },
+      () => {
+        activeUsers.delete(session.userId);
+      },
+    );
   });
   return true;
 }
