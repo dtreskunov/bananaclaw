@@ -13,7 +13,7 @@ import { createNativeMediaTools, createNativeMediaBudget, type NativeMediaToolOp
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_RESULTS = 200;
 const MAX_PROCESS_OUTPUT = 128 * 1024;
-const MAX_SHELL_TIMEOUT_MS = 120_000;
+const MAX_SHELL_TIMEOUT_MS = 600_000;
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist']);
 
 function walk(root: string): string[] {
@@ -54,7 +54,7 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
     let stderr = '';
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    let interrupted = false;
+    let interruption: string | undefined;
     const append = (current: string, chunk: Buffer): string =>
       (current + chunk.toString('utf8')).slice(-MAX_PROCESS_OUTPUT);
     child.stdout.on('data', (chunk: Buffer) => {
@@ -64,9 +64,9 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
       stderr = append(stderr, chunk);
     });
 
-    const stop = (): void => {
-      interrupted = true;
-      if (killTimer) return;
+    const stop = (reason: string): void => {
+      if (interruption) return;
+      interruption = reason;
       if (child.pid) {
         try {
           process.kill(-child.pid, 'SIGTERM');
@@ -80,8 +80,8 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
         }, 1000);
       }
     };
-    const timer = setTimeout(stop, timeoutMs);
-    const onAbort = (): void => stop();
+    const timer = setTimeout(() => stop(`Command timed out after ${timeoutMs / 1000}s`), timeoutMs);
+    const onAbort = (): void => stop('Command cancelled');
     abortSignal?.addEventListener('abort', onAbort, { once: true });
     child.on('error', (error) => {
       if (settled) return;
@@ -104,7 +104,7 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
       ]
         .filter(Boolean)
         .join('\n');
-      if (interrupted) reject(new Error(`Interrupted; outcome unknown.\n${text}`));
+      if (interruption) reject(new Error(`${interruption}; outcome unknown.\n${text}`));
       else resolve({ text, exitCode: code });
     });
   });
@@ -274,7 +274,7 @@ export function createNativeTools(
       type: 'object',
       properties: {
         command: { type: 'string' },
-        timeoutMs: { type: 'number', minimum: 1000, maximum: MAX_SHELL_TIMEOUT_MS },
+        timeoutMs: { type: 'number', description: 'Maximum runtime in milliseconds (default: 30000).', minimum: 1000, maximum: MAX_SHELL_TIMEOUT_MS },
       },
       required: ['command'],
     }),

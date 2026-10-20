@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { asSchema } from 'ai';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { closeSessionDb, initTestSessionDb } from '../../db/connection.js';
+import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../../db/connection.js';
 import { createNativeTools } from './tools.js';
 
 let root: string;
@@ -247,6 +248,45 @@ describe('native coding tools', () => {
     expect(String(await execute('bash', { command: 'pwd' }))).toContain(root);
   });
 
+  it('advertises a ten-minute maximum shell timeout', () => {
+    expect(asSchema(createNativeTools(root).bash.inputSchema).jsonSchema).toMatchObject({
+      properties: { timeoutMs: { minimum: 1000, maximum: 600_000 } },
+    });
+  });
+
+  it.each([
+    [undefined, 30_000],
+    [180_000, 180_000],
+    [600_000, 600_000],
+    [900_000, 600_000],
+    [0, 1000],
+  ])('reports timeout %s as %s to the host and clears it after completion', async (timeoutMs, expected) => {
+    const result = execute('bash', { command: 'printf done', timeoutMs });
+    const state = () => getOutboundDb().prepare(
+      'SELECT current_tool, tool_declared_timeout_ms FROM container_state WHERE id = 1',
+    ).get();
+    expect(state()).toEqual({ current_tool: 'bash', tool_declared_timeout_ms: expected });
+    expect(String(await result)).toContain('stdout:\ndone');
+    expect(state()).toEqual({ current_tool: null, tool_declared_timeout_ms: null });
+  });
+
+  it('reports timeouts with partial output and clears the in-flight tool', async () => {
+    const started = Date.now();
+    const result = execute('bash', {
+      command: 'printf partial; printf warning >&2; sleep 10',
+      timeoutMs: 1000,
+    });
+    await expect(result).rejects.toThrow('Command timed out after 1s; outcome unknown.');
+    await expect(result).rejects.toThrow('stdout:\npartial');
+    await expect(result).rejects.toThrow('stderr:\nwarning');
+    await expect(result).rejects.toThrow('exit: SIGTERM');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    expect(Date.now() - started).toBeLessThan(3500);
+    expect(getOutboundDb().prepare(
+      'SELECT current_tool, tool_declared_timeout_ms FROM container_state WHERE id = 1',
+    ).get()).toEqual({ current_tool: null, tool_declared_timeout_ms: null });
+  });
+
   it('escalates cancellation for a shell ignoring SIGTERM and does not start pre-aborted commands', async () => {
     const controller = new AbortController();
     const bash = createNativeTools(root).bash;
@@ -259,7 +299,8 @@ describe('native coding tools', () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     controller.abort();
-    await expect(result).rejects.toThrow('outcome unknown');
+    await expect(result).rejects.toThrow('Command cancelled; outcome unknown.');
+    await expect(result).rejects.toThrow('exit: SIGKILL');
     expect(Date.now() - started).toBeLessThan(3500);
     await expect(bash.execute!({ command: 'touch must-not-exist' }, {
       toolCallId: 'already-stopped', messages: [], abortSignal: controller.signal,

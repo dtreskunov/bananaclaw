@@ -178,20 +178,21 @@ describe('decideStuckAction', () => {
     expect(res.action).toBe('ok');
   });
 
-  it('widens per-claim tolerance for a running Bash with long timeout', () => {
+  it.each(['Bash', 'bash'])('honors the declared %s timeout at the claim-stuck boundary', (current_tool) => {
     const tenMinMs = 10 * 60 * 1000;
-    const res = decideStuckAction({
-      now: BASE,
-      // 5 min since claim, over the 60s default but under the declared Bash timeout
-      lastSignalAtMs: BASE - 5 * 60 * 1000 - 5_000,
-      containerState: {
-        current_tool: 'Bash',
-        tool_declared_timeout_ms: tenMinMs,
-        tool_started_at: new Date(BASE - 5 * 60 * 1000).toISOString(),
-      },
-      claims: [claim('msg-1', 5 * 60 * 1000)],
-    });
-    expect(res.action).toBe('ok');
+    for (const claimAgeMs of [5 * 60 * 1000, tenMinMs, tenMinMs + 1]) {
+      const res = decideStuckAction({
+        now: BASE,
+        lastSignalAtMs: 0,
+        containerState: {
+          current_tool,
+          tool_declared_timeout_ms: tenMinMs,
+          tool_started_at: new Date(BASE - claimAgeMs).toISOString(),
+        },
+        claims: [claim('msg-1', claimAgeMs)],
+      });
+      expect(res.action).toBe(claimAgeMs <= tenMinMs ? 'ok' : 'kill-claim');
+    }
   });
 
   it('ignores claims with unparseable timestamps', () => {
@@ -368,7 +369,7 @@ describe('resetStuckProcessingRows — orphan claim cleanup', () => {
 describe('resetStuckProcessingRows — failure bounce', () => {
   function bounceRows(outDb: Database.Database) {
     return outDb
-      .prepare("SELECT id, in_reply_to, kind, platform_id, channel_type, thread_id, content FROM messages_out")
+      .prepare('SELECT id, in_reply_to, kind, platform_id, channel_type, thread_id, content FROM messages_out')
       .all() as Array<{
       id: string;
       in_reply_to: string | null;

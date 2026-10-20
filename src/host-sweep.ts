@@ -47,11 +47,7 @@ import {
 } from './db/session-db.js';
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath } from './session-manager.js';
-import {
-  getSessionSignalLastSeenAt,
-  getSessionSignalServerStartedAt,
-  notifySessionHostState,
-} from './session-link.js';
+import { getSessionSignalLastSeenAt, getSessionSignalServerStartedAt, notifySessionHostState } from './session-link.js';
 import { onSessionDurableProcessing } from './session-link.js';
 import { MAX_DECLARED_TOOL_TIMEOUT_MS } from './session-link-durable.js';
 import { isContainerRunning, killContainer, recoverStoppedSession, wakeContainer } from './container-runner.js';
@@ -287,7 +283,7 @@ function lastSignalAtMs(agentGroupId: string, sessionId: string): number {
 }
 
 function bashTimeoutMs(state: ContainerState | null): number | null {
-  if (!state || state.current_tool !== 'Bash') return null;
+  if (!state || (state.current_tool !== 'Bash' && state.current_tool !== 'bash')) return null;
   return typeof state.tool_declared_timeout_ms === 'number'
     ? Math.min(state.tool_declared_timeout_ms, MAX_DECLARED_TOOL_TIMEOUT_MS)
     : null;

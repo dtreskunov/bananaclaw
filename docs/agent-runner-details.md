@@ -334,6 +334,15 @@ container's mounts and operating-system permissions, not a tool-level workspace
 allow-list. Read-only mounts remain read-only. The read size limit, exact-match
 edit validation, and shell output/time limits still apply.
 
+Native `bash` (shown as Run in the UI) defaults to a 30-second timeout.
+Its optional `timeoutMs` argument is bounded to 1,000–600,000 ms (ten minutes);
+longer commands must explicitly request more time. The host watchdog honors
+the declared timeout for both native `bash` and Claude `Bash`. On timeout or
+cancellation, the runner sends SIGTERM to the command's process group, then
+SIGKILL after one second if needed. Errors distinguish timeout from cancellation,
+include captured output, and warn that the outcome is unknown because partial
+side effects may already have occurred.
+
 `glob` and `grep` accept an optional `path` argument selecting a directory to
 search. It may be absolute or relative to the workspace, including outside
 directories. Omitting it preserves workspace-only search. Results use paths
