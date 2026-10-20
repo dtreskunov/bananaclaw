@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from '../../../channels/homeassistant-text.js';
-import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
+import { readThreadTitle } from '../../../modules/thread-titles/db.js';
 import type { LiveTaskDto } from './chat.js';
 
 export interface ThreadScanSpec {
@@ -166,7 +166,7 @@ export function scanThreadSession(dataDir: string, spec: ThreadScanSpec): Sessio
              AND thread_id = ? ORDER BY seq LIMIT 1`,
               )
               .get(key.channelType, key.platformId, key.threadId) as { content: string } | undefined);
-        const title = readPublishedThreadTitle(inbound, key);
+        const title = readThreadTitle(inbound, key);
         const reply = replies.find((r) => r.channel_type === key.channelType && r.thread_id === key.threadId);
         result.threads.push({
           ...key,

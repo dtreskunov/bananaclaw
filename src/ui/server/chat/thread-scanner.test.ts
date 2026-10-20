@@ -5,6 +5,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from '../../../db/schema.js';
+import { onConversationChange } from '../../../conversation-events.js';
+import { upsertThreadTitle } from '../../../modules/thread-titles/db.js';
 import { scanThreadSession, type ThreadScanSpec } from './thread-scan.js';
 import { ThreadScanner } from './thread-scanner.js';
 
@@ -173,18 +175,38 @@ describe('thread scanner', () => {
     ]);
   });
 
-  it('preserves title publication, ownership checks, task summaries and cancelled input semantics', async () => {
+  it('invalidates a cached thread title as soon as a title is created or changed', async () => {
+    const { inbound } = session();
+    message(inbound, 'one');
+    const key = spec.thread!;
+    expect((await scanner.scan([spec]))[0].threads[0].title).toBe('Hello');
+
+    const unsubscribe = onConversationChange((sessionId) => scanner.invalidate(sessionId));
+    try {
+      upsertThreadTitle(inbound, { ...key, title: 'Greeting', requestMessageId: 'one' });
+      await Promise.resolve();
+      expect((await scanner.scan([spec]))[0].threads[0].title).toBe('Greeting');
+
+      const title = 'Wedding photos \u2192 Nextcloud transfer';
+      upsertThreadTitle(inbound, { ...key, title, requestMessageId: 'two' });
+      await Promise.resolve();
+      expect((await scanner.scan([spec]))[0].threads[0].title).toBe(title);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('shows legacy unpublished titles and preserves ownership, tasks and cancelled input semantics', async () => {
     const { inbound } = session();
     message(inbound, 'one', 'web', 'group:group', 'thread', '{"text":"Hidden","cancelled":true,"sender":"owner"}');
     inbound
       .prepare(
         `INSERT INTO thread_titles
        (channel_type, platform_id, thread_id, title, source, request_message_id, published, updated_at)
-       VALUES ('web', 'group:group', 'thread', 'Published', 'model', 'one', 0, ?)`,
+       VALUES ('web', 'group:group', 'thread', 'Legacy title', 'model', 'one', 0, ?)`,
       )
       .run(now);
-    expect((await scanner.scan([spec]))[0].threads[0].title).toBe('(new thread)');
-    inbound.prepare('UPDATE thread_titles SET published = 1').run();
+    expect((await scanner.scan([spec]))[0].threads[0].title).toBe('Legacy title');
     inbound
       .prepare(
         `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, thread_id, content,
@@ -196,7 +218,7 @@ describe('thread scanner', () => {
     scanner.invalidate(spec.sessionId);
     const [scan] = await scanner.scan([spec]);
     expect(scan.threads[0]).toMatchObject({
-      title: 'Published',
+      title: 'Legacy title',
       liveTasks: [
         {
           seriesId: 'series',

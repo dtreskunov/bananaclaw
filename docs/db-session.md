@@ -127,6 +127,19 @@ Ordered host-to-runner journal. Message/sequence/fork triggers and explicit
 routing/destination helpers append rows. The host sends one row at a time and
 deletes it only after `host.ack`; reconnect replays the retained head.
 
+### 2.6 `thread_titles`
+
+Host-owned conversation titles, keyed by channel, platform, and thread. The
+runner's `set_thread_title` tool emits a system action; the host validates its
+request message against the session's inbound routing before upserting the title.
+
+All valid title updates are visible immediately, including the first title;
+visibility does not depend on chat replies or delivery receipts. Each change
+invalidates the thread-list cache and is projected to the runner through the
+session link. The legacy `published` field remains for schema and wire
+compatibility and is set to `1` on updates, but is no longer a visibility filter.
+Existing titles with `published = 0` are also visible without a migration.
+
 ---
 
 ## 3. Sequence numbering invariant

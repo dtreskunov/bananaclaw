@@ -11,7 +11,7 @@ vi.mock('./config.js', async (importOriginal) => ({
 import { replaceDestinations, retryWithBackoff, upsertSessionRouting } from './db/session-db.js';
 import { inboundDbPath, initSessionFolder } from './session-manager.js';
 import { writeSessionMessage } from './session-manager.js';
-import { stageThreadTitle } from './modules/thread-titles/db.js';
+import { upsertThreadTitle } from './modules/thread-titles/db.js';
 
 const ROOT = '/tmp/nanoclaw-host-event-journal-test';
 const AGENT_GROUP_ID = 'agent-a';
@@ -88,7 +88,7 @@ describe('host event journal', () => {
     const db = new Database(inboundDbPath(AGENT_GROUP_ID, SESSION_ID));
     try {
       expect(
-        stageThreadTitle(db, {
+        upsertThreadTitle(db, {
           channelType: 'web',
           platformId: 'chat-1',
           threadId: 'thread-1',
@@ -101,7 +101,7 @@ describe('host event journal', () => {
         payload: string;
       };
       expect(event.event_type).toBe('thread-title.upsert');
-      expect(JSON.parse(event.payload)).toMatchObject({ title: 'Host event projection', published: 0 });
+      expect(JSON.parse(event.payload)).toMatchObject({ title: 'Host event projection', published: 1 });
     } finally {
       db.close();
     }

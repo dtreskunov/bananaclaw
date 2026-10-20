@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 
 import { log } from '../../log.js';
 import type { Session } from '../../types.js';
-import { stageThreadTitle } from './db.js';
+import { upsertThreadTitle } from './db.js';
 
 export async function handleSetThreadTitle(
   content: Record<string, unknown>,
@@ -37,6 +37,7 @@ export async function handleSetThreadTitle(
     return;
   }
 
-  const staged = stageThreadTitle(inDb, { channelType, platformId, threadId, title, requestMessageId });
-  if (staged) log.info('Thread title staged', { sessionId: session.id, threadId });
+  const updated = upsertThreadTitle(inDb, { channelType, platformId, threadId, title, requestMessageId });
+  if (updated) log.info('Thread title updated', { sessionId: session.id, threadId });
+  else log.warn('Rejected invalid thread title', { sessionId: session.id, threadId, requestMessageId });
 }

@@ -64,7 +64,7 @@ import {
 } from '../../../modules/scheduling/db.js';
 import { summarizeTaskPrompt, type ThreadScanSpec } from './thread-scan.js';
 import { threadScanner } from './thread-scanner.js';
-import { readPublishedThreadTitle } from '../../../modules/thread-titles/db.js';
+import { readThreadTitle } from '../../../modules/thread-titles/db.js';
 import { ForkError, forkThread, type ForkThreadResult } from '../../../fork-session.js';
 import {
   deleteThreadFork,
@@ -2837,7 +2837,7 @@ function forkChatThread(
   try {
     const inDb = openInboundDb(groupId, session.id);
     try {
-      parentTitle = readPublishedThreadTitle(inDb, {
+      parentTitle = readThreadTitle(inDb, {
         channelType: target.channelType,
         platformId: null,
         threadId,

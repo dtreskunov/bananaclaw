@@ -30,7 +30,7 @@ import { getThreadFork } from '../../../db/thread-forks.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { insertTask, pauseTask } from '../../../modules/scheduling/db.js';
-import { stageThreadTitle, publishThreadTitle } from '../../../modules/thread-titles/db.js';
+import { upsertThreadTitle } from '../../../modules/thread-titles/db.js';
 import { closeSearchDb, indexMessage, initSearchDb } from '../../../search-index.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath } from '../../../session-manager.js';
 import { handleChatRequest, listThreadsForViewer } from './chat.js';
@@ -325,8 +325,7 @@ describe('asynchronous thread listing', () => {
     try {
       const key = { channelType: 'web', platformId: WEB_PLATFORM_ID, threadId: THREAD };
       inbound.prepare('UPDATE host_sequence SET last_even = 2 WHERE id = 1').run();
-      stageThreadTitle(inbound, { ...key, title: 'Published title', requestMessageId: 'u1' });
-      publishThreadTitle(inbound, key, 'u1');
+      upsertThreadTitle(inbound, { ...key, title: 'Updated title', requestMessageId: 'u1' });
       insertTask(inbound, {
         id: 'task',
         processAfter: NOW,
@@ -337,7 +336,7 @@ describe('asynchronous thread listing', () => {
         content: '{"prompt":"A scheduled task"}',
       });
       const [updated] = await listThreadsForViewer(USER_ID, GROUP_ID);
-      expect(updated.title).toBe('Published title');
+      expect(updated.title).toBe('Updated title');
       expect(updated.liveTasks).toMatchObject([{ summary: 'A scheduled task', paused: false }]);
       pauseTask(inbound, 'task');
       expect((await listThreadsForViewer(USER_ID, GROUP_ID))[0].liveTasks).toMatchObject([{ paused: true }]);

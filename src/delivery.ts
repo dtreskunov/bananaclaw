@@ -19,7 +19,6 @@ import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
 import { extractOutboundText, indexMessage } from './search-index.js';
 import { setTypingAdapter } from './modules/typing/index.js';
-import { publishTitlesForDeliveredReplies } from './modules/thread-titles/db.js';
 import type { DeliveryContext, OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 import { notifySessionHostState, onSessionDurableMessage } from './session-link.js';
@@ -181,7 +180,6 @@ async function drainSession(session: Session): Promise<void> {
       try {
         const platformMsgId = await deliverMessage(msg, session, inDb);
         markDelivered(inDb, msg.id, platformMsgId ?? null);
-        publishTitlesForDeliveredReplies(inDb, outDb);
         notifySessionHostState(session.id);
         deliveryAttempts.delete(msg.id);
 
