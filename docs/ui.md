@@ -237,6 +237,8 @@ The cap follows window, composer, question-dock, and text-density changes. On
 mobile, the existing VisualViewport sizing shrinks the transcript when the
 keyboard opens and expands it back when dismissed. Ordinary re-renders preserve
 internal reading positions, with browser clamping if content no longer overflows.
+Conversation updates re-render only messages whose content, trace, or turn
+accounting changed; unchanged bubbles keep their rendered DOM untouched.
 
 Markdown messages containing tables use the full conversation width. Tables
 retain readable, non-wrapping cells and scroll horizontally inside the message

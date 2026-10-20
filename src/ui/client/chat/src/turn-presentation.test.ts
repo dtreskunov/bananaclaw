@@ -16,7 +16,7 @@ import {
 } from './activity-trace-state';
 import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared/conversation-protocol';
 import { dockQuestions } from './question-dock';
-import type { Conversation } from '../../../shared/conversation';
+import type { Conversation, ConversationTurn } from '../../../shared/conversation';
 import { presentedConversation, testSnapshot, testTurn } from './conversation-test-fixtures';
 import {
   activeTurn,
@@ -100,6 +100,58 @@ describe('authoritative turn presentation', () => {
     expect(projection.transcript.map((row) => row.kind)).toEqual(['message', 'turn']);
     expect(projection.transcript[1]).not.toHaveProperty('id');
     parse.mockRestore();
+  });
+  it('reuses unchanged message objects across frames so memoized bubbles skip rendering', () => {
+    const settled: ConversationTurn = {
+      ...testTurn,
+      id: 'turn-0',
+      phase: 'settled',
+      outcome: 'replied',
+      endedAt: '2026-09-29T00:01:00Z',
+      inputIds: ['q0'],
+      outputIds: ['a0'],
+      activity: [{ ordinal: 0, ts: '900', text: 'done', timelinePosition: 15 }],
+    };
+    const messages = [
+      { id: 'q0', direction: 'in' as const, text: 'First', timestamp: '1', timelinePosition: 10 },
+      { id: 'a0', direction: 'out' as const, text: 'Answer', timestamp: '2', timelinePosition: 20 },
+      { id: 'q1', direction: 'in' as const, text: 'Second', timestamp: '3', timelinePosition: 30 },
+    ];
+    const live = { ...testTurn, inputIds: ['q1'] };
+    const byId = () => new Map(chatMessages.value.map((message) => [message.id, message]));
+    update({ ...initial, messages, turns: [settled, live] });
+    const first = byId();
+    expect(first.get('a0')).toMatchObject({ statsTurn: settled, turnTraceOwner: true, turnTraceLive: false });
+    expect(first.get('a0')!.activity!.length).toBeGreaterThan(0);
+
+    update({
+      ...initial,
+      messages,
+      turns: [
+        settled,
+        { ...live, activity: [...live.activity, { ordinal: 1, ts: '1001', text: 'more', timelinePosition: 101 }] },
+      ],
+    });
+    const second = byId();
+    for (const id of ['q0', 'a0', 'q1']) expect(second.get(id)).toBe(first.get(id));
+
+    update({
+      ...initial,
+      messages: messages.map((message) => (message.id === 'a0' ? { ...message, text: 'Edited' } : message)),
+      turns: [settled, live],
+    });
+    const third = byId();
+    expect(third.get('q0')).toBe(first.get('q0'));
+    expect(third.get('q1')).toBe(first.get('q1'));
+    expect(third.get('a0')).not.toBe(first.get('a0'));
+    expect(third.get('a0')).toMatchObject({ text: 'Edited', statsTurn: settled, turnTraceOwner: true });
+    expect(first.get('a0')!.text).toBe('Answer');
+
+    const reopened = { ...settled, outcome: 'warning' as const };
+    update({ ...initial, messages, turns: [reopened, live] });
+    const fourth = byId();
+    expect(fourth.get('q0')).toBe(first.get('q0'));
+    expect(fourth.get('a0')).toMatchObject({ text: 'Answer', statsTurn: reopened });
   });
   it('preserves an open disclosure through activity updates', () => {
     const steps = [0, 1].map((ordinal) => ({

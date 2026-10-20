@@ -14611,24 +14611,24 @@ function O(n3) {
   };
 }
 function j(n3, u5, t4, i5, r4, o4, e4, f5, c4, s5) {
-  var a4, h5, p5, v5, y5, g8, m6, b5, C3, S3, M3, P5, I3, A6, H4, L3, T5, F5 = u5.type;
+  var a4, h5, p5, v5, y5, g8, m6, b5, C3, S3, M4, P5, I3, A6, H4, L3, T5, F5 = u5.type;
   if (void 0 !== u5.constructor) return null;
   128 & t4.__u && (c4 = !!(32 & t4.__u), o4 = [f5 = u5.__e = t4.__e]), (a4 = l.__b) && a4(u5);
   n: if ("function" == typeof F5) try {
-    if (b5 = u5.props, C3 = "prototype" in F5 && F5.prototype.render, S3 = (a4 = F5.contextType) && i5[a4.__c], M3 = a4 ? S3 ? S3.props.value : a4.__ : i5, t4.__c ? m6 = (h5 = u5.__c = t4.__c).__ = h5.__E : (C3 ? u5.__c = h5 = new F5(b5, M3) : (u5.__c = h5 = new x(b5, M3), h5.constructor = F5, h5.render = B), S3 && S3.sub(h5), h5.props = b5, h5.state || (h5.state = {}), h5.context = M3, h5.__n = i5, p5 = h5.__d = true, h5.__h = [], h5._sb = []), C3 && null == h5.__s && (h5.__s = h5.state), C3 && null != F5.getDerivedStateFromProps && (h5.__s == h5.state && (h5.__s = w({}, h5.__s)), w(h5.__s, F5.getDerivedStateFromProps(b5, h5.__s))), v5 = h5.props, y5 = h5.state, h5.__v = u5, p5) C3 && null == F5.getDerivedStateFromProps && null != h5.componentWillMount && h5.componentWillMount(), C3 && null != h5.componentDidMount && h5.__h.push(h5.componentDidMount);
+    if (b5 = u5.props, C3 = "prototype" in F5 && F5.prototype.render, S3 = (a4 = F5.contextType) && i5[a4.__c], M4 = a4 ? S3 ? S3.props.value : a4.__ : i5, t4.__c ? m6 = (h5 = u5.__c = t4.__c).__ = h5.__E : (C3 ? u5.__c = h5 = new F5(b5, M4) : (u5.__c = h5 = new x(b5, M4), h5.constructor = F5, h5.render = B), S3 && S3.sub(h5), h5.props = b5, h5.state || (h5.state = {}), h5.context = M4, h5.__n = i5, p5 = h5.__d = true, h5.__h = [], h5._sb = []), C3 && null == h5.__s && (h5.__s = h5.state), C3 && null != F5.getDerivedStateFromProps && (h5.__s == h5.state && (h5.__s = w({}, h5.__s)), w(h5.__s, F5.getDerivedStateFromProps(b5, h5.__s))), v5 = h5.props, y5 = h5.state, h5.__v = u5, p5) C3 && null == F5.getDerivedStateFromProps && null != h5.componentWillMount && h5.componentWillMount(), C3 && null != h5.componentDidMount && h5.__h.push(h5.componentDidMount);
     else {
-      if (C3 && null == F5.getDerivedStateFromProps && b5 !== v5 && null != h5.componentWillReceiveProps && h5.componentWillReceiveProps(b5, M3), !h5.__e && (null != h5.shouldComponentUpdate && false === h5.shouldComponentUpdate(b5, h5.__s, M3) || u5.__v == t4.__v)) {
+      if (C3 && null == F5.getDerivedStateFromProps && b5 !== v5 && null != h5.componentWillReceiveProps && h5.componentWillReceiveProps(b5, M4), !h5.__e && (null != h5.shouldComponentUpdate && false === h5.shouldComponentUpdate(b5, h5.__s, M4) || u5.__v == t4.__v)) {
         for (u5.__v != t4.__v && (h5.props = b5, h5.state = h5.__s, h5.__d = false), u5.__e = t4.__e, u5.__k = t4.__k, u5.__k.some(function(n4) {
           n4 && (n4.__ = u5);
         }), P5 = 0; P5 < h5._sb.length; P5++) h5.__h.push(h5._sb[P5]);
         h5._sb = [], h5.__h.length && e4.push(h5);
         break n;
       }
-      null != h5.componentWillUpdate && h5.componentWillUpdate(b5, h5.__s, M3), C3 && null != h5.componentDidUpdate && h5.__h.push(function() {
+      null != h5.componentWillUpdate && h5.componentWillUpdate(b5, h5.__s, M4), C3 && null != h5.componentDidUpdate && h5.__h.push(function() {
         h5.componentDidUpdate(v5, y5, g8);
       });
     }
-    if (h5.context = M3, h5.props = b5, h5.__P = n3, h5.__e = false, I3 = l.__r, A6 = 0, C3) {
+    if (h5.context = M4, h5.props = b5, h5.__P = n3, h5.__e = false, I3 = l.__r, A6 = 0, C3) {
       for (h5.state = h5.__s, h5.__d = false, I3 && I3(u5), a4 = h5.render(h5.props, h5.state, h5.context), H4 = 0; H4 < h5._sb.length; H4++) h5.__h.push(h5._sb[H4]);
       h5._sb = [];
     } else do {
@@ -19914,6 +19914,7 @@ function submissionPresentation(transcript, submissions, view, groupId2, threadI
 var conversationState = y3(null);
 var completedResponse = y3(null);
 var chatTranscript = y3([]);
+var presentedMessages = /* @__PURE__ */ new WeakMap();
 function resetConversation() {
   resetToolStops();
   chatReloadRequired.value = false;
@@ -19925,9 +19926,15 @@ function resetConversation() {
 function conversationPresentation(view) {
   const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
   const questions = new Map(view.questions.map((question2) => [question2.questionId, question2]));
-  const messages = view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map(({ timestamp, ...message2 }) => ({ ...message2, files: message2.files ?? null, ts: timestamp }));
-  const byId = new Map(messages.map((message2) => [message2.id, message2]));
-  const modelTimes = new Map(view.turns.map((turn2) => [turn2.id, turnModelTime(turn2)]));
+  const byId = new Map(
+    view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map((message2) => [message2.id, message2])
+  );
+  const modelTimes = /* @__PURE__ */ new Map();
+  const modelTime = (turn2) => {
+    let times = modelTimes.get(turn2.id);
+    if (!times) modelTimes.set(turn2.id, times = turnModelTime(turn2));
+    return times;
+  };
   const traceLines = (trace2) => {
     const turn2 = turns.get(trace2.turnId);
     if (!turn2) throw new ConversationProtocolError("invalid_frame");
@@ -19939,20 +19946,34 @@ function conversationPresentation(view) {
     );
     const hostsStart = first ? ordinals.has(first.ordinal) : trace2.ownsTurn && turn2.phase !== "settled";
     const lines = trace2.ownsTurn ? conversationActivity(turn2, activity) : activity;
-    return withModelTime(turn2, lines, modelTimes.get(turn2.id), hostsStart);
+    return withModelTime(turn2, lines, modelTime(turn2), hostsStart);
+  };
+  const presentMessage = (source, row) => {
+    const statsTurn = row.statsTurnId ? turns.get(row.statsTurnId) : void 0;
+    const traceTurn = row.trace ? turns.get(row.trace.turnId) : void 0;
+    if (row.trace && !traceTurn) throw new ConversationProtocolError("invalid_frame");
+    const traceKey = row.trace ? `${row.trace.ownsTurn}:${row.trace.ordinals}` : "";
+    const cached = presentedMessages.get(source);
+    if (cached && cached.statsTurn === statsTurn && cached.traceTurn === traceTurn && cached.traceKey === traceKey)
+      return cached.message;
+    const { timestamp, ...fields } = source;
+    const message2 = { ...fields, files: fields.files ?? null, ts: timestamp };
+    if (row.statsTurnId) message2.statsTurn = statsTurn;
+    if (row.trace) {
+      message2.turnId = row.trace.turnId;
+      message2.activity = traceLines(row.trace);
+      message2.turnTraceOwner = row.trace.ownsTurn;
+      message2.turnTraceLive = row.trace.ownsTurn && traceTurn?.phase !== "settled";
+    }
+    presentedMessages.set(source, { statsTurn, traceTurn, traceKey, message: message2 });
+    return message2;
   };
   const transcript = view.timeline.flatMap((row) => {
     const turn2 = row.trace ? turns.get(row.trace.turnId) : void 0;
     if (row.kind === "message") {
-      const message2 = byId.get(row.messageId);
-      if (!message2) throw new ConversationProtocolError("invalid_frame");
-      if (row.statsTurnId) message2.statsTurn = turns.get(row.statsTurnId);
-      if (row.trace) {
-        message2.turnId = row.trace.turnId;
-        message2.activity = traceLines(row.trace);
-        message2.turnTraceOwner = row.trace.ownsTurn;
-        message2.turnTraceLive = row.trace.ownsTurn && turn2?.phase !== "settled";
-      }
+      const source = byId.get(row.messageId);
+      if (!source) throw new ConversationProtocolError("invalid_frame");
+      const message2 = presentMessage(source, row);
       if (message2.questionId) {
         const question2 = questions.get(message2.questionId);
         if (!question2 || message2.direction !== "in") throw new ConversationProtocolError("invalid_frame");
@@ -22535,6 +22556,211 @@ function ThreadsRail() {
   );
 }
 
+// node_modules/preact/compat/dist/compat.module.js
+function g7(n3, t4) {
+  for (var e4 in t4) n3[e4] = t4[e4];
+  return n3;
+}
+function E4(n3, t4) {
+  for (var e4 in n3) if ("__source" !== e4 && !(e4 in t4)) return true;
+  for (var r4 in t4) if ("__source" !== r4 && n3[r4] !== t4[r4]) return true;
+  return false;
+}
+function N3(n3, t4) {
+  this.props = n3, this.context = t4;
+}
+function M3(n3, e4) {
+  function r4(n4) {
+    var t4 = this.props.ref, r5 = t4 == n4.ref;
+    return !r5 && t4 && (t4.call ? t4(null) : t4.current = null), e4 ? !e4(this.props, n4) || !r5 : E4(this.props, n4);
+  }
+  function u5(e5) {
+    return this.shouldComponentUpdate = r4, g(n3, e5);
+  }
+  return u5.displayName = "Memo(" + (n3.displayName || n3.name) + ")", u5.prototype.isReactComponent = true, u5.__f = true, u5;
+}
+(N3.prototype = new x()).isPureReactComponent = true, N3.prototype.shouldComponentUpdate = function(n3, t4) {
+  return E4(this.props, n3) || E4(this.state, t4);
+};
+var T4 = l.__b;
+l.__b = function(n3) {
+  n3.type && n3.type.__f && n3.ref && (n3.props.ref = n3.ref, n3.ref = null), T4 && T4(n3);
+};
+var A5 = "undefined" != typeof Symbol && Symbol.for && Symbol.for("react.forward_ref") || 3911;
+var F4 = l.__e;
+l.__e = function(n3, t4, e4, r4) {
+  if (n3.then) {
+    for (var u5, o4 = t4; o4 = o4.__; ) if ((u5 = o4.__c) && u5.__c) return null == t4.__e && (t4.__e = e4.__e, t4.__k = e4.__k), u5.__c(n3, t4);
+  }
+  F4(n3, t4, e4, r4);
+};
+var U2 = l.unmount;
+function V3(n3, t4, e4) {
+  return n3 && (n3.__c && n3.__c.__H && (n3.__c.__H.__.forEach(function(n4) {
+    "function" == typeof n4.__c && n4.__c();
+  }), n3.__c.__H = null), null != (n3 = g7({}, n3)).__c && (n3.__c.__P === e4 && (n3.__c.__P = t4), n3.__c = null), n3.__k = n3.__k && n3.__k.map(function(n4) {
+    return V3(n4, t4, e4);
+  })), n3;
+}
+function W2(n3, t4, e4) {
+  return n3 && e4 && (n3.__v = null, n3.__k = n3.__k && n3.__k.map(function(n4) {
+    return W2(n4, t4, e4);
+  }), n3.__c && n3.__c.__P === t4 && (n3.__e && e4.appendChild(n3.__e), n3.__c.__e = true, n3.__c.__P = e4)), n3;
+}
+function P4() {
+  this.__u = 0, this.o = null, this.__b = null;
+}
+function j5(n3) {
+  var t4 = n3.__.__c;
+  return t4 && t4.__a && t4.__a(n3);
+}
+function B4() {
+  this.i = null, this.l = null;
+}
+l.unmount = function(n3) {
+  var t4 = n3.__c;
+  t4 && t4.__R && t4.__R(), t4 && 32 & n3.__u && (n3.type = null), U2 && U2(n3);
+}, (P4.prototype = new x()).__c = function(n3, t4) {
+  var e4 = t4.__c, r4 = this;
+  null == r4.o && (r4.o = []), r4.o.push(e4);
+  var u5 = j5(r4.__v), o4 = false, i5 = function() {
+    o4 || (o4 = true, e4.__R = null, u5 ? u5(c4) : c4());
+  };
+  e4.__R = i5;
+  var c4 = function() {
+    if (!--r4.__u) {
+      if (r4.state.__a) {
+        var n4 = r4.state.__a;
+        r4.__v.__k[0] = W2(n4, n4.__c.__P, n4.__c.__O);
+      }
+      var t5;
+      for (r4.setState({ __a: r4.__b = null }); t5 = r4.o.pop(); ) t5.forceUpdate();
+    }
+  };
+  r4.__u++ || 32 & t4.__u || r4.setState({ __a: r4.__b = r4.__v.__k[0] }), n3.then(i5, i5);
+}, P4.prototype.componentWillUnmount = function() {
+  this.o = [];
+}, P4.prototype.render = function(n3, e4) {
+  if (this.__b) {
+    if (this.__v.__k) {
+      var r4 = document.createElement("div"), o4 = this.__v.__k[0].__c;
+      this.__v.__k[0] = V3(this.__b, r4, o4.__O = o4.__P);
+    }
+    this.__b = null;
+  }
+  var i5 = e4.__a && g(k, null, n3.fallback);
+  return i5 && (i5.__u &= -33), [g(k, null, e4.__a ? null : n3.children), i5];
+};
+var H3 = function(n3, t4, e4) {
+  if (++e4[1] === e4[0] && n3.l.delete(t4), n3.props.revealOrder && ("t" !== n3.props.revealOrder[0] || !n3.l.size)) for (e4 = n3.i; e4; ) {
+    for (; e4.length > 3; ) e4.pop()();
+    if (e4[1] < e4[0]) break;
+    n3.i = e4 = e4[2];
+  }
+};
+function Z2(n3) {
+  return this.getChildContext = function() {
+    return n3.context;
+  }, n3.children;
+}
+function Y2(n3) {
+  var e4 = this, r4 = n3.h;
+  e4.componentWillUnmount = function() {
+    D(null, e4.v), e4.v = null, e4.h = null;
+  }, e4.h && e4.h !== r4 && e4.componentWillUnmount(), e4.v || (e4.h = r4, e4.v = { nodeType: 1, parentNode: r4, childNodes: [], contains: function() {
+    return true;
+  }, appendChild: function(n4) {
+    this.childNodes.push(n4), e4.h.appendChild(n4);
+  }, insertBefore: function(n4, t4) {
+    this.childNodes.push(n4), e4.h.insertBefore(n4, t4);
+  }, removeChild: function(n4) {
+    this.childNodes.splice(this.childNodes.indexOf(n4) >>> 1, 1), e4.h.removeChild(n4);
+  } }), D(g(Z2, { context: e4.context }, n3.__v), e4.v);
+}
+function $3(n3, e4) {
+  var r4 = g(Y2, { __v: n3, h: e4 });
+  return r4.containerInfo = e4, r4;
+}
+(B4.prototype = new x()).__a = function(n3) {
+  var t4 = this, e4 = j5(t4.__v), r4 = t4.l.get(n3);
+  return r4[0]++, function(u5) {
+    var o4 = function() {
+      t4.props.revealOrder ? (r4.push(u5), H3(t4, n3, r4)) : u5();
+    };
+    e4 ? e4(o4) : o4();
+  };
+}, B4.prototype.render = function(n3) {
+  this.i = null, this.l = /* @__PURE__ */ new Map();
+  var t4 = H(n3.children);
+  n3.revealOrder && "b" === n3.revealOrder[0] && t4.reverse();
+  for (var e4 = t4.length; e4--; ) this.l.set(t4[e4], this.i = [1, 0, this.i]);
+  return n3.children;
+}, B4.prototype.componentDidUpdate = B4.prototype.componentDidMount = function() {
+  var n3 = this;
+  this.l.forEach(function(t4, e4) {
+    H3(n3, e4, t4);
+  });
+};
+var q4 = "undefined" != typeof Symbol && Symbol.for && Symbol.for("react.element") || 60103;
+var G2 = /^(?:accent|alignment|arabic|baseline|cap|clip(?!PathU)|color|dominant|fill|flood|font|glyph(?!R)|horiz|image(!S)|letter|lighting|marker(?!H|W|U)|overline|paint|pointer|shape|stop|strikethrough|stroke|text(?!L)|transform|underline|unicode|units|v|vector|vert|word|writing|x(?!C))[A-Z]/;
+var J3 = /^on(Ani|Tra|Tou|BeforeInp|Compo)/;
+var K2 = /[A-Z0-9]/g;
+var Q2 = "undefined" != typeof document;
+var X2 = function(n3) {
+  return ("undefined" != typeof Symbol && "symbol" == typeof Symbol() ? /fil|che|rad/ : /fil|che|ra/).test(n3);
+};
+x.prototype.isReactComponent = {}, ["componentWillMount", "componentWillReceiveProps", "componentWillUpdate"].forEach(function(t4) {
+  Object.defineProperty(x.prototype, t4, { configurable: true, get: function() {
+    return this["UNSAFE_" + t4];
+  }, set: function(n3) {
+    Object.defineProperty(this, t4, { configurable: true, writable: true, value: n3 });
+  } });
+});
+var en = l.event;
+function rn() {
+}
+function un() {
+  return this.cancelBubble;
+}
+function on() {
+  return this.defaultPrevented;
+}
+l.event = function(n3) {
+  return en && (n3 = en(n3)), n3.persist = rn, n3.isPropagationStopped = un, n3.isDefaultPrevented = on, n3.nativeEvent = n3;
+};
+var cn;
+var ln = { enumerable: false, configurable: true, get: function() {
+  return this.class;
+} };
+var fn = l.vnode;
+l.vnode = function(n3) {
+  "string" == typeof n3.type && function(n4) {
+    var t4 = n4.props, e4 = n4.type, u5 = {}, o4 = -1 === e4.indexOf("-");
+    for (var i5 in t4) {
+      var c4 = t4[i5];
+      if (!("value" === i5 && "defaultValue" in t4 && null == c4 || Q2 && "children" === i5 && "noscript" === e4 || "class" === i5 || "className" === i5)) {
+        var l7 = i5.toLowerCase();
+        "defaultValue" === i5 && "value" in t4 && null == t4.value ? i5 = "value" : "download" === i5 && true === c4 ? c4 = "" : "translate" === l7 && "no" === c4 ? c4 = false : "o" === l7[0] && "n" === l7[1] ? "ondoubleclick" === l7 ? i5 = "ondblclick" : "onchange" !== l7 || "input" !== e4 && "textarea" !== e4 || X2(t4.type) ? "onfocus" === l7 ? i5 = "onfocusin" : "onblur" === l7 ? i5 = "onfocusout" : J3.test(i5) && (i5 = l7) : l7 = i5 = "oninput" : o4 && G2.test(i5) ? i5 = i5.replace(K2, "-$&").toLowerCase() : null === c4 && (c4 = void 0), "oninput" === l7 && u5[i5 = l7] && (i5 = "oninputCapture"), u5[i5] = c4;
+      }
+    }
+    "select" == e4 && u5.multiple && Array.isArray(u5.value) && (u5.value = H(t4.children).forEach(function(n5) {
+      n5.props.selected = -1 != u5.value.indexOf(n5.props.value);
+    })), "select" == e4 && null != u5.defaultValue && (u5.value = H(t4.children).forEach(function(n5) {
+      n5.props.selected = u5.multiple ? -1 != u5.defaultValue.indexOf(n5.props.value) : u5.defaultValue == n5.props.value;
+    })), t4.class && !t4.className ? (u5.class = t4.class, Object.defineProperty(u5, "className", ln)) : (t4.className && !t4.class || t4.class && t4.className) && (u5.class = u5.className = t4.className), n4.props = u5;
+  }(n3), n3.$$typeof = q4, fn && fn(n3);
+};
+var an = l.__r;
+l.__r = function(n3) {
+  an && an(n3), cn = n3.__c;
+};
+var sn = l.diffed;
+l.diffed = function(n3) {
+  sn && sn(n3);
+  var t4 = n3.props, e4 = n3.__e;
+  null != e4 && "textarea" === n3.type && "value" in t4 && t4.value !== e4.value && (e4.value = null == t4.value ? "" : t4.value), cn = null;
+};
+
 // src/components/VoiceButton.tsx
 function VoiceButton({ target, controller, onStart, configured, unavailable, disabled, id: id2, className = "" }) {
   const state = controller.state.value;
@@ -24549,10 +24775,10 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
   const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === "web";
-  const hasPendingSend = pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const suggestedAction = m6.suggestedAction ?? (isFutureWorkMessage(m6.text) ? "continue" : void 0);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
-  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !hasPendingSend && !m6.files?.length && action != null;
+  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
+  const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
@@ -24652,10 +24878,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             "Sending",
             "\u2026"
           ] }) : null,
-          showsMidTurnLabel(
-            m6.deliveryOrigin,
-            !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled")
-          ) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
+          showsMidTurnLabel(m6.deliveryOrigin, midTurnUpdate) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
           /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: m6.submission ? null : groupId.value, children: [
             !m6.submission ? /* @__PURE__ */ u4(EditMessageButton, { m: m6 }) : null,
             !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
@@ -24666,6 +24889,8 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
     }
   );
 }
+var MessageRow = M3(Message);
+var QuestionAnswer = M3(QuestionAnswerBubble);
 function DisplayCardMessage({ message: message2, card }) {
   const traceOwner = activityTraceOwner(message2);
   const activity = message2.activity ?? [];
@@ -24798,7 +25023,7 @@ function EventsGroup({ events }) {
           " \xB7 hide"
         ] })
       ] }),
-      events.map((e4) => /* @__PURE__ */ u4(Message, { m: e4 }, e4.id))
+      events.map((e4) => /* @__PURE__ */ u4(MessageRow, { m: e4 }, e4.id))
     ] });
   }
   return /* @__PURE__ */ u4("button", { type: "button", class: "msg event events-summary", onClick: () => setOpen(true), title: "Show individual runs", children: [
@@ -24821,7 +25046,7 @@ function ThoughtGroup({
   const label = showThoughts ? "answer" : n3 > 1 ? `thoughts (${n3})` : "thoughts";
   const title = showThoughts ? "Show final answer" : "Show agent thoughts leading to this answer";
   return /* @__PURE__ */ u4("div", { class: "thought-group" + (showThoughts ? " showing-thoughts" : " showing-answer"), children: [
-    showThoughts ? thoughts.map((t4) => /* @__PURE__ */ u4(Message, { m: t4 }, messageKey(t4))) : /* @__PURE__ */ u4(Message, { m: answer, allowContinue, isLatest }),
+    showThoughts ? thoughts.map((t4) => /* @__PURE__ */ u4(MessageRow, { m: t4 }, messageKey(t4))) : /* @__PURE__ */ u4(MessageRow, { m: answer, allowContinue, isLatest }),
     /* @__PURE__ */ u4(
       "button",
       {
@@ -25338,7 +25563,7 @@ function MessageLog({ dockRef }) {
   return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
     chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
       const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
-      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswerBubble, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
+      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "thoughts" ? /* @__PURE__ */ u4(
         ThoughtGroup,
         {
           thoughts: g8.thoughts,
@@ -25348,7 +25573,7 @@ function MessageLog({ dockRef }) {
         },
         key
       ) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
-        Message,
+        MessageRow,
         {
           m: g8.m,
           allowContinue: g8.m === latestConversationalMessage,
@@ -25365,7 +25590,7 @@ function MessageLog({ dockRef }) {
         branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
       ] });
     }),
-    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(Message, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
+    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
     /* @__PURE__ */ u4(TaskIndicator, {})
   ] });
 }
@@ -28716,201 +28941,6 @@ function TaskPanel() {
     /* @__PURE__ */ u4("div", { class: "settings-row", style: "padding:10px 16px;border-top:1px solid var(--border);justify-content:flex-end", children: /* @__PURE__ */ u4("button", { type: "button", onClick: close, children: "Done" }) })
   ] });
 }
-
-// node_modules/preact/compat/dist/compat.module.js
-function g7(n3, t4) {
-  for (var e4 in t4) n3[e4] = t4[e4];
-  return n3;
-}
-function E4(n3, t4) {
-  for (var e4 in n3) if ("__source" !== e4 && !(e4 in t4)) return true;
-  for (var r4 in t4) if ("__source" !== r4 && n3[r4] !== t4[r4]) return true;
-  return false;
-}
-function N3(n3, t4) {
-  this.props = n3, this.context = t4;
-}
-(N3.prototype = new x()).isPureReactComponent = true, N3.prototype.shouldComponentUpdate = function(n3, t4) {
-  return E4(this.props, n3) || E4(this.state, t4);
-};
-var T4 = l.__b;
-l.__b = function(n3) {
-  n3.type && n3.type.__f && n3.ref && (n3.props.ref = n3.ref, n3.ref = null), T4 && T4(n3);
-};
-var A5 = "undefined" != typeof Symbol && Symbol.for && Symbol.for("react.forward_ref") || 3911;
-var F4 = l.__e;
-l.__e = function(n3, t4, e4, r4) {
-  if (n3.then) {
-    for (var u5, o4 = t4; o4 = o4.__; ) if ((u5 = o4.__c) && u5.__c) return null == t4.__e && (t4.__e = e4.__e, t4.__k = e4.__k), u5.__c(n3, t4);
-  }
-  F4(n3, t4, e4, r4);
-};
-var U2 = l.unmount;
-function V3(n3, t4, e4) {
-  return n3 && (n3.__c && n3.__c.__H && (n3.__c.__H.__.forEach(function(n4) {
-    "function" == typeof n4.__c && n4.__c();
-  }), n3.__c.__H = null), null != (n3 = g7({}, n3)).__c && (n3.__c.__P === e4 && (n3.__c.__P = t4), n3.__c = null), n3.__k = n3.__k && n3.__k.map(function(n4) {
-    return V3(n4, t4, e4);
-  })), n3;
-}
-function W2(n3, t4, e4) {
-  return n3 && e4 && (n3.__v = null, n3.__k = n3.__k && n3.__k.map(function(n4) {
-    return W2(n4, t4, e4);
-  }), n3.__c && n3.__c.__P === t4 && (n3.__e && e4.appendChild(n3.__e), n3.__c.__e = true, n3.__c.__P = e4)), n3;
-}
-function P4() {
-  this.__u = 0, this.o = null, this.__b = null;
-}
-function j5(n3) {
-  var t4 = n3.__.__c;
-  return t4 && t4.__a && t4.__a(n3);
-}
-function B4() {
-  this.i = null, this.l = null;
-}
-l.unmount = function(n3) {
-  var t4 = n3.__c;
-  t4 && t4.__R && t4.__R(), t4 && 32 & n3.__u && (n3.type = null), U2 && U2(n3);
-}, (P4.prototype = new x()).__c = function(n3, t4) {
-  var e4 = t4.__c, r4 = this;
-  null == r4.o && (r4.o = []), r4.o.push(e4);
-  var u5 = j5(r4.__v), o4 = false, i5 = function() {
-    o4 || (o4 = true, e4.__R = null, u5 ? u5(c4) : c4());
-  };
-  e4.__R = i5;
-  var c4 = function() {
-    if (!--r4.__u) {
-      if (r4.state.__a) {
-        var n4 = r4.state.__a;
-        r4.__v.__k[0] = W2(n4, n4.__c.__P, n4.__c.__O);
-      }
-      var t5;
-      for (r4.setState({ __a: r4.__b = null }); t5 = r4.o.pop(); ) t5.forceUpdate();
-    }
-  };
-  r4.__u++ || 32 & t4.__u || r4.setState({ __a: r4.__b = r4.__v.__k[0] }), n3.then(i5, i5);
-}, P4.prototype.componentWillUnmount = function() {
-  this.o = [];
-}, P4.prototype.render = function(n3, e4) {
-  if (this.__b) {
-    if (this.__v.__k) {
-      var r4 = document.createElement("div"), o4 = this.__v.__k[0].__c;
-      this.__v.__k[0] = V3(this.__b, r4, o4.__O = o4.__P);
-    }
-    this.__b = null;
-  }
-  var i5 = e4.__a && g(k, null, n3.fallback);
-  return i5 && (i5.__u &= -33), [g(k, null, e4.__a ? null : n3.children), i5];
-};
-var H3 = function(n3, t4, e4) {
-  if (++e4[1] === e4[0] && n3.l.delete(t4), n3.props.revealOrder && ("t" !== n3.props.revealOrder[0] || !n3.l.size)) for (e4 = n3.i; e4; ) {
-    for (; e4.length > 3; ) e4.pop()();
-    if (e4[1] < e4[0]) break;
-    n3.i = e4 = e4[2];
-  }
-};
-function Z2(n3) {
-  return this.getChildContext = function() {
-    return n3.context;
-  }, n3.children;
-}
-function Y2(n3) {
-  var e4 = this, r4 = n3.h;
-  e4.componentWillUnmount = function() {
-    D(null, e4.v), e4.v = null, e4.h = null;
-  }, e4.h && e4.h !== r4 && e4.componentWillUnmount(), e4.v || (e4.h = r4, e4.v = { nodeType: 1, parentNode: r4, childNodes: [], contains: function() {
-    return true;
-  }, appendChild: function(n4) {
-    this.childNodes.push(n4), e4.h.appendChild(n4);
-  }, insertBefore: function(n4, t4) {
-    this.childNodes.push(n4), e4.h.insertBefore(n4, t4);
-  }, removeChild: function(n4) {
-    this.childNodes.splice(this.childNodes.indexOf(n4) >>> 1, 1), e4.h.removeChild(n4);
-  } }), D(g(Z2, { context: e4.context }, n3.__v), e4.v);
-}
-function $3(n3, e4) {
-  var r4 = g(Y2, { __v: n3, h: e4 });
-  return r4.containerInfo = e4, r4;
-}
-(B4.prototype = new x()).__a = function(n3) {
-  var t4 = this, e4 = j5(t4.__v), r4 = t4.l.get(n3);
-  return r4[0]++, function(u5) {
-    var o4 = function() {
-      t4.props.revealOrder ? (r4.push(u5), H3(t4, n3, r4)) : u5();
-    };
-    e4 ? e4(o4) : o4();
-  };
-}, B4.prototype.render = function(n3) {
-  this.i = null, this.l = /* @__PURE__ */ new Map();
-  var t4 = H(n3.children);
-  n3.revealOrder && "b" === n3.revealOrder[0] && t4.reverse();
-  for (var e4 = t4.length; e4--; ) this.l.set(t4[e4], this.i = [1, 0, this.i]);
-  return n3.children;
-}, B4.prototype.componentDidUpdate = B4.prototype.componentDidMount = function() {
-  var n3 = this;
-  this.l.forEach(function(t4, e4) {
-    H3(n3, e4, t4);
-  });
-};
-var q4 = "undefined" != typeof Symbol && Symbol.for && Symbol.for("react.element") || 60103;
-var G2 = /^(?:accent|alignment|arabic|baseline|cap|clip(?!PathU)|color|dominant|fill|flood|font|glyph(?!R)|horiz|image(!S)|letter|lighting|marker(?!H|W|U)|overline|paint|pointer|shape|stop|strikethrough|stroke|text(?!L)|transform|underline|unicode|units|v|vector|vert|word|writing|x(?!C))[A-Z]/;
-var J3 = /^on(Ani|Tra|Tou|BeforeInp|Compo)/;
-var K2 = /[A-Z0-9]/g;
-var Q2 = "undefined" != typeof document;
-var X2 = function(n3) {
-  return ("undefined" != typeof Symbol && "symbol" == typeof Symbol() ? /fil|che|rad/ : /fil|che|ra/).test(n3);
-};
-x.prototype.isReactComponent = {}, ["componentWillMount", "componentWillReceiveProps", "componentWillUpdate"].forEach(function(t4) {
-  Object.defineProperty(x.prototype, t4, { configurable: true, get: function() {
-    return this["UNSAFE_" + t4];
-  }, set: function(n3) {
-    Object.defineProperty(this, t4, { configurable: true, writable: true, value: n3 });
-  } });
-});
-var en = l.event;
-function rn() {
-}
-function un() {
-  return this.cancelBubble;
-}
-function on() {
-  return this.defaultPrevented;
-}
-l.event = function(n3) {
-  return en && (n3 = en(n3)), n3.persist = rn, n3.isPropagationStopped = un, n3.isDefaultPrevented = on, n3.nativeEvent = n3;
-};
-var cn;
-var ln = { enumerable: false, configurable: true, get: function() {
-  return this.class;
-} };
-var fn = l.vnode;
-l.vnode = function(n3) {
-  "string" == typeof n3.type && function(n4) {
-    var t4 = n4.props, e4 = n4.type, u5 = {}, o4 = -1 === e4.indexOf("-");
-    for (var i5 in t4) {
-      var c4 = t4[i5];
-      if (!("value" === i5 && "defaultValue" in t4 && null == c4 || Q2 && "children" === i5 && "noscript" === e4 || "class" === i5 || "className" === i5)) {
-        var l7 = i5.toLowerCase();
-        "defaultValue" === i5 && "value" in t4 && null == t4.value ? i5 = "value" : "download" === i5 && true === c4 ? c4 = "" : "translate" === l7 && "no" === c4 ? c4 = false : "o" === l7[0] && "n" === l7[1] ? "ondoubleclick" === l7 ? i5 = "ondblclick" : "onchange" !== l7 || "input" !== e4 && "textarea" !== e4 || X2(t4.type) ? "onfocus" === l7 ? i5 = "onfocusin" : "onblur" === l7 ? i5 = "onfocusout" : J3.test(i5) && (i5 = l7) : l7 = i5 = "oninput" : o4 && G2.test(i5) ? i5 = i5.replace(K2, "-$&").toLowerCase() : null === c4 && (c4 = void 0), "oninput" === l7 && u5[i5 = l7] && (i5 = "oninputCapture"), u5[i5] = c4;
-      }
-    }
-    "select" == e4 && u5.multiple && Array.isArray(u5.value) && (u5.value = H(t4.children).forEach(function(n5) {
-      n5.props.selected = -1 != u5.value.indexOf(n5.props.value);
-    })), "select" == e4 && null != u5.defaultValue && (u5.value = H(t4.children).forEach(function(n5) {
-      n5.props.selected = u5.multiple ? -1 != u5.defaultValue.indexOf(n5.props.value) : u5.defaultValue == n5.props.value;
-    })), t4.class && !t4.className ? (u5.class = t4.class, Object.defineProperty(u5, "className", ln)) : (t4.className && !t4.class || t4.class && t4.className) && (u5.class = u5.className = t4.className), n4.props = u5;
-  }(n3), n3.$$typeof = q4, fn && fn(n3);
-};
-var an = l.__r;
-l.__r = function(n3) {
-  an && an(n3), cn = n3.__c;
-};
-var sn = l.diffed;
-l.diffed = function(n3) {
-  sn && sn(n3);
-  var t4 = n3.props, e4 = n3.__e;
-  null != e4 && "textarea" === n3.type && "value" in t4 && t4.value !== e4.value && (e4.value = null == t4.value ? "" : t4.value), cn = null;
-};
 
 // src/components/Tooltip.tsx
 var BUBBLE_MARGIN = 6;

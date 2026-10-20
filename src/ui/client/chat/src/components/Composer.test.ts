@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { effect } from '@preact/signals';
 import { isValidElement } from 'preact';
 import { ActivityTraceList as PreparedActivityTraceList, Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
@@ -87,6 +88,9 @@ const hooks = vi.hoisted(() => {
     passiveEffects: [] as (() => void | (() => void))[],
   };
 });
+// Components are called directly here, so render memoized rows as their plain functions.
+// The real module's vnode hook would also rewrite textarea props in this hook-free harness.
+vi.mock('preact/compat', () => ({ memo: <T>(component: T) => component }));
 vi.mock('preact/hooks', () => ({
   useMemo: (calculate: () => unknown, deps: unknown[]) => {
     const index = hooks.cursor++;
@@ -1363,6 +1367,53 @@ describe('main composer pending edits', () => {
     hooks.slots = [];
     hooks.cursor = 0;
     expect(forkButtons[1].type(forkButtons[1].props)).toBeNull();
+  });
+
+  it('subscribes only the latest bubble to per-frame conversation signals', () => {
+    threads.value = [thread];
+    activeTurn.value = null;
+    applyConversationFrame(
+      testSnapshot({
+        messages: [
+          { id: 'older-response', text: 'Older', timestamp: '1', timelinePosition: 100, direction: 'out' },
+          {
+            id: 'latest-response',
+            text: 'Latest',
+            timestamp: '2',
+            timelinePosition: 200,
+            direction: 'out',
+            suggestedAction: 'continue',
+          },
+        ],
+      }),
+      'thread',
+    );
+    hooks.cursor = 0;
+    const chat = ChatMain();
+    const log = [chat.props.children]
+      .flat(Infinity)
+      .find((child: any) => typeof child?.type === 'function' && child.type.name === 'MessageLog');
+    hooks.slots = [];
+    hooks.cursor = 0;
+    const logNode = find(log.type(log.props), 'div');
+    const bubbles = [logNode.props.children].flat(Infinity).filter((node: any) => node?.type?.name === 'Message');
+    const renders = bubbles.map((node: any) => {
+      let count = 0;
+      onTestFinished(
+        effect(() => {
+          hooks.slots = [];
+          hooks.cursor = 0;
+          node.type(node.props);
+          count++;
+        }),
+      );
+      return () => count;
+    });
+    expect(bubbles.map((node: any) => node.props.m.id)).toEqual(['older-response', 'latest-response']);
+    expect(renders.map((count) => count())).toEqual([1, 1]);
+    pendingWebSends.value = [];
+    conversationState.value = { ...conversationState.peek()! };
+    expect(renders.map((count) => count())).toEqual([1, 2]);
   });
 
   it.each([false, true])(

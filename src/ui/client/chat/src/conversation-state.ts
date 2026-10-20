@@ -33,6 +33,18 @@ import { reconcileWebSubmissions } from './web-submissions';
 export const conversationState = signal<ConversationSnapshot | null>(null);
 export const completedResponse = signal<string | null>(null);
 export const chatTranscript = signal<TranscriptRow[]>([]);
+
+type WireMessage = Conversation['messages'][number];
+interface PresentedMessage {
+  statsTurn: ConversationTurn | undefined;
+  traceTurn: ConversationTurn | undefined;
+  traceKey: string;
+  message: ChatMessage;
+}
+// Reuses unchanged rows across frames so memoized bubbles skip re-rendering. The reducer
+// keeps unchanged messages and turns by identity; cached ChatMessages are never mutated.
+const presentedMessages = new WeakMap<WireMessage, PresentedMessage>();
+
 export function resetConversation(): void {
   resetToolStops();
   chatReloadRequired.value = false;
@@ -45,11 +57,17 @@ export function resetConversation(): void {
 export function conversationPresentation(view: Conversation): { messages: ChatMessage[]; transcript: TranscriptRow[] } {
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
   const questions = new Map(view.questions.map((question) => [question.questionId, question]));
-  const messages: ChatMessage[] = view.messages
-    .filter((message) => message.inputState?.status !== 'cancelled')
-    .map(({ timestamp, ...message }) => ({ ...message, files: message.files ?? null, ts: timestamp }));
-  const byId = new Map(messages.map((message) => [message.id, message]));
-  const modelTimes = new Map(view.turns.map((turn) => [turn.id, turnModelTime(turn)]));
+  const byId = new Map(
+    view.messages
+      .filter((message) => message.inputState?.status !== 'cancelled')
+      .map((message) => [message.id, message]),
+  );
+  const modelTimes = new Map<string, ReturnType<typeof turnModelTime>>();
+  const modelTime = (turn: ConversationTurn) => {
+    let times = modelTimes.get(turn.id);
+    if (!times) modelTimes.set(turn.id, (times = turnModelTime(turn)));
+    return times;
+  };
   const traceLines = (trace: ConversationTrace) => {
     const turn = turns.get(trace.turnId);
     if (!turn) throw new ConversationProtocolError('invalid_frame');
@@ -61,20 +79,34 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     );
     const hostsStart = first ? ordinals.has(first.ordinal) : trace.ownsTurn && turn.phase !== 'settled';
     const lines = trace.ownsTurn ? conversationActivity(turn, activity) : activity;
-    return withModelTime(turn, lines, modelTimes.get(turn.id)!, hostsStart);
+    return withModelTime(turn, lines, modelTime(turn), hostsStart);
+  };
+  const presentMessage = (source: WireMessage, row: Extract<Conversation['timeline'][number], { kind: 'message' }>) => {
+    const statsTurn = row.statsTurnId ? turns.get(row.statsTurnId) : undefined;
+    const traceTurn = row.trace ? turns.get(row.trace.turnId) : undefined;
+    if (row.trace && !traceTurn) throw new ConversationProtocolError('invalid_frame');
+    const traceKey = row.trace ? `${row.trace.ownsTurn}:${row.trace.ordinals}` : '';
+    const cached = presentedMessages.get(source);
+    if (cached && cached.statsTurn === statsTurn && cached.traceTurn === traceTurn && cached.traceKey === traceKey)
+      return cached.message;
+    const { timestamp, ...fields } = source;
+    const message: ChatMessage = { ...fields, files: fields.files ?? null, ts: timestamp };
+    if (row.statsTurnId) message.statsTurn = statsTurn;
+    if (row.trace) {
+      message.turnId = row.trace.turnId;
+      message.activity = traceLines(row.trace);
+      message.turnTraceOwner = row.trace.ownsTurn;
+      message.turnTraceLive = row.trace.ownsTurn && traceTurn?.phase !== 'settled';
+    }
+    presentedMessages.set(source, { statsTurn, traceTurn, traceKey, message });
+    return message;
   };
   const transcript = view.timeline.flatMap((row): TranscriptRow[] => {
     const turn = row.trace ? turns.get(row.trace.turnId) : undefined;
     if (row.kind === 'message') {
-      const message = byId.get(row.messageId);
-      if (!message) throw new ConversationProtocolError('invalid_frame');
-      if (row.statsTurnId) message.statsTurn = turns.get(row.statsTurnId);
-      if (row.trace) {
-        message.turnId = row.trace.turnId;
-        message.activity = traceLines(row.trace);
-        message.turnTraceOwner = row.trace.ownsTurn;
-        message.turnTraceLive = row.trace.ownsTurn && turn?.phase !== 'settled';
-      }
+      const source = byId.get(row.messageId);
+      if (!source) throw new ConversationProtocolError('invalid_frame');
+      const message = presentMessage(source, row);
       if (message.questionId) {
         const question = questions.get(message.questionId);
         if (!question || message.direction !== 'in') throw new ConversationProtocolError('invalid_frame');

@@ -3,6 +3,7 @@
 import './ChatMain.css';
 import { signal } from '@preact/signals';
 import type { JSX, RefObject } from 'preact';
+import { memo } from 'preact/compat';
 import { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
 import {
   chatMessages, chatStatus, chatLoading, chatReady, chatReloadRequired, threadId, channelType, canSend, pending,
@@ -775,13 +776,15 @@ function Message(
   const singleFile = m.files?.length === 1 ? m.files[0] : null;
   const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
   const isWebChannel = !channelType.value || channelType.value === 'web';
-  const hasPendingSend = pendingWebSends.value.some((send) =>
-    send.groupId === groupId.value && send.threadId === threadId.value && send.status !== 'failed');
   const suggestedAction = m.suggestedAction ?? (isFutureWorkMessage(m.text) ? 'continue' : undefined);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : undefined;
+  // Read per-frame signals only where needed so memoized bubbles stay unsubscribed.
   const showContinue = isWebChannel && allowContinue && m.direction === 'out' &&
-    !hasPendingSend &&
-    !m.files?.length && action != null;
+    !m.files?.length && action != null &&
+    !pendingWebSends.value.some((send) =>
+      send.groupId === groupId.value && send.threadId === threadId.value && send.status !== 'failed');
+  const midTurnUpdate = m.deliveryOrigin === 'send_message' &&
+    !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled');
   return (
     <MessageBubble
       class={cls}
@@ -885,8 +888,7 @@ function Message(
         {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
         {submission?.status === 'sending' && !m.hideInitialQueuedCaption
           ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
-        {showsMidTurnLabel(m.deliveryOrigin,
-          !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled'))
+        {showsMidTurnLabel(m.deliveryOrigin, midTurnUpdate)
           ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
           : m.deliveryOrigin === 'send_file'
             ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
@@ -900,6 +902,10 @@ function Message(
     </MessageBubble>
   );
 }
+
+/** Unchanged messages keep their object identity across frames, so only changed rows render. */
+const MessageRow = memo(Message);
+const QuestionAnswer = memo(QuestionAnswerBubble);
 
 function DisplayCardMessage({ message, card }: { message: ChatMessage; card: DisplayCard }) {
   const traceOwner = activityTraceOwner(message);
@@ -1046,7 +1052,7 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
           <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
           <span>{n}{' task attempts'}{failed ? ` \u00b7 ${failed} failed` : ''}{multi ? ` \u00b7 ${taskCount} tasks` : ''}{' \u00b7 hide'}</span>
         </button>
-        {events.map((e) => <Message key={e.id} m={e} />)}
+        {events.map((e) => <MessageRow key={e.id} m={e} />)}
       </div>
     );
   }
@@ -1081,8 +1087,8 @@ function ThoughtGroup({
   return (
     <div class={'thought-group' + (showThoughts ? ' showing-thoughts' : ' showing-answer')}>
       {showThoughts
-        ? thoughts.map((t) => <Message key={messageKey(t)} m={t} />)
-        : <Message m={answer} allowContinue={allowContinue} isLatest={isLatest} />}
+        ? thoughts.map((t) => <MessageRow key={messageKey(t)} m={t} />)
+        : <MessageRow m={answer} allowContinue={allowContinue} isLatest={isLatest} />}
       <button
         type="button"
         class="thoughts-toggle"
@@ -1629,7 +1635,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                   const body = g.kind === 'starting' || g.kind === 'turn'
                     ? <ResponseStatusRow key={key} source={g.row} />
                     : g.kind === 'question-answer'
-                      ? <QuestionAnswerBubble key={key} question={g.row.question} answer={g.row.answer} />
+                      ? <QuestionAnswer key={key} question={g.row.question} answer={g.row.answer} />
                     : g.kind === 'thoughts'
                     ? <ThoughtGroup
                         key={key}
@@ -1640,7 +1646,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                       />
                     : g.kind === 'events'
                       ? <EventsGroup key={key} events={g.events} />
-                      : <Message
+                      : <MessageRow
                           key={key}
                           m={g.m}
                           allowContinue={g.m === latestConversationalMessage}
@@ -1657,7 +1663,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                     </>
                   );
                 })}
-        {!chatLoading.value && queued.map((message) => <Message key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
+        {!chatLoading.value && queued.map((message) => <MessageRow key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
         <TaskIndicator />
     </div>
   );
