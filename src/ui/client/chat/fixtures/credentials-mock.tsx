@@ -11,6 +11,7 @@ import type {
   KeyPresetDto,
   McpAuthDto,
   OAuthAppDto,
+  OAuthAppScope,
 } from '../src/components/GroupAdminCredentialsApi';
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
 
@@ -22,6 +23,8 @@ export interface FixtureOptions {
   latencyMs: number;
   failNextWrite: boolean;
   viewOnly: boolean;
+  /** Owner or global admin, who may change install-wide OAuth apps. */
+  owner: boolean;
 }
 
 export interface LoggedCall {
@@ -42,7 +45,11 @@ interface PendingSignIn {
 interface State {
   keys: KeyDto[];
   accounts: AccountDto[];
-  oauthApps: OAuthAppDto[];
+  apps: Record<string, { install: AppClient | null; group: AppClient | null }>;
+  /** Which app each OAuth account or app-based MCP sign-in came through. */
+  via: Record<string, { provider: string; scope: OAuthAppScope }>;
+  /** Accounts other groups have through each install-wide app. */
+  otherGroups: Record<string, number>;
   mcpServers: Record<string, McpServerConfigDto>;
   mcpAuth: Record<string, { auth: McpAuthDto['auth']; key?: string; status?: McpAuthDto['status']; account?: string | null }>;
   signIns: Map<string, PendingSignIn>;
@@ -77,20 +84,53 @@ const SCOPE_SETS: Record<string, Record<string, { label: string; hosts: string[]
   },
 };
 
-function app(id: string, label: string, consoleUrl: string, clientId: string | null, updatedAt: string | null = null): OAuthAppDto {
-  const sets = SCOPE_SETS[id] ?? {};
-  return {
-    id, label, consoleUrl, clientId, updatedAt, configured: clientId !== null,
-    scopeSets: Object.entries(sets).map(([sid, s]) => ({ id: sid, label: s.label, hosts: s.hosts })),
-  };
+interface AppClient {
+  clientId: string;
+  updatedAt: string;
 }
 
-function oauthApps(googleClient: string | null): OAuthAppDto[] {
-  return [
-    app('google', 'Google', 'https://console.cloud.google.com/apis/credentials', googleClient, googleClient ? iso(45 * DAY) : null),
-    app('github', 'GitHub', 'https://github.com/settings/applications/new', null),
-    app('microsoft', 'Microsoft 365', 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps', null),
-  ];
+const APP_CATALOG: { id: string; label: string; consoleUrl: string; mcpServers?: string[] }[] = [
+  { id: 'google', label: 'Google', consoleUrl: 'https://console.cloud.google.com/apis/credentials' },
+  { id: 'github', label: 'GitHub', consoleUrl: 'https://github.com/settings/applications/new', mcpServers: ['github'] },
+  { id: 'microsoft', label: 'Microsoft 365', consoleUrl: 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps' },
+];
+
+/** MCP servers whose authorization server needs a pre-registered app. */
+const MCP_APP: Record<string, string> = { github: 'github' };
+
+const GOOGLE_INSTALL: AppClient = { clientId: '604218840137-q7k2n9f1c8d3.apps.googleusercontent.com', updatedAt: iso(45 * DAY) };
+
+function appReady(provider: string): AppClient | null {
+  const a = state.apps[provider];
+  return a?.group ?? a?.install ?? null;
+}
+
+function appDtos(): OAuthAppDto[] {
+  return APP_CATALOG.map((c) => {
+    const a = state.apps[c.id] ?? { install: null, group: null };
+    const count = (scope: OAuthAppScope): number =>
+      Object.values(state.via).filter((v) => v.provider === c.id && v.scope === scope).length;
+    return {
+      id: c.id,
+      label: c.label,
+      consoleUrl: c.consoleUrl,
+      mcpServers: c.mcpServers,
+      install: a.install ? { ...a.install, accounts: count('install'), accountsAllGroups: count('install') + (state.otherGroups[c.id] ?? 0) } : null,
+      group: a.group ? { ...a.group, accounts: count('group') } : null,
+      scopeSets: Object.entries(SCOPE_SETS[c.id] ?? {}).map(([sid, s]) => ({ id: sid, label: s.label, hosts: s.hosts })),
+    };
+  });
+}
+
+/** Drops this group's accounts that came through one app. */
+function dropAccountsVia(provider: string, scope: OAuthAppScope): void {
+  for (const [key, v] of Object.entries(state.via)) {
+    if (v.provider !== provider || v.scope !== scope) continue;
+    const account = state.accounts.find((a) => a.key === key);
+    if (account?.mcpServer) state.mcpAuth[account.mcpServer] = { auth: 'oauth', status: 'needs_sign_in' };
+    state.accounts = state.accounts.filter((a) => a.key !== key);
+    delete state.via[key];
+  }
 }
 
 function scopeLabel(provider: string, id: string): string {
@@ -140,12 +180,15 @@ function typicalState(): State {
         mcpServer: 'linear', resource: 'https://mcp.linear.app/mcp', client: 'registered',
       },
     ],
-    oauthApps: oauthApps('604218840137-q7k2n9f1c8d3.apps.googleusercontent.com'),
+    apps: { google: { install: GOOGLE_INSTALL, group: null } },
+    via: { GOOGLE_ALEX: { provider: 'google', scope: 'install' }, GOOGLE_SAM: { provider: 'google', scope: 'install' } },
+    otherGroups: { google: 4 },
     mcpServers: {
       tavily: { type: 'http', url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=__TAVILY_API_KEY__' },
       nextcloud: { type: 'http', url: 'https://nextcloud.example.org/mcp/' },
       home_assistant: { type: 'http', url: 'http://homeassistant.local:8123/api/mcp' },
       linear: { type: 'http', url: 'https://mcp.linear.app/mcp' },
+      github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
       notion: { type: 'http', url: 'https://mcp.notion.com/mcp' },
       minimax: { type: 'stdio', command: 'uvx', args: ['minimax-mcp', '-y'] },
     },
@@ -155,6 +198,7 @@ function typicalState(): State {
       home_assistant: { auth: 'key', key: 'HOME_ASSISTANT_TOKEN' },
       linear: { auth: 'oauth', status: 'ok', account: 'alex@example.com' },
       notion: { auth: 'oauth', status: 'needs_sign_in' },
+      github: { auth: 'oauth', status: 'needs_sign_in' },
     },
     signIns: new Map(),
     seq: 1,
@@ -167,13 +211,15 @@ function emptyState(): State {
     ...state,
     keys: [],
     accounts: [],
-    oauthApps: oauthApps(null),
+    apps: {},
+    via: {},
+    otherGroups: {},
     mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } },
     mcpAuth: { notion: { auth: 'oauth', status: 'needs_sign_in' } },
   };
 }
 
-let options: FixtureOptions = { scenario: 'typical', gatewayDown: false, latencyMs: 250, failNextWrite: false, viewOnly: false };
+let options: FixtureOptions = { scenario: 'typical', gatewayDown: false, latencyMs: 250, failNextWrite: false, viewOnly: false, owner: true };
 let state: State = typicalState();
 const listeners = new Set<() => void>();
 export const callLog: LoggedCall[] = [];
@@ -210,14 +256,19 @@ function overview(): CredentialsOverviewDto {
         const k = state.keys.find((x) => x.key === auth.key);
         return { server: name, url, auth: 'key', key: auth.key, status: k?.status === 'set' ? 'ok' : 'needs_value' };
       }
-      if (auth.auth === 'oauth') return { server: name, url, auth: 'oauth', status: auth.status ?? 'needs_sign_in', account: auth.account ?? null };
+      if (auth.auth === 'oauth') {
+        const provider = MCP_APP[name];
+        const needsApp = provider && !appReady(provider) && auth.status !== 'ok' ? provider : undefined;
+        return { server: name, url, auth: 'oauth', status: auth.status ?? 'needs_sign_in', account: auth.account ?? null, needsApp };
+      }
       return { server: name, url, auth: 'none', status: 'ok' };
     });
   return {
     canEdit: !options.viewOnly,
+    canEditInstall: !options.viewOnly && options.owner,
     keys: state.keys,
     accounts: state.accounts,
-    oauthApps: state.oauthApps,
+    oauthApps: appDtos(),
     oauthRedirectUri: REDIRECT_URI,
     presets: PRESETS,
     mcp,
@@ -278,7 +329,7 @@ function settingsResponse(): Record<string, unknown> {
   };
 }
 
-function route(method: string, path: string, init?: RequestInit): unknown {
+function route(method: string, path: string, init?: RequestInit, search = ''): unknown {
   const prefix = `/ui/chat/api/groups/${FIXTURE_GROUP.id}/admin`;
   if (!path.startsWith(prefix)) throw new HttpError(404, `Fixture has no route for ${path}`);
   const sub = path.slice(prefix.length);
@@ -345,10 +396,11 @@ function route(method: string, path: string, init?: RequestInit): unknown {
     const input = body<AccountStartInput>(init);
     const stateId = `st-${state.seq++}-${Math.random().toString(36).slice(2, 8)}`;
     state.signIns.set(stateId, { input, status: 'pending' });
-    if (!('mcpServer' in input) && !state.oauthApps.find((a) => a.id === input.provider)?.configured) {
-      throw new HttpError(409, 'Set up this provider’s OAuth app first');
+    const needed = 'mcpServer' in input ? MCP_APP[input.mcpServer] : input.provider;
+    if (needed && !appReady(needed)) {
+      throw new HttpError(409, 'mcpServer' in input ? 'registration_unsupported: set up the OAuth app for this server first' : 'Set up this provider’s OAuth app first');
     }
-    const label = 'mcpServer' in input ? input.mcpServer : state.oauthApps.find((a) => a.id === input.provider)?.label ?? input.provider;
+    const label = 'mcpServer' in input ? input.mcpServer : APP_CATALOG.find((a) => a.id === input.provider)?.label ?? input.provider;
     const scopes = 'mcpServer' in input ? '' : input.scopeSets.map((s) => scopeLabel(input.provider, s)).join('|');
     const query = new URLSearchParams({ consent: stateId, provider: label, scopes });
     return { state: stateId, label, authorizeUrl: `${location.pathname}?${query}` } satisfies AccountStartDto;
@@ -362,24 +414,34 @@ function route(method: string, path: string, init?: RequestInit): unknown {
     const k = decodeURIComponent(m[1]!);
     const account = state.accounts.find((a) => a.key === k);
     state.accounts = state.accounts.filter((a) => a.key !== k);
+    delete state.via[k];
     if (account?.mcpServer) state.mcpAuth[account.mcpServer] = { auth: 'oauth', status: 'needs_sign_in' };
     return { ok: true };
   }
 
-  if ((m = /^\/oauth-apps\/([a-z0-9-]+)$/.exec(cred))) {
+  if ((m = /^\/oauth-apps\/([a-z0-9-]+)(\?scope=(group|install))?$/.exec(cred + search))) {
     const id = m[1]!;
-    const current = state.oauthApps.find((a) => a.id === id);
-    if (!current) throw new HttpError(404, 'Unknown provider');
+    if (!APP_CATALOG.some((c) => c.id === id)) throw new HttpError(404, 'Unknown provider');
+    const current = state.apps[id] ?? { install: null, group: null };
     if (method === 'PUT') {
-      const b = body<{ clientId: string; clientSecret?: string }>(init);
+      const b = body<{ scope: OAuthAppScope; clientId: string; clientSecret?: string }>(init);
+      if (b.scope === 'install' && !options.owner) throw new HttpError(403, 'Only owners can change install-wide OAuth apps');
+      const existing = current[b.scope];
       if (!b.clientId?.trim()) throw new HttpError(400, 'A client ID is required');
-      if (!current.configured && !b.clientSecret) throw new HttpError(400, 'A client secret is required');
-      state.oauthApps = state.oauthApps.map((a) => (a.id === id ? { ...a, configured: true, clientId: b.clientId.trim(), updatedAt: now } : a));
+      if (!existing && !b.clientSecret) throw new HttpError(400, 'A client secret is required');
+      if (existing && existing.clientId !== b.clientId.trim()) {
+        dropAccountsVia(id, b.scope);
+        if (b.scope === 'install') state.otherGroups[id] = 0;
+      }
+      state.apps[id] = { ...current, [b.scope]: { clientId: b.clientId.trim(), updatedAt: now } };
       return { ok: true };
     }
     if (method === 'DELETE') {
-      state.oauthApps = state.oauthApps.map((a) => (a.id === id ? { ...a, configured: false, clientId: null, updatedAt: null } : a));
-      state.accounts = state.accounts.filter((a) => !(a.kind === 'oauth_app' && a.provider === id));
+      const scope = (m[3] ?? 'group') as OAuthAppScope;
+      if (scope === 'install' && !options.owner) throw new HttpError(403, 'Only owners can change install-wide OAuth apps');
+      dropAccountsVia(id, scope);
+      if (scope === 'install') state.otherGroups[id] = 0;
+      state.apps[id] = { ...current, [scope]: null };
       return { ok: true };
     }
   }
@@ -406,8 +468,11 @@ export function completeSignIn(stateId: string, allow: boolean): void {
     const entry: AccountDto = {
       key, kind: 'mcp_oauth', provider: 'mcp', providerLabel: input.mcpServer, account, scopes: [], status: 'connected',
       connectedAt: now, lastUsedAt: existing?.lastUsedAt ?? null, mcpServer: input.mcpServer,
-      resource: (state.mcpServers[input.mcpServer] as { url?: string } | undefined)?.url, client: 'registered',
+      resource: (state.mcpServers[input.mcpServer] as { url?: string } | undefined)?.url,
+      client: MCP_APP[input.mcpServer] ? 'app' : 'registered',
     };
+    const provider = MCP_APP[input.mcpServer];
+    if (provider) state.via[key] = { provider, scope: state.apps[provider]?.group ? 'group' : 'install' };
     state.accounts = existing ? state.accounts.map((a) => (a.key === key ? entry : a)) : [...state.accounts, entry];
   } else {
     const replaced = input.replaceKey ? state.accounts.find((a) => a.key === input.replaceKey) : undefined;
@@ -417,11 +482,12 @@ export function completeSignIn(stateId: string, allow: boolean): void {
     const key = existing?.key ?? `${input.provider.toUpperCase()}_${account.split('@')[0]!.replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
     const scopeIds = replaced ? input.scopeSets : [...new Set([...(existing?.scopes.map((s) => s.id) ?? []), ...input.scopeSets])];
     const entry: AccountDto = {
-      key, kind: 'oauth_app', provider: input.provider, providerLabel: state.oauthApps.find((a) => a.id === input.provider)?.label ?? input.provider,
+      key, kind: 'oauth_app', provider: input.provider, providerLabel: APP_CATALOG.find((a) => a.id === input.provider)?.label ?? input.provider,
       account, scopes: scopeIds.map((id) => ({ id, label: scopeLabel(input.provider, id) })),
       status: 'connected', connectedAt: now, lastUsedAt: existing?.lastUsedAt ?? null,
     };
     state.accounts = state.accounts.some((a) => a.key === key) ? state.accounts.map((a) => (a.key === key ? entry : a)) : [...state.accounts, entry];
+    state.via[key] = { provider: input.provider, scope: state.apps[input.provider]?.group ? 'group' : 'install' };
   }
   state.signIns.set(stateId, { ...signIn, status: 'connected', account });
   emit();
@@ -441,7 +507,7 @@ export function installMockFetch(): void {
     let status = 200;
     let payload: unknown;
     try {
-      payload = route(method, url.pathname, init);
+      payload = route(method, url.pathname, init, url.search);
     } catch (error) {
       if (!(error instanceof HttpError)) throw error;
       status = error.status;

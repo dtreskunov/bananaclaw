@@ -117,6 +117,7 @@ function Controls(): preact.JSX.Element {
         </label>
         <label><input type="checkbox" checked={options.gatewayDown} onChange={(e) => set({ gatewayDown: e.currentTarget.checked })} /> Gateway down</label>
         <label><input type="checkbox" checked={options.viewOnly} onChange={(e) => set({ viewOnly: e.currentTarget.checked })} /> View only</label>
+        <label><input type="checkbox" checked={!options.owner} onChange={(e) => set({ owner: !e.currentTarget.checked })} /> Group admin, not owner</label>
         <label><input type="checkbox" checked={options.failNextWrite} onChange={(e) => set({ failNextWrite: e.currentTarget.checked }, false)} /> Fail next change</label>
         <label>
           <input type="checkbox" checked={popupBlocked} onChange={(e) => {

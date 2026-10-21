@@ -13,6 +13,7 @@ import {
   type KeyPresetDto,
   type McpAuthDto,
   type OAuthAppDto,
+  type OAuthAppScope,
 } from './GroupAdminCredentialsApi';
 import { KEY_NAME_RE, SecretInput, ago, useEscapeClose } from './GroupAdminCredentialsParts';
 import { GroupAdminField as Field } from './GroupAdminField';
@@ -374,22 +375,31 @@ const CLIENT_ID_RE = /^\S+$/;
 export function OAuthAppDialog({
   gid,
   app,
+  scope: fixedScope,
+  canEditInstall,
   redirectUri,
   onClose,
   onSaved,
 }: {
   gid: string;
   app: OAuthAppDto;
+  /** Which app to edit; when omitted, an owner chooses (defaulting to install-wide). */
+  scope?: OAuthAppScope;
+  canEditInstall: boolean;
   redirectUri: string;
   onClose: () => void;
   onSaved: () => void;
 }): JSX.Element {
-  const [clientId, setClientId] = useState(app.clientId ?? '');
+  const [scope, setScope] = useState<OAuthAppScope>(fixedScope ?? (canEditInstall && !app.install ? 'install' : 'group'));
+  const existing = scope === 'install' ? app.install : app.group;
+  const [clientId, setClientId] = useState(existing?.clientId ?? '');
   const [secret, setSecret] = useState('');
   const [busy, setBusy] = useState(false);
   useEscapeClose(onClose, busy);
+  useEffect(() => setClientId(existing?.clientId ?? ''), [scope]);
   const id = clientId.trim();
-  const canSave = !busy && CLIENT_ID_RE.test(id) && (app.configured ? id !== app.clientId || secret !== '' : secret !== '');
+  const canSave = !busy && CLIENT_ID_RE.test(id) && (existing ? id !== existing.clientId || secret !== '' : secret !== '');
+  const choosing = fixedScope === undefined && canEditInstall && !app.install && !app.group;
 
   async function save(event: Event): Promise<void> {
     event.preventDefault();
@@ -398,8 +408,8 @@ export function OAuthAppDialog({
     const ok = await send(
       credPath(gid, `/oauth-apps/${encodeURIComponent(app.id)}`),
       'PUT',
-      secret ? { clientId: id, clientSecret: secret } : { clientId: id },
-      `Saved the ${app.label} OAuth app`,
+      secret ? { scope, clientId: id, clientSecret: secret } : { scope, clientId: id },
+      `Saved the ${app.label} app`,
     );
     setBusy(false);
     if (ok) onSaved();
@@ -412,16 +422,16 @@ export function OAuthAppDialog({
     );
   }
 
+  const title = existing
+    ? `${app.label} app · ${scope === 'install' ? 'all groups' : 'this group'}`
+    : scope === 'group' && app.install
+      ? `Use a different ${app.label} app here`
+      : `Set up ${app.label}`;
+
   return (
-    <MobileDialog
-      title={app.configured ? `${app.label} OAuth app` : `Set up ${app.label}`}
-      onClose={onClose}
-      maxWidth="560px"
-      className="ga-cred-dialog"
-      closeDisabled={busy}
-    >
+    <MobileDialog title={title} onClose={onClose} maxWidth="560px" className="ga-cred-dialog" closeDisabled={busy}>
       <form id="ga-cred-oauth-app" class="settings-body ga-cred-dialog-body" onSubmit={save}>
-        {app.configured ? null : (
+        {existing ? null : (
           <ol class="ga-cred-steps group-admin-help">
             <li>
               Create an OAuth client of type <em>Web application</em> in the{' '}
@@ -431,6 +441,19 @@ export function OAuthAppDialog({
             <li>Paste the client ID and secret here.</li>
           </ol>
         )}
+        {choosing ? (
+          <fieldset class="ga-cred-scope">
+            <legend>Use it in</legend>
+            <label class="group-admin-check">
+              <input type="radio" name="ga-cred-app-scope" checked={scope === 'install'} onChange={() => setScope('install')} />
+              <span>All groups <span class="ga-cred-choice-note">Recommended. Each group connects its own accounts; tokens stay in each group.</span></span>
+            </label>
+            <label class="group-admin-check">
+              <input type="radio" name="ga-cred-app-scope" checked={scope === 'group'} onChange={() => setScope('group')} />
+              <span>Only this group</span>
+            </label>
+          </fieldset>
+        ) : null}
         <Field label="Redirect URI">
           <div class="ga-cred-copy">
             <code>{redirectUri}</code>
@@ -438,14 +461,20 @@ export function OAuthAppDialog({
           </div>
         </Field>
         <Field label="Client ID">
-          <input type="text" class="ga-cred-mono" value={clientId} spellcheck={false} autoFocus={!app.configured} onInput={(event) => setClientId(event.currentTarget.value)} />
+          <input type="text" class="ga-cred-mono" value={clientId} spellcheck={false} autoFocus={!existing} onInput={(event) => setClientId(event.currentTarget.value)} />
         </Field>
         <Field label="Client secret">
-          <SecretInput value={secret} onInput={setSecret} placeholder={app.configured ? 'Leave empty to keep the current secret' : 'Paste the secret'} />
+          <SecretInput value={secret} onInput={setSecret} placeholder={existing ? 'Leave empty to keep the current secret' : 'Paste the secret'} />
         </Field>
         <p class="group-admin-help ga-cred-field-help">
-          Only this group uses this client. The secret is stored in the gateway and can't be viewed again.
-          {app.configured && app.updatedAt ? ` Current client set ${ago(app.updatedAt)}.` : ''}
+          {scope === 'install'
+            ? 'Every group without its own app uses this client. '
+            : app.install
+              ? 'Only this group uses this client, instead of the install-wide app. '
+              : 'Only this group uses this client. '}
+          The secret is stored in the gateway and can't be viewed again.
+          {existing ? ` Current client set ${ago(existing.updatedAt)}.` : ''}
+          {existing && existing.clientId !== id && id ? ' Changing the client disconnects the accounts that use it.' : ''}
         </p>
       </form>
       <Footer>
@@ -454,6 +483,10 @@ export function OAuthAppDialog({
       </Footer>
     </MobileDialog>
   );
+}
+
+function appReady(app: OAuthAppDto): boolean {
+  return Boolean(app.group ?? app.install);
 }
 
 export function ConnectAccountDialog({
@@ -497,13 +530,13 @@ export function ConnectAccountDialog({
           <p class="group-admin-help">You'll sign in with the provider in a new window. The agent can then use the account through the gateway, without seeing its tokens.</p>
         </div>
         <MobileDialogList className="ga-cred-preset-list">
-          {apps.map((a) => (
+          {apps.filter((a) => a.scopeSets.length > 0).map((a) => (
             <MobileDialogItem
               key={a.id}
               label={a.label}
-              sublabel={a.configured ? `${a.scopeSets.length} kinds of access available` : 'Needs an OAuth app first'}
-              chevron={a.configured || canEdit}
-              onClick={a.configured ? () => setApp(a) : canEdit ? () => onSetUp(a) : undefined}
+              sublabel={appReady(a) ? `${a.scopeSets.length} kinds of access available` : 'Needs an OAuth app first'}
+              chevron={appReady(a) || canEdit}
+              onClick={appReady(a) ? () => setApp(a) : canEdit ? () => onSetUp(a) : undefined}
             />
           ))}
         </MobileDialogList>
@@ -511,15 +544,20 @@ export function ConnectAccountDialog({
           <>
             <div class="settings-body ga-cred-dialog-body ga-cred-dialog-subhead"><h4>MCP servers</h4></div>
             <MobileDialogList className="ga-cred-preset-list">
-              {mcpSignIns.map((m) => (
-                <MobileDialogItem
-                  key={m.server}
-                  label={m.server}
-                  sublabel={m.status === 'ok' ? `Signed in${m.account ? ` as ${m.account}` : ''} — sign in again` : m.url}
-                  chevron
-                  onClick={busy ? undefined : () => void begin({ mcpServer: m.server })}
-                />
-              ))}
+              {mcpSignIns.map((m) => {
+                const app = m.needsApp ? apps.find((a) => a.id === m.needsApp) : undefined;
+                return (
+                  <MobileDialogItem
+                    key={m.server}
+                    label={m.server}
+                    sublabel={app
+                      ? `Needs the ${app.label} OAuth app first`
+                      : m.status === 'ok' ? `Signed in${m.account ? ` as ${m.account}` : ''} — sign in again` : m.url}
+                    chevron={!app || canEdit}
+                    onClick={busy ? undefined : app ? (canEdit ? () => onSetUp(app) : undefined) : () => void begin({ mcpServer: m.server })}
+                  />
+                );
+              })}
             </MobileDialogList>
           </>
         ) : null}

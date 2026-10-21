@@ -9,8 +9,11 @@
 //   POST   /credentials/accounts/start         AccountStartInput → AccountStartDto
 //   GET    /credentials/accounts/start/:state  AccountProgressDto
 //   DELETE /credentials/accounts/:key
-//   PUT    /credentials/oauth-apps/:id         { clientId, clientSecret? }  (secret required the first time)
-//   DELETE /credentials/oauth-apps/:id
+//   PUT    /credentials/oauth-apps/:id         { scope, clientId, clientSecret? }  (secret required the first time)
+//   DELETE /credentials/oauth-apps/:id?scope=group|install
+//
+// `scope: 'install'` changes the install-wide app every group uses by default;
+// only owners and global admins may (`canEditInstall`).
 //
 // When the gateway is down, every route answers 503 { error: 'gateway_unreachable' }.
 import { apiPath } from './GroupAdminApi';
@@ -65,7 +68,7 @@ export interface AccountDto {
    * a client registered dynamically for this group (RFC 7591), or the install's
    * published client metadata document.
    */
-  client?: 'registered' | 'metadata';
+  client?: 'registered' | 'metadata' | 'app';
 }
 
 export interface ScopeSetDto {
@@ -74,17 +77,33 @@ export interface ScopeSetDto {
   hosts: string[];
 }
 
-/** An OAuth client this group uses for a provider without dynamic registration (e.g. Google). */
+export type OAuthAppScope = 'group' | 'install';
+
+/** One configured client; the secret is write-only. */
+export interface OAuthClientDto {
+  clientId: string;
+  updatedAt: string;
+  /** Accounts and MCP sign-ins using this client: in this group, and (install only) across all groups. */
+  accounts: number;
+  accountsAllGroups?: number;
+}
+
+/**
+ * An OAuth client for a provider without dynamic registration (e.g. Google,
+ * GitHub). The install-wide app is used by every group unless the group sets
+ * its own.
+ */
 export interface OAuthAppDto {
   id: string;
   label: string;
-  configured: boolean;
-  /** Public; the secret is write-only. */
-  clientId: string | null;
-  updatedAt: string | null;
+  install: OAuthClientDto | null;
+  group: OAuthClientDto | null;
   /** Where to create the client in the provider's console. */
   consoleUrl: string;
+  /** Scope sets for connecting accounts; empty when the app is only used for MCP sign-in. */
   scopeSets: ScopeSetDto[];
+  /** MCP servers known to sign in through this provider, e.g. GitHub's. */
+  mcpServers?: string[];
 }
 
 export interface KeyPresetDto {
@@ -103,10 +122,17 @@ export interface McpAuthDto {
   status: 'ok' | 'needs_sign_in' | 'needs_reconnect' | 'needs_value';
   key?: string;
   account?: string | null;
+  /**
+   * The server's authorization server doesn't support dynamic registration, so
+   * sign-in needs this OAuth app (provider id); set when that app isn't set up.
+   */
+  needsApp?: string;
 }
 
 export interface CredentialsOverviewDto {
   canEdit: boolean;
+  /** May set install-wide OAuth apps (owner or global admin). */
+  canEditInstall: boolean;
   keys: KeyDto[];
   accounts: AccountDto[];
   oauthApps: OAuthAppDto[];

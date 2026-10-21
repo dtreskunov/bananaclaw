@@ -755,8 +755,8 @@ A second fixture renders the production Agent Settings dialog with the proposed
 **Credentials** tab (R1 scope in
 [credential-gateway-agent-vault-fork-proposal.md](credential-gateway-agent-vault-fork-proposal.md)):
 **Keys** (each with one destination) and **Accounts** (MCP sign-ins, OAuth
-accounts and the group's own OAuth apps), plus the sign-in row in the MCP server
-editor. The tab is hidden in
+accounts, and OAuth apps that are install-wide or the group's own), plus the
+sign-in row in the MCP server editor. The tab is hidden in
 the app until `credentialsUiEnabled` is turned on. The fixture mocks every
 `/admin/credentials/*` route in the page:
 
@@ -775,8 +775,8 @@ with Allow and Deny. The fixture panel can:
 
 - switch between typical and new-group data,
 - add latency,
-- simulate the gateway being down, view-only access, a failed change or a
-  blocked sign-in popup,
+- simulate the gateway being down, view-only access, a group admin who isn't an
+  owner (no install-wide changes), a failed change or a blocked sign-in popup,
 - show the API calls made, with credential values masked.
 
 Nothing leaves the page.

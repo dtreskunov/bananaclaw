@@ -10,7 +10,10 @@ duplicated ([§6.2](#62-keys-shared-across-groups)). **Revision 4:** R1 scope cu
 approvals or separate rules, and no activity view. **Revision 5:** network
 restrictions leave R1, MCP sign-in with dynamic client registration scoped per
 agent group becomes the first deliverable, and OAuth apps (Google and similar)
-are configured per group in the UI instead of `.env`.
+are configured per group in the UI instead of `.env`. **Revision 6:** OAuth
+apps can be install-wide (set by an owner in the UI) with per-group overrides,
+and MCP servers without dynamic registration (e.g. GitHub's) sign in through
+those apps.
 
 This proposal reaches the same goals as
 [credential-gateway-proposal.md](credential-gateway-proposal.md) (the "native
@@ -55,13 +58,13 @@ This document covers only what differs.
 
 ### 1.1 R1 scope
 
-| In R1                                                                                                                                                                                                                                 | Deferred                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **MCP sign-in with dynamic client registration, scoped per agent group** (F4, F11). This is the first deliverable: each group's vault registers its own OAuth client with each MCP authorization server and holds its own tokens.     | **Network restrictions:** blocking requests to hosts without a key, hosts allowed without a key, per-group private-network allowlists (F5 and the Network view). In R1, requests to hosts without a key always go through a blind tunnel (F2), and private addresses are reachable only through the operator's `AGENT_VAULT_NETWORK_ALLOWLIST`. |
-| **Keys:** add (from presets or for any host), replace, edit, delete. Each key has exactly one destination (`host[:port][/path-glob]`) and one way it's sent; there's no separate rules list.                                          | **Copying keys between groups** and setting a key in several groups at once (F12). Each group's keys are entered in that group.                                                                                                                                                                                                                 |
-| **Accounts with OAuth apps configured per group:** Google and similar providers without dynamic registration. A group admin enters the client ID and secret in group settings (F11); token-endpoint stubs for stdio MCP servers (F8). | **Agent requests:** the agent asking for a key or account through proposals (`request_credential`). In R1, a missing credential returns the gateway's error and the agent tells the user to add it in group settings.                                                                                                                           |
-| MCP-tab sign-in status row, `ncl credentials`, per-group switch to the gateway                                                                                                                                                        | **Approvals and fine-grained rules** (F3): ask-before-calling, per-method/path rules, pause/resume, several destinations per key, and the chat approval bridge                                                                                                                                                                                  |
-|                                                                                                                                                                                                                                       | **Activity view** of proxied requests (the gateway still keeps its request log); **manually entered clients for MCP servers** that support neither dynamic registration nor a client metadata document                                                                                                                                          |
+| In R1                                                                                                                                                                                                                                                                                                                                                                                         | Deferred                                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **MCP sign-in with dynamic client registration, scoped per agent group** (F4, F11). This is the first deliverable: each group's vault registers its own OAuth client with each MCP authorization server and holds its own tokens.                                                                                                                                                             | **Network restrictions:** blocking requests to hosts without a key, hosts allowed without a key, per-group private-network allowlists (F5 and the Network view). In R1, requests to hosts without a key always go through a blind tunnel (F2), and private addresses are reachable only through the operator's `AGENT_VAULT_NETWORK_ALLOWLIST`. |
+| **Keys:** add (from presets or for any host), replace, edit, delete. Each key has exactly one destination (`host[:port][/path-glob]`) and one way it's sent; there's no separate rules list.                                                                                                                                                                                                  | **Copying keys between groups** and setting a key in several groups at once (F12). Each group's keys are entered in that group.                                                                                                                                                                                                                 |
+| **OAuth apps and accounts:** Google, GitHub and similar providers without dynamic registration. An owner or global admin sets an **install-wide** app in the UI that every group uses; a group admin can set the group's **own** app instead (F11). The same apps serve **MCP servers without dynamic registration**, such as GitHub's (F4). Token-endpoint stubs for stdio MCP servers (F8). | **Agent requests:** the agent asking for a key or account through proposals (`request_credential`). In R1, a missing credential returns the gateway's error and the agent tells the user to add it in group settings.                                                                                                                           |
+| MCP-tab sign-in status row, `ncl credentials`, per-group switch to the gateway                                                                                                                                                                                                                                                                                                                | **Approvals and fine-grained rules** (F3): ask-before-calling, per-method/path rules, pause/resume, several destinations per key, and the chat approval bridge                                                                                                                                                                                  |
+|                                                                                                                                                                                                                                                                                                                                                                                               | **Activity view** of proxied requests (the gateway still keeps its request log); **clients for MCP authorization servers outside the provider catalog** that support neither dynamic registration nor a client metadata document                                                                                                                |
 
 ## 2. What upstream already provides
 
@@ -142,7 +145,7 @@ files, which is what causes merge conflicts.
 | F8  | **Token-endpoint stubs:** a service type for `oauth2.googleapis.com/token` and similar that answers refresh requests carrying the placeholder refresh token with a synthetic token, without contacting the upstream                                                                                                                    | stdio MCP servers using credential stubs (Gmail, Calendar)                                                            | S / small                                 | Maybe                                |
 | F9  | **Fork hygiene:** telemetry off by default plus a `notelemetry` build tag; a CI check that fails if an `ee/` directory appears                                                                                                                                                                                                         | Privacy, license safety                                                                                               | XS / tiny                                 | No                                   |
 | F10 | **Headless mode** (details below)                                                                                                                                                                                                                                                                                                      | No second UI or login; configured through `.env`                                                                      | M / small (route registration, bootstrap) | Maybe: "API-only server"             |
-| F11 | **OAuth redirect relay and per-vault OAuth apps** (details below)                                                                                                                                                                                                                                                                      | The NanoClaw UI hosts the browser-facing OAuth endpoints, so the gateway stays private                                | S / small (`handle_oauth.go`)             | Yes                                  |
+| F11 | **OAuth redirect relay and OAuth apps (install-wide and per vault)** (details below)                                                                                                                                                                                                                                                   | The NanoClaw UI hosts the browser-facing OAuth endpoints, so the gateway stays private                                | S / small (`handle_oauth.go`)             | Yes                                  |
 | F12 | **Deferred past R1.** **Copying credentials inside the gateway:** `POST /v1/vaults/{dst}/credentials/copy {from_vault, keys}` re-encrypts within the gateway, so values never leave it. Copies record `copied_from` (vault, key, time). Static credentials only.                                                                       | Duplicating shared keys into another group without re-entering them (F6 blocks reading them back)                     | S / none (new package on the store API)   | Maybe                                |
 
 **F1 details.**
@@ -181,13 +184,22 @@ files, which is what causes merge conflicts.
   instead of redirecting to Agent Vault's UI.
 - **Client metadata:** `GET /v1/oauth/client-metadata` returns the CIMD document
   for NanoClaw to publish.
-- **Per-vault OAuth apps:** `PUT /v1/vaults/{vault}/oauth-apps/{provider}
-{client_id, client_secret?}` and `DELETE` (which also revokes and removes the
-  vault's accounts for that provider). The secret is stored like any credential
-  and is write-only (F6). Provider endpoints and scope sets are built into the
-  gateway (Google first), so admins only enter a client ID and secret. Each
-  group's admin creates or reuses a client in the provider's console; nothing is
-  shared between vaults by the gateway.
+- **OAuth apps, at two levels:**
+  - **Install-wide:** `PUT /v1/oauth-apps/{provider} {client_id, client_secret?}`
+    and `DELETE`. Stored in a reserved vault that no socket session can bind.
+  - **Per vault:** `PUT /v1/vaults/{vault}/oauth-apps/{provider} …` and
+    `DELETE`. Overrides the install-wide app for that vault.
+  - **Resolution:** a connect or sign-in uses the vault's app, else the
+    install-wide one. Each account records which client it was issued to, and
+    refreshes always use that client.
+  - **Changing or deleting an app** revokes and removes the accounts issued to
+    that client (across all vaults for the install-wide app).
+  - **Secrets** are stored like any credential and are write-only (F6).
+- **Provider catalog:** each provider's issuer, endpoints and scope sets (with
+  the API hosts each unlocks) are built into the gateway, so admins only enter a
+  client ID and secret. Google and GitHub first. Catalog entries also list known
+  MCP servers that sign in through the provider (GitHub's
+  `api.githubcopilot.com/mcp`).
 
 **F4 details.**
 
@@ -201,11 +213,16 @@ files, which is what causes merge conflicts.
   - The registration (client ID, secret if issued, registration access token) is
     stored in the vault, keyed by issuer.
   - An `invalid_client` answer triggers one re-registration and a new sign-in.
-  - **Fallback:** if the server doesn't offer registration, the install's client
-    metadata document (CIMD, published by NanoClaw, F11). The client identity is
-    then shared across the install, but tokens stay per vault.
-  - Manually entered clients are deferred (§1.1); without registration or CIMD
-    the sign-in fails with `registration_unsupported`.
+  - **Fallbacks,** if the server doesn't offer registration:
+    1. **A configured OAuth app** whose catalog issuer matches the authorization
+       server: the vault's own, else the install-wide one (F11). This is how
+       GitHub's MCP server works.
+    2. **The install's client metadata document** (CIMD, published by
+       NanoClaw, F11). The client identity is then shared across the install,
+       but tokens stay per vault.
+  - **Otherwise** the sign-in fails with `registration_unsupported`. When a
+    catalog provider matches the issuer, the probe reports it, so the UI can
+    offer to set up that app before the first sign-in.
 - **Sign-in:** PKCE plus `resource` (RFC 8707). Refreshes include `resource`.
 - **Result:** a service auto-created for the MCP URL's host and path prefix.
 - **Hiding the challenge:** strips `resource_metadata` from 401s on MCP services,
@@ -293,7 +310,7 @@ also work, but are then stored unencrypted on disk.
   [onecli-proxy.ts](../src/ui/server/chat/onecli-proxy.ts).
 - **Stubs** are written by the host. They contain no secrets.
 - **`ncl credentials`** (host only): `list`, `set --value-stdin`, `edit`,
-  `delete`, `oauth-app set --secret-stdin | remove`. Container `ncl` rejects these verbs regardless of
+  `delete`, `oauth-app set|remove [--install] --secret-stdin`. Container `ncl` rejects these verbs regardless of
   `cli_scope`.
 - **Setup:** `/init-agent-vault` replaces `/init-onecli`. It:
   - downloads a pinned release binary and verifies its SHA-256,
@@ -326,10 +343,10 @@ registration, shown under Accounts). The wire contract is in
 and a mocked fixture of the whole tab is described in
 [ui.md](ui.md). All routes are under `…/admin/credentials`:
 
-| View     | Shows / does                                                                                                                                                                                                                                                                                                                                   | Host routes                                                                                                                                                                        | Gateway API                                                      |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Keys     | Name, key name, needs-value status, where it's sent and how, last used. Add (preset or any host), replace the value, edit the name or destination, delete.                                                                                                                                                                                     | `POST /keys {key, label, value, destination}`, `PUT /keys/:key {value?, label?, destination?}`, `DELETE /keys/:key`                                                                | Set/delete the credential and its single service (no reveal, F6) |
-| Accounts | MCP sign-ins (marked when the group has its own registered client) and OAuth accounts: status, access, last used; connect, change access, reconnect, disconnect. **OAuth apps** section: client ID, accounts using it; set up (with the redirect URI to copy), edit, remove. Connecting a provider that isn't set up leads into setting it up. | `POST /accounts/start` → `{state, authorizeUrl}`, `GET /accounts/start/:state`, `DELETE /accounts/:key`, `PUT /oauth-apps/:id {clientId, clientSecret?}`, `DELETE /oauth-apps/:id` | F4, F11                                                          |
+| View     | Shows / does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Host routes                                                                                                                                                                                      | Gateway API                                                      |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| Keys     | Name, key name, needs-value status, where it's sent and how, last used. Add (preset or any host), replace the value, edit the name or destination, delete.                                                                                                                                                                                                                                                                                                                                                                                  | `POST /keys {key, label, value, destination}`, `PUT /keys/:key {value?, label?, destination?}`, `DELETE /keys/:key`                                                                              | Set/delete the credential and its single service (no reveal, F6) |
+| Accounts | MCP sign-ins (marked when the group has its own registered client or used an OAuth app) and OAuth accounts: status, access, last used; connect, change access, reconnect, disconnect. **OAuth apps** section: which app applies (install-wide or this group's), client ID, accounts using it; set up (owners choose install-wide or this group, with the redirect URI to copy), edit, use the group's own app, remove. Connecting a provider, or signing in to an MCP server, that needs an app that isn't set up leads into setting it up. | `POST /accounts/start` → `{state, authorizeUrl}`, `GET /accounts/start/:state`, `DELETE /accounts/:key`, `PUT /oauth-apps/:id {scope, clientId, clientSecret?}`, `DELETE /oauth-apps/:id?scope=` | F4, F11                                                          |
 
 `GET /credentials` returns everything the tab needs in one call, including the
 MCP servers' sign-in status that the MCP tab shows. When the gateway is down,
@@ -354,8 +371,11 @@ and `GET /oauth/client-metadata.json` (the latter is served from F11).
 **Permissions** (enforced by the host; the gateway trusts the host token). Each
 vault belongs to exactly one group, so the rules follow NanoClaw's group roles:
 
-- **Viewing the tab or changing the group's own vault** (keys, accounts,
-  OAuth apps): a scoped admin of the group, an owner or a global admin.
+- **Viewing the tab or changing the group's own vault** (keys, accounts, the
+  group's own OAuth apps): a scoped admin of the group, an owner or a global
+  admin.
+- **Install-wide OAuth apps:** owners and global admins only. Scoped admins see
+  which install-wide app applies but can only override it for their group.
 - **Handling of values:**
   - never returned by any route,
   - request bodies containing values are never logged,
@@ -376,9 +396,10 @@ vault belongs to exactly one group, so the rules follow NanoClaw's group roles:
     account is typically one click.
   - Google allows up to 100 refresh tokens per account per OAuth client, which
     is plenty for this install's groups even when they reuse one client.
-- **OAuth apps are per group too.** An admin can create a client per group or
-  enter the same client ID and secret in several groups. Either way each vault
-  stores its own copy, and removing it from one group doesn't affect the others.
+- **OAuth apps are shared by default.** An install-wide app is entered once and
+  used by every group without its own. Only the client is shared: each group
+  connects its own accounts and keeps its own tokens. A group that needs a
+  separate client (different consent screen, quota or owner) sets its own.
 - **MCP clients are never shared.** With dynamic registration each vault
   registers its own client (F4), so there's nothing to duplicate.
 
@@ -452,7 +473,7 @@ analysis still applies.
 | P1            | Foundation: F1, F2 (unmatched hosts always tunnelled), F6, F9, F10, socket rebinding after gateway restarts, NanoClaw host gateway client, per-group vaults and `credential_backend = onecli \| agent-vault` |
 | P2            | **MCP sign-in with per-group dynamic registration:** F11 redirect relay, F4, Credentials tab with Accounts (MCP sign-ins) turned on for gateway groups, MCP-tab sign-in row, probe trigger                   |
 | P3            | Credentials → Keys, `ncl credentials`                                                                                                                                                                        |
-| P4            | Per-group OAuth apps (F11) with Google accounts in Credentials → Accounts, F8 stubs                                                                                                                          |
+| P4            | OAuth apps (F11): install-wide and per-group, Google accounts and GitHub's MCP server through its app; F8 stubs                                                                                              |
 | P5            | Migration script, cutover                                                                                                                                                                                    |
 | P6            | Remove OneCLI                                                                                                                                                                                                |
 | P7 (after R1) | Deferred features (§1.1): F5 and network restrictions, F3 approvals and the chat bridge with per-call rules, F12 copying between groups, agent requests, activity view, manually entered MCP clients         |
@@ -512,3 +533,12 @@ matching phase.
    or a group deletes the client with RFC 7592 when the server supports it;
    otherwise the client is just forgotten, which most servers expire on their
    own.
+10. **An install-wide OAuth app is a shared dependency.** Rotating or deleting
+    it disconnects every group's accounts that use it, and provider quotas and
+    limits (e.g. Google's 100 refresh tokens per account per client) apply
+    across those groups. A personal Google client can stay unverified; its
+    owner sees Google's "unverified app" screen when signing in.
+    Project-owned clients shipped with BananaClaw are ruled out: each install
+    has its own redirect domain, the secret would be public, and Gmail's
+    restricted scopes would need Google's verification and a recurring
+    security assessment.

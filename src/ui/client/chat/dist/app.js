@@ -30163,16 +30163,22 @@ var CLIENT_ID_RE = /^\S+$/;
 function OAuthAppDialog({
   gid,
   app,
+  scope: fixedScope,
+  canEditInstall,
   redirectUri,
   onClose,
   onSaved
 }) {
-  const [clientId, setClientId] = h2(app.clientId ?? "");
+  const [scope, setScope] = h2(fixedScope ?? (canEditInstall && !app.install ? "install" : "group"));
+  const existing = scope === "install" ? app.install : app.group;
+  const [clientId, setClientId] = h2(existing?.clientId ?? "");
   const [secret, setSecret] = h2("");
   const [busy, setBusy] = h2(false);
   useEscapeClose(onClose, busy);
+  y2(() => setClientId(existing?.clientId ?? ""), [scope]);
   const id2 = clientId.trim();
-  const canSave = !busy && CLIENT_ID_RE.test(id2) && (app.configured ? id2 !== app.clientId || secret !== "" : secret !== "");
+  const canSave = !busy && CLIENT_ID_RE.test(id2) && (existing ? id2 !== existing.clientId || secret !== "" : secret !== "");
+  const choosing = fixedScope === void 0 && canEditInstall && !app.install && !app.group;
   async function save(event) {
     event.preventDefault();
     if (!canSave) return;
@@ -30180,8 +30186,8 @@ function OAuthAppDialog({
     const ok = await send(
       credPath(gid, `/oauth-apps/${encodeURIComponent(app.id)}`),
       "PUT",
-      secret ? { clientId: id2, clientSecret: secret } : { clientId: id2 },
-      `Saved the ${app.label} OAuth app`
+      secret ? { scope, clientId: id2, clientSecret: secret } : { scope, clientId: id2 },
+      `Saved the ${app.label} app`
     );
     setBusy(false);
     if (ok) onSaved();
@@ -30192,49 +30198,59 @@ function OAuthAppDialog({
       () => showToast("Couldn\u2019t copy; select the URI and copy it", "err")
     );
   }
-  return /* @__PURE__ */ u4(
-    MobileDialog,
-    {
-      title: app.configured ? `${app.label} OAuth app` : `Set up ${app.label}`,
-      onClose,
-      maxWidth: "560px",
-      className: "ga-cred-dialog",
-      closeDisabled: busy,
-      children: [
-        /* @__PURE__ */ u4("form", { id: "ga-cred-oauth-app", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
-          app.configured ? null : /* @__PURE__ */ u4("ol", { class: "ga-cred-steps group-admin-help", children: [
-            /* @__PURE__ */ u4("li", { children: [
-              "Create an OAuth client of type ",
-              /* @__PURE__ */ u4("em", { children: "Web application" }),
-              " in the",
-              " ",
-              /* @__PURE__ */ u4("a", { href: app.consoleUrl, target: "_blank", rel: "noopener noreferrer", children: [
-                app.label,
-                " console"
-              ] }),
-              "."
-            ] }),
-            /* @__PURE__ */ u4("li", { children: "Add the redirect URI below as an authorized redirect URI." }),
-            /* @__PURE__ */ u4("li", { children: "Paste the client ID and secret here." })
+  const title = existing ? `${app.label} app \xB7 ${scope === "install" ? "all groups" : "this group"}` : scope === "group" && app.install ? `Use a different ${app.label} app here` : `Set up ${app.label}`;
+  return /* @__PURE__ */ u4(MobileDialog, { title, onClose, maxWidth: "560px", className: "ga-cred-dialog", closeDisabled: busy, children: [
+    /* @__PURE__ */ u4("form", { id: "ga-cred-oauth-app", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
+      existing ? null : /* @__PURE__ */ u4("ol", { class: "ga-cred-steps group-admin-help", children: [
+        /* @__PURE__ */ u4("li", { children: [
+          "Create an OAuth client of type ",
+          /* @__PURE__ */ u4("em", { children: "Web application" }),
+          " in the",
+          " ",
+          /* @__PURE__ */ u4("a", { href: app.consoleUrl, target: "_blank", rel: "noopener noreferrer", children: [
+            app.label,
+            " console"
           ] }),
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Redirect URI", children: /* @__PURE__ */ u4("div", { class: "ga-cred-copy", children: [
-            /* @__PURE__ */ u4("code", { children: redirectUri }),
-            /* @__PURE__ */ u4("button", { type: "button", onClick: copy, children: "Copy" })
-          ] }) }),
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Client ID", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: clientId, spellcheck: false, autoFocus: !app.configured, onInput: (event) => setClientId(event.currentTarget.value) }) }),
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Client secret", children: /* @__PURE__ */ u4(SecretInput, { value: secret, onInput: setSecret, placeholder: app.configured ? "Leave empty to keep the current secret" : "Paste the secret" }) }),
-          /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: [
-            "Only this group uses this client. The secret is stored in the gateway and can't be viewed again.",
-            app.configured && app.updatedAt ? ` Current client set ${ago(app.updatedAt)}.` : ""
+          "."
+        ] }),
+        /* @__PURE__ */ u4("li", { children: "Add the redirect URI below as an authorized redirect URI." }),
+        /* @__PURE__ */ u4("li", { children: "Paste the client ID and secret here." })
+      ] }),
+      choosing ? /* @__PURE__ */ u4("fieldset", { class: "ga-cred-scope", children: [
+        /* @__PURE__ */ u4("legend", { children: "Use it in" }),
+        /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+          /* @__PURE__ */ u4("input", { type: "radio", name: "ga-cred-app-scope", checked: scope === "install", onChange: () => setScope("install") }),
+          /* @__PURE__ */ u4("span", { children: [
+            "All groups ",
+            /* @__PURE__ */ u4("span", { class: "ga-cred-choice-note", children: "Recommended. Each group connects its own accounts; tokens stay in each group." })
           ] })
         ] }),
-        /* @__PURE__ */ u4(Footer, { children: [
-          /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-          /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-oauth-app", class: "primary", disabled: !canSave, children: busy ? "Saving\u2026" : "Save" })
+        /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+          /* @__PURE__ */ u4("input", { type: "radio", name: "ga-cred-app-scope", checked: scope === "group", onChange: () => setScope("group") }),
+          /* @__PURE__ */ u4("span", { children: "Only this group" })
         ] })
-      ]
-    }
-  );
+      ] }) : null,
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Redirect URI", children: /* @__PURE__ */ u4("div", { class: "ga-cred-copy", children: [
+        /* @__PURE__ */ u4("code", { children: redirectUri }),
+        /* @__PURE__ */ u4("button", { type: "button", onClick: copy, children: "Copy" })
+      ] }) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Client ID", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: clientId, spellcheck: false, autoFocus: !existing, onInput: (event) => setClientId(event.currentTarget.value) }) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Client secret", children: /* @__PURE__ */ u4(SecretInput, { value: secret, onInput: setSecret, placeholder: existing ? "Leave empty to keep the current secret" : "Paste the secret" }) }),
+      /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: [
+        scope === "install" ? "Every group without its own app uses this client. " : app.install ? "Only this group uses this client, instead of the install-wide app. " : "Only this group uses this client. ",
+        "The secret is stored in the gateway and can't be viewed again.",
+        existing ? ` Current client set ${ago(existing.updatedAt)}.` : "",
+        existing && existing.clientId !== id2 && id2 ? " Changing the client disconnects the accounts that use it." : ""
+      ] })
+    ] }),
+    /* @__PURE__ */ u4(Footer, { children: [
+      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
+      /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-oauth-app", class: "primary", disabled: !canSave, children: busy ? "Saving\u2026" : "Save" })
+    ] })
+  ] });
+}
+function appReady(app) {
+  return Boolean(app.group ?? app.install);
 }
 function ConnectAccountDialog({
   apps,
@@ -30261,28 +30277,31 @@ function ConnectAccountDialog({
   if (!app) {
     return /* @__PURE__ */ u4(MobileDialog, { title: "Connect an account", onClose, maxWidth: "520px", className: "ga-cred-dialog", children: [
       /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "You'll sign in with the provider in a new window. The agent can then use the account through the gateway, without seeing its tokens." }) }),
-      /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: apps.map((a4) => /* @__PURE__ */ u4(
+      /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: apps.filter((a4) => a4.scopeSets.length > 0).map((a4) => /* @__PURE__ */ u4(
         MobileDialogItem,
         {
           label: a4.label,
-          sublabel: a4.configured ? `${a4.scopeSets.length} kinds of access available` : "Needs an OAuth app first",
-          chevron: a4.configured || canEdit,
-          onClick: a4.configured ? () => setApp(a4) : canEdit ? () => onSetUp(a4) : void 0
+          sublabel: appReady(a4) ? `${a4.scopeSets.length} kinds of access available` : "Needs an OAuth app first",
+          chevron: appReady(a4) || canEdit,
+          onClick: appReady(a4) ? () => setApp(a4) : canEdit ? () => onSetUp(a4) : void 0
         },
         a4.id
       )) }),
       mcpSignIns.length ? /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body ga-cred-dialog-subhead", children: /* @__PURE__ */ u4("h4", { children: "MCP servers" }) }),
-        /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: mcpSignIns.map((m6) => /* @__PURE__ */ u4(
-          MobileDialogItem,
-          {
-            label: m6.server,
-            sublabel: m6.status === "ok" ? `Signed in${m6.account ? ` as ${m6.account}` : ""} \u2014 sign in again` : m6.url,
-            chevron: true,
-            onClick: busy ? void 0 : () => void begin({ mcpServer: m6.server })
-          },
-          m6.server
-        )) })
+        /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: mcpSignIns.map((m6) => {
+          const app2 = m6.needsApp ? apps.find((a4) => a4.id === m6.needsApp) : void 0;
+          return /* @__PURE__ */ u4(
+            MobileDialogItem,
+            {
+              label: m6.server,
+              sublabel: app2 ? `Needs the ${app2.label} OAuth app first` : m6.status === "ok" ? `Signed in${m6.account ? ` as ${m6.account}` : ""} \u2014 sign in again` : m6.url,
+              chevron: !app2 || canEdit,
+              onClick: busy ? void 0 : app2 ? canEdit ? () => onSetUp(app2) : void 0 : () => void begin({ mcpServer: m6.server })
+            },
+            m6.server
+          );
+        }) })
       ] }) : null
     ] });
   }
@@ -30376,6 +30395,8 @@ function CredentialsTab({ gid }) {
     const item = focus.key ? load.data.keys.find((k4) => k4.key === focus.key) : void 0;
     if (focus.action === "set" && item && load.data.canEdit) setDialog({ kind: "replace", item });
     if (focus.action === "add" && load.data.canEdit) setDialog({ kind: "add-key", match: focus.match });
+    const app = focus.setupApp ? load.data.oauthApps.find((a4) => a4.id === focus.setupApp) : void 0;
+    if (app && load.data.canEdit) setDialog({ kind: "oauth-app", app });
   }, [load.state]);
   if (load.state === "loading") return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
   if (load.state === "down") return /* @__PURE__ */ u4(GatewayDown, { onRetry: () => void refresh() });
@@ -30457,6 +30478,8 @@ function CredentialsTab({ gid }) {
       {
         gid,
         app: dialog.app,
+        scope: dialog.scope,
+        canEditInstall: data.canEditInstall,
         redirectUri: data.oauthRedirectUri,
         onClose: close,
         onSaved: () => {
@@ -30468,16 +30491,17 @@ function CredentialsTab({ gid }) {
     dialog?.kind === "remove-app" ? /* @__PURE__ */ u4(
       ConfirmDialog,
       {
-        title: `Remove the ${dialog.app.label} OAuth app?`,
+        title: dialog.scope === "install" ? `Remove the install-wide ${dialog.app.label} app?` : `Remove this group's ${dialog.app.label} app?`,
         confirmLabel: "Remove",
         danger: true,
         onClose: close,
         onConfirm: async () => {
-          const ok = await mutate(credPath(gid, `/oauth-apps/${encodeURIComponent(dialog.app.id)}`), "DELETE", void 0, `Removed the ${dialog.app.label} OAuth app`);
+          const url = credPath(gid, `/oauth-apps/${encodeURIComponent(dialog.app.id)}?scope=${dialog.scope}`);
+          const ok = await mutate(url, "DELETE", void 0, `Removed the ${dialog.app.label} app`);
           if (ok) done();
           return ok;
         },
-        children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: appAccounts(data, dialog.app.id) > 0 ? `This group's ${dialog.app.label} accounts (${appAccounts(data, dialog.app.id)}) are disconnected too, and their tokens are revoked.` : `New ${dialog.app.label} accounts can't be connected in this group until an OAuth app is set up again.` })
+        children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: removeAppText(dialog.app, dialog.scope) })
       }
     ) : null,
     dialog?.kind === "delete-key" ? /* @__PURE__ */ u4(
@@ -30601,9 +30625,17 @@ function AccountsView({
           /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: "MCP server" }),
           /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs sign-in" })
         ] }),
-        /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: m6.url }) })
+        /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: m6.url }) }),
+        needsApp(data, m6) ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
+          "This server doesn't register clients itself, so signing in needs a ",
+          needsApp(data, m6).label,
+          " OAuth app."
+        ] }) }) : null
       ] }),
-      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => void onSignIn({ mcpServer: m6.server }), children: "Sign in" }) }) : null
+      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: needsApp(data, m6) ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "oauth-app", app: needsApp(data, m6) }), children: [
+        "Set up ",
+        needsApp(data, m6).label
+      ] }) : /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => void onSignIn({ mcpServer: m6.server }), children: "Sign in" }) }) : null
     ] }, m6.server)) }) : null,
     data.accounts.length === 0 && pendingMcp.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
       /* @__PURE__ */ u4("p", { children: "No accounts connected." }),
@@ -30614,6 +30646,7 @@ function AccountsView({
           /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: a4.account ?? a4.providerLabel }),
           /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: a4.kind === "mcp_oauth" ? `MCP \xB7 ${a4.mcpServer}` : a4.providerLabel }),
           a4.client === "registered" ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", title: "The gateway registered its own OAuth client with this server for this group only", children: "Own client" }) : null,
+          a4.client === "app" ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", title: "Signed in through an OAuth app set up under OAuth apps", children: "OAuth app" }) : null,
           a4.status === "needs_reconnect" ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs reconnecting" }) : null
         ] }),
         a4.scopes.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-chips", children: a4.scopes.map((s5) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip", children: s5.label }, s5.id)) }) : null,
@@ -30647,38 +30680,69 @@ function AccountsView({
     /* @__PURE__ */ u4(OAuthAppsSection, { data, onDialog })
   ] });
 }
-function appAccounts(data, provider) {
-  return data.accounts.filter((a4) => a4.kind === "oauth_app" && a4.provider === provider).length;
+function needsApp(data, m6) {
+  return m6.needsApp ? data.oauthApps.find((a4) => a4.id === m6.needsApp) : void 0;
+}
+function countAccounts(n3) {
+  return n3 === 1 ? "1 account" : `${n3} accounts`;
+}
+function removeAppText(app, scope) {
+  if (scope === "install") {
+    const all = app.install?.accountsAllGroups ?? app.install?.accounts ?? 0;
+    const others = app.group ? " This group keeps its own app." : "";
+    return all > 0 ? `Groups without their own ${app.label} app can no longer connect accounts. ${countAccounts(all)} across all groups (${app.install?.accounts ?? 0} here) are disconnected, and their tokens are revoked.${others}` : `Groups without their own ${app.label} app can no longer connect accounts.${others}`;
+  }
+  const n3 = app.group?.accounts ?? 0;
+  const fallback = app.install ? `This group goes back to the install-wide app.` : `New ${app.label} accounts can't be connected here until an app is set up again.`;
+  return n3 > 0 ? `${fallback} This group's ${countAccounts(n3)} connected through its own app are disconnected, and their tokens are revoked.` : fallback;
 }
 function OAuthAppsSection({ data, onDialog }) {
   const edit = data.canEdit;
+  const inst = data.canEditInstall;
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("h4", { class: "ga-cred-subhead", children: "OAuth apps" }),
-    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Providers like Google need an OAuth client that you create in their console before accounts can be connected. This group's client is used only by this group. MCP servers don't need one; the gateway registers its own client with each server for this group." }),
+    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Providers that don't register clients themselves, like Google and GitHub, need an OAuth client created in their console. An install-wide app is shared by every group; a group can use its own instead. Tokens always stay in each group." }),
     /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.oauthApps.map((app) => {
-      const accounts = appAccounts(data, app.id);
+      const client = app.group ?? app.install;
       return /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
         /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
           /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
             /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: app.label }),
-            app.configured ? null : /* @__PURE__ */ u4(StatusPill, { tone: "muted", children: "Not set up" })
+            app.group ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: "This group" }) : app.install ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: "All groups" }) : /* @__PURE__ */ u4(StatusPill, { tone: "muted", children: "Not set up" })
           ] }),
-          app.configured ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
+          client ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
             /* @__PURE__ */ u4("span", { children: [
               "Client ",
-              /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: app.clientId })
+              /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: client.clientId })
             ] }),
-            app.updatedAt ? /* @__PURE__ */ u4("span", { children: [
+            /* @__PURE__ */ u4("span", { children: [
               "Set ",
-              ago(app.updatedAt)
-            ] }) : null,
-            /* @__PURE__ */ u4("span", { children: accounts === 1 ? "1 account" : `${accounts} accounts` })
-          ] }) : null
+              ago(client.updatedAt)
+            ] }),
+            /* @__PURE__ */ u4("span", { children: [
+              countAccounts(client.accounts),
+              " here",
+              !app.group && app.install?.accountsAllGroups !== void 0 ? `, ${app.install.accountsAllGroups} in all groups` : ""
+            ] })
+          ] }) : null,
+          app.group && app.install ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { children: [
+            "Used instead of the install-wide app (",
+            /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: app.install.clientId }),
+            ")"
+          ] }) }) : null,
+          app.mcpServers?.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { children: [
+            "Also signs in to MCP: ",
+            app.mcpServers.join(", ")
+          ] }) }) : null
         ] }),
-        edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: [
-          /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app }), children: app.configured ? "Edit" : "Set up" }),
-          app.configured ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove the ${app.label} OAuth app`, title: "Remove", onClick: () => onDialog({ kind: "remove-app", app }), children: "\u2715" }) : null
-        ] }) : null
+        edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: app.group ? /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app, scope: "group" }), children: "Edit" }),
+          /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove this group's ${app.label} app`, title: "Remove this group's app", onClick: () => onDialog({ kind: "remove-app", app, scope: "group" }), children: "\u2715" })
+        ] }) : app.install ? /* @__PURE__ */ u4(k, { children: [
+          inst ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app, scope: "install" }), children: "Edit" }) : null,
+          /* @__PURE__ */ u4("button", { type: "button", title: "Use a different OAuth app in this group only", onClick: () => onDialog({ kind: "oauth-app", app, scope: "group" }), children: "Use own app" }),
+          inst ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove the install-wide ${app.label} app`, title: "Remove the install-wide app", onClick: () => onDialog({ kind: "remove-app", app, scope: "install" }), children: "\u2715" }) : null
+        ] }) : /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app }), children: "Set up" }) }) : null
       ] }, app.id);
     }) })
   ] });
@@ -30709,7 +30773,17 @@ function McpServerAuth({
     load.message
   ] });
   else if (!entry) body = /* @__PURE__ */ u4("span", { class: "muted", children: "Save the server to check whether it needs a key or sign-in." });
-  else if (entry.auth === "oauth") {
+  else if (entry.auth === "oauth" && entry.needsApp) {
+    const app = load.state === "ready" ? load.data.oauthApps.find((a4) => a4.id === entry.needsApp) : void 0;
+    body = /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
+        "This server doesn't register clients itself; signing in needs a ",
+        app?.label ?? entry.needsApp,
+        " OAuth app."
+      ] }),
+      /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => open({ view: "accounts", setupApp: entry.needsApp }), children: "Set it up in Credentials" })
+    ] });
+  } else if (entry.auth === "oauth") {
     body = entry.status === "ok" ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4("span", { children: [
         "Signed in",
