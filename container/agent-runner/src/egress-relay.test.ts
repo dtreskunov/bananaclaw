@@ -103,6 +103,32 @@ describe('startEgressRelay', () => {
     expect(closed).toBe(true);
   });
 
+  test('an open relayed connection does not keep a finished process alive', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+    cleanup.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const script = path.join(dir, 'child.ts');
+    fs.writeFileSync(
+      script,
+      `import net from 'node:net';
+import { startEgressRelay } from ${JSON.stringify(path.join(import.meta.dir, 'egress-relay.ts'))};
+const socketPath = ${JSON.stringify(path.join(dir, 'egress.sock'))};
+const gateway = net.createServer((s) => { s.unref(); s.on('data', (d) => s.write(d)); });
+await new Promise((r) => gateway.listen(socketPath, r));
+gateway.unref();
+const relay = await startEgressRelay(socketPath, 0);
+const port = relay.address().port;
+const client = net.connect({ port, host: '127.0.0.1' });
+client.on('data', () => { client.unref(); console.log('replied'); });
+client.write('keep-alive');
+`,
+    );
+    const child = Bun.spawn(['bun', 'run', script], { stdout: 'pipe', stderr: 'pipe' });
+    const exited = await Promise.race([child.exited.then(() => true), Bun.sleep(5000).then(() => false)]);
+    if (!exited) child.kill();
+    expect(await new Response(child.stdout).text()).toContain('replied');
+    expect(exited).toBe(true);
+  });
+
   test('fails to start when the port is taken', async () => {
     const socketPath = await unixServer((socket) => socket.end());
     const port = await relay(socketPath);

@@ -21,6 +21,10 @@ export async function startEgressRelay(
   if (!socketPath) return null;
   const server = net.createServer((client) => {
     const upstream = net.connect({ path: socketPath });
+    // Idle keep-alive connections must not keep a finished process alive
+    // (e.g. the MCP probe after it prints its result).
+    client.unref();
+    upstream.unref();
     const destroy = (): void => {
       client.destroy();
       upstream.destroy();
