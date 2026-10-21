@@ -754,8 +754,9 @@ time across settlement. Generated fixture assets are ignored and rebuilt from
 A second fixture renders the production Agent Settings dialog with the proposed
 **Credentials** tab (R1 scope in
 [credential-gateway-agent-vault-fork-proposal.md](credential-gateway-agent-vault-fork-proposal.md)):
-**Keys** (each with one destination), **Accounts** (OAuth and MCP sign-in) and
-**Network**, plus the sign-in row in the MCP server editor. The tab is hidden in
+**Keys** (each with one destination) and **Accounts** (MCP sign-ins, OAuth
+accounts and the group's own OAuth apps), plus the sign-in row in the MCP server
+editor. The tab is hidden in
 the app until `credentialsUiEnabled` is turned on. The fixture mocks every
 `/admin/credentials/*` route in the page:
 

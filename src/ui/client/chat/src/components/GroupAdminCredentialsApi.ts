@@ -9,7 +9,8 @@
 //   POST   /credentials/accounts/start         AccountStartInput → AccountStartDto
 //   GET    /credentials/accounts/start/:state  AccountProgressDto
 //   DELETE /credentials/accounts/:key
-//   PUT    /credentials/network                { unmatched, allowPrivate, allowHosts }
+//   PUT    /credentials/oauth-apps/:id         { clientId, clientSecret? }  (secret required the first time)
+//   DELETE /credentials/oauth-apps/:id
 //
 // When the gateway is down, every route answers 503 { error: 'gateway_unreachable' }.
 import { apiPath } from './GroupAdminApi';
@@ -59,6 +60,12 @@ export interface AccountDto {
   lastUsedAt: string | null;
   mcpServer?: string;
   resource?: string;
+  /**
+   * How the gateway identifies itself to an MCP server's authorization server:
+   * a client registered dynamically for this group (RFC 7591), or the install's
+   * published client metadata document.
+   */
+  client?: 'registered' | 'metadata';
 }
 
 export interface ScopeSetDto {
@@ -67,12 +74,16 @@ export interface ScopeSetDto {
   hosts: string[];
 }
 
+/** An OAuth client this group uses for a provider without dynamic registration (e.g. Google). */
 export interface OAuthAppDto {
   id: string;
   label: string;
   configured: boolean;
-  /** Shown when not configured. */
-  envHint?: string;
+  /** Public; the secret is write-only. */
+  clientId: string | null;
+  updatedAt: string | null;
+  /** Where to create the client in the provider's console. */
+  consoleUrl: string;
   scopeSets: ScopeSetDto[];
 }
 
@@ -94,21 +105,13 @@ export interface McpAuthDto {
   account?: string | null;
 }
 
-export interface NetworkDto {
-  unmatched: 'tunnel' | 'deny';
-  /** Hosts reachable without a key while unmatched requests are blocked. */
-  allowHosts: string[];
-  allowPrivate: string[];
-  /** Operator-wide allowlist from `.env`; read-only here. */
-  operatorAllowPrivate: string[];
-}
-
 export interface CredentialsOverviewDto {
   canEdit: boolean;
   keys: KeyDto[];
   accounts: AccountDto[];
-  network: NetworkDto;
   oauthApps: OAuthAppDto[];
+  /** The install's OAuth redirect URI, entered in a provider's console when creating an OAuth app. */
+  oauthRedirectUri: string;
   presets: KeyPresetDto[];
   mcp: McpAuthDto[];
 }
@@ -123,6 +126,8 @@ export interface AccountStartDto {
 
 export interface AccountProgressDto {
   status: 'pending' | 'connected' | 'failed';
+  /** `registration_unsupported`: the MCP server allows neither dynamic registration nor a client metadata document. */
+  code?: 'declined' | 'registration_unsupported';
   error?: string;
   account?: string | null;
 }

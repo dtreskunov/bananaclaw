@@ -10,7 +10,6 @@ import type {
   KeyDto,
   KeyPresetDto,
   McpAuthDto,
-  NetworkDto,
   OAuthAppDto,
 } from '../src/components/GroupAdminCredentialsApi';
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
@@ -43,7 +42,7 @@ interface PendingSignIn {
 interface State {
   keys: KeyDto[];
   accounts: AccountDto[];
-  network: NetworkDto;
+  oauthApps: OAuthAppDto[];
   mcpServers: Record<string, McpServerConfigDto>;
   mcpAuth: Record<string, { auth: McpAuthDto['auth']; key?: string; status?: McpAuthDto['status']; account?: string | null }>;
   signIns: Map<string, PendingSignIn>;
@@ -63,28 +62,40 @@ const GOOGLE_SCOPES: Record<string, { label: string; hosts: string[] }> = {
   docs: { label: 'Docs', hosts: ['docs.googleapis.com'] },
 };
 
-const OAUTH_APPS: OAuthAppDto[] = [
-  {
-    id: 'google',
-    label: 'Google',
-    configured: true,
-    scopeSets: Object.entries(GOOGLE_SCOPES).map(([id, s]) => ({ id, label: s.label, hosts: s.hosts })),
+const REDIRECT_URI = 'https://nanoclaw.example.com/oauth/callback';
+
+const SCOPE_SETS: Record<string, Record<string, { label: string; hosts: string[] }>> = {
+  google: GOOGLE_SCOPES,
+  github: {
+    repo: { label: 'Repositories', hosts: ['api.github.com/repos/*'] },
+    issues: { label: 'Issues and pull requests', hosts: ['api.github.com/repos/*/issues/*', 'api.github.com/repos/*/pulls/*'] },
   },
-  {
-    id: 'github',
-    label: 'GitHub',
-    configured: false,
-    envHint: 'AGENT_VAULT_OAUTH_APPS=github with AGENT_VAULT_OAUTH_GITHUB_CLIENT_ID and …_CLIENT_SECRET_FILE',
-    scopeSets: [],
+  microsoft: {
+    mail: { label: 'Outlook mail', hosts: ['graph.microsoft.com/v1.0/me/messages*'] },
+    calendar: { label: 'Outlook calendar', hosts: ['graph.microsoft.com/v1.0/me/events*'] },
+    files: { label: 'OneDrive: read', hosts: ['graph.microsoft.com/v1.0/me/drive/*'] },
   },
-  {
-    id: 'microsoft',
-    label: 'Microsoft 365',
-    configured: false,
-    envHint: 'AGENT_VAULT_OAUTH_APPS=microsoft with its client ID and secret file',
-    scopeSets: [],
-  },
-];
+};
+
+function app(id: string, label: string, consoleUrl: string, clientId: string | null, updatedAt: string | null = null): OAuthAppDto {
+  const sets = SCOPE_SETS[id] ?? {};
+  return {
+    id, label, consoleUrl, clientId, updatedAt, configured: clientId !== null,
+    scopeSets: Object.entries(sets).map(([sid, s]) => ({ id: sid, label: s.label, hosts: s.hosts })),
+  };
+}
+
+function oauthApps(googleClient: string | null): OAuthAppDto[] {
+  return [
+    app('google', 'Google', 'https://console.cloud.google.com/apis/credentials', googleClient, googleClient ? iso(45 * DAY) : null),
+    app('github', 'GitHub', 'https://github.com/settings/applications/new', null),
+    app('microsoft', 'Microsoft 365', 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps', null),
+  ];
+}
+
+function scopeLabel(provider: string, id: string): string {
+  return SCOPE_SETS[provider]?.[id]?.label ?? id;
+}
 
 const PRESETS: KeyPresetDto[] = [
   { id: 'openrouter', label: 'OpenRouter', key: 'OPENROUTER_API_KEY', destination: { match: 'openrouter.ai', injection: { type: 'bearer' } }, obtainUrl: 'https://openrouter.ai/settings/keys' },
@@ -126,10 +137,10 @@ function typicalState(): State {
       {
         key: 'MCP_LINEAR', kind: 'mcp_oauth', provider: 'mcp', providerLabel: 'Linear', account: 'alex@example.com',
         scopes: [], status: 'connected', connectedAt: iso(6 * DAY), lastUsedAt: iso(3 * HOUR),
-        mcpServer: 'linear', resource: 'https://mcp.linear.app/mcp',
+        mcpServer: 'linear', resource: 'https://mcp.linear.app/mcp', client: 'registered',
       },
     ],
-    network: { unmatched: 'tunnel', allowHosts: ['pypi.org', 'registry.npmjs.org'], allowPrivate: ['homeassistant.local:8123'], operatorAllowPrivate: ['10.0.1.105/32'] },
+    oauthApps: oauthApps('604218840137-q7k2n9f1c8d3.apps.googleusercontent.com'),
     mcpServers: {
       tavily: { type: 'http', url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=__TAVILY_API_KEY__' },
       nextcloud: { type: 'http', url: 'https://nextcloud.example.org/mcp/' },
@@ -156,7 +167,7 @@ function emptyState(): State {
     ...state,
     keys: [],
     accounts: [],
-    network: { unmatched: 'tunnel', allowHosts: [], allowPrivate: [], operatorAllowPrivate: [] },
+    oauthApps: oauthApps(null),
     mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } },
     mcpAuth: { notion: { auth: 'oauth', status: 'needs_sign_in' } },
   };
@@ -206,8 +217,8 @@ function overview(): CredentialsOverviewDto {
     canEdit: !options.viewOnly,
     keys: state.keys,
     accounts: state.accounts,
-    network: state.network,
-    oauthApps: OAUTH_APPS,
+    oauthApps: state.oauthApps,
+    oauthRedirectUri: REDIRECT_URI,
     presets: PRESETS,
     mcp,
   };
@@ -227,7 +238,7 @@ function redact(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined;
   try {
     return JSON.stringify(JSON.parse(raw), (k, v) => (
-      (k === 'value' || (k.length > 0 && /^[A-Z][A-Z0-9_]*$/.test(k))) && typeof v === 'string' && v ? '•••' : v
+      (k === 'value' || k === 'clientSecret' || (k.length > 0 && /^[A-Z][A-Z0-9_]*$/.test(k))) && typeof v === 'string' && v ? '•••' : v
     ));
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
@@ -334,8 +345,11 @@ function route(method: string, path: string, init?: RequestInit): unknown {
     const input = body<AccountStartInput>(init);
     const stateId = `st-${state.seq++}-${Math.random().toString(36).slice(2, 8)}`;
     state.signIns.set(stateId, { input, status: 'pending' });
-    const label = 'mcpServer' in input ? input.mcpServer : OAUTH_APPS.find((a) => a.id === input.provider)?.label ?? input.provider;
-    const scopes = 'mcpServer' in input ? '' : input.scopeSets.map((s) => GOOGLE_SCOPES[s]?.label ?? s).join('|');
+    if (!('mcpServer' in input) && !state.oauthApps.find((a) => a.id === input.provider)?.configured) {
+      throw new HttpError(409, 'Set up this provider’s OAuth app first');
+    }
+    const label = 'mcpServer' in input ? input.mcpServer : state.oauthApps.find((a) => a.id === input.provider)?.label ?? input.provider;
+    const scopes = 'mcpServer' in input ? '' : input.scopeSets.map((s) => scopeLabel(input.provider, s)).join('|');
     const query = new URLSearchParams({ consent: stateId, provider: label, scopes });
     return { state: stateId, label, authorizeUrl: `${location.pathname}?${query}` } satisfies AccountStartDto;
   }
@@ -352,10 +366,22 @@ function route(method: string, path: string, init?: RequestInit): unknown {
     return { ok: true };
   }
 
-  if (cred === '/network' && method === 'PUT') {
-    const b = body<{ unmatched: NetworkDto['unmatched']; allowHosts: string[]; allowPrivate: string[] }>(init);
-    state.network = { ...state.network, unmatched: b.unmatched, allowHosts: b.allowHosts, allowPrivate: b.allowPrivate };
-    return { ok: true };
+  if ((m = /^\/oauth-apps\/([a-z0-9-]+)$/.exec(cred))) {
+    const id = m[1]!;
+    const current = state.oauthApps.find((a) => a.id === id);
+    if (!current) throw new HttpError(404, 'Unknown provider');
+    if (method === 'PUT') {
+      const b = body<{ clientId: string; clientSecret?: string }>(init);
+      if (!b.clientId?.trim()) throw new HttpError(400, 'A client ID is required');
+      if (!current.configured && !b.clientSecret) throw new HttpError(400, 'A client secret is required');
+      state.oauthApps = state.oauthApps.map((a) => (a.id === id ? { ...a, configured: true, clientId: b.clientId.trim(), updatedAt: now } : a));
+      return { ok: true };
+    }
+    if (method === 'DELETE') {
+      state.oauthApps = state.oauthApps.map((a) => (a.id === id ? { ...a, configured: false, clientId: null, updatedAt: null } : a));
+      state.accounts = state.accounts.filter((a) => !(a.kind === 'oauth_app' && a.provider === id));
+      return { ok: true };
+    }
   }
   throw new HttpError(404, `Fixture has no route for ${method} ${sub}`);
 }
@@ -380,7 +406,7 @@ export function completeSignIn(stateId: string, allow: boolean): void {
     const entry: AccountDto = {
       key, kind: 'mcp_oauth', provider: 'mcp', providerLabel: input.mcpServer, account, scopes: [], status: 'connected',
       connectedAt: now, lastUsedAt: existing?.lastUsedAt ?? null, mcpServer: input.mcpServer,
-      resource: (state.mcpServers[input.mcpServer] as { url?: string } | undefined)?.url,
+      resource: (state.mcpServers[input.mcpServer] as { url?: string } | undefined)?.url, client: 'registered',
     };
     state.accounts = existing ? state.accounts.map((a) => (a.key === key ? entry : a)) : [...state.accounts, entry];
   } else {
@@ -388,11 +414,11 @@ export function completeSignIn(stateId: string, allow: boolean): void {
     account = replaced?.account ?? `user${state.seq}@example.com`;
     // Signing in to an account this group already has adds to its access, as provider re-consent does.
     const existing = replaced ?? state.accounts.find((a) => a.provider === input.provider && a.account === account);
-    const key = existing?.key ?? `GOOGLE_${account.split('@')[0]!.replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
+    const key = existing?.key ?? `${input.provider.toUpperCase()}_${account.split('@')[0]!.replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
     const scopeIds = replaced ? input.scopeSets : [...new Set([...(existing?.scopes.map((s) => s.id) ?? []), ...input.scopeSets])];
     const entry: AccountDto = {
-      key, kind: 'oauth_app', provider: input.provider, providerLabel: OAUTH_APPS.find((a) => a.id === input.provider)?.label ?? input.provider,
-      account, scopes: scopeIds.map((id) => ({ id, label: GOOGLE_SCOPES[id]?.label ?? id })),
+      key, kind: 'oauth_app', provider: input.provider, providerLabel: state.oauthApps.find((a) => a.id === input.provider)?.label ?? input.provider,
+      account, scopes: scopeIds.map((id) => ({ id, label: scopeLabel(input.provider, id) })),
       status: 'connected', connectedAt: now, lastUsedAt: existing?.lastUsedAt ?? null,
     };
     state.accounts = state.accounts.some((a) => a.key === key) ? state.accounts.map((a) => (a.key === key ? entry : a)) : [...state.accounts, entry];

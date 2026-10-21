@@ -369,20 +369,115 @@ export function EditKeyDialog({
   );
 }
 
+const CLIENT_ID_RE = /^\S+$/;
+
+export function OAuthAppDialog({
+  gid,
+  app,
+  redirectUri,
+  onClose,
+  onSaved,
+}: {
+  gid: string;
+  app: OAuthAppDto;
+  redirectUri: string;
+  onClose: () => void;
+  onSaved: () => void;
+}): JSX.Element {
+  const [clientId, setClientId] = useState(app.clientId ?? '');
+  const [secret, setSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEscapeClose(onClose, busy);
+  const id = clientId.trim();
+  const canSave = !busy && CLIENT_ID_RE.test(id) && (app.configured ? id !== app.clientId || secret !== '' : secret !== '');
+
+  async function save(event: Event): Promise<void> {
+    event.preventDefault();
+    if (!canSave) return;
+    setBusy(true);
+    const ok = await send(
+      credPath(gid, `/oauth-apps/${encodeURIComponent(app.id)}`),
+      'PUT',
+      secret ? { clientId: id, clientSecret: secret } : { clientId: id },
+      `Saved the ${app.label} OAuth app`,
+    );
+    setBusy(false);
+    if (ok) onSaved();
+  }
+
+  function copy(): void {
+    navigator.clipboard.writeText(redirectUri).then(
+      () => showToast('Copied the redirect URI'),
+      () => showToast('Couldn’t copy; select the URI and copy it', 'err'),
+    );
+  }
+
+  return (
+    <MobileDialog
+      title={app.configured ? `${app.label} OAuth app` : `Set up ${app.label}`}
+      onClose={onClose}
+      maxWidth="560px"
+      className="ga-cred-dialog"
+      closeDisabled={busy}
+    >
+      <form id="ga-cred-oauth-app" class="settings-body ga-cred-dialog-body" onSubmit={save}>
+        {app.configured ? null : (
+          <ol class="ga-cred-steps group-admin-help">
+            <li>
+              Create an OAuth client of type <em>Web application</em> in the{' '}
+              <a href={app.consoleUrl} target="_blank" rel="noopener noreferrer">{app.label} console</a>.
+            </li>
+            <li>Add the redirect URI below as an authorized redirect URI.</li>
+            <li>Paste the client ID and secret here.</li>
+          </ol>
+        )}
+        <Field label="Redirect URI">
+          <div class="ga-cred-copy">
+            <code>{redirectUri}</code>
+            <button type="button" onClick={copy}>Copy</button>
+          </div>
+        </Field>
+        <Field label="Client ID">
+          <input type="text" class="ga-cred-mono" value={clientId} spellcheck={false} autoFocus={!app.configured} onInput={(event) => setClientId(event.currentTarget.value)} />
+        </Field>
+        <Field label="Client secret">
+          <SecretInput value={secret} onInput={setSecret} placeholder={app.configured ? 'Leave empty to keep the current secret' : 'Paste the secret'} />
+        </Field>
+        <p class="group-admin-help ga-cred-field-help">
+          Only this group uses this client. The secret is stored in the gateway and can't be viewed again.
+          {app.configured && app.updatedAt ? ` Current client set ${ago(app.updatedAt)}.` : ''}
+        </p>
+      </form>
+      <Footer>
+        <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        <button type="submit" form="ga-cred-oauth-app" class="primary" disabled={!canSave}>{busy ? 'Saving…' : 'Save'}</button>
+      </Footer>
+    </MobileDialog>
+  );
+}
+
 export function ConnectAccountDialog({
   apps,
   mcp,
+  canEdit,
+  provider,
   reconnect,
+  onSetUp,
   onStart,
   onClose,
 }: {
   apps: OAuthAppDto[];
   mcp: McpAuthDto[];
+  canEdit: boolean;
+  /** Opens straight to this provider's access choices. */
+  provider?: string;
   reconnect?: { provider: string; key: string; scopes: string[] };
+  onSetUp: (app: OAuthAppDto) => void;
   onStart: (input: AccountStartInput) => Promise<boolean>;
   onClose: () => void;
 }): JSX.Element {
-  const [app, setApp] = useState<OAuthAppDto | null>(() => (reconnect ? apps.find((a) => a.id === reconnect.provider) ?? null : null));
+  const initial = reconnect?.provider ?? provider;
+  const [app, setApp] = useState<OAuthAppDto | null>(() => (initial ? apps.find((a) => a.id === initial) ?? null : null));
   const [scopes, setScopes] = useState<string[]>(() => reconnect?.scopes ?? []);
   const [busy, setBusy] = useState(false);
   useEscapeClose(onClose, busy);
@@ -406,11 +501,9 @@ export function ConnectAccountDialog({
             <MobileDialogItem
               key={a.id}
               label={a.label}
-              sublabel={a.configured ? `${a.scopeSets.length} kinds of access available` : 'Not set up by the operator'}
-              chevron={a.configured}
-              title={a.configured ? undefined : a.envHint}
-              className={a.configured ? undefined : 'ga-cred-item-disabled'}
-              onClick={a.configured ? () => setApp(a) : undefined}
+              sublabel={a.configured ? `${a.scopeSets.length} kinds of access available` : 'Needs an OAuth app first'}
+              chevron={a.configured || canEdit}
+              onClick={a.configured ? () => setApp(a) : canEdit ? () => onSetUp(a) : undefined}
             />
           ))}
         </MobileDialogList>
@@ -430,11 +523,6 @@ export function ConnectAccountDialog({
             </MobileDialogList>
           </>
         ) : null}
-        {apps.some((a) => !a.configured) ? (
-          <div class="settings-body ga-cred-dialog-body">
-            <p class="group-admin-help">Providers that aren't set up need an OAuth client in the gateway's <code>.env</code>; see the operator guide.</p>
-          </div>
-        ) : null}
       </MobileDialog>
     );
   }
@@ -443,7 +531,7 @@ export function ConnectAccountDialog({
     <MobileDialog
       title={reconnect ? `Reconnect ${app.label}` : `Connect ${app.label}`}
       onClose={onClose}
-      onBack={reconnect ? undefined : () => setApp(null)}
+      onBack={reconnect || provider ? undefined : () => setApp(null)}
       backLabel="Back to providers"
       maxWidth="520px"
       className="ga-cred-dialog"

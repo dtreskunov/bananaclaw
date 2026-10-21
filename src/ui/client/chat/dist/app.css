@@ -6401,15 +6401,18 @@ body.private-web-page,
 .ga-cred-foot button.primary:hover:not(:disabled) {
   filter: brightness(1.08);
 }
-.ga-cred button.danger,
-.ga-cred-foot button.danger {
+.ga-cred-icon.danger {
   color: var(--danger);
   border-color: var(--danger);
 }
-.ga-cred button.danger:hover:not(:disabled),
-.ga-cred-foot button.danger:hover:not(:disabled) {
+.ga-cred-icon.danger:hover:not(:disabled) {
   background: var(--danger);
   color: var(--danger-on-fill);
+}
+.ga-cred .ga-confirm-foot button.danger {
+  background: var(--danger-fill);
+  color: var(--danger-on-fill);
+  border-color: var(--danger-fill);
 }
 .ga-cred button:disabled,
 .ga-cred-foot button:disabled {
@@ -6601,58 +6604,8 @@ body.private-web-page,
   background: var(--chip-bg, var(--wash));
   font-size: var(--font-sm);
 }
-.ga-cred-chip.locked {
-  color: var(--muted);
-}
-.ga-cred-chip button {
-  padding: 0 2px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-size: var(--font-xs);
-}
-.ga-cred-chips-edit {
-  min-height: 26px;
-  align-items: center;
-}
-.ga-cred-choice {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.ga-cred-choice legend {
-  margin-bottom: 6px;
-  font-weight: 600;
-}
-.ga-cred-choice .group-admin-check {
-  align-items: flex-start;
-}
-.ga-cred-choice .group-admin-check input {
-  margin-top: 3px;
-}
-.ga-cred-choice-note {
-  display: block;
-  color: var(--muted);
-  font-size: var(--font-sm);
-}
-.ga-cred-inline-add {
-  display: flex;
-  gap: 6px;
-  max-width: 420px;
-}
-.ga-cred-inline-add input {
-  flex: 1;
-  min-width: 0;
-}
-.ga-cred-save-row {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
+.ga-cred-subhead {
+  margin: 18px 0 2px;
 }
 .ga-cred-callout {
   padding: 12px 14px;
@@ -6703,7 +6656,6 @@ body.private-web-page,
   gap: 6px;
 }
 .ga-cred-secret input,
-.ga-cred-inline-add input,
 .ga-cred select,
 .ga-cred-dialog select,
 .ga-cred-dialog input[type=text] {
@@ -6763,9 +6715,25 @@ body.private-web-page,
   color: var(--muted);
   font-size: var(--font-sm);
 }
-.ga-cred-item-disabled {
-  opacity: 0.55;
-  cursor: default;
+.ga-cred-steps {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ga-cred-copy {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ga-cred-copy code {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  background: var(--wash);
+  overflow-wrap: anywhere;
 }
 .ga-cred-mcp-auth {
   display: flex;

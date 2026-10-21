@@ -1,4 +1,4 @@
-// Group settings → Credentials (R1): keys, accounts and network policy for this
+// Group settings → Credentials (R1): keys, accounts and OAuth apps in this
 // group's vault in the credential gateway. Values are write-only throughout.
 import './GroupAdminCredentials.css';
 import { signal } from '@preact/signals';
@@ -13,6 +13,7 @@ import {
   type CredentialsOverviewDto,
   type KeyDto,
   type McpAuthDto,
+  type OAuthAppDto,
 } from './GroupAdminCredentialsApi';
 import { SignInBanner, ago, describeInjection, useSignIn } from './GroupAdminCredentialsParts';
 import {
@@ -20,11 +21,12 @@ import {
   ConfirmDialog,
   ConnectAccountDialog,
   EditKeyDialog,
+  OAuthAppDialog,
   ReplaceKeyDialog,
 } from './GroupAdminCredentialsDialogs';
 import { showToast } from './Toast';
 
-type View = 'keys' | 'accounts' | 'network';
+type View = 'keys' | 'accounts';
 
 /** Where the Credentials tab should open next, e.g. when linked from the MCP editor. */
 export const credentialsFocus = signal<{ view: View; key?: string; action?: 'set' | 'add'; match?: string } | null>(null);
@@ -34,8 +36,10 @@ type Dialog =
   | { kind: 'replace'; item: KeyDto }
   | { kind: 'edit'; item: KeyDto }
   | { kind: 'delete-key'; item: KeyDto }
-  | { kind: 'connect'; reconnect?: { provider: string; key: string; scopes: string[] } }
-  | { kind: 'disconnect'; account: AccountDto };
+  | { kind: 'connect'; provider?: string; reconnect?: { provider: string; key: string; scopes: string[] } }
+  | { kind: 'disconnect'; account: AccountDto }
+  | { kind: 'oauth-app'; app: OAuthAppDto; thenConnect?: boolean }
+  | { kind: 'remove-app'; app: OAuthAppDto };
 
 type Load =
   | { state: 'loading' }
@@ -111,7 +115,6 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
       count: data.accounts.length + pendingMcp,
       alert: data.accounts.some((a) => a.status === 'needs_reconnect') || pendingMcp > 0,
     },
-    { id: 'network', label: 'Network' },
   ];
 
   return (
@@ -141,7 +144,6 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
 
       {view === 'keys' ? <KeysView data={data} onDialog={setDialog} /> : null}
       {view === 'accounts' ? <AccountsView data={data} onDialog={setDialog} onSignIn={signIn.start} /> : null}
-      {view === 'network' ? <NetworkView gid={gid} data={data} onDone={done} /> : null}
 
       {dialog?.kind === 'add-key' ? (
         <AddKeyDialog
@@ -160,7 +162,47 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
       {dialog?.kind === 'replace' ? <ReplaceKeyDialog gid={gid} item={dialog.item} onClose={close} onSaved={done} /> : null}
       {dialog?.kind === 'edit' ? <EditKeyDialog gid={gid} item={dialog.item} onClose={close} onSaved={done} /> : null}
       {dialog?.kind === 'connect' ? (
-        <ConnectAccountDialog apps={data.oauthApps} mcp={data.mcp} reconnect={dialog.reconnect} onStart={signIn.start} onClose={close} />
+        <ConnectAccountDialog
+          apps={data.oauthApps}
+          mcp={data.mcp}
+          canEdit={data.canEdit}
+          provider={dialog.provider}
+          reconnect={dialog.reconnect}
+          onSetUp={(app) => setDialog({ kind: 'oauth-app', app, thenConnect: true })}
+          onStart={signIn.start}
+          onClose={close}
+        />
+      ) : null}
+      {dialog?.kind === 'oauth-app' ? (
+        <OAuthAppDialog
+          gid={gid}
+          app={dialog.app}
+          redirectUri={data.oauthRedirectUri}
+          onClose={close}
+          onSaved={() => {
+            done();
+            setDialog(dialog.thenConnect ? { kind: 'connect', provider: dialog.app.id } : null);
+          }}
+        />
+      ) : null}
+      {dialog?.kind === 'remove-app' ? (
+        <ConfirmDialog
+          title={`Remove the ${dialog.app.label} OAuth app?`}
+          confirmLabel="Remove"
+          danger
+          onClose={close}
+          onConfirm={async () => {
+            const ok = await mutate(credPath(gid, `/oauth-apps/${encodeURIComponent(dialog.app.id)}`), 'DELETE', undefined, `Removed the ${dialog.app.label} OAuth app`);
+            if (ok) done();
+            return ok;
+          }}
+        >
+          <p class="group-admin-help">
+            {appAccounts(data, dialog.app.id) > 0
+              ? `This group's ${dialog.app.label} accounts (${appAccounts(data, dialog.app.id)}) are disconnected too, and their tokens are revoked.`
+              : `New ${dialog.app.label} accounts can't be connected in this group until an OAuth app is set up again.`}
+          </p>
+        </ConfirmDialog>
       ) : null}
       {dialog?.kind === 'delete-key' ? (
         <ConfirmDialog
@@ -334,6 +376,7 @@ function AccountsView({
                 <div class="ga-cred-item-title">
                   <span class="ga-cred-name">{a.account ?? a.providerLabel}</span>
                   <span class="ga-cred-tag">{a.kind === 'mcp_oauth' ? `MCP · ${a.mcpServer}` : a.providerLabel}</span>
+                  {a.client === 'registered' ? <span class="ga-cred-tag" title="The gateway registered its own OAuth client with this server for this group only">Own client</span> : null}
                   {a.status === 'needs_reconnect' ? <StatusPill tone="warn">Needs reconnecting</StatusPill> : null}
                 </div>
                 {a.scopes.length ? (
@@ -364,131 +407,56 @@ function AccountsView({
           ))}
         </ul>
       )}
+      <OAuthAppsSection data={data} onDialog={onDialog} />
     </div>
   );
 }
 
-function HostList({
-  label,
-  help,
-  values,
-  locked,
-  edit,
-  placeholder,
-  valid,
-  onChange,
-}: {
-  label: string;
-  help: JSX.Element;
-  values: string[];
-  locked?: string[];
-  edit: boolean;
-  placeholder: string;
-  valid: (value: string) => boolean;
-  onChange: (next: string[]) => void;
-}): JSX.Element {
-  const [entry, setEntry] = useState('');
-  const trimmed = entry.trim();
-  const ok = trimmed !== '' && valid(trimmed) && !values.includes(trimmed);
+function appAccounts(data: CredentialsOverviewDto, provider: string): number {
+  return data.accounts.filter((a) => a.kind === 'oauth_app' && a.provider === provider).length;
+}
+
+function OAuthAppsSection({ data, onDialog }: { data: CredentialsOverviewDto; onDialog: (d: Dialog) => void }): JSX.Element {
+  const edit = data.canEdit;
   return (
     <>
-      <h4>{label}</h4>
-      <p class="group-admin-help">{help}</p>
-      <div class="ga-cred-chips ga-cred-chips-edit">
-        {values.map((a) => (
-          <span key={a} class="ga-cred-chip ga-cred-mono">
-            {a}
-            {edit ? <button type="button" aria-label={`Remove ${a}`} onClick={() => onChange(values.filter((x) => x !== a))}>{'\u2715'}</button> : null}
-          </span>
-        ))}
-        {(locked ?? []).map((a) => (
-          <span key={`op-${a}`} class="ga-cred-chip ga-cred-mono locked" title="Allowed for every group in the gateway's .env">{a} · all groups</span>
-        ))}
-        {values.length === 0 && !(locked ?? []).length ? <span class="muted">None</span> : null}
-      </div>
-      {edit ? (
-        <form class="ga-cred-inline-add" onSubmit={(event) => {
-          event.preventDefault();
-          if (!ok) return;
-          onChange([...values, trimmed]);
-          setEntry('');
-        }}>
-          <input type="text" class="ga-cred-mono" value={entry} spellcheck={false} placeholder={placeholder} onInput={(event) => setEntry(event.currentTarget.value)} />
-          <button type="submit" disabled={!ok}>Add</button>
-        </form>
-      ) : null}
+      <h4 class="ga-cred-subhead">OAuth apps</h4>
+      <p class="group-admin-help">
+        Providers like Google need an OAuth client that you create in their console before accounts can be connected.
+        This group's client is used only by this group. MCP servers don't need one; the gateway registers its own client
+        with each server for this group.
+      </p>
+      <ul class="ga-cred-list">
+        {data.oauthApps.map((app) => {
+          const accounts = appAccounts(data, app.id);
+          return (
+            <li key={app.id} class="ga-cred-item">
+              <div class="ga-cred-item-main">
+                <div class="ga-cred-item-title">
+                  <span class="ga-cred-name">{app.label}</span>
+                  {app.configured ? null : <StatusPill tone="muted">Not set up</StatusPill>}
+                </div>
+                {app.configured ? (
+                  <div class="ga-cred-meta">
+                    <span>Client <span class="ga-cred-mono">{app.clientId}</span></span>
+                    {app.updatedAt ? <span>Set {ago(app.updatedAt)}</span> : null}
+                    <span>{accounts === 1 ? '1 account' : `${accounts} accounts`}</span>
+                  </div>
+                ) : null}
+              </div>
+              {edit ? (
+                <div class="ga-cred-item-actions">
+                  <button type="button" onClick={() => onDialog({ kind: 'oauth-app', app })}>{app.configured ? 'Edit' : 'Set up'}</button>
+                  {app.configured ? (
+                    <button type="button" class="ga-cred-icon danger" aria-label={`Remove the ${app.label} OAuth app`} title="Remove" onClick={() => onDialog({ kind: 'remove-app', app })}>{'\u2715'}</button>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
     </>
-  );
-}
-
-const HOST_RE = /^(\*\.)?[A-Za-z0-9.-]+(:\d+)?(\/\S*)?$/;
-const ADDRESS_RE = /^[A-Za-z0-9.:\-[\]]+(\/\d{1,3})?(:\d+)?$/;
-
-function NetworkView({ gid, data, onDone }: { gid: string; data: CredentialsOverviewDto; onDone: () => void }): JSX.Element {
-  const edit = data.canEdit;
-  const [unmatched, setUnmatched] = useState(data.network.unmatched);
-  const [allowHosts, setAllowHosts] = useState(data.network.allowHosts);
-  const [allowPrivate, setAllowPrivate] = useState(data.network.allowPrivate);
-  const [busy, setBusy] = useState(false);
-  const reset = (): void => {
-    setUnmatched(data.network.unmatched);
-    setAllowHosts(data.network.allowHosts);
-    setAllowPrivate(data.network.allowPrivate);
-  };
-  useEffect(reset, [JSON.stringify(data.network)]);
-  const dirty = unmatched !== data.network.unmatched
-    || JSON.stringify(allowHosts) !== JSON.stringify(data.network.allowHosts)
-    || JSON.stringify(allowPrivate) !== JSON.stringify(data.network.allowPrivate);
-
-  return (
-    <div class="ga-cred-view">
-      <SectionHead help="What the agent can reach besides the hosts its keys and accounts are sent to." />
-      <fieldset class="ga-cred-choice" disabled={!edit}>
-        <legend>Requests to other hosts</legend>
-        <label class="group-admin-check">
-          <input type="radio" name="ga-cred-unmatched" checked={unmatched === 'tunnel'} onChange={() => setUnmatched('tunnel')} />
-          <span>Allow, without a key <span class="ga-cred-choice-note">Recommended. Public sites and downloads work; the gateway doesn't inspect them.</span></span>
-        </label>
-        <label class="group-admin-check">
-          <input type="radio" name="ga-cred-unmatched" checked={unmatched === 'deny'} onChange={() => setUnmatched('deny')} />
-          <span>Block <span class="ga-cred-choice-note">Only hosts with a key or account, and the hosts listed below, are reachable.</span></span>
-        </label>
-      </fieldset>
-      {unmatched === 'deny' ? (
-        <HostList
-          label="Also allow, without a key"
-          help={<>Hosts the agent may reach while other requests are blocked, e.g. <code>pypi.org</code> or <code>*.npmjs.org</code>.</>}
-          values={allowHosts}
-          edit={edit}
-          placeholder="Host or host/path"
-          valid={(v) => HOST_RE.test(v)}
-          onChange={setAllowHosts}
-        />
-      ) : null}
-      <HostList
-        label="Private network addresses"
-        help={<>Addresses on your local network are blocked unless listed here, e.g. <code>192.168.1.20</code> or <code>homeassistant.local:8123</code>.</>}
-        values={allowPrivate}
-        locked={data.network.operatorAllowPrivate}
-        edit={edit}
-        placeholder="Address, network or host:port"
-        valid={(v) => ADDRESS_RE.test(v)}
-        onChange={setAllowPrivate}
-      />
-      <p class="group-admin-help ga-cred-field-help">Cloud metadata addresses are always blocked.</p>
-      {edit ? (
-        <div class="ga-cred-save-row">
-          <button type="button" disabled={!dirty || busy} onClick={reset}>Discard</button>
-          <button type="button" class="primary" disabled={!dirty || busy} onClick={async () => {
-            setBusy(true);
-            if (await mutate(credPath(gid, '/network'), 'PUT', { unmatched, allowHosts, allowPrivate }, 'Network settings saved')) onDone();
-            setBusy(false);
-          }}>
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      ) : null}
-    </div>
   );
 }
 
