@@ -202,5 +202,49 @@ new relay:
 - `container/agent-runner/src/egress-relay.ts` is the in-container relay.
 - **Tests:** 7 for the host module against a fake gateway, 5 for the relay,
   and the existing `container-runner` tests pass.
-- **Not done yet:** the gateway service unit and the canary deployment, which
-  touch the live install.
+
+### Canary on the live install (2026-10-21)
+
+**Setup:**
+
+- **Gateway service:** `agent-vault.service` (user unit) runs the fork binary
+  from `~/.local/bin`, with working directory `~/nanoclaw-v2` and
+  `--env-file .env`. NanoClaw's unit gets a `Wants=`/`After=` drop-in for it.
+- **Master password:** encrypted with `systemd-creds --user`. This systemd
+  (257) can't load user-scoped credentials into a user unit (`Permission
+denied`), so the unit decrypts it with `systemd-creds --user decrypt` and
+  pipes it to `--password-stdin`.
+- **Canary vault:** "My Agent" has five services (MiniMax custom headers,
+  Tavily query substitution, NextCloud custom Basic, bananabrowse bearer, Linear
+  bearer) and four MCP servers. Keys were entered with a hidden-prompt script.
+
+**Two bugs only the live install exposed, both fixed:**
+
+1. **Socket path length.** Session directories named after containers made
+   socket paths exceed 108 bytes. They're now named with a 16-hex hash of the
+   container name.
+2. **Probes never exited.** The relay's keep-alive sockets kept the MCP probe
+   alive after it printed its result, so every probe timed out. Relayed
+   sockets are now unref'd.
+
+**Private address:** `nextcloud-mcp.adsoconsulting.org` resolves to
+`10.0.1.103` from this host, which the network guard blocks.
+`AGENT_VAULT_NETWORK_ALLOWLIST=10.0.1.103/32` allows it, for every vault until
+F5 adds a per-vault allowlist. OneCLI doesn't block private addresses.
+
+**Results:**
+
+| Check                             | Result                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| Model (MiniMax M3, Anthropic API) | 200 through the gateway                                                                |
+| Tavily MCP (query substitution)   | OK, 5 tools                                                                            |
+| NextCloud MCP (custom Basic, LAN) | OK, 136 tools                                                                          |
+| bananabrowse MCP                  | 401: the gateway injected `DOMAGENT_TOKEN`, upstream rejected it; works through OneCLI |
+| Linear MCP                        | 401: the gateway injected `LINEAR_API_KEY`, upstream rejected it; works through OneCLI |
+
+The request log shows both 401s matched their service and had the key
+injected, with the same `Bearer {value}` format OneCLI uses. So the stored
+values differ from OneCLI's; re-entering them is the next step.
+
+**Still to check:** a real conversation with "My Agent", and behavior across a
+gateway restart (sockets aren't rebound until P1).
