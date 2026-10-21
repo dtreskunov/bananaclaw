@@ -9,6 +9,7 @@ dist/
 !src/ui/client/chat/dist/
 # Reproducible browser fixture, built separately from production assets.
 src/ui/client/chat/dist/turn-status-fixture*
+src/ui/client/chat/dist/credentials-fixture*
 
 # Local data & auth
 store/

@@ -762,7 +762,10 @@ pnpm --dir src/ui/client/chat run fixture:credentials
 ```
 
 This typechecks, builds into `data/dev-fixtures/credentials/`, and serves it at
-`http://127.0.0.1:4175/`, rebuilding on change. `PORT` overrides the port, and
+`http://127.0.0.1:4175/`, rebuilding on change. To view it through the running UI instead,
+`pnpm --dir src/ui/client/chat run build:credentials-fixture` writes
+content-hashed files to `dist/` and prints the
+`/ui/chat/dist/credentials-fixture-<hash>.html` path to open. `PORT` overrides the port, and
 `?tab=mcp` opens the MCP servers tab. Sign-ins open a simulated provider window
 with Allow and Deny. The fixture panel can:
 

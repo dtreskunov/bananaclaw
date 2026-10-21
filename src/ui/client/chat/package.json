@@ -9,6 +9,7 @@
     "build:no-typecheck": "esbuild src/appearance-bootstrap.ts --bundle --format=iife --target=es2022 --outfile=dist/appearance.js && esbuild src/index.tsx --bundle --format=esm --target=es2022 --sourcemap --loader:.ttf=file --asset-names=fonts/[name]-[hash] --outfile=dist/app.js && esbuild src/private-web-entry.tsx --bundle --format=esm --target=es2022 --sourcemap --loader:.ttf=file --asset-names=fonts/[name]-[hash] --outfile=dist/private-web.js",
     "build:turn-status-fixture": "tsc --noEmit && node fixtures/build-turn-status.mjs",
     "fixture:credentials": "tsc --noEmit && node fixtures/build-credentials.mjs --serve",
+    "build:credentials-fixture": "tsc --noEmit && node fixtures/build-credentials.mjs --publish",
     "watch": "esbuild appearance=src/appearance-bootstrap.ts app=src/index.tsx --bundle --format=iife --target=es2022 --sourcemap --outdir=dist --watch",
     "typecheck": "tsc --noEmit"
   },
