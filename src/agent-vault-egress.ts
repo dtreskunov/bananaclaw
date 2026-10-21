@@ -10,6 +10,7 @@
  *
  * Contract: docs/credential-gateway-spike.md.
  */
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -21,6 +22,8 @@ const PROJECT_ROOT = path.dirname(DATA_DIR);
 const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:14321';
 const SYSTEM_CA_BUNDLE = '/etc/ssl/certs/ca-certificates.crt';
 const REQUEST_TIMEOUT_MS = 10_000;
+// sun_path is 108 bytes including the terminating NUL.
+const MAX_SOCKET_PATH = 107;
 
 export const EGRESS_RELAY_PORT = 3128;
 export const CONTAINER_EGRESS_DIR = '/run/nanoclaw/egress';
@@ -144,9 +147,18 @@ async function ensureCaBundle(s: GatewaySettings): Promise<void> {
 
 const CONTAINER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 
+/**
+ * Session directory name for a container. Container names are too long for
+ * Unix socket paths, so use a short hash; it's derived, not stored, so
+ * cleanup still works after a host restart.
+ */
+export function egressDirName(containerName: string): string {
+  return createHash('sha256').update(containerName).digest('hex').slice(0, 16);
+}
+
 function sessionDir(s: GatewaySettings, containerName: string): string {
   if (!CONTAINER_NAME_RE.test(containerName)) throw new Error(`Invalid container name: ${containerName}`);
-  return path.join(s.socketRoot, containerName);
+  return path.join(s.socketRoot, egressDirName(containerName));
 }
 
 /**
@@ -162,6 +174,11 @@ export async function applyAgentVaultEgress(
   await ensureCaBundle(s);
   const dir = sessionDir(s, opts.containerName);
   fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+  const socketPath = path.join(fs.realpathSync(dir), 'egress.sock');
+  if (Buffer.byteLength(socketPath) > MAX_SOCKET_PATH) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw new Error(`Agent Vault socket path is too long (${socketPath}); shorten AGENT_VAULT_SOCKET_ROOT`);
+  }
   try {
     const res = await gateway(s, 'POST', '/v1/socket-sessions', {
       vault: opts.agentGroupId,
@@ -193,7 +210,7 @@ async function listSessions(s: GatewaySettings): Promise<SocketSessionItem[]> {
   return body.items ?? [];
 }
 
-/** Container name owning a gateway socket path, or null if it isn't ours. */
+/** Session directory name owning a gateway socket path, or null if it isn't ours. */
 function ownerOf(s: GatewaySettings, socketPath: string): string | null {
   const dir = path.dirname(socketPath);
   // Before the root exists nothing of ours can be bound, so the raw path is fine.
@@ -201,7 +218,7 @@ function ownerOf(s: GatewaySettings, socketPath: string): string | null {
   return path.dirname(dir) === root && path.basename(socketPath) === 'egress.sock' ? path.basename(dir) : null;
 }
 
-async function deleteSessions(s: GatewaySettings, keep: (containerName: string) => boolean): Promise<string[]> {
+async function deleteSessions(s: GatewaySettings, keep: (dirName: string) => boolean): Promise<string[]> {
   const removed: string[] = [];
   for (const item of await listSessions(s)) {
     const owner = ownerOf(s, item.socket_path);
@@ -220,7 +237,8 @@ export async function releaseAgentVaultEgress(containerName: string): Promise<vo
   const dir = sessionDir(s, containerName);
   if (!fs.existsSync(dir)) return;
   try {
-    await deleteSessions(s, (owner) => owner !== containerName);
+    const own = egressDirName(containerName);
+    await deleteSessions(s, (owner) => owner !== own);
   } catch (err) {
     if (!(err instanceof AgentVaultError)) throw err;
     log.warn('Agent Vault socket session release failed', { containerName, err: (err as Error).message });
@@ -235,8 +253,9 @@ export async function releaseAgentVaultEgress(containerName: string): Promise<vo
 export async function reconcileAgentVaultEgress(liveContainerNames: Set<string>): Promise<void> {
   const s = settings();
   if (agentVaultGroups().size === 0 && !fs.existsSync(s.socketRoot)) return;
+  const live = new Set([...liveContainerNames].map(egressDirName));
   try {
-    const removed = await deleteSessions(s, (owner) => liveContainerNames.has(owner));
+    const removed = await deleteSessions(s, (owner) => live.has(owner));
     if (removed.length) log.info('Agent Vault stale socket sessions revoked', { count: removed.length });
   } catch (err) {
     if (!(err instanceof AgentVaultError)) throw err;
@@ -244,7 +263,7 @@ export async function reconcileAgentVaultEgress(liveContainerNames: Set<string>)
   }
   if (!fs.existsSync(s.socketRoot)) return;
   for (const entry of fs.readdirSync(s.socketRoot, { withFileTypes: true })) {
-    if (entry.isDirectory() && !liveContainerNames.has(entry.name)) {
+    if (entry.isDirectory() && !live.has(entry.name)) {
       fs.rmSync(path.join(s.socketRoot, entry.name), { recursive: true, force: true });
     }
   }

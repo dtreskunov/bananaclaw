@@ -92,7 +92,8 @@ Listener behavior:
 
 - **Switch:** `NANOCLAW_AGENT_VAULT_GROUPS=<group ids>` (spike only) moves those
   groups to the gateway. Every other group keeps OneCLI.
-- **Spawn:** create `data/agent-vault/sessions/<session>/` and call
+- **Spawn:** create `data/agent-vault/sessions/<16-hex hash of the container name>/`
+  (container names make Unix socket paths exceed 108 bytes) and call
   `POST /v1/socket-sessions`.
   - **Mounts:** the directory at `/run/nanoclaw/egress`, and a combined CA
     bundle (system CAs plus the gateway root) read-only.

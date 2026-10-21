@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   agentVaultEnvKeys,
   applyAgentVaultEgress,
+  egressDirName,
   reconcileAgentVaultEgress,
   releaseAgentVaultEgress,
   usesAgentVault,
@@ -112,9 +113,13 @@ describe('agent vault egress', () => {
 
   it('opens a socket session and mounts the socket directory and CA bundle', async () => {
     const args: string[] = [];
-    await applyAgentVaultEgress(args, { containerName: 'nanoclaw-v2-one-1', agentGroupId: 'ag-one', label: 'agent:sess-1' });
+    await applyAgentVaultEgress(args, {
+      containerName: 'nanoclaw-v2-one-1',
+      agentGroupId: 'ag-one',
+      label: 'agent:sess-1',
+    });
 
-    const dir = path.join(tmp, 'sessions', 'nanoclaw-v2-one-1');
+    const dir = path.join(tmp, 'sessions', egressDirName('nanoclaw-v2-one-1'));
     const post = requests.find((r) => r.method === 'POST')!;
     expect(post.auth).toBe('Bearer host-token-value');
     expect(post.body).toEqual({ vault: 'ag-one', label: 'agent:sess-1', dir });
@@ -139,7 +144,7 @@ describe('agent vault egress', () => {
     await expect(
       applyAgentVaultEgress([], { containerName: 'nanoclaw-v2-one-2', agentGroupId: 'ag-missing', label: 'x' }),
     ).rejects.toThrow(/HTTP 404/);
-    expect(fs.existsSync(path.join(tmp, 'sessions', 'nanoclaw-v2-one-2'))).toBe(false);
+    expect(fs.readdirSync(path.join(tmp, 'sessions'))).toEqual([]);
   });
 
   it('refuses to spawn when the gateway is unreachable', async () => {
@@ -154,8 +159,21 @@ describe('agent vault egress', () => {
     await applyAgentVaultEgress([], { containerName: 'c-b', agentGroupId: 'ag-two', label: 'b' });
     await releaseAgentVaultEgress('c-a');
     expect(sessions.map((s) => s.label)).toEqual(['b']);
-    expect(fs.existsSync(path.join(tmp, 'sessions', 'c-a'))).toBe(false);
-    expect(fs.existsSync(path.join(tmp, 'sessions', 'c-b'))).toBe(true);
+    expect(fs.readdirSync(path.join(tmp, 'sessions'))).toEqual([egressDirName('c-b')]);
+  });
+
+  it('keeps socket paths short for long container names, and refuses ones that would not fit', async () => {
+    const long = `nanoclaw-mcp-probe-${'g'.repeat(48)}-1792565655463`;
+    const args: string[] = [];
+    await applyAgentVaultEgress(args, { containerName: long, agentGroupId: 'ag-one', label: 'probe' });
+    const post = requests.find((r) => r.method === 'POST')!;
+    expect(Buffer.byteLength(path.join((post.body as { dir: string }).dir, 'egress.sock'))).toBeLessThan(108);
+
+    process.env.AGENT_VAULT_SOCKET_ROOT = path.join(tmp, 'x'.repeat(90));
+    await expect(
+      applyAgentVaultEgress([], { containerName: 'c-too-long', agentGroupId: 'ag-one', label: 'x' }),
+    ).rejects.toThrow(/too long/);
+    expect(fs.readdirSync(process.env.AGENT_VAULT_SOCKET_ROOT)).toEqual([]);
   });
 
   it('release is a no-op for OneCLI containers and survives a gateway outage', async () => {
@@ -164,18 +182,23 @@ describe('agent vault egress', () => {
     await applyAgentVaultEgress([], { containerName: 'c-down', agentGroupId: 'ag-one', label: 'd' });
     process.env.NANOCLAW_AGENT_VAULT_URL = 'http://127.0.0.1:1';
     await expect(releaseAgentVaultEgress('c-down')).resolves.toBeUndefined();
-    expect(fs.existsSync(path.join(tmp, 'sessions', 'c-down'))).toBe(false);
+    expect(fs.readdirSync(path.join(tmp, 'sessions'))).toEqual([]);
   });
 
   it('reconciles sessions and directories for containers that are gone', async () => {
     await applyAgentVaultEgress([], { containerName: 'c-live', agentGroupId: 'ag-one', label: 'live' });
     await applyAgentVaultEgress([], { containerName: 'c-dead', agentGroupId: 'ag-one', label: 'dead' });
-    sessions.push({ id: 'foreign', vault: 'x', label: 'foreign', socket_path: '/elsewhere/c-dead/egress.sock' });
+    sessions.push({
+      id: 'foreign',
+      vault: 'x',
+      label: 'foreign',
+      socket_path: `/elsewhere/${egressDirName('c-dead')}/egress.sock`,
+    });
     fs.mkdirSync(path.join(tmp, 'sessions', 'c-orphan-dir'));
 
     await reconcileAgentVaultEgress(new Set(['c-live']));
 
     expect(sessions.map((s) => s.label).sort()).toEqual(['foreign', 'live']);
-    expect(fs.readdirSync(path.join(tmp, 'sessions'))).toEqual(['c-live']);
+    expect(fs.readdirSync(path.join(tmp, 'sessions'))).toEqual([egressDirName('c-live')]);
   });
 });
