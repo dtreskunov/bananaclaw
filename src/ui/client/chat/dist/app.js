@@ -29739,15 +29739,7 @@ function ago(iso) {
   if (ms < 30 * day) return `${Math.floor(ms / day)} d ago`;
   return new Date(iso).toLocaleDateString(void 0, { month: "short", day: "numeric", year: "numeric" });
 }
-function until(iso) {
-  const ms = Date.parse(iso) - Date.now();
-  const day = 24 * 60 * 60 * 1e3;
-  if (ms <= 0) return "expired";
-  if (ms < day) return `expires in ${Math.max(1, Math.floor(ms / 36e5))} h`;
-  return `expires in ${Math.floor(ms / day)} d`;
-}
-function describeInjection(injection) {
-  const key = injection.key ?? "key";
+function describeInjection(injection, key) {
   switch (injection.type) {
     case "bearer":
       return `Authorization: Bearer ${key}`;
@@ -29759,22 +29751,8 @@ function describeInjection(injection) {
       return `?${injection.name || "key"}=${key}`;
     case "custom":
       return injection.template || "Custom header";
-    case "passthrough":
-      return "No key (allowed host)";
   }
 }
-var APPROVAL_LABELS = {
-  allow: "Allow every call",
-  "ask-writes": "Ask before changes",
-  ask: "Ask before every call",
-  custom: "Ask for specific calls"
-};
-var APPROVAL_HELP = {
-  allow: "Calls go through without asking.",
-  "ask-writes": "Reads go through; POST, PUT, PATCH and DELETE wait for an admin in chat.",
-  ask: "Every call waits for an admin to approve it in chat.",
-  custom: "Only the calls listed below wait for approval."
-};
 function SecretInput({
   id: id2,
   value,
@@ -29920,10 +29898,8 @@ var INJECTION_LABELS = {
   basic: "Basic auth (Authorization header)",
   "api-key": "Named header",
   query: "Query parameter",
-  custom: "Header template",
-  passthrough: "No key \u2014 just allow the host"
+  custom: "Header template"
 };
-var METHODS = ["ANY", "GET", "POST", "PUT", "PATCH", "DELETE"];
 function toKeyName(label) {
   const base = label.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   if (!base) return "";
@@ -29939,49 +29915,8 @@ async function send(url, method, body, success) {
   showToast(success);
   return true;
 }
-function usePeers(gid) {
-  const [peers, setPeers] = h2(null);
-  y2(() => {
-    let live = true;
-    void call(credPath(gid, "/peers")).then((r4) => {
-      if (!live) return;
-      if (r4.ok) setPeers(r4.data.groups);
-      else {
-        setPeers([]);
-        showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-      }
-    });
-    return () => {
-      live = false;
-    };
-  }, [gid]);
-  return peers;
-}
 function Footer({ children }) {
   return /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot ga-cred-foot", children });
-}
-function GroupChecklist({
-  groups: groups2,
-  selected,
-  onChange,
-  note
-}) {
-  if (groups2.length === 0) return /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "No other groups you can change." });
-  return /* @__PURE__ */ u4("ul", { class: "ga-cred-checklist", children: groups2.map((g8) => /* @__PURE__ */ u4("li", { children: [
-    /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-      /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "checkbox",
-          disabled: g8.disabled,
-          checked: selected.includes(g8.groupId),
-          onChange: (event) => onChange(event.currentTarget.checked ? [...selected, g8.groupId] : selected.filter((id2) => id2 !== g8.groupId))
-        }
-      ),
-      /* @__PURE__ */ u4("span", { children: g8.groupName })
-    ] }),
-    g8.detail || note?.(g8.groupId) ? /* @__PURE__ */ u4("span", { class: "ga-cred-checklist-note", children: g8.detail ?? note?.(g8.groupId) }) : null
-  ] }, g8.groupId)) });
 }
 function ConfirmDialog({
   title,
@@ -30015,59 +29950,40 @@ function ConfirmDialog({
     ] })
   ] });
 }
-function InjectionFields({
+function DestinationFields({
+  keyName,
   value,
-  keys,
-  onChange,
-  keyFixed
+  onChange
 }) {
-  const type = value.type;
+  const injection = value.injection;
+  const setInjection = (next) => onChange({ ...value, injection: next });
   return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Send it to", info: "Host, optionally with a port and a path pattern, e.g. api.example.com/v1/*. The key is only ever sent to matching requests.", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: value.match, spellcheck: false, placeholder: "api.example.com", onInput: (event) => onChange({ ...value, match: event.currentTarget.value }) }) }),
     /* @__PURE__ */ u4(GroupAdminField, { label: "How it's sent", info: "How the gateway attaches the key to matching requests. Whatever the agent puts in this slot is replaced.", children: /* @__PURE__ */ u4(
       "select",
       {
-        value: type,
+        value: injection.type,
         onChange: (event) => {
           const next = event.currentTarget.value;
-          onChange({
+          setInjection({
             type: next,
-            key: next === "passthrough" ? void 0 : value.key ?? keys[0],
-            name: next === "api-key" ? value.name || "X-API-Key" : next === "query" ? value.name || "api_key" : void 0,
-            template: next === "custom" ? value.template || `Basic {{ ${value.key ?? "KEY"} }}` : void 0
+            name: next === "api-key" ? injection.name || "X-API-Key" : next === "query" ? injection.name || "api_key" : void 0,
+            template: next === "custom" ? injection.template || `Basic {{ ${keyName || "KEY"} }}` : void 0
           });
         },
         children: Object.keys(INJECTION_LABELS).map((t4) => /* @__PURE__ */ u4("option", { value: t4, children: INJECTION_LABELS[t4] }, t4))
       }
     ) }),
-    type !== "passthrough" && !keyFixed ? /* @__PURE__ */ u4(GroupAdminField, { label: "Key", children: /* @__PURE__ */ u4("select", { value: value.key ?? "", onChange: (event) => onChange({ ...value, key: event.currentTarget.value }), children: [
-      keys.length === 0 ? /* @__PURE__ */ u4("option", { value: "", children: "No keys yet" }) : null,
-      keys.map((k4) => /* @__PURE__ */ u4("option", { value: k4, children: k4 }, k4))
-    ] }) }) : null,
-    type === "api-key" || type === "query" ? /* @__PURE__ */ u4(GroupAdminField, { label: type === "query" ? "Parameter" : "Header", children: /* @__PURE__ */ u4("input", { type: "text", value: value.name ?? "", spellcheck: false, onInput: (event) => onChange({ ...value, name: event.currentTarget.value }) }) }) : null,
-    type === "api-key" ? /* @__PURE__ */ u4(GroupAdminField, { label: "Prefix", info: "Text placed before the key, e.g. \u201CToken \u201D.", children: /* @__PURE__ */ u4("input", { type: "text", value: value.prefix ?? "", spellcheck: false, placeholder: "none", onInput: (event) => onChange({ ...value, prefix: event.currentTarget.value }) }) }) : null,
-    type === "custom" ? /* @__PURE__ */ u4(GroupAdminField, { label: "Header", info: "Write the full Authorization header; {{ KEY_NAME }} is replaced by the key.", children: /* @__PURE__ */ u4("input", { type: "text", value: value.template ?? "", spellcheck: false, onInput: (event) => onChange({ ...value, template: event.currentTarget.value }) }) }) : null
+    injection.type === "api-key" || injection.type === "query" ? /* @__PURE__ */ u4(GroupAdminField, { label: injection.type === "query" ? "Parameter" : "Header", children: /* @__PURE__ */ u4("input", { type: "text", value: injection.name ?? "", spellcheck: false, onInput: (event) => setInjection({ ...injection, name: event.currentTarget.value }) }) }) : null,
+    injection.type === "api-key" ? /* @__PURE__ */ u4(GroupAdminField, { label: "Prefix", info: "Text placed before the key, e.g. \u201CToken \u201D.", children: /* @__PURE__ */ u4("input", { type: "text", value: injection.prefix ?? "", spellcheck: false, placeholder: "none", onInput: (event) => setInjection({ ...injection, prefix: event.currentTarget.value }) }) }) : null,
+    injection.type === "custom" ? /* @__PURE__ */ u4(GroupAdminField, { label: "Header", info: "Write the full Authorization header; {{ KEY_NAME }} is replaced by the key.", children: /* @__PURE__ */ u4("input", { type: "text", value: injection.template ?? "", spellcheck: false, onInput: (event) => setInjection({ ...injection, template: event.currentTarget.value }) }) }) : null
   ] });
 }
-function ApprovalFields({
-  mode,
-  askRules,
-  onChange
-}) {
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Approval", children: /* @__PURE__ */ u4("select", { value: mode, onChange: (event) => {
-      const next = event.currentTarget.value;
-      onChange(next, next === "custom" && askRules.length === 0 ? [{ method: "POST", path: "/*" }] : askRules);
-    }, children: Object.keys(APPROVAL_LABELS).map((m6) => /* @__PURE__ */ u4("option", { value: m6, children: APPROVAL_LABELS[m6] }, m6)) }) }),
-    /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: APPROVAL_HELP[mode] }),
-    mode === "custom" ? /* @__PURE__ */ u4("div", { class: "ga-cred-ask-rules", children: [
-      askRules.map((rule, index) => /* @__PURE__ */ u4("div", { class: "ga-cred-ask-rule", children: [
-        /* @__PURE__ */ u4("select", { "aria-label": "Method", value: rule.method, onChange: (event) => onChange(mode, askRules.map((r4, i5) => i5 === index ? { ...r4, method: event.currentTarget.value } : r4)), children: METHODS.map((m6) => /* @__PURE__ */ u4("option", { value: m6, children: m6 }, m6)) }),
-        /* @__PURE__ */ u4("input", { type: "text", "aria-label": "Path", value: rule.path, spellcheck: false, placeholder: "/v1/messages/*", onInput: (event) => onChange(mode, askRules.map((r4, i5) => i5 === index ? { ...r4, path: event.currentTarget.value } : r4)) }),
-        /* @__PURE__ */ u4("button", { type: "button", class: "icon-btn", "aria-label": "Remove", onClick: () => onChange(mode, askRules.filter((_6, i5) => i5 !== index)), children: "\u2715" })
-      ] }, index)),
-      /* @__PURE__ */ u4("button", { type: "button", onClick: () => onChange(mode, [...askRules, { method: "POST", path: "/*" }]), children: "Add call" })
-    ] }) : null
-  ] });
+function destinationValid(value) {
+  const i5 = value.injection;
+  if (!value.match.trim()) return false;
+  if ((i5.type === "api-key" || i5.type === "query") && !i5.name?.trim()) return false;
+  return i5.type !== "custom" || !!i5.template?.includes("{{");
 }
 function AddKeyDialog({
   gid,
@@ -30078,66 +29994,45 @@ function AddKeyDialog({
   onClose,
   onSaved
 }) {
-  const peers = usePeers(gid);
   const [preset, setPreset] = h2(null);
   const [label, setLabel] = h2("");
   const [key, setKey] = h2("");
   const [keyTouched, setKeyTouched] = h2(false);
   const [value, setValue] = h2("");
-  const [match2, setMatch] = h2("");
-  const [injection, setInjection] = h2({ type: "bearer" });
-  const [approval, setApproval] = h2("allow");
-  const [askRules, setAskRules] = h2([]);
-  const [alsoGroups, setAlsoGroups] = h2([]);
+  const [destination, setDestination] = h2({ match: "", injection: { type: "bearer" } });
   const [busy, setBusy] = h2(false);
   useEscapeClose(onClose, busy);
+  function pick(next) {
+    setPreset(next);
+    setLabel(next === "custom" ? "" : next.label);
+    setKey(next === "custom" ? "" : next.key);
+    setDestination(next === "custom" ? { match: "", injection: { type: "bearer" } } : next.destination);
+    setKeyTouched(false);
+  }
   y2(() => {
     if (!initialMatch) return;
     const host = initialMatch.split("/")[0];
-    const match3 = presets.find((p5) => p5.match.split("/")[0] === host);
-    pick(match3 ?? "custom");
-    if (!match3) setMatch(initialMatch);
+    const match2 = presets.find((p5) => p5.destination.match.split("/")[0] === host && !existingKeys.includes(p5.key));
+    pick(match2 ?? "custom");
+    if (!match2) setDestination({ match: initialMatch, injection: { type: "bearer" } });
   }, []);
-  function pick(next) {
-    setPreset(next);
-    if (next === "custom") {
-      setLabel("");
-      setKey("");
-      setMatch("");
-      setInjection({ type: "bearer" });
-    } else {
-      setLabel(next.label);
-      setKey(next.key);
-      setMatch(next.match);
-      setInjection({ ...next.injection, key: next.key });
-    }
-    setKeyTouched(false);
-  }
   if (!preset) {
     return /* @__PURE__ */ u4(MobileDialog, { title: "Add a key", onClose, maxWidth: "520px", className: "ga-cred-dialog", children: [
       /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Pick the service the key is for. The agent will be able to use it but never read it." }) }),
       /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: [
-        presets.map((p5) => existingKeys.includes(p5.key) ? /* @__PURE__ */ u4(MobileDialogItem, { label: p5.label, sublabel: `Already added (${p5.key}) \xB7 replace its value`, chevron: true, onClick: () => onExisting(p5.key) }, p5.id) : /* @__PURE__ */ u4(MobileDialogItem, { label: p5.label, sublabel: p5.match, chevron: true, onClick: () => pick(p5) }, p5.id)),
+        presets.map((p5) => existingKeys.includes(p5.key) ? /* @__PURE__ */ u4(MobileDialogItem, { label: p5.label, sublabel: `Already added (${p5.key}) \xB7 replace its value`, chevron: true, onClick: () => onExisting(p5.key) }, p5.id) : /* @__PURE__ */ u4(MobileDialogItem, { label: p5.label, sublabel: p5.destination.match, chevron: true, onClick: () => pick(p5) }, p5.id)),
         /* @__PURE__ */ u4(MobileDialogItem, { label: "Another service", sublabel: "Any host; choose how the key is sent", chevron: true, onClick: () => pick("custom") })
       ] })
     ] });
   }
   const keyInvalid = key !== "" && !KEY_NAME_RE.test(key);
   const keyDuplicate = existingKeys.includes(key);
-  const canSave = !busy && label.trim() !== "" && key !== "" && !keyInvalid && !keyDuplicate && value !== "" && match2.trim() !== "";
-  const editablePeers = (peers ?? []).filter((p5) => p5.canEdit);
+  const canSave = !busy && label.trim() !== "" && key !== "" && !keyInvalid && !keyDuplicate && value !== "" && destinationValid(destination);
   async function save(event) {
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
-    const rule = {
-      match: match2.trim(),
-      injection: { ...injection, key },
-      approval,
-      askRules: approval === "custom" ? askRules : [],
-      enabled: true
-    };
-    const ok = await send(credPath(gid, "/keys"), "POST", { key, label: label.trim(), value, rule, alsoGroups }, `Saved ${label.trim()}`);
+    const ok = await send(credPath(gid, "/keys"), "POST", { key, label: label.trim(), value, destination: { ...destination, match: destination.match.trim() } }, `Saved ${label.trim()}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -30166,7 +30061,7 @@ function AddKeyDialog({
             setLabel(next);
             if (!keyTouched && preset === "custom") setKey(toKeyName(next));
           } }) }),
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Key name", info: "How rules and agent requests refer to this key. Upper case, digits and underscores.", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: key, spellcheck: false, onInput: (event) => {
+          /* @__PURE__ */ u4(GroupAdminField, { label: "Key name", info: "How this key is referred to, e.g. in header templates. Upper case, digits and underscores.", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: key, spellcheck: false, onInput: (event) => {
             setKeyTouched(true);
             setKey(event.currentTarget.value.toUpperCase());
           } }) }),
@@ -30178,26 +30073,7 @@ function AddKeyDialog({
           ] }) : null,
           /* @__PURE__ */ u4(GroupAdminField, { label: "Value", children: /* @__PURE__ */ u4(SecretInput, { value, onInput: setValue, autoFocus: preset !== "custom" }) }),
           /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: "Stored encrypted by the credential gateway. Nobody can view it after saving; you can only replace it." }),
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Send it to", info: "Host, optionally with a port and a path pattern, e.g. api.example.com/v1/*. The key is only ever sent to matching requests.", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: match2, spellcheck: false, placeholder: "api.example.com", onInput: (event) => setMatch(event.currentTarget.value) }) }),
-          /* @__PURE__ */ u4(InjectionFields, { value: { ...injection, key }, keys: [key], keyFixed: true, onChange: setInjection }),
-          /* @__PURE__ */ u4(ApprovalFields, { mode: approval, askRules, onChange: (m6, rules) => {
-            setApproval(m6);
-            setAskRules(rules);
-          } }),
-          /* @__PURE__ */ u4("h4", { children: "Also add to" }),
-          peers === null ? /* @__PURE__ */ u4("p", { class: "muted", children: "Loading groups\u2026" }) : /* @__PURE__ */ u4(
-            GroupChecklist,
-            {
-              groups: editablePeers.map((p5) => ({
-                groupId: p5.groupId,
-                groupName: p5.groupName,
-                detail: p5.keys.some((k4) => k4.key === key) ? `Replaces its ${key}` : void 0
-              })),
-              selected: alsoGroups,
-              onChange: setAlsoGroups
-            }
-          ),
-          /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: "Each group gets its own copy; changing one later doesn't change the others." })
+          /* @__PURE__ */ u4(DestinationFields, { keyName: key, value: destination, onChange: setDestination })
         ] }),
         /* @__PURE__ */ u4(Footer, { children: [
           /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
@@ -30214,22 +30090,14 @@ function ReplaceKeyDialog({
   onSaved
 }) {
   const [value, setValue] = h2("");
-  const [alsoGroups, setAlsoGroups] = h2([]);
   const [busy, setBusy] = h2(false);
   useEscapeClose(onClose, busy);
-  const editable = item.alsoIn.filter((g8) => g8.canEdit);
-  const locked = item.alsoIn.filter((g8) => !g8.canEdit);
   const verb = item.status === "needs_value" ? "Set" : "Replace";
   async function save(event) {
     event.preventDefault();
     if (!value) return;
     setBusy(true);
-    const ok = await send(
-      credPath(gid, `/keys/${encodeURIComponent(item.key)}`),
-      "PUT",
-      { value, alsoGroups },
-      alsoGroups.length ? `Updated ${item.label} in ${alsoGroups.length + 1} groups` : `Updated ${item.label}`
-    );
+    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), "PUT", { value }, `Updated ${item.label}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -30242,28 +30110,7 @@ function ReplaceKeyDialog({
         /* @__PURE__ */ u4("code", { children: item.key }),
         item.status === "set" && item.updatedAt ? ` \xB7 current value set ${ago(item.updatedAt)}` : ""
       ] }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "New value", children: /* @__PURE__ */ u4(SecretInput, { value, onInput: setValue, autoFocus: true }) }),
-      editable.length ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("h4", { children: "Also replace it in" }),
-        /* @__PURE__ */ u4(
-          GroupChecklist,
-          {
-            groups: editable.map((g8) => ({ groupId: g8.groupId, groupName: g8.groupName, detail: g8.stale ? "Its copy is out of date" : void 0 })),
-            selected: alsoGroups,
-            onChange: setAlsoGroups
-          }
-        )
-      ] }) : null,
-      locked.length ? /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: [
-        locked.map((g8) => g8.groupName).join(", "),
-        " also ",
-        locked.length === 1 ? "has" : "have",
-        " a ",
-        item.key,
-        "; ask an admin of ",
-        locked.length === 1 ? "that group" : "those groups",
-        " to update it."
-      ] }) : null
+      /* @__PURE__ */ u4(GroupAdminField, { label: "New value", children: /* @__PURE__ */ u4(SecretInput, { value, onInput: setValue, autoFocus: true }) })
     ] }),
     /* @__PURE__ */ u4(Footer, { children: [
       /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
@@ -30271,164 +30118,44 @@ function ReplaceKeyDialog({
     ] })
   ] });
 }
-function ShareKeyDialog({
+function EditKeyDialog({
   gid,
   item,
   onClose,
   onSaved
 }) {
-  const peers = usePeers(gid);
-  const [selected, setSelected] = h2([]);
+  const [label, setLabel] = h2(item.label);
+  const [destination, setDestination] = h2(item.destination);
   const [busy, setBusy] = h2(false);
   useEscapeClose(onClose, busy);
-  const editable = (peers ?? []).filter((p5) => p5.canEdit);
-  return /* @__PURE__ */ u4(MobileDialog, { title: `Copy ${item.label} to other groups`, onClose, maxWidth: "480px", className: "ga-cred-dialog", closeDisabled: busy, children: [
-    /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: [
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "The value is copied inside the credential gateway; it isn't shown to anyone. Each group can then use and replace its own copy." }),
-      peers === null ? /* @__PURE__ */ u4("p", { class: "muted", children: "Loading groups\u2026" }) : /* @__PURE__ */ u4(
-        GroupChecklist,
-        {
-          groups: editable.map((p5) => ({
-            groupId: p5.groupId,
-            groupName: p5.groupName,
-            detail: p5.keys.some((k4) => k4.key === item.key) ? `Replaces its ${item.key}` : void 0
-          })),
-          selected,
-          onChange: setSelected
-        }
-      )
-    ] }),
-    /* @__PURE__ */ u4(Footer, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy || selected.length === 0, onClick: async () => {
-        setBusy(true);
-        const ok = await send(
-          credPath(gid, `/keys/${encodeURIComponent(item.key)}/share`),
-          "POST",
-          { toGroups: selected },
-          `Copied ${item.label} to ${selected.length} group${selected.length === 1 ? "" : "s"}`
-        );
-        setBusy(false);
-        if (ok) {
-          onSaved();
-          onClose();
-        }
-      }, children: busy ? "Copying\u2026" : "Copy" })
-    ] })
-  ] });
-}
-function CopyFromDialog({
-  gid,
-  existingKeys,
-  onClose,
-  onSaved
-}) {
-  const peers = usePeers(gid);
-  const sources = (peers ?? []).filter((p5) => p5.canEdit && p5.keys.length > 0);
-  const [from, setFrom] = h2(null);
-  const [selected, setSelected] = h2([]);
-  const [busy, setBusy] = h2(false);
-  useEscapeClose(onClose, busy);
-  const source = sources.find((p5) => p5.groupId === from) ?? null;
-  y2(() => {
-    if (!from && sources.length) setFrom(sources[0].groupId);
-  }, [sources.length]);
-  y2(() => setSelected([]), [from]);
-  return /* @__PURE__ */ u4(MobileDialog, { title: "Copy keys from another group", onClose, maxWidth: "520px", className: "ga-cred-dialog", closeDisabled: busy, children: [
-    /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: peers === null ? /* @__PURE__ */ u4("p", { class: "muted", children: "Loading groups\u2026" }) : sources.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "None of the other groups you manage has keys yet." }) : /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4(GroupAdminField, { label: "From", children: /* @__PURE__ */ u4("select", { value: from ?? "", onChange: (event) => setFrom(event.currentTarget.value), children: sources.map((p5) => /* @__PURE__ */ u4("option", { value: p5.groupId, children: p5.groupName }, p5.groupId)) }) }),
-      /* @__PURE__ */ u4("ul", { class: "ga-cred-checklist", children: source?.keys.map((k4) => {
-        const missing = k4.status !== "set";
-        return /* @__PURE__ */ u4("li", { children: [
-          /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "checkbox",
-                disabled: missing,
-                checked: selected.includes(k4.key),
-                onChange: (event) => setSelected(event.currentTarget.checked ? [...selected, k4.key] : selected.filter((x6) => x6 !== k4.key))
-              }
-            ),
-            /* @__PURE__ */ u4("span", { children: [
-              k4.label,
-              " ",
-              /* @__PURE__ */ u4("code", { class: "ga-cred-code-muted", children: k4.key })
-            ] })
-          ] }),
-          missing ? /* @__PURE__ */ u4("span", { class: "ga-cred-checklist-note", children: "Has no value to copy" }) : existingKeys.includes(k4.key) ? /* @__PURE__ */ u4("span", { class: "ga-cred-checklist-note", children: "Replaces this group's value" }) : null
-        ] }, k4.key);
-      }) }),
-      /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: "Values are copied inside the credential gateway and never shown. Rules for these keys are copied too." })
-    ] }) }),
-    /* @__PURE__ */ u4(Footer, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy || !source || selected.length === 0, onClick: async () => {
-        if (!source) return;
-        setBusy(true);
-        const ok = await send(
-          credPath(gid, "/keys/copy"),
-          "POST",
-          { fromGroup: source.groupId, keys: selected },
-          `Copied ${selected.length} key${selected.length === 1 ? "" : "s"} from ${source.groupName}`
-        );
-        setBusy(false);
-        if (ok) {
-          onSaved();
-          onClose();
-        }
-      }, children: busy ? "Copying\u2026" : selected.length > 1 ? `Copy ${selected.length} keys` : "Copy" })
-    ] })
-  ] });
-}
-function RuleDialog({
-  gid,
-  rule,
-  keys,
-  initialKey,
-  onClose,
-  onSaved
-}) {
-  const [match2, setMatch] = h2(rule?.match ?? "");
-  const [injection, setInjection] = h2(rule?.injection ?? { type: "bearer", key: initialKey ?? keys[0] });
-  const [approval, setApproval] = h2(rule?.approval ?? "allow");
-  const [askRules, setAskRules] = h2(rule?.askRules ?? []);
-  const [busy, setBusy] = h2(false);
-  useEscapeClose(onClose, busy);
-  const needsKey = injection.type !== "passthrough";
-  const canSave = !busy && match2.trim() !== "" && (!needsKey || !!injection.key);
+  const dirty = label.trim() !== item.label || JSON.stringify(destination) !== JSON.stringify(item.destination);
+  const canSave = !busy && dirty && label.trim() !== "" && destinationValid(destination);
   async function save(event) {
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
-    const body = {
-      match: match2.trim(),
-      injection: needsKey ? injection : { type: "passthrough" },
-      approval,
-      askRules: approval === "custom" ? askRules : [],
-      enabled: rule?.enabled ?? true,
-      mcpServer: rule?.mcpServer
-    };
-    const ok = rule ? await send(credPath(gid, `/rules/${encodeURIComponent(rule.name)}`), "PUT", body, "Rule updated") : await send(credPath(gid, "/rules"), "POST", body, "Rule added");
+    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), "PUT", {
+      label: label.trim(),
+      destination: { ...destination, match: destination.match.trim() }
+    }, `Updated ${label.trim()}`);
     setBusy(false);
     if (ok) {
       onSaved();
       onClose();
     }
   }
-  return /* @__PURE__ */ u4(MobileDialog, { title: rule ? "Edit rule" : "Add a rule", onClose, maxWidth: "560px", className: "ga-cred-dialog", closeDisabled: busy, children: [
-    /* @__PURE__ */ u4("form", { id: "ga-cred-rule", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "A rule says which requests get a key, and whether calls need approval." }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Requests to", info: "Host, optionally with a port and a path pattern, e.g. api.example.com/v1/*.", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: match2, spellcheck: false, placeholder: "api.example.com", onInput: (event) => setMatch(event.currentTarget.value) }) }),
-      /* @__PURE__ */ u4(InjectionFields, { value: injection, keys, onChange: setInjection }),
-      /* @__PURE__ */ u4(ApprovalFields, { mode: approval, askRules, onChange: (m6, rules) => {
-        setApproval(m6);
-        setAskRules(rules);
-      } })
+  return /* @__PURE__ */ u4(MobileDialog, { title: `Edit ${item.label}`, onClose, maxWidth: "560px", className: "ga-cred-dialog", closeDisabled: busy, children: [
+    /* @__PURE__ */ u4("form", { id: "ga-cred-edit", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
+      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+        /* @__PURE__ */ u4("code", { children: item.key }),
+        " \xB7 the value stays as it is."
+      ] }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Name", children: /* @__PURE__ */ u4("input", { type: "text", value: label, onInput: (event) => setLabel(event.currentTarget.value) }) }),
+      /* @__PURE__ */ u4(DestinationFields, { keyName: item.key, value: destination, onChange: setDestination })
     ] }),
     /* @__PURE__ */ u4(Footer, { children: [
       /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-rule", class: "primary", disabled: !canSave, children: busy ? "Saving\u2026" : rule ? "Save rule" : "Add rule" })
+      /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-edit", class: "primary", disabled: !canSave, children: busy ? "Saving\u2026" : "Save" })
     ] })
   ] });
 }
@@ -30560,30 +30287,21 @@ function useOverview(gid) {
   }, [gid]);
   return { load, refresh };
 }
-function rulesForKey(rules, key) {
-  return rules.filter((r4) => r4.injection.key === key || (r4.injection.template ?? "").includes(`{{ ${key} }}`));
-}
-function hostOf(match2) {
-  return match2.split("/")[0] ?? match2;
-}
 function CredentialsTab({ gid }) {
   const { load, refresh } = useOverview(gid);
-  const [view, setView] = h2(null);
+  const [view, setView] = h2("keys");
   const [dialog, setDialog] = h2(null);
   const signIn = useSignIn(gid, () => void refresh());
-  y2(() => setView(null), [gid]);
+  y2(() => setView("keys"), [gid]);
   y2(() => {
     if (load.state !== "ready") return;
     const focus = credentialsFocus.peek();
-    if (focus) {
-      credentialsFocus.value = null;
-      setView(focus.view);
-      const item = focus.key ? load.data.keys.find((k4) => k4.key === focus.key) : void 0;
-      if (focus.action === "set" && item && load.data.canEdit) setDialog({ kind: "replace", item });
-      if (focus.action === "add" && load.data.canEdit) setDialog({ kind: "add-key", match: focus.match });
-      return;
-    }
-    if (view === null) setView(load.data.requests.length ? "requests" : "keys");
+    if (!focus) return;
+    credentialsFocus.value = null;
+    setView(focus.view);
+    const item = focus.key ? load.data.keys.find((k4) => k4.key === focus.key) : void 0;
+    if (focus.action === "set" && item && load.data.canEdit) setDialog({ kind: "replace", item });
+    if (focus.action === "add" && load.data.canEdit) setDialog({ kind: "add-key", match: focus.match });
   }, [load.state]);
   if (load.state === "loading") return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
   if (load.state === "down") return /* @__PURE__ */ u4(GatewayDown, { onRetry: () => void refresh() });
@@ -30597,21 +30315,18 @@ function CredentialsTab({ gid }) {
     ] });
   }
   const data = load.data;
-  const current = view ?? "keys";
   const close = () => setDialog(null);
   const done = () => void refresh();
   const keyNames = data.keys.map((k4) => k4.key);
+  const pendingMcp = data.mcp.filter((m6) => m6.auth === "oauth" && m6.status === "needs_sign_in").length;
   const segments = [
-    ...data.requests.length || current === "requests" ? [{ id: "requests", label: "Requests", count: data.requests.length, alert: data.requests.length > 0 }] : [],
     { id: "keys", label: "Keys", count: data.keys.length, alert: data.keys.some((k4) => k4.status === "needs_value") },
     {
       id: "accounts",
       label: "Accounts",
-      count: data.accounts.length + data.mcp.filter((m6) => m6.auth === "oauth" && m6.status === "needs_sign_in").length,
-      alert: data.accounts.some((a4) => a4.status === "needs_reconnect") || data.mcp.some((m6) => m6.status === "needs_sign_in")
+      count: data.accounts.length + pendingMcp,
+      alert: data.accounts.some((a4) => a4.status === "needs_reconnect") || pendingMcp > 0
     },
-    { id: "rules", label: "Rules", count: data.rules.length },
-    { id: "activity", label: "Activity" },
     { id: "network", label: "Network" }
   ];
   return /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
@@ -30621,8 +30336,8 @@ function CredentialsTab({ gid }) {
       "button",
       {
         type: "button",
-        class: current === s5.id ? "active" : "",
-        "aria-current": current === s5.id ? "page" : void 0,
+        class: view === s5.id ? "active" : "",
+        "aria-current": view === s5.id ? "page" : void 0,
         onClick: () => setView(s5.id),
         children: [
           s5.label,
@@ -30632,21 +30347,9 @@ function CredentialsTab({ gid }) {
       s5.id
     )) }),
     !data.canEdit ? /* @__PURE__ */ u4("p", { class: "ga-cred-note", children: "You can see this group's credentials but not change them." }) : null,
-    current === "requests" ? /* @__PURE__ */ u4(
-      RequestsView,
-      {
-        gid,
-        data,
-        onReject: (request) => setDialog({ kind: "reject", request }),
-        onSignIn: signIn.start,
-        onDone: done
-      }
-    ) : null,
-    current === "keys" ? /* @__PURE__ */ u4(KeysView, { data, onDialog: setDialog }) : null,
-    current === "accounts" ? /* @__PURE__ */ u4(AccountsView, { data, onDialog: setDialog, onSignIn: signIn.start }) : null,
-    current === "rules" ? /* @__PURE__ */ u4(RulesView, { gid, data, onDialog: setDialog, onDone: done, onNetwork: () => setView("network") }) : null,
-    current === "activity" ? /* @__PURE__ */ u4(ActivityView, { gid }) : null,
-    current === "network" ? /* @__PURE__ */ u4(NetworkView, { gid, data, onDone: done }) : null,
+    view === "keys" ? /* @__PURE__ */ u4(KeysView, { data, onDialog: setDialog }) : null,
+    view === "accounts" ? /* @__PURE__ */ u4(AccountsView, { data, onDialog: setDialog, onSignIn: signIn.start }) : null,
+    view === "network" ? /* @__PURE__ */ u4(NetworkView, { gid, data, onDone: done }) : null,
     dialog?.kind === "add-key" ? /* @__PURE__ */ u4(
       AddKeyDialog,
       {
@@ -30663,9 +30366,7 @@ function CredentialsTab({ gid }) {
       }
     ) : null,
     dialog?.kind === "replace" ? /* @__PURE__ */ u4(ReplaceKeyDialog, { gid, item: dialog.item, onClose: close, onSaved: done }) : null,
-    dialog?.kind === "share" ? /* @__PURE__ */ u4(ShareKeyDialog, { gid, item: dialog.item, onClose: close, onSaved: done }) : null,
-    dialog?.kind === "copy-from" ? /* @__PURE__ */ u4(CopyFromDialog, { gid, existingKeys: keyNames, onClose: close, onSaved: done }) : null,
-    dialog?.kind === "rule" ? /* @__PURE__ */ u4(RuleDialog, { gid, rule: dialog.rule, keys: keyNames, initialKey: dialog.initialKey, onClose: close, onSaved: done }) : null,
+    dialog?.kind === "edit" ? /* @__PURE__ */ u4(EditKeyDialog, { gid, item: dialog.item, onClose: close, onSaved: done }) : null,
     dialog?.kind === "connect" ? /* @__PURE__ */ u4(ConnectAccountDialog, { apps: data.oauthApps, mcp: data.mcp, reconnect: dialog.reconnect, onStart: signIn.start, onClose: close }) : null,
     dialog?.kind === "delete-key" ? /* @__PURE__ */ u4(
       ConfirmDialog,
@@ -30679,28 +30380,10 @@ function CredentialsTab({ gid }) {
           if (ok) done();
           return ok;
         },
-        children: /* @__PURE__ */ u4(DeleteKeyText, { item: dialog.item, rules: rulesForKey(data.rules, dialog.item.key) })
-      }
-    ) : null,
-    dialog?.kind === "delete-rule" ? /* @__PURE__ */ u4(
-      ConfirmDialog,
-      {
-        title: "Delete this rule?",
-        confirmLabel: "Delete rule",
-        danger: true,
-        onClose: close,
-        onConfirm: async () => {
-          const ok = await mutate(credPath(gid, `/rules/${encodeURIComponent(dialog.rule.name)}`), "DELETE", void 0, "Rule deleted");
-          if (ok) done();
-          return ok;
-        },
         children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-          "Requests to ",
-          /* @__PURE__ */ u4("code", { children: dialog.rule.match }),
-          " will no longer get",
-          " ",
-          dialog.rule.injection.key ? /* @__PURE__ */ u4("code", { children: dialog.rule.injection.key }) : "special handling",
-          ". The key itself is kept."
+          "The value is erased from this group's vault, and requests to ",
+          /* @__PURE__ */ u4("code", { children: dialog.item.destination.match }),
+          " stop getting it. This can't be undone."
         ] })
       }
     ) : null,
@@ -30722,21 +30405,6 @@ function CredentialsTab({ gid }) {
           " in this group, and the gateway revokes its tokens. Other groups connected to the same account keep their own access."
         ] })
       }
-    ) : null,
-    dialog?.kind === "reject" ? /* @__PURE__ */ u4(
-      ConfirmDialog,
-      {
-        title: "Decline this request?",
-        confirmLabel: "Decline",
-        danger: true,
-        onClose: close,
-        onConfirm: async () => {
-          const ok = await mutate(credPath(gid, `/requests/${encodeURIComponent(dialog.request.id)}/reject`), "POST", {}, "Request declined");
-          if (ok) done();
-          return ok;
-        },
-        children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "The agent is told the request was declined. Nothing is added." })
-      }
     ) : null
   ] });
 }
@@ -30752,23 +30420,6 @@ function GatewayDown({ onRetry }) {
     /* @__PURE__ */ u4("button", { type: "button", onClick: onRetry, children: "Try again" })
   ] }) });
 }
-function DeleteKeyText({ item, rules }) {
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "The value is erased from this group's vault. This can't be undone." }),
-    rules.length ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      rules.length === 1 ? "This rule uses it and will be deleted too:" : `These ${rules.length} rules use it and will be deleted too:`,
-      " ",
-      rules.map((r4, i5) => /* @__PURE__ */ u4("span", { children: [
-        i5 ? ", " : "",
-        /* @__PURE__ */ u4("code", { children: r4.match })
-      ] }, r4.name))
-    ] }) : null,
-    item.alsoIn.length ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      item.alsoIn.map((g8) => g8.groupName).join(", "),
-      " keep their own copies."
-    ] }) : null
-  ] });
-}
 function StatusPill({ tone: tone2, children }) {
   return /* @__PURE__ */ u4("span", { class: `ga-cred-pill ${tone2}`, children });
 }
@@ -30781,59 +30432,45 @@ function SectionHead({ help, children }) {
 function KeysView({ data, onDialog }) {
   const edit = data.canEdit;
   return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
-    /* @__PURE__ */ u4(SectionHead, { help: "API keys and tokens the agent can use. Each group has its own copy of a key.", children: [
-      edit ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "copy-from" }), children: "Copy from group\u2026" }) : null,
-      edit ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "add-key" }), children: "Add key" }) : null
-    ] }),
+    /* @__PURE__ */ u4(SectionHead, { help: "API keys and tokens the agent can use, and where each one is sent.", children: edit ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "add-key" }), children: "Add key" }) : null }),
     data.keys.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
       /* @__PURE__ */ u4("p", { children: "No keys yet." }),
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Add a key for a service, or copy keys you already set up in another group." })
-    ] }) : /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.keys.map((k4) => {
-      const rules = rulesForKey(data.rules, k4.key);
-      const hosts = [...new Set(rules.map((r4) => hostOf(r4.match)))];
-      const staleCopy = k4.copiedFrom?.stale;
-      return /* @__PURE__ */ u4("li", { class: `ga-cred-item${k4.status === "needs_value" ? " attention" : ""}`, children: [
-        /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
-          /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
-            /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: k4.label }),
-            /* @__PURE__ */ u4("code", { class: "ga-cred-code-muted", children: k4.key }),
-            k4.status === "needs_value" ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs a value" }) : null,
-            staleCopy ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Out of date" }) : null
-          ] }),
-          /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
-            hosts.length ? /* @__PURE__ */ u4("span", { children: [
-              "Sent to ",
-              /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: hosts.join(", ") })
-            ] }) : /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: "Not used by any rule" }),
-            k4.status === "set" ? /* @__PURE__ */ u4("span", { children: [
-              "Last used ",
-              ago(k4.lastUsedAt)
-            ] }) : null,
-            k4.status === "set" && k4.updatedAt ? /* @__PURE__ */ u4("span", { children: [
-              "Set ",
-              ago(k4.updatedAt)
-            ] }) : null
-          ] }),
-          k4.copiedFrom ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { children: [
-            "Copied from ",
-            k4.copiedFrom.groupName,
-            " ",
-            ago(k4.copiedFrom.at),
-            staleCopy ? `; ${k4.copiedFrom.groupName} has replaced its value since` : ""
-          ] }) }) : null,
-          k4.alsoIn.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { children: [
-            "Also in ",
-            k4.alsoIn.map((g8) => g8.groupName).join(", ")
-          ] }) }) : null
+      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Add a key for a service; it's only ever sent to the host you choose." })
+    ] }) : /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.keys.map((k4) => /* @__PURE__ */ u4("li", { class: `ga-cred-item${k4.status === "needs_value" ? " attention" : ""}`, children: [
+      /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
+        /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
+          /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: k4.label }),
+          /* @__PURE__ */ u4("code", { class: "ga-cred-code-muted", children: k4.key }),
+          k4.mcpServer ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: [
+            "MCP \xB7 ",
+            k4.mcpServer
+          ] }) : null,
+          k4.status === "needs_value" ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs a value" }) : null
         ] }),
-        edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: [
-          /* @__PURE__ */ u4("button", { type: "button", class: k4.status === "needs_value" || staleCopy ? "primary" : "", onClick: () => onDialog({ kind: "replace", item: k4 }), children: k4.status === "needs_value" ? "Set value" : "Replace" }),
-          k4.status === "set" ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "share", item: k4 }), children: "Copy to\u2026" }) : null,
-          !hosts.length ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "rule", rule: null, initialKey: k4.key }), children: "Add rule" }) : null,
-          /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Delete ${k4.label}`, title: "Delete", onClick: () => onDialog({ kind: "delete-key", item: k4 }), children: "\u2715" })
+        /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
+          /* @__PURE__ */ u4("span", { children: [
+            "Sent to ",
+            /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: k4.destination.match })
+          ] }),
+          /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: describeInjection(k4.destination.injection, k4.key) })
+        ] }),
+        k4.status === "set" ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
+          /* @__PURE__ */ u4("span", { children: [
+            "Last used ",
+            ago(k4.lastUsedAt)
+          ] }),
+          k4.updatedAt ? /* @__PURE__ */ u4("span", { children: [
+            "Set ",
+            ago(k4.updatedAt)
+          ] }) : null
         ] }) : null
-      ] }, k4.key);
-    }) })
+      ] }),
+      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: [
+        /* @__PURE__ */ u4("button", { type: "button", class: k4.status === "needs_value" ? "primary" : "", onClick: () => onDialog({ kind: "replace", item: k4 }), children: k4.status === "needs_value" ? "Set value" : "Replace" }),
+        /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "edit", item: k4 }), children: "Edit" }),
+        /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Delete ${k4.label}`, title: "Delete", onClick: () => onDialog({ kind: "delete-key", item: k4 }), children: "\u2715" })
+      ] }) : null
+    ] }, k4.key)) })
   ] });
 }
 function AccountsView({
@@ -30896,154 +30533,63 @@ function AccountsView({
     ] }, a4.key)) })
   ] });
 }
-function RulesView({
-  gid,
-  data,
-  onDialog,
-  onDone,
-  onNetwork
+function HostList({
+  label,
+  help,
+  values,
+  locked,
+  edit,
+  placeholder,
+  valid,
+  onChange
 }) {
-  const edit = data.canEdit;
-  const [busy, setBusy] = h2(null);
-  async function toggle2(rule) {
-    setBusy(rule.name);
-    const { name: _name, ...body } = rule;
-    if (await mutate(credPath(gid, `/rules/${encodeURIComponent(rule.name)}`), "PUT", { ...body, enabled: !rule.enabled }, rule.enabled ? "Rule paused" : "Rule resumed")) onDone();
-    setBusy(null);
-  }
-  const availability = /* @__PURE__ */ new Map();
-  for (const k4 of data.keys) availability.set(k4.key, k4.status === "set" ? "ok" : "missing");
-  for (const a4 of data.accounts) availability.set(a4.key, a4.status === "connected" ? "ok" : "reconnect");
-  return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
-    /* @__PURE__ */ u4(SectionHead, { help: "Which requests get which key, and which calls wait for approval. The most specific match wins.", children: edit ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "rule", rule: null }), children: "Add rule" }) : null }),
-    data.rules.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
-      /* @__PURE__ */ u4("p", { children: "No rules yet." }),
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Adding a key creates its rule; add more to reuse a key for other hosts." })
-    ] }) : /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.rules.map((r4) => {
-      const keyState = r4.injection.key ? availability.get(r4.injection.key) ?? "gone" : "ok";
-      return /* @__PURE__ */ u4("li", { class: `ga-cred-item${r4.enabled ? "" : " paused"}`, children: [
-        /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
-          /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
-            /* @__PURE__ */ u4("span", { class: "ga-cred-name ga-cred-mono", children: r4.match }),
-            r4.mcpServer ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: [
-              "MCP \xB7 ",
-              r4.mcpServer
-            ] }) : null,
-            !r4.enabled ? /* @__PURE__ */ u4(StatusPill, { tone: "muted", children: "Paused" }) : null,
-            keyState === "missing" ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Key has no value" }) : null,
-            keyState === "reconnect" ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Account needs reconnecting" }) : null,
-            keyState === "gone" ? /* @__PURE__ */ u4(StatusPill, { tone: "err", children: "Key deleted" }) : null
-          ] }),
-          /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
-            /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: describeInjection(r4.injection) }),
-            /* @__PURE__ */ u4("span", { children: APPROVAL_LABELS[r4.approval] })
-          ] }),
-          r4.approval === "custom" && r4.askRules.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-chips", children: r4.askRules.map((a4, i5) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip ga-cred-mono", children: [
-            "Ask: ",
-            a4.method,
-            " ",
-            a4.path
-          ] }, i5)) }) : null
-        ] }),
-        edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: [
-          /* @__PURE__ */ u4("button", { type: "button", disabled: busy === r4.name, onClick: () => void toggle2(r4), children: r4.enabled ? "Pause" : "Resume" }),
-          /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "rule", rule: r4 }), children: "Edit" }),
-          /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Delete rule ${r4.match}`, title: "Delete", onClick: () => onDialog({ kind: "delete-rule", rule: r4 }), children: "\u2715" })
-        ] }) : null
-      ] }, r4.name);
-    }) }),
-    /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-foot-note", children: [
-      "Requests that match no rule ",
-      data.network.unmatched === "tunnel" ? "go out without a key" : "are blocked",
-      ".",
-      " ",
-      /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: onNetwork, children: "Change" })
-    ] })
-  ] });
-}
-var DECISION_LABELS = {
-  injected: { label: "Key added", tone: "ok" },
-  approved: { label: "Approved", tone: "ok" },
-  denied: { label: "Denied", tone: "err" },
-  expired: { label: "Not approved in time", tone: "warn" },
-  tunnel: { label: "No key", tone: "muted" },
-  blocked: { label: "Blocked", tone: "err" }
-};
-function ActivityView({ gid }) {
-  const [filter, setFilter] = h2("all");
-  const [items, setItems] = h2(null);
-  const [next, setNext] = h2(null);
-  const [busy, setBusy] = h2(false);
-  async function fetchPage(before, replace) {
-    setBusy(true);
-    const query = new URLSearchParams({ filter });
-    if (before) query.set("before", before);
-    const r4 = await call(`${credPath(gid, "/activity")}?${query}`);
-    setBusy(false);
-    if (!r4.ok) {
-      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-      if (replace) setItems([]);
-      return;
-    }
-    setItems(replace ? r4.data.items : [...items ?? [], ...r4.data.items]);
-    setNext(r4.data.nextBefore);
-  }
-  y2(() => {
-    setItems(null);
-    void fetchPage(null, true);
-  }, [gid, filter]);
-  return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
-    /* @__PURE__ */ u4(SectionHead, { help: "Recent requests from this group's agents. Bodies and key values are never recorded.", children: [
-      /* @__PURE__ */ u4("div", { class: "ga-cred-filter", role: "group", "aria-label": "Filter", children: ["all", "keys", "problems"].map((f5) => /* @__PURE__ */ u4("button", { type: "button", class: filter === f5 ? "active" : "", "aria-pressed": filter === f5, onClick: () => setFilter(f5), children: f5 === "all" ? "All" : f5 === "keys" ? "Used a key" : "Denied or blocked" }, f5)) }),
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => void fetchPage(null, true), children: "Refresh" })
+  const [entry, setEntry] = h2("");
+  const trimmed = entry.trim();
+  const ok = trimmed !== "" && valid(trimmed) && !values.includes(trimmed);
+  return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("h4", { children: label }),
+    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: help }),
+    /* @__PURE__ */ u4("div", { class: "ga-cred-chips ga-cred-chips-edit", children: [
+      values.map((a4) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip ga-cred-mono", children: [
+        a4,
+        edit ? /* @__PURE__ */ u4("button", { type: "button", "aria-label": `Remove ${a4}`, onClick: () => onChange(values.filter((x6) => x6 !== a4)), children: "\u2715" }) : null
+      ] }, a4)),
+      (locked ?? []).map((a4) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip ga-cred-mono locked", title: "Allowed for every group in the gateway's .env", children: [
+        a4,
+        " \xB7 all groups"
+      ] }, `op-${a4}`)),
+      values.length === 0 && !(locked ?? []).length ? /* @__PURE__ */ u4("span", { class: "muted", children: "None" }) : null
     ] }),
-    items === null ? /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" }) : items.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: /* @__PURE__ */ u4("p", { children: "Nothing here yet." }) }) : /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("ul", { class: "ga-cred-activity", children: items.map((a4) => {
-        const d5 = DECISION_LABELS[a4.decision];
-        return /* @__PURE__ */ u4("li", { children: [
-          /* @__PURE__ */ u4("span", { class: "ga-cred-activity-time", title: new Date(a4.at).toLocaleString(), children: ago(a4.at) }),
-          /* @__PURE__ */ u4("span", { class: "ga-cred-activity-req ga-cred-mono", children: [
-            /* @__PURE__ */ u4("strong", { children: a4.method }),
-            " ",
-            a4.host,
-            /* @__PURE__ */ u4("span", { class: "ga-cred-activity-path", children: a4.path })
-          ] }),
-          /* @__PURE__ */ u4("span", { class: "ga-cred-activity-outcome", children: [
-            /* @__PURE__ */ u4(StatusPill, { tone: d5.tone, children: d5.label }),
-            a4.status !== null ? /* @__PURE__ */ u4("span", { class: "ga-cred-activity-status", children: a4.status }) : null
-          ] }),
-          /* @__PURE__ */ u4("span", { class: "ga-cred-activity-detail", children: [
-            a4.key ? /* @__PURE__ */ u4("code", { class: "ga-cred-code-muted", children: a4.key }) : null,
-            a4.thread ? /* @__PURE__ */ u4("span", { children: a4.thread }) : null
-          ] })
-        ] }, a4.id);
-      }) }),
-      next ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-more", disabled: busy, onClick: () => void fetchPage(next, false), children: busy ? "Loading\u2026" : "Show older" }) : null
-    ] })
+    edit ? /* @__PURE__ */ u4("form", { class: "ga-cred-inline-add", onSubmit: (event) => {
+      event.preventDefault();
+      if (!ok) return;
+      onChange([...values, trimmed]);
+      setEntry("");
+    }, children: [
+      /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: entry, spellcheck: false, placeholder, onInput: (event) => setEntry(event.currentTarget.value) }),
+      /* @__PURE__ */ u4("button", { type: "submit", disabled: !ok, children: "Add" })
+    ] }) : null
   ] });
 }
+var HOST_RE = /^(\*\.)?[A-Za-z0-9.-]+(:\d+)?(\/\S*)?$/;
+var ADDRESS_RE = /^[A-Za-z0-9.:\-[\]]+(\/\d{1,3})?(:\d+)?$/;
 function NetworkView({ gid, data, onDone }) {
   const edit = data.canEdit;
   const [unmatched, setUnmatched] = h2(data.network.unmatched);
-  const [allow, setAllow] = h2(data.network.allowPrivate);
-  const [entry, setEntry] = h2("");
+  const [allowHosts, setAllowHosts] = h2(data.network.allowHosts);
+  const [allowPrivate, setAllowPrivate] = h2(data.network.allowPrivate);
   const [busy, setBusy] = h2(false);
-  y2(() => {
+  const reset = () => {
     setUnmatched(data.network.unmatched);
-    setAllow(data.network.allowPrivate);
-  }, [JSON.stringify(data.network)]);
-  const dirty = unmatched !== data.network.unmatched || JSON.stringify(allow) !== JSON.stringify(data.network.allowPrivate);
-  const entryValid = /^[A-Za-z0-9.:\-[\]]+(\/\d{1,3})?(:\d+)?$/.test(entry.trim());
-  function add() {
-    const value = entry.trim();
-    if (!entryValid || allow.includes(value)) return;
-    setAllow([...allow, value]);
-    setEntry("");
-  }
+    setAllowHosts(data.network.allowHosts);
+    setAllowPrivate(data.network.allowPrivate);
+  };
+  y2(reset, [JSON.stringify(data.network)]);
+  const dirty = unmatched !== data.network.unmatched || JSON.stringify(allowHosts) !== JSON.stringify(data.network.allowHosts) || JSON.stringify(allowPrivate) !== JSON.stringify(data.network.allowPrivate);
   return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
-    /* @__PURE__ */ u4(SectionHead, { help: "What the agent can reach besides services with a rule." }),
+    /* @__PURE__ */ u4(SectionHead, { help: "What the agent can reach besides the hosts its keys and accounts are sent to." }),
     /* @__PURE__ */ u4("fieldset", { class: "ga-cred-choice", disabled: !edit, children: [
-      /* @__PURE__ */ u4("legend", { children: "Requests that match no rule" }),
+      /* @__PURE__ */ u4("legend", { children: "Requests to other hosts" }),
       /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
         /* @__PURE__ */ u4("input", { type: "radio", name: "ga-cred-unmatched", checked: unmatched === "tunnel", onChange: () => setUnmatched("tunnel") }),
         /* @__PURE__ */ u4("span", { children: [
@@ -31055,154 +30601,55 @@ function NetworkView({ gid, data, onDone }) {
         /* @__PURE__ */ u4("input", { type: "radio", name: "ga-cred-unmatched", checked: unmatched === "deny", onChange: () => setUnmatched("deny") }),
         /* @__PURE__ */ u4("span", { children: [
           "Block ",
-          /* @__PURE__ */ u4("span", { class: "ga-cred-choice-note", children: "Only hosts with a rule are reachable. Add \u201CNo key \u2014 just allow the host\u201D rules for anything else." })
+          /* @__PURE__ */ u4("span", { class: "ga-cred-choice-note", children: "Only hosts with a key or account, and the hosts listed below, are reachable." })
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ u4("h4", { children: "Private network addresses" }),
-    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      "Addresses on your local network are blocked unless listed here, e.g. ",
-      /* @__PURE__ */ u4("code", { children: "192.168.1.20" }),
-      " or ",
-      /* @__PURE__ */ u4("code", { children: "homeassistant.local:8123" }),
-      "."
-    ] }),
-    /* @__PURE__ */ u4("div", { class: "ga-cred-chips ga-cred-chips-edit", children: [
-      allow.map((a4) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip ga-cred-mono", children: [
-        a4,
-        edit ? /* @__PURE__ */ u4("button", { type: "button", "aria-label": `Remove ${a4}`, onClick: () => setAllow(allow.filter((x6) => x6 !== a4)), children: "\u2715" }) : null
-      ] }, a4)),
-      data.network.operatorAllowPrivate.map((a4) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip ga-cred-mono locked", title: "Allowed for every group in the gateway's .env", children: [
-        a4,
-        " \xB7 all groups"
-      ] }, `op-${a4}`)),
-      allow.length === 0 && data.network.operatorAllowPrivate.length === 0 ? /* @__PURE__ */ u4("span", { class: "muted", children: "None" }) : null
-    ] }),
-    edit ? /* @__PURE__ */ u4("form", { class: "ga-cred-inline-add", onSubmit: (event) => {
-      event.preventDefault();
-      add();
-    }, children: [
-      /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: entry, spellcheck: false, placeholder: "Address, network or host:port", onInput: (event) => setEntry(event.currentTarget.value) }),
-      /* @__PURE__ */ u4("button", { type: "submit", disabled: !entryValid, children: "Add" })
-    ] }) : null,
+    unmatched === "deny" ? /* @__PURE__ */ u4(
+      HostList,
+      {
+        label: "Also allow, without a key",
+        help: /* @__PURE__ */ u4(k, { children: [
+          "Hosts the agent may reach while other requests are blocked, e.g. ",
+          /* @__PURE__ */ u4("code", { children: "pypi.org" }),
+          " or ",
+          /* @__PURE__ */ u4("code", { children: "*.npmjs.org" }),
+          "."
+        ] }),
+        values: allowHosts,
+        edit,
+        placeholder: "Host or host/path",
+        valid: (v5) => HOST_RE.test(v5),
+        onChange: setAllowHosts
+      }
+    ) : null,
+    /* @__PURE__ */ u4(
+      HostList,
+      {
+        label: "Private network addresses",
+        help: /* @__PURE__ */ u4(k, { children: [
+          "Addresses on your local network are blocked unless listed here, e.g. ",
+          /* @__PURE__ */ u4("code", { children: "192.168.1.20" }),
+          " or ",
+          /* @__PURE__ */ u4("code", { children: "homeassistant.local:8123" }),
+          "."
+        ] }),
+        values: allowPrivate,
+        locked: data.network.operatorAllowPrivate,
+        edit,
+        placeholder: "Address, network or host:port",
+        valid: (v5) => ADDRESS_RE.test(v5),
+        onChange: setAllowPrivate
+      }
+    ),
     /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: "Cloud metadata addresses are always blocked." }),
     edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-save-row", children: [
-      /* @__PURE__ */ u4("button", { type: "button", disabled: !dirty || busy, onClick: () => {
-        setUnmatched(data.network.unmatched);
-        setAllow(data.network.allowPrivate);
-      }, children: "Discard" }),
+      /* @__PURE__ */ u4("button", { type: "button", disabled: !dirty || busy, onClick: reset, children: "Discard" }),
       /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: !dirty || busy, onClick: async () => {
         setBusy(true);
-        if (await mutate(credPath(gid, "/network"), "PUT", { unmatched, allowPrivate: allow }, "Network settings saved")) onDone();
+        if (await mutate(credPath(gid, "/network"), "PUT", { unmatched, allowHosts, allowPrivate }, "Network settings saved")) onDone();
         setBusy(false);
       }, children: busy ? "Saving\u2026" : "Save" })
-    ] }) : null
-  ] });
-}
-function RequestsView({
-  gid,
-  data,
-  onReject,
-  onSignIn,
-  onDone
-}) {
-  if (data.requests.length === 0) {
-    return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: /* @__PURE__ */ u4("p", { children: "No pending requests." }) }) });
-  }
-  return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
-    /* @__PURE__ */ u4(SectionHead, { help: "The agent asked for access it doesn't have yet. Nothing changes until you approve." }),
-    data.requests.map((r4) => /* @__PURE__ */ u4(RequestCard, { gid, request: r4, canEdit: data.canEdit, onReject, onSignIn, onDone }, r4.id))
-  ] });
-}
-function RequestCard({
-  gid,
-  request,
-  canEdit,
-  onReject,
-  onSignIn,
-  onDone
-}) {
-  const [values, setValues] = h2({});
-  const [copyFrom, setCopyFrom] = h2({});
-  const [source, setSource] = h2({});
-  const [busy, setBusy] = h2(false);
-  const slotReady = (key, agentProvided) => {
-    if (agentProvided) return true;
-    return (source[key] ?? "enter") === "copy" ? !!copyFrom[key] : !!values[key];
-  };
-  const ready = request.slots.every((s5) => slotReady(s5.key, s5.agentProvided));
-  async function approve() {
-    setBusy(true);
-    const body = {
-      values: Object.fromEntries(request.slots.filter((s5) => !s5.agentProvided && (source[s5.key] ?? "enter") === "enter").map((s5) => [s5.key, values[s5.key] ?? ""])),
-      copyFrom: Object.fromEntries(request.slots.filter((s5) => (source[s5.key] ?? "enter") === "copy").map((s5) => [s5.key, copyFrom[s5.key]]))
-    };
-    if (await mutate(credPath(gid, `/requests/${encodeURIComponent(request.id)}/approve`), "POST", body, "Request approved")) onDone();
-    setBusy(false);
-  }
-  return /* @__PURE__ */ u4("article", { class: "ga-cred-request", children: [
-    /* @__PURE__ */ u4("header", { children: /* @__PURE__ */ u4("div", { children: [
-      /* @__PURE__ */ u4("strong", { children: request.account ? `Connect ${request.account.providerLabel}` : request.slots.length ? `Add ${request.slots.map((s5) => s5.label).join(", ")}` : "Change rules" }),
-      /* @__PURE__ */ u4("span", { class: "ga-cred-meta", children: [
-        /* @__PURE__ */ u4("span", { children: [
-          "Asked ",
-          ago(request.createdAt),
-          request.thread ? ` in \u201C${request.thread}\u201D` : ""
-        ] }),
-        /* @__PURE__ */ u4("span", { children: until(request.expiresAt) })
-      ] })
-    ] }) }),
-    /* @__PURE__ */ u4("blockquote", { class: "ga-cred-request-message", children: request.message }),
-    request.slots.map((s5) => {
-      const mode = source[s5.key] ?? "enter";
-      return /* @__PURE__ */ u4("div", { class: "ga-cred-slot", children: [
-        /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
-          /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: s5.label }),
-          /* @__PURE__ */ u4("code", { class: "ga-cred-code-muted", children: s5.key })
-        ] }),
-        /* @__PURE__ */ u4("p", { class: "group-admin-help", children: s5.description }),
-        s5.agentProvided ? /* @__PURE__ */ u4("p", { class: "ga-cred-note", children: "The agent created this value itself (for example, a token from a sign-up). Approving stores it; you won't see it." }) : /* @__PURE__ */ u4(k, { children: [
-          s5.copyableFrom.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-filter", role: "group", "aria-label": `Value for ${s5.key}`, children: [
-            /* @__PURE__ */ u4("button", { type: "button", class: mode === "enter" ? "active" : "", "aria-pressed": mode === "enter", onClick: () => setSource({ ...source, [s5.key]: "enter" }), children: "Enter a value" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: mode === "copy" ? "active" : "", "aria-pressed": mode === "copy", onClick: () => {
-              setSource({ ...source, [s5.key]: "copy" });
-              if (!copyFrom[s5.key]) setCopyFrom({ ...copyFrom, [s5.key]: s5.copyableFrom[0].groupId });
-            }, children: [
-              "Copy from ",
-              s5.copyableFrom.length === 1 ? s5.copyableFrom[0].groupName : "another group"
-            ] })
-          ] }) : null,
-          mode === "enter" ? /* @__PURE__ */ u4(k, { children: [
-            /* @__PURE__ */ u4(SecretInput, { value: values[s5.key] ?? "", onInput: (v5) => setValues({ ...values, [s5.key]: v5 }), disabled: !canEdit }),
-            s5.obtainUrl || s5.obtainInstructions ? /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: [
-              s5.obtainInstructions ? `${s5.obtainInstructions} ` : null,
-              s5.obtainUrl ? /* @__PURE__ */ u4("a", { href: s5.obtainUrl, target: "_blank", rel: "noopener noreferrer", children: "Get one \u2197" }) : null
-            ] }) : null
-          ] }) : s5.copyableFrom.length > 1 ? /* @__PURE__ */ u4("select", { value: copyFrom[s5.key] ?? "", onChange: (event) => setCopyFrom({ ...copyFrom, [s5.key]: event.currentTarget.value }), children: s5.copyableFrom.map((g8) => /* @__PURE__ */ u4("option", { value: g8.groupId, children: g8.groupName }, g8.groupId)) }) : /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "The value is copied inside the gateway; nobody sees it." })
-        ] })
-      ] }, s5.key);
-    }),
-    request.rules.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-request-rules", children: [
-      /* @__PURE__ */ u4("span", { class: "ga-cred-row-label", children: "Rules it adds" }),
-      /* @__PURE__ */ u4("ul", { children: request.rules.map((r4, i5) => /* @__PURE__ */ u4("li", { children: [
-        /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: r4.match }),
-        " \xB7 ",
-        /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: describeInjection(r4.injection) }),
-        " \xB7 ",
-        APPROVAL_LABELS[r4.approval]
-      ] }, i5)) })
-    ] }) : null,
-    request.account ? /* @__PURE__ */ u4("div", { class: "ga-cred-chips", children: request.account.scopes.map((s5) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip", children: s5.label }, s5.id)) }) : null,
-    canEdit ? /* @__PURE__ */ u4("footer", { children: [
-      /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled: busy, onClick: () => onReject(request), children: "Decline" }),
-      request.account ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy, onClick: () => void onSignIn({
-        provider: request.account.provider,
-        scopeSets: request.account.scopes.map((s5) => s5.id),
-        requestId: request.id
-      }), children: [
-        "Sign in to ",
-        request.account.providerLabel
-      ] }) : /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy || !ready, onClick: () => void approve(), children: busy ? "Approving\u2026" : "Approve" })
     ] }) : null
   ] });
 }

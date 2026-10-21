@@ -8,9 +8,8 @@ import {
   type AccountProgressDto,
   type AccountStartDto,
   type AccountStartInput,
-  type ApprovalMode,
+  type InjectionDto,
   type OAuthCompleteMessage,
-  type RuleDto,
 } from './GroupAdminCredentialsApi';
 import { showToast } from './Toast';
 
@@ -32,16 +31,7 @@ export function ago(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function until(iso: string): string {
-  const ms = Date.parse(iso) - Date.now();
-  const day = 24 * 60 * 60 * 1000;
-  if (ms <= 0) return 'expired';
-  if (ms < day) return `expires in ${Math.max(1, Math.floor(ms / 3_600_000))} h`;
-  return `expires in ${Math.floor(ms / day)} d`;
-}
-
-export function describeInjection(injection: RuleDto['injection']): string {
-  const key = injection.key ?? 'key';
+export function describeInjection(injection: InjectionDto, key: string): string {
   switch (injection.type) {
     case 'bearer':
       return `Authorization: Bearer ${key}`;
@@ -53,24 +43,8 @@ export function describeInjection(injection: RuleDto['injection']): string {
       return `?${injection.name || 'key'}=${key}`;
     case 'custom':
       return injection.template || 'Custom header';
-    case 'passthrough':
-      return 'No key (allowed host)';
   }
 }
-
-export const APPROVAL_LABELS: Record<ApprovalMode, string> = {
-  allow: 'Allow every call',
-  'ask-writes': 'Ask before changes',
-  ask: 'Ask before every call',
-  custom: 'Ask for specific calls',
-};
-
-export const APPROVAL_HELP: Record<ApprovalMode, string> = {
-  allow: 'Calls go through without asking.',
-  'ask-writes': 'Reads go through; POST, PUT, PATCH and DELETE wait for an admin in chat.',
-  ask: 'Every call waits for an admin to approve it in chat.',
-  custom: 'Only the calls listed below wait for approval.',
-};
 
 export function SecretInput({
   id,

@@ -1,4 +1,4 @@
-// Dialogs for group settings → Credentials.
+// Dialogs for group settings → Credentials (R1).
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
@@ -6,18 +6,15 @@ import { call, errMsg } from './GroupAdminApi';
 import {
   credPath,
   type AccountStartInput,
-  type ApprovalMode,
-  type AskRuleDto,
+  type DestinationDto,
+  type InjectionDto,
   type InjectionType,
   type KeyDto,
   type KeyPresetDto,
   type McpAuthDto,
   type OAuthAppDto,
-  type PeerGroupDto,
-  type RuleDto,
-  type RuleInput,
 } from './GroupAdminCredentialsApi';
-import { APPROVAL_HELP, APPROVAL_LABELS, KEY_NAME_RE, SecretInput, ago, useEscapeClose } from './GroupAdminCredentialsParts';
+import { KEY_NAME_RE, SecretInput, ago, useEscapeClose } from './GroupAdminCredentialsParts';
 import { GroupAdminField as Field } from './GroupAdminField';
 import { MobileDialog, MobileDialogFooter, MobileDialogItem, MobileDialogList } from './MobileDialog';
 import { showToast } from './Toast';
@@ -28,9 +25,7 @@ const INJECTION_LABELS: Record<InjectionType, string> = {
   'api-key': 'Named header',
   query: 'Query parameter',
   custom: 'Header template',
-  passthrough: 'No key — just allow the host',
 };
-const METHODS = ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
 function toKeyName(label: string): string {
   const base = label.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -49,61 +44,8 @@ async function send(url: string, method: string, body: unknown, success: string)
   return true;
 }
 
-export function usePeers(gid: string): PeerGroupDto[] | null {
-  const [peers, setPeers] = useState<PeerGroupDto[] | null>(null);
-  useEffect(() => {
-    let live = true;
-    void call<{ groups: PeerGroupDto[] }>(credPath(gid, '/peers')).then((r) => {
-      if (!live) return;
-      if (r.ok) setPeers(r.data.groups);
-      else {
-        setPeers([]);
-        showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
-      }
-    });
-    return () => {
-      live = false;
-    };
-  }, [gid]);
-  return peers;
-}
-
 function Footer({ children }: { children: JSX.Element | (JSX.Element | null)[] }): JSX.Element {
   return <MobileDialogFooter className="ga-confirm-foot ga-cred-foot">{children}</MobileDialogFooter>;
-}
-
-function GroupChecklist({
-  groups,
-  selected,
-  onChange,
-  note,
-}: {
-  groups: { groupId: string; groupName: string; detail?: string; disabled?: boolean }[];
-  selected: string[];
-  onChange: (next: string[]) => void;
-  note?: (groupId: string) => string | null;
-}): JSX.Element {
-  if (groups.length === 0) return <p class="group-admin-help">No other groups you can change.</p>;
-  return (
-    <ul class="ga-cred-checklist">
-      {groups.map((g) => (
-        <li key={g.groupId}>
-          <label class="group-admin-check">
-            <input
-              type="checkbox"
-              disabled={g.disabled}
-              checked={selected.includes(g.groupId)}
-              onChange={(event) => onChange(event.currentTarget.checked
-                ? [...selected, g.groupId]
-                : selected.filter((id) => id !== g.groupId))}
-            />
-            <span>{g.groupName}</span>
-          </label>
-          {g.detail || note?.(g.groupId) ? <span class="ga-cred-checklist-note">{g.detail ?? note?.(g.groupId)}</span> : null}
-        </li>
-      ))}
-    </ul>
-  );
 }
 
 export function ConfirmDialog({
@@ -146,30 +88,32 @@ export function ConfirmDialog({
   );
 }
 
-function InjectionFields({
+/** Where a key is sent and how; shared by the add and edit dialogs. */
+function DestinationFields({
+  keyName,
   value,
-  keys,
   onChange,
-  keyFixed,
 }: {
-  value: RuleDto['injection'];
-  keys: string[];
-  onChange: (next: RuleDto['injection']) => void;
-  keyFixed?: boolean;
+  keyName: string;
+  value: DestinationDto;
+  onChange: (next: DestinationDto) => void;
 }): JSX.Element {
-  const type = value.type;
+  const injection = value.injection;
+  const setInjection = (next: InjectionDto): void => onChange({ ...value, injection: next });
   return (
     <>
+      <Field label="Send it to" info="Host, optionally with a port and a path pattern, e.g. api.example.com/v1/*. The key is only ever sent to matching requests.">
+        <input type="text" class="ga-cred-mono" value={value.match} spellcheck={false} placeholder="api.example.com" onInput={(event) => onChange({ ...value, match: event.currentTarget.value })} />
+      </Field>
       <Field label="How it's sent" info="How the gateway attaches the key to matching requests. Whatever the agent puts in this slot is replaced.">
         <select
-          value={type}
+          value={injection.type}
           onChange={(event) => {
             const next = event.currentTarget.value as InjectionType;
-            onChange({
+            setInjection({
               type: next,
-              key: next === 'passthrough' ? undefined : value.key ?? keys[0],
-              name: next === 'api-key' ? value.name || 'X-API-Key' : next === 'query' ? value.name || 'api_key' : undefined,
-              template: next === 'custom' ? value.template || `Basic {{ ${value.key ?? 'KEY'} }}` : undefined,
+              name: next === 'api-key' ? injection.name || 'X-API-Key' : next === 'query' ? injection.name || 'api_key' : undefined,
+              template: next === 'custom' ? injection.template || `Basic {{ ${keyName || 'KEY'} }}` : undefined,
             });
           }}
         >
@@ -178,69 +122,30 @@ function InjectionFields({
           ))}
         </select>
       </Field>
-      {type !== 'passthrough' && !keyFixed ? (
-        <Field label="Key">
-          <select value={value.key ?? ''} onChange={(event) => onChange({ ...value, key: event.currentTarget.value })}>
-            {keys.length === 0 ? <option value="">No keys yet</option> : null}
-            {keys.map((k) => <option key={k} value={k}>{k}</option>)}
-          </select>
+      {injection.type === 'api-key' || injection.type === 'query' ? (
+        <Field label={injection.type === 'query' ? 'Parameter' : 'Header'}>
+          <input type="text" value={injection.name ?? ''} spellcheck={false} onInput={(event) => setInjection({ ...injection, name: event.currentTarget.value })} />
         </Field>
       ) : null}
-      {type === 'api-key' || type === 'query' ? (
-        <Field label={type === 'query' ? 'Parameter' : 'Header'}>
-          <input type="text" value={value.name ?? ''} spellcheck={false} onInput={(event) => onChange({ ...value, name: event.currentTarget.value })} />
-        </Field>
-      ) : null}
-      {type === 'api-key' ? (
+      {injection.type === 'api-key' ? (
         <Field label="Prefix" info="Text placed before the key, e.g. “Token ”.">
-          <input type="text" value={value.prefix ?? ''} spellcheck={false} placeholder="none" onInput={(event) => onChange({ ...value, prefix: event.currentTarget.value })} />
+          <input type="text" value={injection.prefix ?? ''} spellcheck={false} placeholder="none" onInput={(event) => setInjection({ ...injection, prefix: event.currentTarget.value })} />
         </Field>
       ) : null}
-      {type === 'custom' ? (
+      {injection.type === 'custom' ? (
         <Field label="Header" info="Write the full Authorization header; {{ KEY_NAME }} is replaced by the key.">
-          <input type="text" value={value.template ?? ''} spellcheck={false} onInput={(event) => onChange({ ...value, template: event.currentTarget.value })} />
+          <input type="text" value={injection.template ?? ''} spellcheck={false} onInput={(event) => setInjection({ ...injection, template: event.currentTarget.value })} />
         </Field>
       ) : null}
     </>
   );
 }
 
-function ApprovalFields({
-  mode,
-  askRules,
-  onChange,
-}: {
-  mode: ApprovalMode;
-  askRules: AskRuleDto[];
-  onChange: (mode: ApprovalMode, askRules: AskRuleDto[]) => void;
-}): JSX.Element {
-  return (
-    <>
-      <Field label="Approval">
-        <select value={mode} onChange={(event) => {
-          const next = event.currentTarget.value as ApprovalMode;
-          onChange(next, next === 'custom' && askRules.length === 0 ? [{ method: 'POST', path: '/*' }] : askRules);
-        }}>
-          {(Object.keys(APPROVAL_LABELS) as ApprovalMode[]).map((m) => <option key={m} value={m}>{APPROVAL_LABELS[m]}</option>)}
-        </select>
-      </Field>
-      <p class="group-admin-help ga-cred-field-help">{APPROVAL_HELP[mode]}</p>
-      {mode === 'custom' ? (
-        <div class="ga-cred-ask-rules">
-          {askRules.map((rule, index) => (
-            <div class="ga-cred-ask-rule" key={index}>
-              <select aria-label="Method" value={rule.method} onChange={(event) => onChange(mode, askRules.map((r, i) => (i === index ? { ...r, method: event.currentTarget.value } : r)))}>
-                {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <input type="text" aria-label="Path" value={rule.path} spellcheck={false} placeholder="/v1/messages/*" onInput={(event) => onChange(mode, askRules.map((r, i) => (i === index ? { ...r, path: event.currentTarget.value } : r)))} />
-              <button type="button" class="icon-btn" aria-label="Remove" onClick={() => onChange(mode, askRules.filter((_, i) => i !== index))}>{'\u2715'}</button>
-            </div>
-          ))}
-          <button type="button" onClick={() => onChange(mode, [...askRules, { method: 'POST', path: '/*' }])}>Add call</button>
-        </div>
-      ) : null}
-    </>
-  );
+function destinationValid(value: DestinationDto): boolean {
+  const i = value.injection;
+  if (!value.match.trim()) return false;
+  if ((i.type === 'api-key' || i.type === 'query') && !i.name?.trim()) return false;
+  return i.type !== 'custom' || !!i.template?.includes('{{');
 }
 
 export function AddKeyDialog({
@@ -262,43 +167,30 @@ export function AddKeyDialog({
   onClose: () => void;
   onSaved: () => void;
 }): JSX.Element {
-  const peers = usePeers(gid);
   const [preset, setPreset] = useState<KeyPresetDto | 'custom' | null>(null);
   const [label, setLabel] = useState('');
   const [key, setKey] = useState('');
   const [keyTouched, setKeyTouched] = useState(false);
   const [value, setValue] = useState('');
-  const [match, setMatch] = useState('');
-  const [injection, setInjection] = useState<RuleDto['injection']>({ type: 'bearer' });
-  const [approval, setApproval] = useState<ApprovalMode>('allow');
-  const [askRules, setAskRules] = useState<AskRuleDto[]>([]);
-  const [alsoGroups, setAlsoGroups] = useState<string[]>([]);
+  const [destination, setDestination] = useState<DestinationDto>({ match: '', injection: { type: 'bearer' } });
   const [busy, setBusy] = useState(false);
   useEscapeClose(onClose, busy);
+
+  function pick(next: KeyPresetDto | 'custom'): void {
+    setPreset(next);
+    setLabel(next === 'custom' ? '' : next.label);
+    setKey(next === 'custom' ? '' : next.key);
+    setDestination(next === 'custom' ? { match: '', injection: { type: 'bearer' } } : next.destination);
+    setKeyTouched(false);
+  }
 
   useEffect(() => {
     if (!initialMatch) return;
     const host = initialMatch.split('/')[0];
-    const match = presets.find((p) => p.match.split('/')[0] === host);
+    const match = presets.find((p) => p.destination.match.split('/')[0] === host && !existingKeys.includes(p.key));
     pick(match ?? 'custom');
-    if (!match) setMatch(initialMatch);
+    if (!match) setDestination({ match: initialMatch, injection: { type: 'bearer' } });
   }, []);
-
-  function pick(next: KeyPresetDto | 'custom'): void {
-    setPreset(next);
-    if (next === 'custom') {
-      setLabel('');
-      setKey('');
-      setMatch('');
-      setInjection({ type: 'bearer' });
-    } else {
-      setLabel(next.label);
-      setKey(next.key);
-      setMatch(next.match);
-      setInjection({ ...next.injection, key: next.key });
-    }
-    setKeyTouched(false);
-  }
 
   if (!preset) {
     return (
@@ -311,7 +203,7 @@ export function AddKeyDialog({
             existingKeys.includes(p.key) ? (
               <MobileDialogItem key={p.id} label={p.label} sublabel={`Already added (${p.key}) · replace its value`} chevron onClick={() => onExisting(p.key)} />
             ) : (
-              <MobileDialogItem key={p.id} label={p.label} sublabel={p.match} chevron onClick={() => pick(p)} />
+              <MobileDialogItem key={p.id} label={p.label} sublabel={p.destination.match} chevron onClick={() => pick(p)} />
             )
           ))}
           <MobileDialogItem label="Another service" sublabel="Any host; choose how the key is sent" chevron onClick={() => pick('custom')} />
@@ -322,21 +214,13 @@ export function AddKeyDialog({
 
   const keyInvalid = key !== '' && !KEY_NAME_RE.test(key);
   const keyDuplicate = existingKeys.includes(key);
-  const canSave = !busy && label.trim() !== '' && key !== '' && !keyInvalid && !keyDuplicate && value !== '' && match.trim() !== '';
-  const editablePeers = (peers ?? []).filter((p) => p.canEdit);
+  const canSave = !busy && label.trim() !== '' && key !== '' && !keyInvalid && !keyDuplicate && value !== '' && destinationValid(destination);
 
   async function save(event: Event): Promise<void> {
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
-    const rule: RuleInput = {
-      match: match.trim(),
-      injection: { ...injection, key },
-      approval,
-      askRules: approval === 'custom' ? askRules : [],
-      enabled: true,
-    };
-    const ok = await send(credPath(gid, '/keys'), 'POST', { key, label: label.trim(), value, rule, alsoGroups }, `Saved ${label.trim()}`);
+    const ok = await send(credPath(gid, '/keys'), 'POST', { key, label: label.trim(), value, destination: { ...destination, match: destination.match.trim() } }, `Saved ${label.trim()}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -369,7 +253,7 @@ export function AddKeyDialog({
             if (!keyTouched && preset === 'custom') setKey(toKeyName(next));
           }} />
         </Field>
-        <Field label="Key name" info="How rules and agent requests refer to this key. Upper case, digits and underscores.">
+        <Field label="Key name" info="How this key is referred to, e.g. in header templates. Upper case, digits and underscores.">
           <input type="text" class="ga-cred-mono" value={key} spellcheck={false} onInput={(event) => {
             setKeyTouched(true);
             setKey(event.currentTarget.value.toUpperCase());
@@ -381,24 +265,7 @@ export function AddKeyDialog({
           <SecretInput value={value} onInput={setValue} autoFocus={preset !== 'custom'} />
         </Field>
         <p class="group-admin-help ga-cred-field-help">Stored encrypted by the credential gateway. Nobody can view it after saving; you can only replace it.</p>
-        <Field label="Send it to" info="Host, optionally with a port and a path pattern, e.g. api.example.com/v1/*. The key is only ever sent to matching requests.">
-          <input type="text" class="ga-cred-mono" value={match} spellcheck={false} placeholder="api.example.com" onInput={(event) => setMatch(event.currentTarget.value)} />
-        </Field>
-        <InjectionFields value={{ ...injection, key }} keys={[key]} keyFixed onChange={setInjection} />
-        <ApprovalFields mode={approval} askRules={askRules} onChange={(m, rules) => { setApproval(m); setAskRules(rules); }} />
-        <h4>Also add to</h4>
-        {peers === null ? <p class="muted">Loading groups…</p> : (
-          <GroupChecklist
-            groups={editablePeers.map((p) => ({
-              groupId: p.groupId,
-              groupName: p.groupName,
-              detail: p.keys.some((k) => k.key === key) ? `Replaces its ${key}` : undefined,
-            }))}
-            selected={alsoGroups}
-            onChange={setAlsoGroups}
-          />
-        )}
-        <p class="group-admin-help ga-cred-field-help">Each group gets its own copy; changing one later doesn't change the others.</p>
+        <DestinationFields keyName={key} value={destination} onChange={setDestination} />
       </form>
       <Footer>
         <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
@@ -420,19 +287,15 @@ export function ReplaceKeyDialog({
   onSaved: () => void;
 }): JSX.Element {
   const [value, setValue] = useState('');
-  const [alsoGroups, setAlsoGroups] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   useEscapeClose(onClose, busy);
-  const editable = item.alsoIn.filter((g) => g.canEdit);
-  const locked = item.alsoIn.filter((g) => !g.canEdit);
   const verb = item.status === 'needs_value' ? 'Set' : 'Replace';
 
   async function save(event: Event): Promise<void> {
     event.preventDefault();
     if (!value) return;
     setBusy(true);
-    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), 'PUT', { value, alsoGroups },
-      alsoGroups.length ? `Updated ${item.label} in ${alsoGroups.length + 1} groups` : `Updated ${item.label}`);
+    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), 'PUT', { value }, `Updated ${item.label}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -447,21 +310,6 @@ export function ReplaceKeyDialog({
         <Field label="New value">
           <SecretInput value={value} onInput={setValue} autoFocus />
         </Field>
-        {editable.length ? (
-          <>
-            <h4>Also replace it in</h4>
-            <GroupChecklist
-              groups={editable.map((g) => ({ groupId: g.groupId, groupName: g.groupName, detail: g.stale ? 'Its copy is out of date' : undefined }))}
-              selected={alsoGroups}
-              onChange={setAlsoGroups}
-            />
-          </>
-        ) : null}
-        {locked.length ? (
-          <p class="group-admin-help ga-cred-field-help">
-            {locked.map((g) => g.groupName).join(', ')} also {locked.length === 1 ? 'has' : 'have'} a {item.key}; ask an admin of {locked.length === 1 ? 'that group' : 'those groups'} to update it.
-          </p>
-        ) : null}
       </form>
       <Footer>
         <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
@@ -471,7 +319,7 @@ export function ReplaceKeyDialog({
   );
 }
 
-export function ShareKeyDialog({
+export function EditKeyDialog({
   gid,
   item,
   onClose,
@@ -482,165 +330,21 @@ export function ShareKeyDialog({
   onClose: () => void;
   onSaved: () => void;
 }): JSX.Element {
-  const peers = usePeers(gid);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [label, setLabel] = useState(item.label);
+  const [destination, setDestination] = useState<DestinationDto>(item.destination);
   const [busy, setBusy] = useState(false);
   useEscapeClose(onClose, busy);
-  const editable = (peers ?? []).filter((p) => p.canEdit);
-  return (
-    <MobileDialog title={`Copy ${item.label} to other groups`} onClose={onClose} maxWidth="480px" className="ga-cred-dialog" closeDisabled={busy}>
-      <div class="settings-body ga-cred-dialog-body">
-        <p class="group-admin-help">The value is copied inside the credential gateway; it isn't shown to anyone. Each group can then use and replace its own copy.</p>
-        {peers === null ? <p class="muted">Loading groups…</p> : (
-          <GroupChecklist
-            groups={editable.map((p) => ({
-              groupId: p.groupId,
-              groupName: p.groupName,
-              detail: p.keys.some((k) => k.key === item.key) ? `Replaces its ${item.key}` : undefined,
-            }))}
-            selected={selected}
-            onChange={setSelected}
-          />
-        )}
-      </div>
-      <Footer>
-        <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-        <button type="button" class="primary" disabled={busy || selected.length === 0} onClick={async () => {
-          setBusy(true);
-          const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}/share`), 'POST', { toGroups: selected },
-            `Copied ${item.label} to ${selected.length} group${selected.length === 1 ? '' : 's'}`);
-          setBusy(false);
-          if (ok) {
-            onSaved();
-            onClose();
-          }
-        }}>
-          {busy ? 'Copying…' : 'Copy'}
-        </button>
-      </Footer>
-    </MobileDialog>
-  );
-}
-
-export function CopyFromDialog({
-  gid,
-  existingKeys,
-  onClose,
-  onSaved,
-}: {
-  gid: string;
-  existingKeys: string[];
-  onClose: () => void;
-  onSaved: () => void;
-}): JSX.Element {
-  const peers = usePeers(gid);
-  const sources = (peers ?? []).filter((p) => p.canEdit && p.keys.length > 0);
-  const [from, setFrom] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  useEscapeClose(onClose, busy);
-  const source = sources.find((p) => p.groupId === from) ?? null;
-
-  useEffect(() => {
-    if (!from && sources.length) setFrom(sources[0]!.groupId);
-  }, [sources.length]);
-  useEffect(() => setSelected([]), [from]);
-
-  return (
-    <MobileDialog title="Copy keys from another group" onClose={onClose} maxWidth="520px" className="ga-cred-dialog" closeDisabled={busy}>
-      <div class="settings-body ga-cred-dialog-body">
-        {peers === null ? <p class="muted">Loading groups…</p> : sources.length === 0 ? (
-          <p class="group-admin-help">None of the other groups you manage has keys yet.</p>
-        ) : (
-          <>
-            <Field label="From">
-              <select value={from ?? ''} onChange={(event) => setFrom(event.currentTarget.value)}>
-                {sources.map((p) => <option key={p.groupId} value={p.groupId}>{p.groupName}</option>)}
-              </select>
-            </Field>
-            <ul class="ga-cred-checklist">
-              {source?.keys.map((k) => {
-                const missing = k.status !== 'set';
-                return (
-                  <li key={k.key}>
-                    <label class="group-admin-check">
-                      <input
-                        type="checkbox"
-                        disabled={missing}
-                        checked={selected.includes(k.key)}
-                        onChange={(event) => setSelected(event.currentTarget.checked ? [...selected, k.key] : selected.filter((x) => x !== k.key))}
-                      />
-                      <span>{k.label} <code class="ga-cred-code-muted">{k.key}</code></span>
-                    </label>
-                    {missing ? <span class="ga-cred-checklist-note">Has no value to copy</span>
-                      : existingKeys.includes(k.key) ? <span class="ga-cred-checklist-note">Replaces this group's value</span> : null}
-                  </li>
-                );
-              })}
-            </ul>
-            <p class="group-admin-help ga-cred-field-help">Values are copied inside the credential gateway and never shown. Rules for these keys are copied too.</p>
-          </>
-        )}
-      </div>
-      <Footer>
-        <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-        <button type="button" class="primary" disabled={busy || !source || selected.length === 0} onClick={async () => {
-          if (!source) return;
-          setBusy(true);
-          const ok = await send(credPath(gid, '/keys/copy'), 'POST', { fromGroup: source.groupId, keys: selected },
-            `Copied ${selected.length} key${selected.length === 1 ? '' : 's'} from ${source.groupName}`);
-          setBusy(false);
-          if (ok) {
-            onSaved();
-            onClose();
-          }
-        }}>
-          {busy ? 'Copying…' : selected.length > 1 ? `Copy ${selected.length} keys` : 'Copy'}
-        </button>
-      </Footer>
-    </MobileDialog>
-  );
-}
-
-export function RuleDialog({
-  gid,
-  rule,
-  keys,
-  initialKey,
-  onClose,
-  onSaved,
-}: {
-  gid: string;
-  rule: RuleDto | null;
-  keys: string[];
-  initialKey?: string;
-  onClose: () => void;
-  onSaved: () => void;
-}): JSX.Element {
-  const [match, setMatch] = useState(rule?.match ?? '');
-  const [injection, setInjection] = useState<RuleDto['injection']>(rule?.injection ?? { type: 'bearer', key: initialKey ?? keys[0] });
-  const [approval, setApproval] = useState<ApprovalMode>(rule?.approval ?? 'allow');
-  const [askRules, setAskRules] = useState<AskRuleDto[]>(rule?.askRules ?? []);
-  const [busy, setBusy] = useState(false);
-  useEscapeClose(onClose, busy);
-  const needsKey = injection.type !== 'passthrough';
-  const canSave = !busy && match.trim() !== '' && (!needsKey || !!injection.key);
+  const dirty = label.trim() !== item.label || JSON.stringify(destination) !== JSON.stringify(item.destination);
+  const canSave = !busy && dirty && label.trim() !== '' && destinationValid(destination);
 
   async function save(event: Event): Promise<void> {
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
-    const body: RuleInput = {
-      match: match.trim(),
-      injection: needsKey ? injection : { type: 'passthrough' },
-      approval,
-      askRules: approval === 'custom' ? askRules : [],
-      enabled: rule?.enabled ?? true,
-      mcpServer: rule?.mcpServer,
-    };
-    const ok = rule
-      ? await send(credPath(gid, `/rules/${encodeURIComponent(rule.name)}`), 'PUT', body, 'Rule updated')
-      : await send(credPath(gid, '/rules'), 'POST', body, 'Rule added');
+    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), 'PUT', {
+      label: label.trim(),
+      destination: { ...destination, match: destination.match.trim() },
+    }, `Updated ${label.trim()}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -649,18 +353,17 @@ export function RuleDialog({
   }
 
   return (
-    <MobileDialog title={rule ? 'Edit rule' : 'Add a rule'} onClose={onClose} maxWidth="560px" className="ga-cred-dialog" closeDisabled={busy}>
-      <form id="ga-cred-rule" class="settings-body ga-cred-dialog-body" onSubmit={save}>
-        <p class="group-admin-help">A rule says which requests get a key, and whether calls need approval.</p>
-        <Field label="Requests to" info="Host, optionally with a port and a path pattern, e.g. api.example.com/v1/*.">
-          <input type="text" class="ga-cred-mono" value={match} spellcheck={false} placeholder="api.example.com" onInput={(event) => setMatch(event.currentTarget.value)} />
+    <MobileDialog title={`Edit ${item.label}`} onClose={onClose} maxWidth="560px" className="ga-cred-dialog" closeDisabled={busy}>
+      <form id="ga-cred-edit" class="settings-body ga-cred-dialog-body" onSubmit={save}>
+        <p class="group-admin-help"><code>{item.key}</code> · the value stays as it is.</p>
+        <Field label="Name">
+          <input type="text" value={label} onInput={(event) => setLabel(event.currentTarget.value)} />
         </Field>
-        <InjectionFields value={injection} keys={keys} onChange={setInjection} />
-        <ApprovalFields mode={approval} askRules={askRules} onChange={(m, rules) => { setApproval(m); setAskRules(rules); }} />
+        <DestinationFields keyName={item.key} value={destination} onChange={setDestination} />
       </form>
       <Footer>
         <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-        <button type="submit" form="ga-cred-rule" class="primary" disabled={!canSave}>{busy ? 'Saving…' : rule ? 'Save rule' : 'Add rule'}</button>
+        <button type="submit" form="ga-cred-edit" class="primary" disabled={!canSave}>{busy ? 'Saving…' : 'Save'}</button>
       </Footer>
     </MobileDialog>
   );

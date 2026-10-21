@@ -5,7 +5,9 @@ gateway is headless. Credentials are managed in NanoClaw's agent group settings
 through a gateway admin API, and the operator configures the gateway through
 `.env`. Agent Vault's web UI and email/password accounts are not used.
 **Revision 3:** one vault per agent group. Keys shared between groups are
-duplicated, with copy and fan-out support ([§6.2](#62-keys-shared-across-groups)).
+duplicated ([§6.2](#62-keys-shared-across-groups)). **Revision 4:** R1 scope cut
+([§1.1](#11-r1-scope)): no copying between groups, no agent requests, no
+approvals or separate rules, and no activity view.
 
 This proposal reaches the same goals as
 [credential-gateway-proposal.md](credential-gateway-proposal.md) (the "native
@@ -40,7 +42,6 @@ This document covers only what differs.
 - **What NanoClaw keeps or adds:**
   - spawn integration
   - the in-container relay
-  - the approval bridge
   - the Credentials tab and MCP-tab integration
   - the OAuth callback relay
   - the setup skill
@@ -48,6 +49,15 @@ This document covers only what differs.
   proxy.
 - **First step:** a time-boxed spike ([§9](#9-plan)) with explicit go/no-go
   criteria before any rollout work.
+
+### 1.1 R1 scope
+
+| In R1                                                                                                                                                                                        | Deferred                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Keys:** add (from presets or for any host), replace, edit, delete. Each key has exactly one destination (`host[:port][/path-glob]`) and one way it's sent; there's no separate rules list. | **Copying keys between groups** and setting a key in several groups at once (F12). Each group's keys are entered in that group.                                                                                       |
+| **Accounts:** Google and similar OAuth apps (F11), MCP sign-in (F4)                                                                                                                          | **Agent requests:** the agent asking for a key or account through proposals (`request_credential`). In R1, a missing credential returns the gateway's error and the agent tells the user to add it in group settings. |
+| **Network:** allow or block requests to other hosts, hosts allowed without a key while blocking, private-network allowlist                                                                   | **Approvals and fine-grained rules** (F3): ask-before-calling, per-method/path rules, pause/resume, several destinations per key, and the chat approval bridge                                                        |
+| MCP-tab sign-in status row, `ncl credentials`, per-group switch to the gateway                                                                                                               | **Activity view** of proxied requests (the gateway still keeps its request log)                                                                                                                                       |
 
 ## 2. What upstream already provides
 
@@ -80,8 +90,7 @@ flowchart LR
   end
   subgraph H["NanoClaw host"]
     S["spawn"]
-    AB["approval bridge → chat"]
-    PR["MCP probe → proposals"]
+    PR["MCP probe → sign-in"]
     GS["Group settings → Credentials<br/>/api/groups/:gid/admin/credentials/*"]
     CB["/oauth/callback relay<br/>/oauth/client-metadata.json"]
   end
@@ -94,7 +103,6 @@ flowchart LR
   S -- "POST /v1/socket-sessions" --> API
   R == "per-session Unix socket" ==> SL --> M --> VT
   M --> NG["netguard (+F5)"] --> UP["Upstreams"]
-  API -- "F3 approvals long-poll" --> AB
   PR --> API
   B["Admin browser"] -- "NanoClaw login" --> GS
   GS -- "owner-agent token" --> API
@@ -111,27 +119,27 @@ flowchart LR
 | OneCLI secret + host/path pattern             | Credential + service                                                                                                                                                                                                              |
 | OneCLI app connection                         | OAuth credential plus services for each API host                                                                                                                                                                                  |
 | Owner/admin managing or approving credentials | NanoClaw roles, enforced by the host (§6). The gateway sees only the host's owner-agent token.                                                                                                                                    |
-| `request_credential` tool                     | An Agent Vault proposal created through the socket (F1 API passthrough), using upstream's agent skill                                                                                                                             |
+| `request_credential` tool                     | Deferred (§1.1). Later: an Agent Vault proposal created through the socket (F1 API passthrough), using upstream's agent skill.                                                                                                    |
 
 ## 4. Fork changes
 
 Sizes are estimates of new code. "Core diff" is the change to existing upstream
 files, which is what causes merge conflicts.
 
-| #   | Change                                                                                                                                                                                                                                                                                                         | Why                                                                                                                   | Size / core diff                          | Upstream?                            |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------ |
-| F1  | **Socket-bound sessions** (details below)                                                                                                                                                                                                                                                                      | Identity comes from the socket, with no token in the container ([why](credential-gateway-proposal.md#2-architecture)) | M / small                                 | Yes: generic for local orchestrators |
-| F2  | **Blind tunnels:** if no service in the session's vault matches the CONNECT host, splice raw TCP through the network guard instead of terminating TLS. Setting `unmatched_host_mode = tunnel \| mitm \| deny`.                                                                                                 | Certificate-pinned clients and bulk downloads work; less traffic is inspected                                         | S / small (`handleConnect`)               | Yes                                  |
-| F3  | **Per-request approvals:** services get `approval: allow \| ask` plus `(method, path-glob)` rules. An `ask` holds the request, publishes it on `GET /v1/approvals?wait=`, and is decided by `POST /v1/approvals/{id}` from a vault member or the host agent with an `approver` flag. A timeout counts as deny. | Parity with OneCLI approval cards                                                                                     | M / small (hook in `forwardRequest`)      | Yes                                  |
-| F4  | **MCP OAuth** (details below)                                                                                                                                                                                                                                                                                  | The main new feature                                                                                                  | L / small                                 | Yes                                  |
-| F5  | **Network guard additions:** also block NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), 6to4, Teredo and the host's own IPs (ported from smokescreen, MIT); per-vault private allowlist                                                                                                                              | Closes IPv6 bypasses; lets the Home Assistant LAN host be allowed for one group only                                  | S / small (`netguard.go`)                 | Yes                                  |
-| F6  | **Instance setting `reveal_disabled` (required):** turns off `credential get --reveal` and `list --reveal` for every role, including owners                                                                                                                                                                    | The host's owner token must not be able to read values                                                                | S / small                                 | Likely                               |
-| F7  | **Sealed bindings:** a credential's allowed hosts are part of its ciphertext's authenticated data, so services can only reference it on those hosts                                                                                                                                                            | Needed only for topology B (separate VM)                                                                              | M / medium                                | Maybe                                |
-| F8  | **Token-endpoint stubs:** a service type for `oauth2.googleapis.com/token` and similar that answers refresh requests carrying the placeholder refresh token with a synthetic token, without contacting the upstream                                                                                            | stdio MCP servers using credential stubs (Gmail, Calendar)                                                            | S / small                                 | Maybe                                |
-| F9  | **Fork hygiene:** telemetry off by default plus a `notelemetry` build tag; a CI check that fails if an `ee/` directory appears                                                                                                                                                                                 | Privacy, license safety                                                                                               | XS / tiny                                 | No                                   |
-| F10 | **Headless mode** (details below)                                                                                                                                                                                                                                                                              | No second UI or login; configured through `.env`                                                                      | M / small (route registration, bootstrap) | Maybe: "API-only server"             |
-| F11 | **OAuth redirect relay and env-configured OAuth apps** (details below)                                                                                                                                                                                                                                         | The NanoClaw UI hosts the browser-facing OAuth endpoints, so the gateway stays private                                | S / small (`handle_oauth.go`)             | Yes                                  |
-| F12 | **Copying credentials inside the gateway:** `POST /v1/vaults/{dst}/credentials/copy {from_vault, keys}` re-encrypts within the gateway, so values never leave it. Copies record `copied_from` (vault, key, time). Static credentials only.                                                                     | Duplicating shared keys into another group without re-entering them (F6 blocks reading them back)                     | S / none (new package on the store API)   | Maybe                                |
+| #   | Change                                                                                                                                                                                                                                                           | Why                                                                                                                                                                                                                                        | Size / core diff                          | Upstream?                            |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- | ------------------------------------ | --- |
+| F1  | **Socket-bound sessions** (details below)                                                                                                                                                                                                                        | Identity comes from the socket, with no token in the container ([why](credential-gateway-proposal.md#2-architecture))                                                                                                                      | M / small                                 | Yes: generic for local orchestrators |
+| F2  | **Blind tunnels:** if no service in the session's vault matches the CONNECT host, splice raw TCP through the network guard instead of terminating TLS. Setting `unmatched_host_mode = tunnel \| mitm \| deny`.                                                   | Certificate-pinned clients and bulk downloads work; less traffic is inspected                                                                                                                                                              | S / small (`handleConnect`)               | Yes                                  |
+| F3  | **Deferred past R1.** **Per-request approvals:** services get `approval: allow \                                                                                                                                                                                 | ask`plus`(method, path-glob)`rules. An`ask`holds the request, publishes it on`GET /v1/approvals?wait=`, and is decided by `POST /v1/approvals/{id}`from a vault member or the host agent with an`approver` flag. A timeout counts as deny. | Parity with OneCLI approval cards         | M / small (hook in `forwardRequest`) | Yes |
+| F4  | **MCP OAuth** (details below)                                                                                                                                                                                                                                    | The main new feature                                                                                                                                                                                                                       | L / small                                 | Yes                                  |
+| F5  | **Network guard additions:** also block NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), 6to4, Teredo and the host's own IPs (ported from smokescreen, MIT); per-vault private allowlist                                                                                | Closes IPv6 bypasses; lets the Home Assistant LAN host be allowed for one group only                                                                                                                                                       | S / small (`netguard.go`)                 | Yes                                  |
+| F6  | **Instance setting `reveal_disabled` (required):** turns off `credential get --reveal` and `list --reveal` for every role, including owners                                                                                                                      | The host's owner token must not be able to read values                                                                                                                                                                                     | S / small                                 | Likely                               |
+| F7  | **Sealed bindings:** a credential's allowed hosts are part of its ciphertext's authenticated data, so services can only reference it on those hosts                                                                                                              | Needed only for topology B (separate VM)                                                                                                                                                                                                   | M / medium                                | Maybe                                |
+| F8  | **Token-endpoint stubs:** a service type for `oauth2.googleapis.com/token` and similar that answers refresh requests carrying the placeholder refresh token with a synthetic token, without contacting the upstream                                              | stdio MCP servers using credential stubs (Gmail, Calendar)                                                                                                                                                                                 | S / small                                 | Maybe                                |
+| F9  | **Fork hygiene:** telemetry off by default plus a `notelemetry` build tag; a CI check that fails if an `ee/` directory appears                                                                                                                                   | Privacy, license safety                                                                                                                                                                                                                    | XS / tiny                                 | No                                   |
+| F10 | **Headless mode** (details below)                                                                                                                                                                                                                                | No second UI or login; configured through `.env`                                                                                                                                                                                           | M / small (route registration, bootstrap) | Maybe: "API-only server"             |
+| F11 | **OAuth redirect relay and env-configured OAuth apps** (details below)                                                                                                                                                                                           | The NanoClaw UI hosts the browser-facing OAuth endpoints, so the gateway stays private                                                                                                                                                     | S / small (`handle_oauth.go`)             | Yes                                  |
+| F12 | **Deferred past R1.** **Copying credentials inside the gateway:** `POST /v1/vaults/{dst}/credentials/copy {from_vault, keys}` re-encrypts within the gateway, so values never leave it. Copies record `copied_from` (vault, key, time). Static credentials only. | Duplicating shared keys into another group without re-entering them (F6 blocks reading them back)                                                                                                                                          | S / none (new package on the store API)   | Maybe                                |
 
 **F1 details.**
 
@@ -253,24 +261,24 @@ also work, but are then stored unencrypted on disk.
 - **Relay:** `container/agent-runner/src/egress-relay.ts`, the same as in the
   native proposal.
 - **Gateway client:** `src/modules/credentials/agent-vault-client.ts` is the
-  only code that holds the host token. The UI server, `ncl`, spawn and the
-  approval bridge all go through it.
-- **Approvals:** [onecli-approvals.ts](../src/modules/approvals/onecli-approvals.ts)
-  becomes `agent-vault-approvals.ts`, which long-polls F3 and keeps the card
-  flow. Cards and proposal notifications deep-link to the Credentials tab
-  (`?tab=credentials&request=<id>`).
+  only code that holds the host token. The UI server, `ncl` and spawn go
+  through it.
+- **Approvals:** none in R1. OneCLI approval cards
+  ([onecli-approvals.ts](../src/modules/approvals/onecli-approvals.ts)) keep
+  working for groups still on OneCLI.
 - **MCP OAuth trigger:** the existing MCP **Test** action
   (`/mcp-servers/test`) and `mcp-probe` notice a 401 that carries
   `resource_metadata`. The MCP tab then offers **Connect**.
 - **Container skill:** `onecli-gateway` is replaced by `credential-gateway`,
-  which wraps upstream's agent skill (proposals, `/discover`) and its error codes.
+  which explains the gateway's error codes and tells the agent to ask the user to
+  add a missing key or account in group settings → Credentials.
   [upload-trace.ts](../container/agent-runner/src/upload-trace.ts) is updated
   for those codes.
 - **Host-side calls:** use the host token with the loopback MITM port, replacing
   [onecli-proxy.ts](../src/ui/server/chat/onecli-proxy.ts).
 - **Stubs** are written by the host. They contain no secrets.
-- **`ncl credentials`** (host only): `list`, `set --value-stdin`, `delete`,
-  `services …`, `copy …`. Container `ncl` rejects these verbs regardless of
+- **`ncl credentials`** (host only): `list`, `set --value-stdin`, `edit`,
+  `delete`, `network …`. Container `ncl` rejects these verbs regardless of
   `cli_scope`.
 - **Setup:** `/init-agent-vault` replaces `/init-onecli`. It:
   - downloads a pinned release binary and verifies its SHA-256,
@@ -296,21 +304,18 @@ or a sign-in and offers **Sign in**, or links to the key in Credentials.
 Routes extend the existing `/api/groups/:gid/admin/*` dispatcher in
 [group-admin.ts](../src/ui/server/chat/group-admin.ts).
 
-The UI uses plain-language names: **keys** (gateway credentials), **accounts**
-(OAuth connections), **rules** (services), **requests** (proposals) and
-**network** (egress policy). The wire contract is in
+The UI uses plain-language names: **keys** (a gateway credential plus the one
+service that sends it), **accounts** (OAuth connections) and **network**
+(egress policy). The wire contract is in
 [GroupAdminCredentialsApi.ts](../src/ui/client/chat/src/components/GroupAdminCredentialsApi.ts),
 and a mocked fixture of the whole tab is described in
 [ui.md](ui.md). All routes are under `…/admin/credentials`:
 
-| View     | Shows / does                                                                                                                                                                                                                                   | Host routes                                                                                                                       | Gateway API                                      |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| Requests | Pending agent proposals: fill in each credential slot (or copy it from another group), sign in for account requests, approve or decline                                                                                                        | `POST /requests/:id/approve {values, copyFrom}`, `POST /requests/:id/reject`                                                      | Approve/reject proposals                         |
-| Keys     | Name, key name, needs-value / out-of-date status, hosts it's sent to, last used, copied-from and also-in groups. Add (preset or custom; optionally to other groups too), replace (optionally in other groups), copy to or from groups, delete. | `POST /keys`, `PUT /keys/:key {value, alsoGroups}`, `POST /keys/copy`, `POST /keys/:key/share`, `DELETE /keys/:key`, `GET /peers` | Set/delete credentials (no reveal, F6); F12 copy |
-| Accounts | OAuth accounts and MCP sign-ins: status, access, last used; connect, change access, reconnect, disconnect                                                                                                                                      | `POST /accounts/start` → `{state, authorizeUrl}`, `GET /accounts/start/:state`, `DELETE /accounts/:key`                           | F11 connect; F4                                  |
-| Rules    | Host/path match, how the key is sent, approval mode (allow, ask before changes, ask always, ask for listed calls), pause/resume                                                                                                                | `POST /rules`, `PUT /rules/:name`, `DELETE /rules/:name`                                                                          | Set/delete services; F3                          |
-| Activity | Recent requests: time, method, host, path, outcome, key, thread; filters for key use and problems                                                                                                                                              | `GET /activity?filter=&before=`                                                                                                   | Request log                                      |
-| Network  | Unmatched requests (allow without a key, or block), private-network allowlist; operator-wide entries shown read-only                                                                                                                           | `PUT /network`                                                                                                                    | Vault settings; F5                               |
+| View     | Shows / does                                                                                                                                                          | Host routes                                                                                                         | Gateway API                                                        |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Keys     | Name, key name, needs-value status, where it's sent and how, last used. Add (preset or any host), replace the value, edit the name or destination, delete.            | `POST /keys {key, label, value, destination}`, `PUT /keys/:key {value?, label?, destination?}`, `DELETE /keys/:key` | Set/delete the credential and its single service (no reveal, F6)   |
+| Accounts | OAuth accounts and MCP sign-ins: status, access, last used; connect, change access, reconnect, disconnect                                                             | `POST /accounts/start` → `{state, authorizeUrl}`, `GET /accounts/start/:state`, `DELETE /accounts/:key`             | F11 connect; F4                                                    |
+| Network  | Requests to other hosts (allow without a key, or block), hosts allowed without a key while blocking, private-network allowlist; operator-wide entries shown read-only | `PUT /network {unmatched, allowHosts, allowPrivate}`                                                                | Vault settings (`unmatched_host_mode`), `passthrough` services, F5 |
 
 `GET /credentials` returns everything the tab needs in one call, including the
 MCP servers' sign-in status that the MCP tab shows. When the gateway is down,
@@ -335,33 +340,21 @@ and `GET /oauth/client-metadata.json` (the latter is served from F11).
 **Permissions** (enforced by the host; the gateway trusts the host token). Each
 vault belongs to exactly one group, so the rules follow NanoClaw's group roles:
 
-- **Viewing the tab or changing the group's own vault** (secrets, services,
-  connections, egress, approving requests): a scoped admin of the group, an
-  owner or a global admin.
-- **Copying from another group, or setting a value in other groups too:** the
-  actor must be allowed to change every target group. For a copy, they must
-  also be an admin of the source group, because a copy lets the target group
-  use that secret.
+- **Viewing the tab or changing the group's own vault** (keys, accounts,
+  network): a scoped admin of the group, an owner or a global admin.
 - **Handling of values:**
   - never returned by any route,
   - request bodies containing values are never logged,
-  - NanoClaw's audit log records only actor, action, key and the affected
-    groups.
+  - NanoClaw's audit log records only actor, action and key.
 
 ### 6.2 Keys shared across groups
 
 - **Duplication is explicit.** Each group's vault holds its own copy, so a key
   set in one group can never be used by another. That's stronger isolation than
   shared vaults would give.
-- **Adding an existing key to another group:** **Copy from group…** uses F12.
-  The value stays inside the gateway and nobody re-enters it. Migration uses the
-  same path.
-- **Rotating a key:** when setting a key, the Secrets section lists the other
-  groups that hold the same key name (with their `copied_from`) and offers
-  **Also update in these groups**. The host sends the new value to each vault;
-  the value passes through the host once, as for a single set.
-- **Stale copies:** a copy whose `copied_from` is older than the source's last
-  update shows a warning, and the Secrets section links to the other copies.
+- **In R1, each group's keys are entered in that group.** Rotating a shared key
+  means replacing it in every group that has it. Copying between groups and
+  fan-out updates (F12) are deferred (§1.1).
 - **OAuth connections are not copied.** Providers that rotate refresh tokens
   would make the copies invalidate each other. Each group connects its own
   account instead:
@@ -394,25 +387,25 @@ vault belongs to exactly one group, so the rules follow NanoClaw's group roles:
 
 ## 8. Migrating the current OneCLI inventory
 
-| Current (OneCLI)                                                                           | Agent Vault service                                                                                                                          |
-| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bearer `Authorization` (MiniMax ×3, Vercel AI Gateway, Apify, Linear, OpenRouter)          | `bearer`                                                                                                                                     |
-| Path-scoped bearer: domagent `/mcp/bananaclawz`, budget `/http`, Home Assistant `/api/mcp` | `bearer` with a path glob                                                                                                                    |
-| NextCloud `Basic {value}` (pre-encoded)                                                    | `custom`: `Authorization: Basic {{ NEXTCLOUD_MCP }}`, path `/mcp/*`                                                                          |
-| Seattle Open Data `X-App-Token`                                                            | `api-key` with header `X-App-Token`                                                                                                          |
-| Tavily query parameter `tavilyApiKey`                                                      | Query substitution; the MCP URL becomes `…/mcp/?tavilyApiKey=__TAVILY_API_KEY__`                                                             |
-| `anthropic` type (api.anthropic.com, api.minimax.io)                                       | `api-key` with `x-api-key`, or a `custom` Bearer + beta header for OAuth tokens. Merge the two overlapping api.minimax.io entries.           |
-| 7 Google apps × 2 accounts                                                                 | One OAuth credential per account with the union of scopes, connected in each group that uses it (§6.2), plus one service per Google API host |
+| Current (OneCLI)                                                                           | Agent Vault service                                                                                                                                      |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bearer `Authorization` (MiniMax ×3, Vercel AI Gateway, Apify, Linear, OpenRouter)          | `bearer`                                                                                                                                                 |
+| Path-scoped bearer: domagent `/mcp/bananaclawz`, budget `/http`, Home Assistant `/api/mcp` | `bearer` with a path glob                                                                                                                                |
+| NextCloud `Basic {value}` (pre-encoded)                                                    | `custom`: `Authorization: Basic {{ NEXTCLOUD_MCP }}`, path `/mcp/*`                                                                                      |
+| Seattle Open Data `X-App-Token`                                                            | `api-key` with header `X-App-Token`                                                                                                                      |
+| Tavily query parameter `tavilyApiKey`                                                      | Query substitution; the MCP URL becomes `…/mcp/?tavilyApiKey=__TAVILY_API_KEY__`                                                                         |
+| `anthropic` type (api.anthropic.com, api.minimax.io)                                       | `api-key` with `x-api-key`, or a `custom` Bearer + beta header for OAuth tokens. Merge the two overlapping api.minimax.io entries.                       |
+| 7 Google apps × 2 accounts                                                                 | One OAuth credential per account with the union of scopes, connected in each group that uses it (§6.2); the gateway adds one service per Google API host |
 
 **How the migration runs:** `scripts/migrate-from-onecli.ts` reads
 `onecli secrets list` and each OneCLI agent's grants (metadata only). OneCLI
-agents are one per group, so for each group it creates that group's services and
-one proposal with credential slots for the keys it was granted.
+agents are one per group, so for each group it creates that group's keys with
+their destinations and no values.
 
-- The operator enters each distinct value once, in any one group, under
-  **Credentials → Requests**.
-- The other groups that need it are filled with **Copy from group…** (F12).
-- Google accounts are connected per group from **Credentials → Connections**.
+- The operator sets each value under **Credentials → Keys** (shown as **Needs a
+  value**) or with `ncl credentials set --value-stdin`, once per group that
+  uses it.
+- Google accounts are connected per group from **Credentials → Accounts**.
 
 ## 9. Plan
 
@@ -435,23 +428,24 @@ analysis still applies.
 
 **Phases after a go:**
 
-| Phase         | Scope                                                                                                                                                                                                          |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1            | F1, F2, F5, F6, F9, F10, F12, NanoClaw integration with per-group vaults, Credentials tab (Secrets with copy and fan-out, Services), `ncl credentials`, per-group `credential_backend = onecli \| agent-vault` |
-| P2            | F3 approvals and the bridge; Credentials tab Requests and Activity                                                                                                                                             |
-| P3            | F11, Google OAuth through Credentials → Connections, F8 stubs                                                                                                                                                  |
-| P4            | F4 MCP OAuth; MCP-tab auth status and Connect, probe trigger                                                                                                                                                   |
-| P5            | Migration script, cutover                                                                                                                                                                                      |
-| P6            | Remove OneCLI                                                                                                                                                                                                  |
-| P7 (optional) | Topology B (forwarder + upstream token mode) plus F7 and the tighter host role (§11)                                                                                                                           |
+| Phase         | Scope                                                                                                                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P1            | F1, F2, F5, F6, F9, F10, socket rebinding after gateway restarts, NanoClaw integration with per-group vaults, Credentials tab (Keys, Network), `ncl credentials`, per-group `credential_backend = onecli \| agent-vault` |
+| P2            | F11, Google OAuth through Credentials → Accounts, F8 stubs                                                                                                                                                               |
+| P3            | F4 MCP OAuth; MCP-tab sign-in row and Accounts, probe trigger                                                                                                                                                            |
+| P4            | Migration script, cutover                                                                                                                                                                                                |
+| P5            | Remove OneCLI                                                                                                                                                                                                            |
+| P6 (after R1) | Deferred features (§1.1): F3 approvals and the chat bridge with per-call rules, F12 copying between groups, agent requests, activity view                                                                                |
+| P7 (optional) | Topology B (forwarder + upstream token mode) plus F7 and the tighter host role (§11)                                                                                                                                     |
 
-Each phase has the same exit criteria as the native proposal's matching phase.
+R1 is P1–P5. Each phase has the same exit criteria as the native proposal's
+matching phase.
 
 ## 10. Comparison with the native proposal
 
 |                            | Agent Vault fork                                                                                       | Native (TypeScript)                           |
 | -------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
-| Code to write              | NanoClaw integration and Credentials UI, MCP OAuth, approvals, headless mode                           | Proxy, CA, vault, OAuth, plus all of the left |
+| Code to write              | NanoClaw integration and Credentials UI, MCP OAuth, headless mode                                      | Proxy, CA, vault, OAuth, plus all of the left |
 | Test coverage from day one | Upstream suite (~0.84 MB of tests)                                                                     | Only what we write                            |
 | Admin UI                   | NanoClaw group settings → Credentials (gateway is headless)                                            | NanoClaw group settings → Credentials         |
 | Security fixes             | Cherry-picked from upstream                                                                            | Ours alone                                    |
@@ -466,14 +460,13 @@ Each phase has the same exit criteria as the native proposal's matching phase.
    - **Mitigation:** the MIT snapshot stays usable indefinitely.
    - **Mitigation:** keep the fork small.
    - **Mitigation:** the F9 CI check catches `ee/` changes.
-2. **Duplicated shared keys.** Rotating a shared key means updating every copy.
-   - **Mitigations:** fan-out set, `copied_from` tracking and stale-copy
-     warnings (§6.2).
-   - **Later option:** a "layered vaults" fork change could remove the
-     duplication.
+2. **Duplicated shared keys.** Rotating a shared key means replacing it in
+   every group that has it, by hand in R1.
+   - **Later options:** copy and fan-out (F12, deferred), or a "layered vaults"
+     fork change that removes the duplication.
 3. **The host holds an instance-owner token.**
-   - **What a compromised host could do:** set values, retarget services,
-     approve requests and create vaults.
+   - **What a compromised host could do:** set values, retarget services and
+     create vaults.
    - **What it couldn't do:** read values, because of F6.
    - **Topology A:** this matches the existing trust model (the host already
      controls Docker).
@@ -488,5 +481,5 @@ Each phase has the same exit criteria as the native proposal's matching phase.
    compromised host can still read process memory. This is the same trust model
    as native §2.1.
 6. **Go expertise is needed** for reviewing upstream syncs.
-7. **Open question:** do F3 approvals need "approve for N minutes" from day one,
-   or is per-call enough to start?
+7. **No approvals in R1.** Any granted key is used without asking. Groups that
+   need human approval for credentialed actions stay on OneCLI until F3 lands.

@@ -752,21 +752,24 @@ time across settlement. Generated fixture assets are ignored and rebuilt from
 `src/ui/client/chat/fixtures/`.
 
 A second fixture renders the production Agent Settings dialog with the proposed
-**Credentials** tab (see
-[credential-gateway-agent-vault-fork-proposal.md](credential-gateway-agent-vault-fork-proposal.md)).
-The tab is hidden in the app until `credentialsUiEnabled` is turned on. The
-fixture mocks every `/admin/credentials/*` route in the page:
+**Credentials** tab (R1 scope in
+[credential-gateway-agent-vault-fork-proposal.md](credential-gateway-agent-vault-fork-proposal.md)):
+**Keys** (each with one destination), **Accounts** (OAuth and MCP sign-in) and
+**Network**, plus the sign-in row in the MCP server editor. The tab is hidden in
+the app until `credentialsUiEnabled` is turned on. The fixture mocks every
+`/admin/credentials/*` route in the page:
 
 ```bash
 pnpm --dir src/ui/client/chat run fixture:credentials
 ```
 
 This typechecks, builds into `data/dev-fixtures/credentials/`, and serves it at
-`http://127.0.0.1:4175/`, rebuilding on change. To view it through the running UI instead,
+`http://127.0.0.1:4175/`, rebuilding on change; `PORT` overrides the port. To
+view it through the running UI instead,
 `pnpm --dir src/ui/client/chat run build:credentials-fixture` writes
 content-hashed files to `dist/` and prints the
-`/ui/chat/dist/credentials-fixture-<hash>.html` path to open. `PORT` overrides the port, and
-`?tab=mcp` opens the MCP servers tab. Sign-ins open a simulated provider window
+`/ui/chat/dist/credentials-fixture-<hash>.html` path to open. `?tab=mcp` opens
+the MCP servers tab. Sign-ins open a simulated provider window
 with Allow and Deny. The fixture panel can:
 
 - switch between typical and new-group data,

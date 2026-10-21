@@ -5,19 +5,13 @@ import type {
   AccountProgressDto,
   AccountStartDto,
   AccountStartInput,
-  ActivityDecision,
-  ActivityDto,
   CredentialsOverviewDto,
-  GroupRefDto,
+  DestinationDto,
   KeyDto,
   KeyPresetDto,
   McpAuthDto,
   NetworkDto,
   OAuthAppDto,
-  PeerGroupDto,
-  RequestDto,
-  RuleDto,
-  RuleInput,
 } from '../src/components/GroupAdminCredentialsApi';
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
 
@@ -39,24 +33,6 @@ export interface LoggedCall {
   body?: string;
 }
 
-interface StoredKey {
-  key: string;
-  label: string;
-  status: KeyDto['status'];
-  updatedAt: string | null;
-  lastUsedAt: string | null;
-  copiedFrom: { groupId: string; at: string } | null;
-  /** Where the key is sent; used when copying between groups. */
-  match?: string;
-}
-
-interface Peer {
-  groupId: string;
-  groupName: string;
-  canEdit: boolean;
-  keys: StoredKey[];
-}
-
 interface PendingSignIn {
   input: AccountStartInput;
   status: AccountProgressDto['status'];
@@ -65,16 +41,12 @@ interface PendingSignIn {
 }
 
 interface State {
-  keys: StoredKey[];
-  rules: RuleDto[];
+  keys: KeyDto[];
   accounts: AccountDto[];
-  requests: RequestDto[];
   network: NetworkDto;
   mcpServers: Record<string, McpServerConfigDto>;
   mcpAuth: Record<string, { auth: McpAuthDto['auth']; key?: string; status?: McpAuthDto['status']; account?: string | null }>;
-  peers: Peer[];
   signIns: Map<string, PendingSignIn>;
-  activity: ActivityDto[];
   seq: number;
 }
 
@@ -115,120 +87,49 @@ const OAUTH_APPS: OAuthAppDto[] = [
 ];
 
 const PRESETS: KeyPresetDto[] = [
-  { id: 'openrouter', label: 'OpenRouter', key: 'OPENROUTER_API_KEY', match: 'openrouter.ai', injection: { type: 'bearer' }, obtainUrl: 'https://openrouter.ai/settings/keys' },
-  { id: 'anthropic', label: 'Anthropic', key: 'ANTHROPIC_API_KEY', match: 'api.anthropic.com', injection: { type: 'api-key', name: 'x-api-key' }, obtainUrl: 'https://console.anthropic.com/settings/keys' },
-  { id: 'openai', label: 'OpenAI', key: 'OPENAI_API_KEY', match: 'api.openai.com', injection: { type: 'bearer' }, obtainUrl: 'https://platform.openai.com/api-keys' },
-  { id: 'github', label: 'GitHub', key: 'GITHUB_TOKEN', match: 'api.github.com', injection: { type: 'bearer' }, hint: 'Use a fine-grained token limited to the repositories the agent needs.', obtainUrl: 'https://github.com/settings/personal-access-tokens/new' },
-  { id: 'brave', label: 'Brave Search', key: 'BRAVE_API_KEY', match: 'api.search.brave.com', injection: { type: 'api-key', name: 'X-Subscription-Token' }, obtainUrl: 'https://api-dashboard.search.brave.com/app/keys' },
-  { id: 'tavily', label: 'Tavily (MCP)', key: 'TAVILY_API_KEY', match: 'mcp.tavily.com/mcp/*', injection: { type: 'query', name: 'tavilyApiKey' } },
-  { id: 'notion', label: 'Notion (API)', key: 'NOTION_TOKEN', match: 'api.notion.com', injection: { type: 'bearer' } },
-  { id: 'home-assistant', label: 'Home Assistant', key: 'HOME_ASSISTANT_TOKEN', match: 'homeassistant.local:8123', injection: { type: 'bearer' }, hint: 'Create a long-lived access token on your Home Assistant profile page.' },
+  { id: 'openrouter', label: 'OpenRouter', key: 'OPENROUTER_API_KEY', destination: { match: 'openrouter.ai', injection: { type: 'bearer' } }, obtainUrl: 'https://openrouter.ai/settings/keys' },
+  { id: 'anthropic', label: 'Anthropic', key: 'ANTHROPIC_API_KEY', destination: { match: 'api.anthropic.com', injection: { type: 'api-key', name: 'x-api-key' } }, obtainUrl: 'https://console.anthropic.com/settings/keys' },
+  { id: 'openai', label: 'OpenAI', key: 'OPENAI_API_KEY', destination: { match: 'api.openai.com', injection: { type: 'bearer' } }, obtainUrl: 'https://platform.openai.com/api-keys' },
+  { id: 'github', label: 'GitHub', key: 'GITHUB_TOKEN', destination: { match: 'api.github.com', injection: { type: 'bearer' } }, hint: 'Use a fine-grained token limited to the repositories the agent needs.', obtainUrl: 'https://github.com/settings/personal-access-tokens/new' },
+  { id: 'brave', label: 'Brave Search', key: 'BRAVE_API_KEY', destination: { match: 'api.search.brave.com', injection: { type: 'api-key', name: 'X-Subscription-Token' } }, obtainUrl: 'https://api-dashboard.search.brave.com/app/keys' },
+  { id: 'tavily', label: 'Tavily (MCP)', key: 'TAVILY_API_KEY', destination: { match: 'mcp.tavily.com/mcp/*', injection: { type: 'query', name: 'tavilyApiKey' } } },
+  { id: 'notion', label: 'Notion (API)', key: 'NOTION_TOKEN', destination: { match: 'api.notion.com', injection: { type: 'bearer' } } },
+  { id: 'home-assistant', label: 'Home Assistant', key: 'HOME_ASSISTANT_TOKEN', destination: { match: 'homeassistant.local:8123', injection: { type: 'bearer' } }, hint: 'Create a long-lived access token on your Home Assistant profile page.' },
 ];
 
-function rule(name: string, match: string, injection: RuleDto['injection'], extra: Partial<RuleDto> = {}): RuleDto {
-  return { name, match, injection, approval: 'allow', askRules: [], enabled: true, ...extra };
+function key(k: string, label: string, destination: DestinationDto, extra: Partial<KeyDto> = {}): KeyDto {
+  return { key: k, label, status: 'set', updatedAt: iso(20 * DAY), lastUsedAt: iso(3 * HOUR), destination, ...extra };
 }
 
 function typicalState(): State {
-  const keys: StoredKey[] = [
-    { key: 'OPENROUTER_API_KEY', label: 'OpenRouter', status: 'set', updatedAt: iso(40 * DAY), lastUsedAt: iso(4 * MINUTE), copiedFrom: null, match: 'openrouter.ai' },
-    { key: 'TAVILY_API_KEY', label: 'Tavily', status: 'set', updatedAt: iso(12 * DAY), lastUsedAt: iso(2 * HOUR), copiedFrom: null, match: 'mcp.tavily.com/mcp/*' },
-    { key: 'NEXTCLOUD_MCP', label: 'Nextcloud', status: 'set', updatedAt: iso(20 * DAY), lastUsedAt: iso(1 * DAY), copiedFrom: { groupId: 'research', at: iso(20 * DAY) }, match: 'nextcloud.example.org/mcp/*' },
-    { key: 'GITHUB_TOKEN', label: 'GitHub', status: 'set', updatedAt: iso(3 * DAY), lastUsedAt: iso(5 * HOUR), copiedFrom: null, match: 'api.github.com' },
-    { key: 'SEATTLE_DATA_TOKEN', label: 'Seattle Open Data', status: 'set', updatedAt: iso(70 * DAY), lastUsedAt: iso(9 * DAY), copiedFrom: null, match: 'data.seattle.gov' },
-    { key: 'HOME_ASSISTANT_TOKEN', label: 'Home Assistant', status: 'needs_value', updatedAt: null, lastUsedAt: null, copiedFrom: null, match: 'homeassistant.local:8123' },
-    { key: 'MINIMAX_API_KEY', label: 'MiniMax', status: 'set', updatedAt: iso(55 * DAY), lastUsedAt: null, copiedFrom: null },
-  ];
-  const rules: RuleDto[] = [
-    rule('openrouter', 'openrouter.ai', { type: 'bearer', key: 'OPENROUTER_API_KEY' }),
-    rule('tavily', 'mcp.tavily.com/mcp/*', { type: 'query', key: 'TAVILY_API_KEY', name: 'tavilyApiKey' }, { mcpServer: 'tavily' }),
-    rule('nextcloud', 'nextcloud.example.org/mcp/*', { type: 'custom', key: 'NEXTCLOUD_MCP', template: 'Basic {{ NEXTCLOUD_MCP }}' }, { mcpServer: 'nextcloud' }),
-    rule('github', 'api.github.com', { type: 'bearer', key: 'GITHUB_TOKEN' }, { approval: 'ask-writes' }),
-    rule('seattle-data', 'data.seattle.gov', { type: 'api-key', key: 'SEATTLE_DATA_TOKEN', name: 'X-App-Token' }),
-    rule('home-assistant', 'homeassistant.local:8123/api/mcp', { type: 'bearer', key: 'HOME_ASSISTANT_TOKEN' }, { mcpServer: 'home_assistant' }),
-    rule('gmail', 'gmail.googleapis.com', { type: 'bearer', key: 'GOOGLE_ALEX' }, {
-      approval: 'custom',
-      askRules: [{ method: 'POST', path: '/gmail/v1/users/*/messages/send' }],
-    }),
-    rule('google-calendar', 'www.googleapis.com/calendar/*', { type: 'bearer', key: 'GOOGLE_ALEX' }),
-    rule('google-drive', 'www.googleapis.com/drive/*', { type: 'bearer', key: 'GOOGLE_SAM' }, { enabled: false }),
-    rule('pypi', 'pypi.org', { type: 'passthrough' }),
-  ];
-  const accounts: AccountDto[] = [
-    {
-      key: 'GOOGLE_ALEX', kind: 'oauth_app', provider: 'google', providerLabel: 'Google', account: 'alex@example.com',
-      scopes: ['gmail-read', 'gmail-send', 'calendar'].map((id) => ({ id, label: GOOGLE_SCOPES[id]!.label })),
-      status: 'connected', connectedAt: iso(30 * DAY), lastUsedAt: iso(25 * MINUTE),
-    },
-    {
-      key: 'GOOGLE_SAM', kind: 'oauth_app', provider: 'google', providerLabel: 'Google', account: 'sam@example.com',
-      scopes: [{ id: 'drive-read', label: GOOGLE_SCOPES['drive-read']!.label }],
-      status: 'needs_reconnect', connectedAt: iso(90 * DAY), lastUsedAt: iso(8 * DAY),
-    },
-    {
-      key: 'MCP_LINEAR', kind: 'mcp_oauth', provider: 'mcp', providerLabel: 'Linear', account: 'alex@example.com',
-      scopes: [], status: 'connected', connectedAt: iso(6 * DAY), lastUsedAt: iso(3 * HOUR),
-      mcpServer: 'linear', resource: 'https://mcp.linear.app/mcp',
-    },
-  ];
-  const requests: RequestDto[] = [
-    {
-      id: 'req-weather', createdAt: iso(18 * MINUTE), expiresAt: new Date(Date.now() + 7 * DAY - 18 * MINUTE).toISOString(),
-      thread: 'Weekend trip planning',
-      message: 'I need a weather API to check the forecast for Saturday’s hike. WeatherAPI.com has a free tier.',
-      slots: [{
-        key: 'WEATHER_API_KEY', label: 'WeatherAPI.com', description: 'Free-tier API key for forecasts.',
-        obtainUrl: 'https://www.weatherapi.com/signup.aspx', obtainInstructions: 'Sign up, then copy the key from your dashboard.',
-        copyableFrom: [],
-      }],
-      rules: [{ match: 'api.weatherapi.com', injection: { type: 'query', key: 'WEATHER_API_KEY', name: 'key' }, approval: 'allow', askRules: [], enabled: true }],
-    },
-    {
-      id: 'req-brave', createdAt: iso(2 * HOUR), expiresAt: new Date(Date.now() + 6 * DAY).toISOString(),
-      thread: 'Funko research',
-      message: 'Web search through Brave would let me check current prices. Research already has a Brave key.',
-      slots: [{
-        key: 'BRAVE_API_KEY', label: 'Brave Search', description: 'Brave Search API subscription token.',
-        obtainUrl: 'https://api-dashboard.search.brave.com/app/keys',
-        copyableFrom: [{ groupId: 'research', groupName: 'Research', canEdit: true }],
-      }],
-      rules: [{ match: 'api.search.brave.com', injection: { type: 'api-key', key: 'BRAVE_API_KEY', name: 'X-Subscription-Token' }, approval: 'allow', askRules: [], enabled: true }],
-    },
-    {
-      id: 'req-calendar', createdAt: iso(1 * DAY), expiresAt: new Date(Date.now() + 5 * HOUR).toISOString(),
-      thread: 'Family schedule',
-      message: 'To add the school events, I need access to Sam’s Google Calendar.',
-      slots: [],
-      rules: [],
-      account: { provider: 'google', providerLabel: 'Google', scopes: [{ id: 'calendar', label: GOOGLE_SCOPES.calendar!.label }] },
-    },
-  ];
-  const peers: Peer[] = [
-    {
-      groupId: 'research', groupName: 'Research', canEdit: true, keys: [
-        { key: 'OPENROUTER_API_KEY', label: 'OpenRouter', status: 'set', updatedAt: iso(40 * DAY), lastUsedAt: null, copiedFrom: null, match: 'openrouter.ai' },
-        { key: 'NEXTCLOUD_MCP', label: 'Nextcloud', status: 'set', updatedAt: iso(2 * DAY), lastUsedAt: null, copiedFrom: null, match: 'nextcloud.example.org/mcp/*' },
-        { key: 'BRAVE_API_KEY', label: 'Brave Search', status: 'set', updatedAt: iso(15 * DAY), lastUsedAt: null, copiedFrom: null, match: 'api.search.brave.com' },
-      ],
-    },
-    {
-      groupId: 'travel', groupName: 'Travel', canEdit: true, keys: [
-        { key: 'GOOGLE_MAPS_KEY', label: 'Google Maps', status: 'set', updatedAt: iso(9 * DAY), lastUsedAt: null, copiedFrom: null, match: 'maps.googleapis.com' },
-        { key: 'AMADEUS_API_KEY', label: 'Amadeus', status: 'needs_value', updatedAt: null, lastUsedAt: null, copiedFrom: null },
-      ],
-    },
-    {
-      groupId: 'family', groupName: 'Family', canEdit: false, keys: [
-        { key: 'OPENROUTER_API_KEY', label: 'OpenRouter', status: 'set', updatedAt: iso(80 * DAY), lastUsedAt: null, copiedFrom: null, match: 'openrouter.ai' },
-      ],
-    },
-  ];
   return {
-    keys,
-    rules,
-    accounts,
-    requests,
-    network: { unmatched: 'tunnel', allowPrivate: ['homeassistant.local:8123'], operatorAllowPrivate: ['10.0.1.105/32'] },
+    keys: [
+      key('OPENROUTER_API_KEY', 'OpenRouter', { match: 'openrouter.ai', injection: { type: 'bearer' } }, { updatedAt: iso(40 * DAY), lastUsedAt: iso(4 * MINUTE) }),
+      key('TAVILY_API_KEY', 'Tavily', { match: 'mcp.tavily.com/mcp/*', injection: { type: 'query', name: 'tavilyApiKey' } }, { mcpServer: 'tavily', updatedAt: iso(12 * DAY), lastUsedAt: iso(2 * HOUR) }),
+      key('NEXTCLOUD_MCP', 'Nextcloud', { match: 'nextcloud.example.org/mcp/*', injection: { type: 'custom', template: 'Basic {{ NEXTCLOUD_MCP }}' } }, { mcpServer: 'nextcloud', lastUsedAt: iso(1 * DAY) }),
+      key('GITHUB_TOKEN', 'GitHub', { match: 'api.github.com', injection: { type: 'bearer' } }, { updatedAt: iso(3 * DAY), lastUsedAt: iso(5 * HOUR) }),
+      key('SEATTLE_DATA_TOKEN', 'Seattle Open Data', { match: 'data.seattle.gov', injection: { type: 'api-key', name: 'X-App-Token' } }, { updatedAt: iso(70 * DAY), lastUsedAt: iso(9 * DAY) }),
+      key('HOME_ASSISTANT_TOKEN', 'Home Assistant', { match: 'homeassistant.local:8123/api/mcp', injection: { type: 'bearer' } }, { mcpServer: 'home_assistant', status: 'needs_value', updatedAt: null, lastUsedAt: null }),
+      key('MINIMAX_API_KEY', 'MiniMax', { match: 'api.minimax.io', injection: { type: 'custom', template: 'Bearer {{ MINIMAX_API_KEY }}' } }, { updatedAt: iso(55 * DAY), lastUsedAt: iso(30 * MINUTE) }),
+    ],
+    accounts: [
+      {
+        key: 'GOOGLE_ALEX', kind: 'oauth_app', provider: 'google', providerLabel: 'Google', account: 'alex@example.com',
+        scopes: ['gmail-read', 'gmail-send', 'calendar'].map((id) => ({ id, label: GOOGLE_SCOPES[id]!.label })),
+        status: 'connected', connectedAt: iso(30 * DAY), lastUsedAt: iso(25 * MINUTE),
+      },
+      {
+        key: 'GOOGLE_SAM', kind: 'oauth_app', provider: 'google', providerLabel: 'Google', account: 'sam@example.com',
+        scopes: [{ id: 'drive-read', label: GOOGLE_SCOPES['drive-read']!.label }],
+        status: 'needs_reconnect', connectedAt: iso(90 * DAY), lastUsedAt: iso(8 * DAY),
+      },
+      {
+        key: 'MCP_LINEAR', kind: 'mcp_oauth', provider: 'mcp', providerLabel: 'Linear', account: 'alex@example.com',
+        scopes: [], status: 'connected', connectedAt: iso(6 * DAY), lastUsedAt: iso(3 * HOUR),
+        mcpServer: 'linear', resource: 'https://mcp.linear.app/mcp',
+      },
+    ],
+    network: { unmatched: 'tunnel', allowHosts: ['pypi.org', 'registry.npmjs.org'], allowPrivate: ['homeassistant.local:8123'], operatorAllowPrivate: ['10.0.1.105/32'] },
     mcpServers: {
       tavily: { type: 'http', url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=__TAVILY_API_KEY__' },
       nextcloud: { type: 'http', url: 'https://nextcloud.example.org/mcp/' },
@@ -244,9 +145,7 @@ function typicalState(): State {
       linear: { auth: 'oauth', status: 'ok', account: 'alex@example.com' },
       notion: { auth: 'oauth', status: 'needs_sign_in' },
     },
-    peers,
     signIns: new Map(),
-    activity: makeActivity(),
     seq: 1,
   };
 }
@@ -256,39 +155,11 @@ function emptyState(): State {
   return {
     ...state,
     keys: [],
-    rules: [],
     accounts: [],
-    requests: [],
-    activity: [],
-    network: { unmatched: 'tunnel', allowPrivate: [], operatorAllowPrivate: [] },
+    network: { unmatched: 'tunnel', allowHosts: [], allowPrivate: [], operatorAllowPrivate: [] },
     mcpServers: { notion: { type: 'http', url: 'https://mcp.notion.com/mcp' } },
     mcpAuth: { notion: { auth: 'oauth', status: 'needs_sign_in' } },
   };
-}
-
-function makeActivity(): ActivityDto[] {
-  const rows: [string, string, string, ActivityDecision, number | null, string?][] = [
-    ['POST', 'openrouter.ai', '/api/v1/chat/completions', 'injected', 200, 'OPENROUTER_API_KEY'],
-    ['GET', 'mcp.tavily.com', '/mcp/', 'injected', 200, 'TAVILY_API_KEY'],
-    ['POST', 'gmail.googleapis.com', '/gmail/v1/users/me/messages/send', 'approved', 200, 'GOOGLE_ALEX'],
-    ['GET', 'pypi.org', '/simple/requests/', 'tunnel', null],
-    ['POST', 'api.github.com', '/repos/alex/notes/issues', 'denied', 403, 'GITHUB_TOKEN'],
-    ['GET', 'api.github.com', '/repos/alex/notes/issues', 'injected', 200, 'GITHUB_TOKEN'],
-    ['GET', 'www.googleapis.com', '/drive/v3/files', 'blocked', 403, 'GOOGLE_SAM'],
-    ['POST', 'http://homeassistant.local:8123', '/api/mcp', 'injected', 401, 'HOME_ASSISTANT_TOKEN'],
-    ['GET', '169.254.169.254', '/latest/meta-data/', 'blocked', null],
-    ['POST', 'gmail.googleapis.com', '/gmail/v1/users/me/messages/send', 'expired', 403, 'GOOGLE_ALEX'],
-    ['GET', 'registry.npmjs.org', '/marked', 'tunnel', null],
-    ['GET', 'data.seattle.gov', '/resource/kzjm-xkqj.json', 'injected', 200, 'SEATTLE_DATA_TOKEN'],
-  ];
-  const threads = ['Funko research', 'Weekend trip planning', 'Inbox triage', null];
-  return Array.from({ length: 64 }, (_, i) => {
-    const [method, host, path, decision, status, key] = rows[i % rows.length]!;
-    return {
-      id: `act-${i}`, at: iso(i * 47 * MINUTE + 3 * MINUTE), thread: threads[i % threads.length] ?? null,
-      method, host, path, status, decision, key,
-    };
-  });
 }
 
 let options: FixtureOptions = { scenario: 'typical', gatewayDown: false, latencyMs: 250, failNextWrite: false, viewOnly: false };
@@ -318,87 +189,28 @@ function emit(): void {
   for (const listener of listeners) listener();
 }
 
-function peerRef(peer: Peer): GroupRefDto {
-  return { groupId: peer.groupId, groupName: peer.groupName, canEdit: peer.canEdit && !options.viewOnly };
-}
-
 function overview(): CredentialsOverviewDto {
-  const keys: KeyDto[] = state.keys.map((k) => {
-    const source = k.copiedFrom ? state.peers.find((p) => p.groupId === k.copiedFrom!.groupId) : undefined;
-    const sourceKey = source?.keys.find((x) => x.key === k.key);
-    return {
-      key: k.key,
-      label: k.label,
-      status: k.status,
-      updatedAt: k.updatedAt,
-      lastUsedAt: k.lastUsedAt,
-      copiedFrom: k.copiedFrom && source
-        ? { groupId: source.groupId, groupName: source.groupName, at: k.copiedFrom.at,
-          stale: !!sourceKey?.updatedAt && Date.parse(sourceKey.updatedAt) > Date.parse(k.copiedFrom.at) }
-        : null,
-      alsoIn: state.peers
-        .filter((p) => p.keys.some((x) => x.key === k.key))
-        .map((p) => {
-          const theirs = p.keys.find((x) => x.key === k.key)!;
-          return { ...peerRef(p), stale: !!k.updatedAt && !!theirs.updatedAt && Date.parse(theirs.updatedAt) < Date.parse(k.updatedAt) - DAY };
-        }),
-    };
-  });
   const mcp: McpAuthDto[] = Object.entries(state.mcpServers)
     .filter(([, server]) => server.type === 'http' || server.type === 'sse')
     .map(([name, server]) => {
       const auth = state.mcpAuth[name] ?? { auth: 'none' as const };
       const url = (server as { url: string }).url;
       if (auth.auth === 'key') {
-        const key = state.keys.find((k) => k.key === auth.key);
-        return { server: name, url, auth: 'key', key: auth.key, status: key?.status === 'set' ? 'ok' : 'needs_value' };
+        const k = state.keys.find((x) => x.key === auth.key);
+        return { server: name, url, auth: 'key', key: auth.key, status: k?.status === 'set' ? 'ok' : 'needs_value' };
       }
       if (auth.auth === 'oauth') return { server: name, url, auth: 'oauth', status: auth.status ?? 'needs_sign_in', account: auth.account ?? null };
       return { server: name, url, auth: 'none', status: 'ok' };
     });
   return {
     canEdit: !options.viewOnly,
-    keys,
+    keys: state.keys,
     accounts: state.accounts,
-    rules: state.rules,
-    requests: state.requests,
     network: state.network,
     oauthApps: OAUTH_APPS,
     presets: PRESETS,
     mcp,
   };
-}
-
-function peers(): PeerGroupDto[] {
-  return state.peers.map((p) => ({
-    ...peerRef(p),
-    keys: p.keys.map((k) => ({ key: k.key, label: k.label, status: k.status })),
-  }));
-}
-
-function nextName(base: string): string {
-  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'rule';
-  let name = slug;
-  for (let i = 2; state.rules.some((r) => r.name === name); i++) name = `${slug}-${i}`;
-  return name;
-}
-
-function addRule(input: RuleInput): RuleDto {
-  const created: RuleDto = { ...input, name: input.name ?? nextName(input.match) };
-  state.rules = [...state.rules, created];
-  return created;
-}
-
-function putPeerKey(groupId: string, key: StoredKey): void {
-  const peer = state.peers.find((p) => p.groupId === groupId);
-  if (!peer) throw new Error(`Unknown group ${groupId}`);
-  peer.keys = [...peer.keys.filter((k) => k.key !== key.key), key];
-}
-
-function upsertKey(key: StoredKey): void {
-  state.keys = state.keys.some((k) => k.key === key.key)
-    ? state.keys.map((k) => (k.key === key.key ? { ...k, ...key } : k))
-    : [...state.keys, key];
 }
 
 class HttpError extends Error {
@@ -455,7 +267,7 @@ function settingsResponse(): Record<string, unknown> {
   };
 }
 
-function route(method: string, path: string, init?: RequestInit, search?: URLSearchParams): unknown {
+function route(method: string, path: string, init?: RequestInit): unknown {
   const prefix = `/ui/chat/api/groups/${FIXTURE_GROUP.id}/admin`;
   if (!path.startsWith(prefix)) throw new HttpError(404, `Fixture has no route for ${path}`);
   const sub = path.slice(prefix.length);
@@ -490,36 +302,12 @@ function route(method: string, path: string, init?: RequestInit, search?: URLSea
   let m: RegExpExecArray | null;
 
   if (cred === '' && method === 'GET') return overview();
-  if (cred === '/peers' && method === 'GET') return { groups: peers() };
 
   if (cred === '/keys' && method === 'POST') {
-    const b = body<{ key: string; label: string; value: string; rule?: RuleInput; alsoGroups?: string[] }>(init);
+    const b = body<{ key: string; label: string; value: string; destination: DestinationDto }>(init);
     if (state.keys.some((k) => k.key === b.key)) throw new HttpError(409, `${b.key} already exists`);
-    upsertKey({ key: b.key, label: b.label, status: 'set', updatedAt: now, lastUsedAt: null, copiedFrom: null, match: b.rule?.match });
-    if (b.rule) addRule(b.rule);
-    for (const g of b.alsoGroups ?? []) putPeerKey(g, { key: b.key, label: b.label, status: 'set', updatedAt: now, lastUsedAt: null, copiedFrom: null, match: b.rule?.match });
-    return { ok: true };
-  }
-  if (cred === '/keys/copy' && method === 'POST') {
-    const b = body<{ fromGroup: string; keys: string[] }>(init);
-    const source = state.peers.find((p) => p.groupId === b.fromGroup);
-    if (!source) throw new HttpError(404, 'Unknown group');
-    for (const name of b.keys) {
-      const k = source.keys.find((x) => x.key === name);
-      if (!k || k.status !== 'set') throw new HttpError(409, `${name} has no value in ${source.groupName}`);
-      upsertKey({ key: k.key, label: k.label, status: 'set', updatedAt: now, lastUsedAt: null, copiedFrom: { groupId: source.groupId, at: now }, match: k.match });
-      if (k.match && !state.rules.some((r) => r.injection.key === k.key)) {
-        addRule({ match: k.match, injection: { type: 'bearer', key: k.key }, approval: 'allow', askRules: [], enabled: true });
-      }
-    }
-    return { ok: true };
-  }
-  if ((m = /^\/keys\/([A-Z0-9_]+)\/share$/.exec(cred)) && method === 'POST') {
-    const k = state.keys.find((x) => x.key === m![1]);
-    if (!k) throw new HttpError(404, 'Unknown key');
-    for (const g of body<{ toGroups: string[] }>(init).toGroups) {
-      putPeerKey(g, { ...k, updatedAt: now, lastUsedAt: null, copiedFrom: { groupId: FIXTURE_GROUP.id, at: now } });
-    }
+    if (!b.value) throw new HttpError(400, 'A value is required');
+    state.keys = [...state.keys, { key: b.key, label: b.label, status: 'set', updatedAt: now, lastUsedAt: null, destination: b.destination }];
     return { ok: true };
   }
   if ((m = /^\/keys\/([A-Z0-9_]+)$/.exec(cred))) {
@@ -527,33 +315,17 @@ function route(method: string, path: string, init?: RequestInit, search?: URLSea
     const k = state.keys.find((x) => x.key === name);
     if (!k) throw new HttpError(404, 'Unknown key');
     if (method === 'PUT') {
-      const b = body<{ value: string; alsoGroups?: string[] }>(init);
-      if (!b.value) throw new HttpError(400, 'A value is required');
-      upsertKey({ ...k, status: 'set', updatedAt: now, copiedFrom: null });
-      for (const g of b.alsoGroups ?? []) {
-        const peer = state.peers.find((p) => p.groupId === g)!;
-        const theirs = peer.keys.find((x) => x.key === name);
-        putPeerKey(g, { ...(theirs ?? k), status: 'set', updatedAt: now });
-      }
+      const b = body<{ value?: string; label?: string; destination?: DestinationDto }>(init);
+      state.keys = state.keys.map((x) => (x.key !== name ? x : {
+        ...x,
+        ...(b.value ? { status: 'set' as const, updatedAt: now } : {}),
+        ...(b.label ? { label: b.label } : {}),
+        ...(b.destination ? { destination: b.destination } : {}),
+      }));
       return { ok: true };
     }
     if (method === 'DELETE') {
       state.keys = state.keys.filter((x) => x.key !== name);
-      state.rules = state.rules.filter((r) => r.injection.key !== name && !(r.injection.template ?? '').includes(`{{ ${name} }}`));
-      return { ok: true };
-    }
-  }
-
-  if (cred === '/rules' && method === 'POST') return addRule(body<RuleInput>(init));
-  if ((m = /^\/rules\/([^/]+)$/.exec(cred))) {
-    const name = decodeURIComponent(m[1]!);
-    if (!state.rules.some((r) => r.name === name)) throw new HttpError(404, 'Unknown rule');
-    if (method === 'PUT') {
-      state.rules = state.rules.map((r) => (r.name === name ? { ...body<RuleInput>(init), name } : r));
-      return { ok: true };
-    }
-    if (method === 'DELETE') {
-      state.rules = state.rules.filter((r) => r.name !== name);
       return { ok: true };
     }
   }
@@ -573,44 +345,16 @@ function route(method: string, path: string, init?: RequestInit, search?: URLSea
     return { status: signIn.status, account: signIn.account, error: signIn.error } satisfies AccountProgressDto;
   }
   if ((m = /^\/accounts\/([^/]+)$/.exec(cred)) && method === 'DELETE') {
-    const key = decodeURIComponent(m[1]!);
-    const account = state.accounts.find((a) => a.key === key);
-    state.accounts = state.accounts.filter((a) => a.key !== key);
+    const k = decodeURIComponent(m[1]!);
+    const account = state.accounts.find((a) => a.key === k);
+    state.accounts = state.accounts.filter((a) => a.key !== k);
     if (account?.mcpServer) state.mcpAuth[account.mcpServer] = { auth: 'oauth', status: 'needs_sign_in' };
     return { ok: true };
   }
 
-  if ((m = /^\/requests\/([^/]+)\/(approve|reject)$/.exec(cred)) && method === 'POST') {
-    const request = state.requests.find((r) => r.id === m![1]);
-    if (!request) throw new HttpError(404, 'This request has expired');
-    if (m[2] === 'approve') {
-      const b = body<{ values: Record<string, string>; copyFrom: Record<string, string> }>(init);
-      for (const slot of request.slots) {
-        const from = b.copyFrom[slot.key];
-        if (!from && !slot.agentProvided && !b.values[slot.key]) throw new HttpError(400, `${slot.key} needs a value`);
-        upsertKey({
-          key: slot.key, label: slot.label, status: 'set', updatedAt: now, lastUsedAt: null,
-          copiedFrom: from ? { groupId: from, at: now } : null, match: request.rules[0]?.match,
-        });
-      }
-      for (const r of request.rules) addRule(r);
-    }
-    state.requests = state.requests.filter((r) => r.id !== request.id);
-    return { ok: true };
-  }
-
-  if (cred === '/activity' && method === 'GET') {
-    const filter = search?.get('filter') ?? 'all';
-    const before = search?.get('before');
-    const items = state.activity.filter((a) => (filter === 'keys' ? a.decision === 'injected' || a.decision === 'approved'
-      : filter === 'problems' ? ['denied', 'blocked', 'expired'].includes(a.decision) : true));
-    const start = before ? items.findIndex((a) => a.id === before) + 1 : 0;
-    const page = items.slice(start, start + 20);
-    return { items: page, nextBefore: start + 20 < items.length ? page[page.length - 1]!.id : null };
-  }
   if (cred === '/network' && method === 'PUT') {
-    const b = body<{ unmatched: NetworkDto['unmatched']; allowPrivate: string[] }>(init);
-    state.network = { ...state.network, unmatched: b.unmatched, allowPrivate: b.allowPrivate };
+    const b = body<{ unmatched: NetworkDto['unmatched']; allowHosts: string[]; allowPrivate: string[] }>(init);
+    state.network = { ...state.network, unmatched: b.unmatched, allowHosts: b.allowHosts, allowPrivate: b.allowPrivate };
     return { ok: true };
   }
   throw new HttpError(404, `Fixture has no route for ${method} ${sub}`);
@@ -641,7 +385,7 @@ export function completeSignIn(stateId: string, allow: boolean): void {
     state.accounts = existing ? state.accounts.map((a) => (a.key === key ? entry : a)) : [...state.accounts, entry];
   } else {
     const replaced = input.replaceKey ? state.accounts.find((a) => a.key === input.replaceKey) : undefined;
-    account = replaced?.account ?? (input.requestId ? 'sam@example.com' : `user${state.seq}@example.com`);
+    account = replaced?.account ?? `user${state.seq}@example.com`;
     // Signing in to an account this group already has adds to its access, as provider re-consent does.
     const existing = replaced ?? state.accounts.find((a) => a.provider === input.provider && a.account === account);
     const key = existing?.key ?? `GOOGLE_${account.split('@')[0]!.replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
@@ -652,14 +396,6 @@ export function completeSignIn(stateId: string, allow: boolean): void {
       status: 'connected', connectedAt: now, lastUsedAt: existing?.lastUsedAt ?? null,
     };
     state.accounts = state.accounts.some((a) => a.key === key) ? state.accounts.map((a) => (a.key === key ? entry : a)) : [...state.accounts, entry];
-    for (const id of scopeIds) {
-      for (const host of GOOGLE_SCOPES[id]?.hosts ?? []) {
-        if (!state.rules.some((r) => r.match === host && r.injection.key === key)) {
-          addRule({ match: host, injection: { type: 'bearer', key }, approval: 'allow', askRules: [], enabled: true });
-        }
-      }
-    }
-    if (input.requestId) state.requests = state.requests.filter((r) => r.id !== input.requestId);
   }
   state.signIns.set(stateId, { ...signIn, status: 'connected', account });
   emit();
@@ -679,7 +415,7 @@ export function installMockFetch(): void {
     let status = 200;
     let payload: unknown;
     try {
-      payload = route(method, url.pathname, init, url.searchParams);
+      payload = route(method, url.pathname, init);
     } catch (error) {
       if (!(error instanceof HttpError)) throw error;
       status = error.status;

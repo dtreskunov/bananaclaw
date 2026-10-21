@@ -6521,9 +6521,6 @@ body.private-web-page,
 .ga-cred-item.attention {
   box-shadow: inset 3px 0 0 var(--warning, var(--warn));
 }
-.ga-cred-item.paused .ga-cred-item-main {
-  opacity: 0.6;
-}
 .ga-cred-item-main {
   flex: 1;
   min-width: 0;
@@ -6618,78 +6615,6 @@ body.private-web-page,
   min-height: 26px;
   align-items: center;
 }
-.ga-cred-foot-note {
-  margin-top: 4px;
-}
-.ga-cred-filter {
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-.ga-cred-filter button {
-  border: 0;
-  border-right: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-}
-.ga-cred-filter button:last-child {
-  border-right: 0;
-}
-.ga-cred-filter button.active {
-  background: var(--wash-strong);
-  color: var(--surface-fg);
-  font-weight: 600;
-}
-.ga-cred-activity {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--font-sm);
-}
-.ga-cred-activity li {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) auto;
-  grid-template-areas: "time req outcome" ". detail detail";
-  gap: 2px 10px;
-  padding: 7px 4px;
-  border-bottom: 1px solid var(--border);
-}
-.ga-cred-activity-time {
-  grid-area: time;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.ga-cred-activity-req {
-  grid-area: req;
-  overflow-wrap: anywhere;
-}
-.ga-cred-activity-path {
-  color: var(--muted);
-}
-.ga-cred-activity-outcome {
-  grid-area: outcome;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.ga-cred-activity-status {
-  color: var(--muted);
-  font-family: var(--font-mono, monospace);
-}
-.ga-cred-activity-detail {
-  grid-area: detail;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  color: var(--muted);
-}
-.ga-cred-activity-detail:empty {
-  display: none;
-}
-.ga-cred-more {
-  align-self: center;
-}
 .ga-cred-choice {
   margin: 0;
   padding: 0;
@@ -6771,55 +6696,6 @@ body.private-web-page,
     transform: rotate(360deg);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .ga-cred-spinner {
-    animation: none;
-  }
-}
-.ga-cred-request {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--warning-border, var(--border));
-  border-radius: var(--radius-lg);
-}
-.ga-cred-request header .ga-cred-meta {
-  margin-top: 2px;
-}
-.ga-cred-request-message {
-  margin: 0;
-  padding: 6px 10px;
-  border-left: 3px solid var(--border);
-  color: var(--surface-fg);
-  white-space: pre-wrap;
-}
-.ga-cred-slot {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ga-cred-slot p {
-  margin: 0;
-}
-.ga-cred-slot select {
-  max-width: 320px;
-}
-.ga-cred-row-label {
-  color: var(--muted);
-  font-size: var(--font-xs);
-  font-weight: 600;
-}
-.ga-cred-request-rules ul {
-  margin: 4px 0 0;
-  padding-left: 18px;
-  font-size: var(--font-sm);
-}
-.ga-cred-request footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
 .ga-cred-secret {
   flex: 1;
   min-width: 0;
@@ -6828,7 +6704,6 @@ body.private-web-page,
 }
 .ga-cred-secret input,
 .ga-cred-inline-add input,
-.ga-cred-ask-rule input,
 .ga-cred select,
 .ga-cred-dialog select,
 .ga-cred-dialog input[type=text] {
@@ -6888,20 +6763,6 @@ body.private-web-page,
   color: var(--muted);
   font-size: var(--font-sm);
 }
-.ga-cred-ask-rules {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0 0 8px;
-}
-.ga-cred-ask-rule {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) auto;
-  gap: 6px;
-}
-.ga-cred-ask-rules > button {
-  align-self: flex-start;
-}
 .ga-cred-item-disabled {
   opacity: 0.55;
   cursor: default;
@@ -6950,22 +6811,8 @@ body.private-web-page,
   .ga-cred-segments button {
     min-height: 40px;
   }
-  .ga-cred-activity li {
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-areas: "req req" "outcome time" "detail detail";
-  }
-  .ga-cred-activity-time {
-    justify-self: end;
-  }
-  .ga-cred-request footer button {
-    flex: 1;
-    min-height: 44px;
-  }
   .ga-cred-foot button {
     min-height: 44px;
-  }
-  .ga-cred-ask-rule {
-    grid-template-columns: 84px minmax(0, 1fr) auto;
   }
 }
 
