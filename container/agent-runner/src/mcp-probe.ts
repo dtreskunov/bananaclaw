@@ -4,6 +4,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
+import { startEgressRelay } from './egress-relay.js';
 import type { McpServerConfig } from './providers/types.js';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
   let client: Client | undefined;
 
   try {
+    await startEgressRelay();
     const raw = await Bun.stdin.text();
     const config = JSON.parse(raw) as McpServerConfig;
     const transport = createTransport(config);

@@ -27,6 +27,7 @@ import { fileURLToPath } from 'url';
 
 import { loadConfig } from './config.js';
 import { buildSystemPromptAddendum } from './destinations.js';
+import { startEgressRelay } from './egress-relay.js';
 import { maybeEnableKsm } from './ksm.js';
 import { ensureMemoryScaffold } from './memory-scaffold.js';
 // Providers barrel — the named provider self-registers when loaded.
@@ -45,6 +46,10 @@ function log(msg: string): void {
 const CWD = '/workspace/agent';
 
 async function main(): Promise<void> {
+  // Credential-gateway groups have no network; every HTTP(S) client reaches
+  // the gateway through this relay, so it must listen before anything else.
+  if (await startEgressRelay()) log('Egress relay listening on 127.0.0.1:3128');
+
   // Opt into KSM before any child processes spawn so opencode/MCP servers
   // inherit mergeable pages. Cheap no-op when the host scanner is off.
   maybeEnableKsm(log);

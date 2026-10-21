@@ -12,6 +12,7 @@ import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { adoptRunningContainers } from './container-runner.js';
+import { reconcileAgentVaultEgress } from './agent-vault-egress.js';
 import { getActiveSessions } from './db/sessions.js';
 import { startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { createDeliveryBridge } from './delivery-bridge.js';
@@ -99,6 +100,7 @@ async function main(): Promise<void> {
   const activeSessionIds = new Set(getActiveSessions().map((s) => s.id));
   const adopted = cleanupOrphans((sid) => activeSessionIds.has(sid));
   await adoptRunningContainers(adopted);
+  await reconcileAgentVaultEgress(new Set(adopted.map((a) => a.name)));
 
   // 3. Channel adapters
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {

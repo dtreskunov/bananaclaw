@@ -36,6 +36,12 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
+import {
+  agentVaultEnvKeys,
+  applyAgentVaultEgress,
+  releaseAgentVaultEgress,
+  usesAgentVault,
+} from './agent-vault-egress.js';
 import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from './egress-lockdown.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
@@ -282,6 +288,13 @@ function evictContainer(sessionId: string): Promise<void> {
   });
 }
 
+/** Exit-path cleanup for Agent Vault egress; failures are logged, never thrown. */
+function releaseEgress(containerName: string): Promise<void> {
+  return releaseAgentVaultEgress(containerName).catch((err: unknown) => {
+    log.error('Agent Vault egress release failed', { containerName, err });
+  });
+}
+
 async function spawnContainer(session: Session): Promise<void> {
   const agentGroup = getAgentGroup(session.agent_group_id);
   if (!agentGroup) {
@@ -377,6 +390,7 @@ async function spawnContainer(session: Session): Promise<void> {
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
     await stopSessionSignalServer(session.id, true);
+    await releaseEgress(containerName);
     return;
   }
 
@@ -461,6 +475,7 @@ export async function runMcpProbeContainer(
       } catch {
         /* the --rm probe normally removed itself */
       }
+      await releaseEgress(containerName);
     }
     fs.rmSync(probeDir, { recursive: true, force: true });
   }
@@ -547,6 +562,7 @@ function attachContainerWatcher(sessionId: string, containerName: string): void 
     markContainerStopped(sessionId);
     stopTypingRefresh(sessionId);
     void stopSessionSignalServer(sessionId, true);
+    void releaseEgress(containerName);
     log.info('Container exited', { sessionId, code, containerName });
   });
 
@@ -555,6 +571,7 @@ function attachContainerWatcher(sessionId: string, containerName: string): void 
     markContainerStopped(sessionId);
     stopTypingRefresh(sessionId);
     void stopSessionSignalServer(sessionId, true);
+    void releaseEgress(containerName);
     log.error('Container watcher error', { sessionId, containerName, err });
   });
 }
@@ -1006,16 +1023,26 @@ export async function buildContainerArgs(
     if (ksm) args.push('-e', `KSM_MERGE=${ksm}`);
   }
 
+  // Agent Vault groups (credential gateway spike) replace OneCLI and its
+  // network setup; their egress env must win over provider contributions.
+  const agentVault = usesAgentVault(agentGroup.id);
+  const reservedEnv = agentVault ? agentVaultEnvKeys() : new Set<string>();
+
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
     for (const [key, value] of Object.entries(providerContribution.env)) {
+      if (reservedEnv.has(key)) continue;
       args.push('-e', `${key}=${value}`);
     }
   }
 
   // Egress lockdown when enabled — throws if it can't be established, aborting
   // the spawn rather than running with open egress. Otherwise the host gateway.
-  if (ensureEgressNetwork()) {
+  // Agent Vault containers have no network at all: the mounted gateway socket
+  // is their only way out.
+  if (agentVault) {
+    args.push('--network=none');
+  } else if (ensureEgressNetwork()) {
     args.push(...egressNetworkArgs());
     log.info('Egress lockdown active', { containerName, network: EGRESS_NETWORK });
   } else {
@@ -1048,19 +1075,27 @@ export async function buildContainerArgs(
   // the gateway, we don't spawn. The caller (router or host-sweep) catches
   // the throw, leaves the inbound message pending, and the next sweep tick
   // retries.
-  if (agentIdentifier) {
-    await ensureOneCliAgent(onecli, agentGroup.name, agentIdentifier);
+  if (agentVault) {
+    await applyAgentVaultEgress(args, {
+      containerName,
+      agentGroupId: agentGroup.id,
+      label: `${launchMode}:${sessionId}`,
+    });
+  } else {
+    if (agentIdentifier) {
+      await ensureOneCliAgent(onecli, agentGroup.name, agentIdentifier);
+    }
+    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+    if (!onecliApplied) {
+      throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
+    }
+    // The SDK sets SSL_CERT_FILE (OpenSSL/Node) but git/curl read their CA
+    // bundle from CURL_CA_BUNDLE / GIT_SSL_CAINFO. Without these, `git clone`
+    // through the OneCLI HTTPS proxy fails with "server certificate verification failed".
+    args.push('-e', 'CURL_CA_BUNDLE=/tmp/onecli-combined-ca.pem');
+    args.push('-e', 'GIT_SSL_CAINFO=/tmp/onecli-combined-ca.pem');
+    log.info('OneCLI gateway applied', { containerName });
   }
-  const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-  if (!onecliApplied) {
-    throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
-  }
-  // The SDK sets SSL_CERT_FILE (OpenSSL/Node) but git/curl read their CA
-  // bundle from CURL_CA_BUNDLE / GIT_SSL_CAINFO. Without these, `git clone`
-  // through the OneCLI HTTPS proxy fails with "server certificate verification failed".
-  args.push('-e', 'CURL_CA_BUNDLE=/tmp/onecli-combined-ca.pem');
-  args.push('-e', 'GIT_SSL_CAINFO=/tmp/onecli-combined-ca.pem');
-  log.info('OneCLI gateway applied', { containerName });
 
   // Override entrypoint: run v2 entry point directly via Bun (no tsc, no stdin).
   args.push('--entrypoint', 'bash');
