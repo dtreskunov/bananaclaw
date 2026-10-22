@@ -267,7 +267,7 @@ function seedUser(id: string, role?: { role: 'owner' | 'admin'; agent_group_id: 
 function seedGroup(id: string, mcpServers: Record<string, unknown>): void {
   getDb()
     .prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`)
-    .run(id, id, id, NOW());
+    .run(id, id === GID ? 'Gateway Group' : id, id, NOW());
   getDb()
     .prepare(`INSERT INTO container_configs (agent_group_id, mcp_servers, updated_at) VALUES (?, ?, ?)`)
     .run(id, JSON.stringify(mcpServers), NOW());
@@ -386,7 +386,7 @@ describe('MCP sign-in', () => {
     expect(started).toMatchObject({ state: 'mcp_oast_s1', authorizeUrl: expect.stringContaining('linear.app') });
     expect(gw.requests.at(-1)).toMatchObject({
       url: `/v1/vaults/${GID}/mcp-oauth/start`,
-      body: { resource_url: LINEAR },
+      body: { resource_url: LINEAR, client_name: 'Gateway Group' },
     });
     expect((await api('GET', '/accounts/start/mcp_oast_s1')).body()).toMatchObject({ status: 'pending' });
 

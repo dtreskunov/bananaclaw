@@ -152,12 +152,19 @@ export function forgetProbes(agentGroupId: string): void {
 
 // ── writes ────────────────────────────────────────────────────────────────
 
+/**
+ * `clientName` is what the authorization server shows on its consent screen
+ * (the group's name). The gateway registers a new client when it changes.
+ */
 export async function startMcpSignIn(
   agentGroupId: string,
   resourceUrl: string,
+  clientName?: string,
 ): Promise<{ state: string; authorize_url: string }> {
+  const body: Record<string, string> = { resource_url: resourceUrl };
+  if (clientName) body.client_name = clientName;
   return gatewayJson('POST', `/v1/vaults/${enc(vaultName(agentGroupId))}/mcp-oauth/start`, 'MCP sign-in start', {
-    body: { resource_url: resourceUrl },
+    body,
     timeoutMs: 30_000,
   });
 }

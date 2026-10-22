@@ -11,6 +11,7 @@
 import http from 'http';
 
 import type { McpServerConfig } from '../../../container-config.js';
+import { getAgentGroup } from '../../../db/agent-groups.js';
 import { log } from '../../../log.js';
 import { AgentVaultError, gatewayMessage, usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';
 import {
@@ -163,6 +164,15 @@ async function overview(ctx: CredentialsRouteContext): Promise<unknown> {
   };
 }
 
+const MAX_CLIENT_NAME = 100;
+
+/** The group's name as the OAuth client name, within the gateway's limits. */
+export function clientNameFor(gid: string): string | undefined {
+  // eslint-disable-next-line no-control-regex
+  const name = (getAgentGroup(gid)?.name ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim();
+  return name ? [...name].slice(0, MAX_CLIENT_NAME).join('') : undefined;
+}
+
 async function startSignIn(ctx: CredentialsRouteContext): Promise<void> {
   const body = (await ctx.readJsonBody(ctx.req)) as { mcpServer?: unknown; provider?: unknown };
   if (typeof body.mcpServer !== 'string') {
@@ -174,7 +184,7 @@ async function startSignIn(ctx: CredentialsRouteContext): Promise<void> {
     ctx.writeJson(ctx.res, 404, { error: `No HTTP MCP server named ${body.mcpServer}; save it first` });
     return;
   }
-  const started = await startMcpSignIn(ctx.gid, url);
+  const started = await startMcpSignIn(ctx.gid, url, clientNameFor(ctx.gid));
   recordSignIn({
     state: started.state,
     userId: ctx.actorUserId,
