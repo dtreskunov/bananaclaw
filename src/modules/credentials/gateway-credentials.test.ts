@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { isMcpService, resourceId, serviceForUrl, servicesToKeys, type GatewayService } from './gateway-credentials.js';
+import {
+  isMcpService,
+  resourceId,
+  sameInjection,
+  serviceForUrl,
+  serviceFromDestination,
+  serviceSlug,
+  servicesToKeys,
+  uniqueServiceName,
+  type GatewayService,
+} from './gateway-credentials.js';
 
 // The live canary vault's services, plus one the gateway generated for an MCP sign-in.
 const SERVICES: GatewayService[] = [
@@ -101,5 +111,31 @@ describe('resourceId', () => {
   it('ignores query, fragment, trailing slash and case', () => {
     expect(resourceId('https://MCP.linear.app/mcp/?x=1#y')).toBe(resourceId('https://mcp.linear.app/mcp'));
     expect(resourceId('https://mcp.linear.app/mcp')).not.toBe(resourceId('https://mcp.linear.app/mcp2'));
+  });
+});
+
+describe('building services', () => {
+  it('slugifies labels into unique gateway service names', () => {
+    expect(serviceSlug('Brave Search')).toBe('brave-search');
+    expect(serviceSlug('X')).toBe('key-x');
+    expect(serviceSlug('Ünïcode API!')).toBe('unicode-api');
+    expect(uniqueServiceName('minimax', SERVICES)).toBe('minimax-2');
+    expect(uniqueServiceName('minimax', SERVICES, 'minimax')).toBe('minimax');
+  });
+
+  it('round-trips every injection type through servicesToKeys', () => {
+    const cases = [
+      { type: 'bearer' },
+      { type: 'basic' },
+      { type: 'api-key', name: 'X-Api-Key', prefix: 'Token ' },
+      { type: 'query', name: '__K_KEY__' },
+      { type: 'custom', template: 'Basic {{ K_KEY }}' },
+    ] as const;
+    for (const injection of cases) {
+      const service = serviceFromDestination('svc', 'K_KEY', { match: 'h.example/p/*', injection });
+      const [key] = servicesToKeys([service], [{ key: 'K_KEY' }]);
+      expect(key!.destination.match).toBe('h.example/p/*');
+      expect(sameInjection(key!.destination.injection, injection)).toBe(true);
+    }
   });
 });

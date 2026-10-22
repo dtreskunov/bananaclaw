@@ -32,6 +32,10 @@ async function main(): Promise<void> {
   }
 
   const { command, args, json } = parseArgv(argv);
+  if (args['value-stdin'] === true) {
+    if (process.stdin.isTTY) process.stderr.write('Enter the value, then press Ctrl-D:\n');
+    args.value = (await readStdin()).replace(/\r?\n$/, '');
+  }
   const req: RequestFrame = { id: randomUUID(), command, args };
   const transport: Transport = pickTransport();
 
@@ -45,6 +49,12 @@ async function main(): Promise<void> {
 
   process.stdout.write(formatResponse(res, json ? 'json' : 'human'));
   process.exit(res.ok ? 0 : 1);
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 function pickTransport(): Transport {

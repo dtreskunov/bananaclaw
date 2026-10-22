@@ -273,8 +273,8 @@ guide is `docs/guides/mcp-oauth.mdx` in the fork.
   - MCP sign-in start, progress and disconnect.
   - The overview: MCP sign-ins, plus each HTTP MCP server's status from the
     vault's accounts, its services, and a cached gateway probe.
-  - Keys, read-only.
-  - Key edits and OAuth apps answer 501 until P3/P4.
+  - Keys: add, replace, edit and delete since P3 (below).
+  - OAuth apps answer 501 until P4.
 - [oauth-callback.ts](../src/ui/server/oauth-callback.ts) serves
   `/ui/oauth/callback` and `/oauth/client-metadata.json`.
 - The tab appears for admins of groups listed in
@@ -315,3 +315,28 @@ Test was moved to the gateway as the second group.
    `DELETE …/credentials/accounts/:key`. Its generated services were removed,
    and its calls now get `401` with no `resource_metadata`. My Agent's call
    still returns the team.
+
+### R1 P3: keys and `ncl credentials` (2026-10-22)
+
+- **Shared logic:** [keys.ts](../src/modules/credentials/keys.ts) adds,
+  replaces, edits and deletes static keys, each stored as one credential plus
+  the one service that sends it. The Credentials tab routes and
+  `ncl credentials` both use it.
+- **How keys map to gateway services:**
+  - Service names are slugs of the key's name, since the gateway only accepts
+    slugs.
+  - A query-string key becomes a passthrough service that swaps a URL
+    placeholder (default `__KEY__`) for the value.
+  - Basic auth sends the value as the username.
+  - When only the host changes, auth details the form can't show (such as
+    MiniMax's second header) are kept.
+- **Protecting other services:** each edit rewrites the vault's whole service
+  list under a per-group lock and keeps the services generated for MCP sign-ins.
+  The fork has been asked for per-service writes, which would remove that race.
+- **Rollback:** if saving a new key's service fails, its credential is deleted
+  again.
+- **`ncl credentials list|set|delete|disconnect`** is host-only, and values
+  arrive only through `--value-stdin`.
+- **Verified:**
+  - Route, CLI and dispatcher tests pass.
+  - Every injection type round-trips through an isolated real gateway.

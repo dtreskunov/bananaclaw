@@ -152,6 +152,26 @@ export function forgetProbes(agentGroupId: string): void {
 
 // ── writes ────────────────────────────────────────────────────────────────
 
+/** Stores (or replaces) static credential values in the group's vault. */
+export async function setCredentials(agentGroupId: string, credentials: Record<string, string>): Promise<void> {
+  await gatewayJson('POST', '/v1/credentials', 'credential set', {
+    body: { vault: vaultName(agentGroupId), credentials },
+  });
+}
+
+export async function deleteCredentials(agentGroupId: string, keys: string[]): Promise<void> {
+  await gatewayJson('DELETE', '/v1/credentials', 'credential delete', {
+    body: { vault: vaultName(agentGroupId), keys },
+  });
+}
+
+/** Replaces the vault's whole service list (the gateway has no per-service write yet). */
+export async function putServices(agentGroupId: string, services: GatewayService[]): Promise<void> {
+  await gatewayJson('PUT', `/v1/vaults/${enc(vaultName(agentGroupId))}/services`, 'service update', {
+    body: { services },
+  });
+}
+
 /**
  * `clientName` is what the authorization server shows on its consent screen
  * (the group's name). The gateway registers a new client when it changes.
@@ -220,7 +240,12 @@ export function isMcpService(service: GatewayService): boolean {
 function injectionFor(service: GatewayService, key: string): InjectionDto {
   const a = service.auth ?? { type: '' };
   const sub = service.substitutions?.find((s) => s.key === key);
-  if (sub) return { type: sub.in?.includes('query') ? 'query' : 'custom', name: sub.placeholder };
+  if (sub)
+    return {
+      type: sub.in?.includes('query') ? 'query' : 'custom',
+      name: sub.placeholder,
+      template: sub.in?.includes('query') ? undefined : sub.placeholder,
+    };
   if (a.type === 'bearer') return { type: 'bearer' };
   if (a.type === 'basic') return { type: 'basic' };
   if (a.type === 'api-key') return { type: 'api-key', name: a.header || 'Authorization', prefix: a.prefix };
@@ -280,3 +305,86 @@ export function serviceForUrl(services: GatewayService[], url: string): GatewayS
     return globToRegExp(pattern).test(target) || globToRegExp(s.host).test(u.host);
   });
 }
+
+// ── building services from the UI's destination ──────────────────────────
+
+export interface DestinationDto {
+  match: string;
+  injection: InjectionDto;
+}
+
+/** Gateway service names are 3-64 character slugs. */
+export function serviceSlug(label: string): string {
+  const slug = label
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/, '');
+  return slug.length >= 3 ? slug : `key-${slug || 'service'}`.slice(0, 64);
+}
+
+/** A slug based on `label` that no other service uses. */
+export function uniqueServiceName(label: string, services: GatewayService[], except?: string): string {
+  const taken = new Set(services.map((s) => s.name).filter((n) => n !== except));
+  const base = serviceSlug(label);
+  if (!taken.has(base)) return base;
+  for (let i = 2; ; i++) {
+    const suffix = `-${i}`;
+    const name = `${base.slice(0, 64 - suffix.length).replace(/-+$/, '')}${suffix}`;
+    if (!taken.has(name)) return name;
+  }
+}
+
+/** Default placeholder an agent puts in the URL for a query-string key. */
+export function queryPlaceholder(key: string): string {
+  return `__${key}__`;
+}
+
+/** The single service that sends `key` to `destination`. */
+export function serviceFromDestination(name: string, key: string, destination: DestinationDto): GatewayService {
+  const { injection } = destination;
+  const host = destination.match.trim();
+  switch (injection.type) {
+    case 'bearer':
+      return { name, host, auth: { type: 'bearer', token: key } };
+    case 'basic':
+      return { name, host, auth: { type: 'basic', username: key } };
+    case 'api-key': {
+      const auth: GatewayAuth = { type: 'api-key', key, header: injection.name?.trim() || 'Authorization' };
+      if (injection.prefix) auth.prefix = injection.prefix;
+      return { name, host, auth };
+    }
+    case 'query':
+      return {
+        name,
+        host,
+        auth: { type: 'passthrough' },
+        substitutions: [{ key, placeholder: injection.name?.trim() || queryPlaceholder(key), in: ['query'] }],
+      };
+    case 'custom':
+      return {
+        name,
+        host,
+        auth: { type: 'custom', headers: { [injection.name?.trim() || 'Authorization']: injection.template ?? '' } },
+      };
+  }
+}
+
+/** Index of the non-MCP service that sends `key`, or -1. */
+export function serviceIndexForKey(services: GatewayService[], key: string): number {
+  return services.findIndex((s) => !isMcpService(s) && serviceKeys(s).includes(key));
+}
+
+/** True when two injections describe the same wire behaviour (ignoring unset optional fields). */
+export function sameInjection(a: InjectionDto, b: InjectionDto): boolean {
+  const header = (i: InjectionDto): string =>
+    i.type === 'api-key' || i.type === 'custom' ? (i.name || 'Authorization').toLowerCase() : i.name || '';
+  const norm = (i: InjectionDto): string =>
+    JSON.stringify([i.type, header(i), i.prefix || '', i.type === 'custom' ? i.template || '' : '']);
+  return norm(a) === norm(b);
+}
+
+export { injectionFor };

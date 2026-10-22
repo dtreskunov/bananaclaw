@@ -41,6 +41,8 @@ import { forgetProbes } from '../../../modules/credentials/gateway-credentials.j
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { handleClientMetadata, handleOAuthCallback, resetClientMetadataCache } from '../oauth-callback.js';
 import { handle } from './routes.js';
+import { dispatch } from '../../../cli/dispatch.js';
+import '../../../cli/commands/credentials.js';
 
 const NOW = (): string => new Date().toISOString();
 const GID = 'ag-gw';
@@ -62,8 +64,31 @@ const gw = {
   url: '',
   requests: [] as Recorded[],
   accounts: [] as Record<string, unknown>[],
+  services: [] as Record<string, unknown>[],
+  credentials: new Map<string, string>(),
+  failServicePut: false,
   down: false,
 };
+
+function initialServices(): Record<string, unknown>[] {
+  return [
+    {
+      name: 'tavily',
+      host: 'mcp.tavily.com',
+      auth: { type: 'passthrough' },
+      substitutions: [{ key: 'TAVILY_API_KEY', placeholder: '__T__', in: ['query'] }],
+    },
+    { name: 'openrouter', host: 'openrouter.ai', auth: { type: 'bearer', token: 'OPENROUTER_API_KEY' } },
+    {
+      name: 'minimax',
+      host: 'api.minimax.io',
+      auth: {
+        type: 'custom',
+        headers: { Authorization: 'Bearer {{ MINIMAX_API_KEY }}', 'x-api-key': '{{ MINIMAX_API_KEY }}' },
+      },
+    },
+  ];
+}
 
 function fakeGateway(req: http.IncomingMessage, res: http.ServerResponse, raw: string): void {
   const url = new URL(req.url || '/', 'http://gw');
@@ -81,13 +106,7 @@ function fakeGateway(req: http.IncomingMessage, res: http.ServerResponse, raw: s
   if (req.method === 'GET' && url.pathname === `${vault}/services`) {
     return send(200, {
       services: [
-        {
-          name: 'tavily',
-          host: 'mcp.tavily.com',
-          auth: { type: 'passthrough' },
-          substitutions: [{ key: 'TAVILY_API_KEY', placeholder: '__T__', in: ['query'] }],
-        },
-        { name: 'openrouter', host: 'openrouter.ai', auth: { type: 'bearer', token: 'OPENROUTER_API_KEY' } },
+        ...gw.services,
         ...gw.accounts.map((a) => ({
           name: 'mcp-x',
           host: 'mcp.linear.app/mcp',
@@ -96,13 +115,28 @@ function fakeGateway(req: http.IncomingMessage, res: http.ServerResponse, raw: s
       ],
     });
   }
+  if (req.method === 'PUT' && url.pathname === `${vault}/services`) {
+    if (gw.failServicePut) return send(400, { error: 'service 2: name is required' });
+    gw.services = ((body?.services ?? []) as Record<string, unknown>[]).filter(
+      (s) => !String(s.name).startsWith('mcp-'),
+    );
+    return send(200, { ok: true });
+  }
   if (req.method === 'GET' && url.pathname === '/v1/credentials' && url.searchParams.get('vault') === GID) {
     return send(200, {
       credentials: [
-        { key: 'TAVILY_API_KEY', type: 'static' },
+        ...[...gw.credentials.keys()].map((key) => ({ key, type: 'static' })),
         ...gw.accounts.map((a) => ({ key: a.key, type: 'mcp_oauth' })),
       ],
     });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/credentials' && body?.vault === GID) {
+    for (const [k, v] of Object.entries(body.credentials as Record<string, string>)) gw.credentials.set(k, v);
+    return send(200, { ok: true });
+  }
+  if (req.method === 'DELETE' && url.pathname === '/v1/credentials' && body?.vault === GID) {
+    const deleted = (body.keys as string[]).filter((k) => gw.credentials.delete(k));
+    return send(200, { deleted });
   }
   if (req.method === 'GET' && url.pathname === `${vault}/mcp-oauth`) return send(200, gw.accounts);
   if (req.method === 'POST' && url.pathname === `${vault}/mcp-oauth/probe`) {
@@ -284,6 +318,12 @@ beforeEach(() => {
   runMigrations(initTestDb());
   gw.requests = [];
   gw.accounts = [];
+  gw.services = initialServices();
+  gw.credentials = new Map([
+    ['TAVILY_API_KEY', 'tvly-secret'],
+    ['MINIMAX_API_KEY', 'mm-secret'],
+  ]);
+  gw.failServicePut = false;
   gw.down = false;
   clearSignIns();
   forgetProbes(GID);
@@ -321,7 +361,7 @@ describe('GET …/credentials', () => {
     expect(body).toMatchObject({
       canEdit: true,
       canEditInstall: false,
-      keysEditable: false,
+      keysEditable: true,
       oauthApps: [],
       accounts: [],
     });
@@ -329,7 +369,9 @@ describe('GET …/credentials', () => {
     expect(body.keys.map((k) => [k.key, k.status, k.mcpServer])).toEqual([
       ['TAVILY_API_KEY', 'set', 'tavily'],
       ['OPENROUTER_API_KEY', 'needs_value', undefined],
+      ['MINIMAX_API_KEY', 'set', undefined],
     ]);
+    expect(JSON.stringify(body)).not.toContain('secret');
     const mcp = Object.fromEntries(body.mcp.map((m) => [m.server, m]));
     expect(Object.keys(mcp).sort()).toEqual(['github', 'linear', 'plain', 'tavily']);
     expect(mcp.linear).toMatchObject({ auth: 'oauth', status: 'needs_sign_in' });
@@ -367,9 +409,9 @@ describe('GET …/credentials', () => {
     expect(owner.status()).toBe(409);
   });
 
-  it('answers 501 for key edits and OAuth apps until their phases land', async () => {
-    expect((await api('POST', '/keys', { key: 'X_KEY', value: 'secret' })).status()).toBe(501);
-    expect((await api('PUT', '/oauth-apps/google', { scope: 'group', clientId: 'x' })).status()).toBe(501);
+  it('answers 501 for OAuth apps until P4', async () => {
+    const res = await api('PUT', '/oauth-apps/google', { scope: 'group', clientId: 'x', clientSecret: 'secret' });
+    expect(res.status()).toBe(501);
     expect(gw.requests.some((r) => JSON.stringify(r.body ?? '').includes('secret'))).toBe(false);
   });
 });
@@ -488,5 +530,185 @@ describe('GET /oauth/client-metadata.json', () => {
     expect(gw.requests.at(-1)!.auth).toBeUndefined();
     await run(handleClientMetadata, 'GET', '/oauth/client-metadata.json');
     expect(gw.requests.filter((r) => r.url === '/v1/oauth/client-metadata')).toHaveLength(1);
+  });
+});
+
+describe('keys', () => {
+  const bearer = (match: string) => ({ match, injection: { type: 'bearer' } });
+  const addKey = (body: Record<string, unknown>) => api('POST', '/keys', body);
+
+  it('adds a key as a credential plus one service', async () => {
+    const res = await addKey({
+      key: 'BRAVE_API_KEY',
+      label: 'Brave Search',
+      value: 'brv-1',
+      destination: { match: 'api.search.brave.com', injection: { type: 'api-key', name: 'X-Subscription-Token' } },
+    });
+    expect(res.status()).toBe(200);
+    expect(gw.credentials.get('BRAVE_API_KEY')).toBe('brv-1');
+    expect(gw.services.at(-1)).toEqual({
+      name: 'brave-search',
+      host: 'api.search.brave.com',
+      auth: { type: 'api-key', key: 'BRAVE_API_KEY', header: 'X-Subscription-Token' },
+    });
+    const keys = ((await api('GET', '')).body() as { keys: Record<string, unknown>[] }).keys;
+    expect(keys.find((k) => k.key === 'BRAVE_API_KEY')).toMatchObject({ status: 'set', label: 'brave-search' });
+  });
+
+  it('maps query keys to a URL placeholder and custom headers to a template', async () => {
+    await addKey({
+      key: 'WEATHER_KEY',
+      label: 'Weather',
+      value: 'w',
+      destination: { match: 'api.weather.example', injection: { type: 'query' } },
+    });
+    expect(gw.services.at(-1)).toMatchObject({
+      auth: { type: 'passthrough' },
+      substitutions: [{ key: 'WEATHER_KEY', placeholder: '__WEATHER_KEY__', in: ['query'] }],
+    });
+    await addKey({
+      key: 'NC_KEY',
+      label: 'nc',
+      value: 'x',
+      destination: { match: 'nc.example.org/mcp/*', injection: { type: 'custom', template: 'Basic {{ NC_KEY }}' } },
+    });
+    expect(gw.services.at(-1)).toMatchObject({
+      name: 'key-nc',
+      host: 'nc.example.org/mcp/*',
+      auth: { type: 'custom', headers: { Authorization: 'Basic {{ NC_KEY }}' } },
+    });
+  });
+
+  it('rejects invalid input and reserved names without calling the gateway', async () => {
+    const before = gw.requests.length;
+    expect((await addKey({ key: 'lower', value: 'v', destination: bearer('a.example') })).status()).toBe(400);
+    expect((await addKey({ key: 'MCP_X', value: 'v', destination: bearer('a.example') })).status()).toBe(400);
+    expect((await addKey({ key: 'A_KEY', value: '', destination: bearer('a.example') })).status()).toBe(400);
+    expect((await addKey({ key: 'A_KEY', value: 'v', destination: bearer('not a host') })).status()).toBe(400);
+    const wrongTemplate = { match: 'a.example', injection: { type: 'custom', template: 'Basic {{ OTHER }}' } };
+    expect((await addKey({ key: 'A_KEY', value: 'v', destination: wrongTemplate })).status()).toBe(400);
+    expect(gw.requests.length).toBe(before);
+  });
+
+  it('refuses a key that already exists', async () => {
+    const dup = await addKey({ key: 'OPENROUTER_API_KEY', value: 'v', destination: bearer('openrouter.ai') });
+    expect(dup.status()).toBe(409);
+    expect(gw.credentials.has('OPENROUTER_API_KEY')).toBe(false);
+  });
+
+  it('removes the credential again when the service update fails', async () => {
+    gw.failServicePut = true;
+    const res = await addKey({ key: 'B_KEY', value: 'v', destination: bearer('b.example') });
+    expect(res.status()).toBe(400);
+    expect(gw.credentials.has('B_KEY')).toBe(false);
+  });
+
+  it('sets a missing value, renames and re-targets a key', async () => {
+    expect((await api('PUT', '/keys/OPENROUTER_API_KEY', { value: 'or-1' })).status()).toBe(200);
+    expect(gw.credentials.get('OPENROUTER_API_KEY')).toBe('or-1');
+    const res = await api('PUT', '/keys/OPENROUTER_API_KEY', {
+      label: 'OpenRouter API',
+      destination: bearer('openrouter.ai/api/*'),
+    });
+    expect(res.status()).toBe(200);
+    expect(gw.services.find((s) => s.host === 'openrouter.ai/api/*')).toEqual({
+      name: 'openrouter-api',
+      host: 'openrouter.ai/api/*',
+      auth: { type: 'bearer', token: 'OPENROUTER_API_KEY' },
+    });
+  });
+
+  it('keeps auth details the form cannot express when only the host changes', async () => {
+    const keys = ((await api('GET', '')).body() as { keys: { key: string; destination: { injection: unknown } }[] })
+      .keys;
+    const injection = keys.find((k) => k.key === 'MINIMAX_API_KEY')!.destination.injection;
+    expect(
+      (await api('PUT', '/keys/MINIMAX_API_KEY', { destination: { match: 'api.minimaxi.com', injection } })).status(),
+    ).toBe(200);
+    expect(gw.services.find((s) => s.name === 'minimax')).toMatchObject({
+      host: 'api.minimaxi.com',
+      auth: { headers: { Authorization: 'Bearer {{ MINIMAX_API_KEY }}', 'x-api-key': '{{ MINIMAX_API_KEY }}' } },
+    });
+  });
+
+  it('deletes the key and its service but never MCP sign-in services', async () => {
+    gw.accounts.push({
+      key: 'MCP_ABC',
+      resource_url: LINEAR,
+      account: null,
+      connected_at: NOW(),
+      last_used_at: null,
+      updated_at: NOW(),
+      status: 'connected',
+      client: 'registered',
+      scopes: [],
+    });
+    expect((await api('DELETE', '/keys/TAVILY_API_KEY')).status()).toBe(200);
+    expect(gw.credentials.has('TAVILY_API_KEY')).toBe(false);
+    expect(gw.services.map((s) => s.name)).toEqual(['openrouter', 'minimax']);
+    const put = gw.requests.filter((r) => r.method === 'PUT' && r.url.endsWith('/services')).at(-1)!;
+    expect((put.body as { services: { name: string }[] }).services.map((s) => s.name)).toContain('mcp-x');
+    expect((await api('DELETE', '/keys/TAVILY_API_KEY')).status()).toBe(404);
+    expect((await api('DELETE', '/keys/MCP_ABC')).status()).toBe(400);
+  });
+
+  it('serializes concurrent key writes per group', async () => {
+    await Promise.all([
+      addKey({ key: 'C1_KEY', value: 'v', destination: bearer('c1.example') }),
+      addKey({ key: 'C2_KEY', value: 'v', destination: bearer('c2.example') }),
+    ]);
+    expect(gw.services.map((s) => s.host)).toEqual(expect.arrayContaining(['c1.example', 'c2.example']));
+  });
+
+  it('never returns values', async () => {
+    const res = await addKey({ key: 'S_KEY', value: 'super-secret-value', destination: bearer('s.example') });
+    expect(res.text()).not.toContain('super-secret-value');
+    expect((await api('GET', '')).text()).not.toContain('super-secret-value');
+  });
+});
+
+describe('ncl credentials (host)', () => {
+  const host = { caller: 'host' as const };
+  const run = (command: string, args: Record<string, unknown>) => dispatch({ id: '1', command, args }, host);
+
+  it('lists keys and sign-ins without values', async () => {
+    const resp = await run('credentials-list', { group: GID });
+    expect(resp.ok).toBe(true);
+    if (!resp.ok) return;
+    expect(resp.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'key', key: 'TAVILY_API_KEY', status: 'set', how: 'query' }),
+        expect.objectContaining({ kind: 'key', key: 'OPENROUTER_API_KEY', status: 'needs_value' }),
+      ]),
+    );
+    expect(JSON.stringify(resp.data)).not.toContain('secret');
+  });
+
+  it('adds a key from stdin, then replaces its value and deletes it', async () => {
+    let resp = await run('credentials-set', {
+      group: GID,
+      key: 'CLI_KEY',
+      'value-stdin': true,
+      value: 'v1',
+      match: 'cli.example',
+    });
+    expect(resp.ok).toBe(true);
+    expect(gw.credentials.get('CLI_KEY')).toBe('v1');
+    expect(gw.services.at(-1)).toMatchObject({ host: 'cli.example', auth: { type: 'bearer', token: 'CLI_KEY' } });
+    resp = await run('credentials-set', { group: GID, key: 'CLI_KEY', 'value-stdin': true, value: 'v2' });
+    expect(resp.ok).toBe(true);
+    expect(gw.credentials.get('CLI_KEY')).toBe('v2');
+    resp = await run('credentials-delete', { group: GID, key: 'CLI_KEY' });
+    expect(resp.ok).toBe(true);
+    expect(gw.credentials.has('CLI_KEY')).toBe(false);
+  });
+
+  it('refuses values passed on the command line and groups off the gateway', async () => {
+    const inline = await run('credentials-set', { group: GID, key: 'CLI_KEY', value: 'oops', match: 'cli.example' });
+    expect(inline.ok).toBe(false);
+    if (!inline.ok) expect(inline.error.message).toContain('--value-stdin');
+    expect(gw.credentials.has('CLI_KEY')).toBe(false);
+    const off = await run('credentials-list', { group: 'ag-onecli' });
+    expect(off.ok).toBe(false);
   });
 });

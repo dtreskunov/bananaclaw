@@ -22,9 +22,9 @@ import { showToast } from './Toast';
 
 const INJECTION_LABELS: Record<InjectionType, string> = {
   bearer: 'Bearer token (Authorization header)',
-  basic: 'Basic auth (Authorization header)',
+  basic: 'Basic auth, key as username (Authorization header)',
   'api-key': 'Named header',
-  query: 'Query parameter',
+  query: 'Replace a placeholder in the URL query',
   custom: 'Header template',
 };
 
@@ -113,7 +113,7 @@ function DestinationFields({
             const next = event.currentTarget.value as InjectionType;
             setInjection({
               type: next,
-              name: next === 'api-key' ? injection.name || 'X-API-Key' : next === 'query' ? injection.name || 'api_key' : undefined,
+              name: next === 'api-key' ? injection.name || 'X-API-Key' : next === 'query' ? injection.name || `__${keyName || 'KEY'}__` : undefined,
               template: next === 'custom' ? injection.template || `Basic {{ ${keyName || 'KEY'} }}` : undefined,
             });
           }}
@@ -124,7 +124,10 @@ function DestinationFields({
         </select>
       </Field>
       {injection.type === 'api-key' || injection.type === 'query' ? (
-        <Field label={injection.type === 'query' ? 'Parameter' : 'Header'}>
+        <Field
+          label={injection.type === 'query' ? 'Placeholder' : 'Header'}
+          info={injection.type === 'query' ? 'The agent or MCP server URL uses this text where the key goes, e.g. ?apiKey=__MY_KEY__; the gateway swaps in the real key.' : undefined}
+        >
           <input type="text" value={injection.name ?? ''} spellcheck={false} onInput={(event) => setInjection({ ...injection, name: event.currentTarget.value })} />
         </Field>
       ) : null}

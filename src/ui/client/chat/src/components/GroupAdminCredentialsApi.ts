@@ -27,7 +27,7 @@ export type InjectionType = 'bearer' | 'basic' | 'api-key' | 'query' | 'custom';
 /** How the gateway attaches a key; the key itself is implied by its owner. */
 export interface InjectionDto {
   type: InjectionType;
-  /** Header name for `api-key`, query parameter for `query`. */
+  /** Header name for `api-key`; for `query`, the placeholder the agent puts in the URL (default `__KEY__`). */
   name?: string;
   prefix?: string;
   /** Header template for `custom`, e.g. `Basic {{ KEY }}`. */

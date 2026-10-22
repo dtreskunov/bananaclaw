@@ -312,9 +312,12 @@ also work, but are then stored unencrypted on disk.
 - **Host-side calls:** use the host token with the loopback MITM port, replacing
   [onecli-proxy.ts](../src/ui/server/chat/onecli-proxy.ts).
 - **Stubs** are written by the host. They contain no secrets.
-- **`ncl credentials`** (host only): `list`, `set --value-stdin`, `edit`,
-  `delete`, `oauth-app set|remove [--install] --secret-stdin`. Container `ncl` rejects these verbs regardless of
-  `cli_scope`.
+- **`ncl credentials`** (host only,
+  [credentials.ts](../src/cli/commands/credentials.ts)): `list`, `set`
+  (adds a key or replaces its value/destination; the value only via
+  `--value-stdin`), `delete`, `disconnect` (MCP sign-ins); P4 adds
+  `oauth-app set|remove [--install] --secret-stdin`. The dispatcher rejects
+  every `credentials` command from containers regardless of `cli_scope`.
 - **Setup:** `/init-agent-vault` replaces `/init-onecli`. It:
   - downloads a pinned release binary and verifies its SHA-256,
   - writes the unit with `--env-file`,

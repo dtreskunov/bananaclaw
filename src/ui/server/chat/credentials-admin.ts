@@ -2,9 +2,9 @@
  * Group settings → Credentials routes (`…/admin/credentials/*`), backed by
  * the Agent Vault gateway. Mounted by group-admin.ts behind its admin gate.
  *
- * R1 P2 scope: MCP sign-in with per-group dynamic registration, plus a
- * read-only view of the group's keys. Key edits and OAuth apps answer 501
- * until their phases land. Values never appear in any response.
+ * R1 scope so far: MCP sign-in with per-group dynamic registration (P2) and
+ * static keys (P3). OAuth apps answer 501 until P4. Values never appear in
+ * any response or log.
  *
  * Wire contract: src/ui/client/chat/src/components/GroupAdminCredentialsApi.ts.
  */
@@ -29,6 +29,15 @@ import {
   type KeyDto,
   type McpAccountInfo,
 } from '../../../modules/credentials/gateway-credentials.js';
+import {
+  addKey,
+  deleteKey,
+  KEY_PRESETS,
+  KeyInputError,
+  updateKey,
+  type AddKeyInput,
+  type UpdateKeyInput,
+} from '../../../modules/credentials/keys.js';
 import { getSignIn, recordSignIn } from '../../../modules/credentials/sign-ins.js';
 import { isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
 import { uiBaseUrl } from '../server.js';
@@ -154,14 +163,54 @@ async function overview(ctx: CredentialsRouteContext): Promise<unknown> {
   return {
     canEdit: true,
     canEditInstall: isOwner(ctx.actorUserId) || isGlobalAdmin(ctx.actorUserId),
-    keysEditable: false,
+    keysEditable: true,
     keys,
     accounts: accounts.map((a) => toAccount(a, servers)),
     oauthApps: [],
     oauthRedirectUri: oauthRedirectUri(),
-    presets: [],
+    presets: KEY_PRESETS,
     mcp,
   };
+}
+
+// ── keys (P3) ──────────────────────────────────────────────────────────────
+
+async function addKeyRoute(ctx: CredentialsRouteContext): Promise<void> {
+  const body = (await ctx.readJsonBody(ctx.req)) as AddKeyInput;
+  const { key, destination } = await addKey(ctx.gid, body);
+  recordAdminAction({
+    actorUserId: ctx.actorUserId,
+    action: 'group_credential_add',
+    targetKind: 'agent_group',
+    targetId: ctx.gid,
+    payload: { key, match: destination.match, injection: destination.injection.type },
+  });
+  ctx.writeJson(ctx.res, 200, { ok: true });
+}
+
+async function updateKeyRoute(ctx: CredentialsRouteContext, key: string): Promise<void> {
+  const body = (await ctx.readJsonBody(ctx.req)) as UpdateKeyInput;
+  const changed = await updateKey(ctx.gid, key, body);
+  recordAdminAction({
+    actorUserId: ctx.actorUserId,
+    action: 'group_credential_update',
+    targetKind: 'agent_group',
+    targetId: ctx.gid,
+    payload: { key, changed },
+  });
+  ctx.writeJson(ctx.res, 200, { ok: true });
+}
+
+async function deleteKeyRoute(ctx: CredentialsRouteContext, key: string): Promise<void> {
+  await deleteKey(ctx.gid, key);
+  recordAdminAction({
+    actorUserId: ctx.actorUserId,
+    action: 'group_credential_delete',
+    targetKind: 'agent_group',
+    targetId: ctx.gid,
+    payload: { key },
+  });
+  ctx.writeJson(ctx.res, 200, { ok: true });
 }
 
 const MAX_CLIENT_NAME = 100;
@@ -245,12 +294,20 @@ export async function handleCredentialsRoute(ctx: CredentialsRouteContext): Prom
     if (m && method === 'GET') return signInProgress(ctx, decodeURIComponent(m[1]!));
     m = /^\/accounts\/([^/]+)$/.exec(sub);
     if (m && method === 'DELETE') return await disconnect(ctx, decodeURIComponent(m[1]!));
-    if (/^\/keys(\/|$)/.test(sub) || /^\/oauth-apps(\/|$)/.test(sub)) {
-      ctx.writeJson(res, 501, { error: 'Changing this here arrives in a later update' });
+    if (sub === '/keys' && method === 'POST') return await addKeyRoute(ctx);
+    m = /^\/keys\/([^/]+)$/.exec(sub);
+    if (m && method === 'PUT') return await updateKeyRoute(ctx, decodeURIComponent(m[1]!));
+    if (m && method === 'DELETE') return await deleteKeyRoute(ctx, decodeURIComponent(m[1]!));
+    if (/^\/oauth-apps(\/|$)/.test(sub)) {
+      ctx.writeJson(res, 501, { error: 'OAuth apps arrive in a later update' });
       return;
     }
     ctx.writeJson(res, 404, { error: 'not_found' });
   } catch (err) {
+    if (err instanceof KeyInputError) {
+      ctx.writeJson(res, err.status, { error: err.message });
+      return;
+    }
     if (!(err instanceof AgentVaultError)) throw err;
     if (err.unreachable) {
       log.warn('Credential gateway unreachable', { gid: ctx.gid, err: err.message });

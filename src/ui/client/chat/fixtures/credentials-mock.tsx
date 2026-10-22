@@ -143,7 +143,7 @@ const PRESETS: KeyPresetDto[] = [
   { id: 'openai', label: 'OpenAI', key: 'OPENAI_API_KEY', destination: { match: 'api.openai.com', injection: { type: 'bearer' } }, obtainUrl: 'https://platform.openai.com/api-keys' },
   { id: 'github', label: 'GitHub', key: 'GITHUB_TOKEN', destination: { match: 'api.github.com', injection: { type: 'bearer' } }, hint: 'Use a fine-grained token limited to the repositories the agent needs.', obtainUrl: 'https://github.com/settings/personal-access-tokens/new' },
   { id: 'brave', label: 'Brave Search', key: 'BRAVE_API_KEY', destination: { match: 'api.search.brave.com', injection: { type: 'api-key', name: 'X-Subscription-Token' } }, obtainUrl: 'https://api-dashboard.search.brave.com/app/keys' },
-  { id: 'tavily', label: 'Tavily (MCP)', key: 'TAVILY_API_KEY', destination: { match: 'mcp.tavily.com/mcp/*', injection: { type: 'query', name: 'tavilyApiKey' } } },
+  { id: 'tavily', label: 'Tavily (MCP)', key: 'TAVILY_API_KEY', destination: { match: 'mcp.tavily.com', injection: { type: 'query', name: '__TAVILY_API_KEY__' } }, hint: 'Use https://mcp.tavily.com/mcp/?tavilyApiKey=__TAVILY_API_KEY__ as the MCP server URL.' },
   { id: 'notion', label: 'Notion (API)', key: 'NOTION_TOKEN', destination: { match: 'api.notion.com', injection: { type: 'bearer' } } },
   { id: 'home-assistant', label: 'Home Assistant', key: 'HOME_ASSISTANT_TOKEN', destination: { match: 'homeassistant.local:8123', injection: { type: 'bearer' } }, hint: 'Create a long-lived access token on your Home Assistant profile page.' },
 ];
@@ -156,7 +156,7 @@ function typicalState(): State {
   return {
     keys: [
       key('OPENROUTER_API_KEY', 'OpenRouter', { match: 'openrouter.ai', injection: { type: 'bearer' } }, { updatedAt: iso(40 * DAY), lastUsedAt: iso(4 * MINUTE) }),
-      key('TAVILY_API_KEY', 'Tavily', { match: 'mcp.tavily.com/mcp/*', injection: { type: 'query', name: 'tavilyApiKey' } }, { mcpServer: 'tavily', updatedAt: iso(12 * DAY), lastUsedAt: iso(2 * HOUR) }),
+      key('TAVILY_API_KEY', 'Tavily', { match: 'mcp.tavily.com/mcp/*', injection: { type: 'query', name: '__TAVILY_API_KEY__' } }, { mcpServer: 'tavily', updatedAt: iso(12 * DAY), lastUsedAt: iso(2 * HOUR) }),
       key('NEXTCLOUD_MCP', 'Nextcloud', { match: 'nextcloud.example.org/mcp/*', injection: { type: 'custom', template: 'Basic {{ NEXTCLOUD_MCP }}' } }, { mcpServer: 'nextcloud', lastUsedAt: iso(1 * DAY) }),
       key('GITHUB_TOKEN', 'GitHub', { match: 'api.github.com', injection: { type: 'bearer' } }, { updatedAt: iso(3 * DAY), lastUsedAt: iso(5 * HOUR) }),
       key('SEATTLE_DATA_TOKEN', 'Seattle Open Data', { match: 'data.seattle.gov', injection: { type: 'api-key', name: 'X-App-Token' } }, { updatedAt: iso(70 * DAY), lastUsedAt: iso(9 * DAY) }),

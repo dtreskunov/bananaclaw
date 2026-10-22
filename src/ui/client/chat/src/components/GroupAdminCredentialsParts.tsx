@@ -40,7 +40,7 @@ export function describeInjection(injection: InjectionDto, key: string): string 
     case 'api-key':
       return `${injection.name || 'Authorization'}: ${injection.prefix ?? ''}${key}`;
     case 'query':
-      return `?${injection.name || 'key'}=${key}`;
+      return `${injection.name || `__${key}__`} in the URL query → ${key}`;
     case 'custom':
       return injection.template || 'Custom header';
   }

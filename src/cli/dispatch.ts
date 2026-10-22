@@ -58,6 +58,15 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
       );
     }
 
+    // Credential values and gateway grants are operator-only, even for `global` scope.
+    if (cmd.resource === 'credentials') {
+      return err(
+        req.id,
+        'forbidden',
+        'credentials commands are host-only — ask an admin to add the key in group settings → Credentials.',
+      );
+    }
+
     if (cliScope === 'group') {
       const allowed = new Set(['groups', 'sessions', 'destinations', 'members']);
       // Only allow whitelisted resources and general commands (no resource, like help)

@@ -29751,7 +29751,7 @@ function describeInjection(injection, key) {
     case "api-key":
       return `${injection.name || "Authorization"}: ${injection.prefix ?? ""}${key}`;
     case "query":
-      return `?${injection.name || "key"}=${key}`;
+      return `${injection.name || `__${key}__`} in the URL query \u2192 ${key}`;
     case "custom":
       return injection.template || "Custom header";
   }
@@ -29898,9 +29898,9 @@ function GroupAdminField({
 // src/components/GroupAdminCredentialsDialogs.tsx
 var INJECTION_LABELS = {
   bearer: "Bearer token (Authorization header)",
-  basic: "Basic auth (Authorization header)",
+  basic: "Basic auth, key as username (Authorization header)",
   "api-key": "Named header",
-  query: "Query parameter",
+  query: "Replace a placeholder in the URL query",
   custom: "Header template"
 };
 function toKeyName(label) {
@@ -29970,14 +29970,21 @@ function DestinationFields({
           const next = event.currentTarget.value;
           setInjection({
             type: next,
-            name: next === "api-key" ? injection.name || "X-API-Key" : next === "query" ? injection.name || "api_key" : void 0,
+            name: next === "api-key" ? injection.name || "X-API-Key" : next === "query" ? injection.name || `__${keyName || "KEY"}__` : void 0,
             template: next === "custom" ? injection.template || `Basic {{ ${keyName || "KEY"} }}` : void 0
           });
         },
         children: Object.keys(INJECTION_LABELS).map((t4) => /* @__PURE__ */ u4("option", { value: t4, children: INJECTION_LABELS[t4] }, t4))
       }
     ) }),
-    injection.type === "api-key" || injection.type === "query" ? /* @__PURE__ */ u4(GroupAdminField, { label: injection.type === "query" ? "Parameter" : "Header", children: /* @__PURE__ */ u4("input", { type: "text", value: injection.name ?? "", spellcheck: false, onInput: (event) => setInjection({ ...injection, name: event.currentTarget.value }) }) }) : null,
+    injection.type === "api-key" || injection.type === "query" ? /* @__PURE__ */ u4(
+      GroupAdminField,
+      {
+        label: injection.type === "query" ? "Placeholder" : "Header",
+        info: injection.type === "query" ? "The agent or MCP server URL uses this text where the key goes, e.g. ?apiKey=__MY_KEY__; the gateway swaps in the real key." : void 0,
+        children: /* @__PURE__ */ u4("input", { type: "text", value: injection.name ?? "", spellcheck: false, onInput: (event) => setInjection({ ...injection, name: event.currentTarget.value }) })
+      }
+    ) : null,
     injection.type === "api-key" ? /* @__PURE__ */ u4(GroupAdminField, { label: "Prefix", info: "Text placed before the key, e.g. \u201CToken \u201D.", children: /* @__PURE__ */ u4("input", { type: "text", value: injection.prefix ?? "", spellcheck: false, placeholder: "none", onInput: (event) => setInjection({ ...injection, prefix: event.currentTarget.value }) }) }) : null,
     injection.type === "custom" ? /* @__PURE__ */ u4(GroupAdminField, { label: "Header", info: "Write the full Authorization header; {{ KEY_NAME }} is replaced by the key.", children: /* @__PURE__ */ u4("input", { type: "text", value: injection.template ?? "", spellcheck: false, onInput: (event) => setInjection({ ...injection, template: event.currentTarget.value }) }) }) : null
   ] });

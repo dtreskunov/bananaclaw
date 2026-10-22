@@ -27,7 +27,10 @@ register({
     if (cliScope === 'group') {
       resources = resources.filter((r) => GROUP_SCOPE_RESOURCES.has(r.plural));
     }
-    const commands = listCommands().filter((c) => c.access !== 'hidden' && !c.resource);
+    // Commands grouped under a resource without a table (e.g. `credentials`) are listed here, host only.
+    const commands = listCommands().filter(
+      (c) => c.access !== 'hidden' && (!c.resource || (ctx.caller === 'host' && !getResource(c.resource))),
+    );
 
     const lines: string[] = [];
 

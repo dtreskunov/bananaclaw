@@ -178,6 +178,15 @@ register({
   handler: async () => ({ archived: true }),
 });
 
+register({
+  name: 'credentials-test',
+  description: 'stands in for the host-only credentials commands',
+  resource: 'credentials',
+  access: 'open',
+  parseArgs: (raw) => raw,
+  handler: async () => ({ listed: true }),
+});
+
 import { dispatch } from './dispatch.js';
 import type { CallerContext } from './frame.js';
 
@@ -584,6 +593,21 @@ describe('CLI scope enforcement', () => {
       expect(resp.error.code).toBe('forbidden');
       expect(resp.error.message).toContain('host-only');
     }
+  });
+
+  it.each(['group', 'global'])('%s: blocks credentials commands (host-only)', async (scope) => {
+    mockGetContainerConfig.mockReturnValue({ cli_scope: scope });
+    const resp = await dispatch({ id: '1', command: 'credentials-test', args: { group: 'g1' } }, agentCtx());
+    expect(resp.ok).toBe(false);
+    if (!resp.ok) {
+      expect(resp.error.code).toBe('forbidden');
+      expect(resp.error.message).toContain('host-only');
+    }
+  });
+
+  it('host: runs credentials commands', async () => {
+    const resp = await dispatch({ id: '1', command: 'credentials-test', args: { group: 'g1' } }, { caller: 'host' });
+    expect(resp.ok).toBe(true);
   });
 
   it('global: allows groups-create', async () => {
