@@ -99,7 +99,7 @@ flowchart LR
     S["spawn"]
     PR["MCP probe → sign-in"]
     GS["Group settings → Credentials<br/>/api/groups/:gid/admin/credentials/*"]
-    CB["/oauth/callback relay<br/>/oauth/client-metadata.json"]
+    CB["/ui/oauth/callback relay<br/>/oauth/client-metadata.json"]
   end
   subgraph AV["nanoclaw-gateway (Agent Vault fork)"]
     SL["F1 socket listener<br/>(bound scoped session)"]
@@ -184,6 +184,9 @@ files, which is what causes merge conflicts.
   instead of redirecting to Agent Vault's UI.
 - **Client metadata:** `GET /v1/oauth/client-metadata` returns the CIMD document
   for NanoClaw to publish.
+- **Issuer binding:** the completion relay accepts `{state, code, iss?}`.
+  NanoClaw forwards the callback's `iss`; the gateway requires and validates it
+  when the authorization server advertises RFC 9207 support.
 - **OAuth apps, at two levels:**
   - **Install-wide:** `PUT /v1/oauth-apps/{provider} {client_id, client_secret?}`
     and `DELETE`. Stored in a reserved vault that no socket session can bind.
@@ -353,15 +356,28 @@ MCP servers' sign-in status that the MCP tab shows. When the gateway is down,
 every route answers `503 {error: "gateway_unreachable"}`, and the tab shows an
 operator hint instead of data.
 
-**OAuth callback.** There are two global UI-server routes: `GET /oauth/callback`
-and `GET /oauth/client-metadata.json` (the latter is served from F11).
+**OAuth callback.** There are two UI-server routes:
+[oauth-callback.ts](../src/ui/server/oauth-callback.ts).
+
+- `GET /ui/oauth/callback` is the redirect URL
+  (`AGENT_VAULT_OAUTH_REDIRECT_URL=<UI_BASE_URL>/oauth/callback`). It sits under
+  `/ui` because the session cookie is scoped to `Path=/ui`.
+- `GET /oauth/client-metadata.json` publishes the gateway's client metadata
+  document (F11) at the origin, where its client ID points.
 
 - **Start:** `POST …/credentials/accounts/start` records `state → (user, group)`
-  with a 10-minute expiry and returns the authorize URL, which the UI opens in a
-  popup.
-- **Callback:** completes only for the **same signed-in NanoClaw user**.
-  - It forwards `{code, state}` to `POST /v1/oauth/complete`.
-  - It then returns the user to the tab.
+  in host memory with a 10-minute expiry and returns the authorize URL, which the
+  UI opens in a popup. A host restart only means signing in again.
+- **Callback:** completes only for the **same signed-in NanoClaw user**. A
+  signed-out browser goes to the login page and comes back.
+  - It forwards `{state, code, iss}` (or `{state, error, iss}` when consent was
+    declined) to `POST /v1/oauth/complete`. A `200` can still report
+    `status: "failed"`, e.g. `issuer_mismatch`.
+  - It posts `nanoclaw-oauth-complete` to the same-origin opener, which reloads
+    the tab; the progress route `GET …/accounts/start/:state` covers a lost
+    message.
+  - The page sends no referrer, isn't cached and runs one nonce-locked script,
+    because its URL carried the authorization code.
 - **Why this is safe:**
   - **No account injection:** a leaked authorize link can't bind someone else's
     account, because the callback only completes for the user who started it.

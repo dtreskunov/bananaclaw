@@ -5,7 +5,7 @@ import './GroupAdmin.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
-import { credentialsUiEnabled, groupAdminOpen, groupAdminTabRequest, groupId, groups, isMobile } from '../state';
+import { credentialsUiFor, groupAdminOpen, groupAdminTabRequest, groupId, groups, isMobile } from '../state';
 import { returnToUserMenu, selectGroup } from '../actions';
 import { Combobox, type ComboboxOption } from './Combobox';
 import { ModelPickerDialog } from './ModelPickerDialog';
@@ -174,7 +174,7 @@ export function GroupAdmin(): JSX.Element | null {
     }
     setTab(requestedTab as Tab);
   }, [open, requestedTab]);
-  const tabItems = credentialsUiEnabled.value ? TAB_ITEMS : TAB_ITEMS.filter((it) => it.id !== 'credentials');
+  const tabItems = credentialsUiFor(gid) ? TAB_ITEMS : TAB_ITEMS.filter((it) => it.id !== 'credentials');
 
   if (!open || !gid) return null;
   const group = groups.value.find((g) => g.id === gid);
@@ -253,7 +253,7 @@ export function GroupAdmin(): JSX.Element | null {
               onActions={setActions}
             />
           ) : null}
-          {activeTab === 'credentials' && credentialsUiEnabled.value ? <CredentialsTab gid={gid} /> : null}
+          {activeTab === 'credentials' && credentialsUiFor(gid) ? <CredentialsTab gid={gid} /> : null}
           {activeTab === 'members' ? <MembersTab gid={gid} /> : null}
           {activeTab === 'roles' ? <RolesTab gid={gid} /> : null}
           {activeTab === 'destinations' ? <DestinationsTab gid={gid} /> : null}
@@ -1005,7 +1005,7 @@ function SettingsTab({
           busy={busy}
           onChange={setDraftMcpServers}
           onTest={testMcpServer}
-          credentialsGid={credentialsUiEnabled.value ? gid : undefined}
+          credentialsGid={credentialsUiFor(gid) ? gid : undefined}
           savedServers={data.mcpServers}
         />
       ) : null}

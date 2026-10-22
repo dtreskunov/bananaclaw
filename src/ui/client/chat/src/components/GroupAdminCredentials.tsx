@@ -87,8 +87,9 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
     credentialsFocus.value = null;
     setView(focus.view);
     const item = focus.key ? load.data.keys.find((k) => k.key === focus.key) : undefined;
-    if (focus.action === 'set' && item && load.data.canEdit) setDialog({ kind: 'replace', item });
-    if (focus.action === 'add' && load.data.canEdit) setDialog({ kind: 'add-key', match: focus.match });
+    const keysEditable = load.data.canEdit && load.data.keysEditable !== false;
+    if (focus.action === 'set' && item && keysEditable) setDialog({ kind: 'replace', item });
+    if (focus.action === 'add' && keysEditable) setDialog({ kind: 'add-key', match: focus.match });
     const app = focus.setupApp ? load.data.oauthApps.find((a) => a.id === focus.setupApp) : undefined;
     if (app && load.data.canEdit) setDialog({ kind: 'oauth-app', app });
   }, [load.state]);
@@ -278,9 +279,12 @@ function SectionHead({ help, children }: { help: string; children?: JSX.Element 
 }
 
 function KeysView({ data, onDialog }: { data: CredentialsOverviewDto; onDialog: (d: Dialog) => void }): JSX.Element {
-  const edit = data.canEdit;
+  const edit = data.canEdit && data.keysEditable !== false;
   return (
     <div class="ga-cred-view">
+      {data.canEdit && data.keysEditable === false ? (
+        <p class="ga-cred-note">Keys can be viewed here; adding and changing them arrives in a later update.</p>
+      ) : null}
       <SectionHead help="API keys and tokens the agent can use, and where each one is sent.">
         {edit ? <button type="button" class="primary" onClick={() => onDialog({ kind: 'add-key' })}>Add key</button> : null}
       </SectionHead>
@@ -419,7 +423,7 @@ function AccountsView({
           ))}
         </ul>
       )}
-      <OAuthAppsSection data={data} onDialog={onDialog} />
+      {data.oauthApps.length ? <OAuthAppsSection data={data} onDialog={onDialog} /> : null}
     </div>
   );
 }
@@ -572,7 +576,9 @@ export function McpServerAuth({
     body = (
       <>
         <span class="muted">No key or sign-in.</span>
-        <button type="button" class="ga-cred-link" onClick={() => open({ view: 'keys', action: 'add', match: mcpMatch(entry.url) })}>Add a key</button>
+        {load.data.keysEditable !== false ? (
+          <button type="button" class="ga-cred-link" onClick={() => open({ view: 'keys', action: 'add', match: mcpMatch(entry.url) })}>Add a key</button>
+        ) : null}
       </>
     );
   }

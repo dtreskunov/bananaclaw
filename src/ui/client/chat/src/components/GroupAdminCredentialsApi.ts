@@ -133,6 +133,8 @@ export interface CredentialsOverviewDto {
   canEdit: boolean;
   /** May set install-wide OAuth apps (owner or global admin). */
   canEditInstall: boolean;
+  /** False while keys can only be viewed here (the gateway answers key edits with 501). */
+  keysEditable?: boolean;
   keys: KeyDto[];
   accounts: AccountDto[];
   oauthApps: OAuthAppDto[];

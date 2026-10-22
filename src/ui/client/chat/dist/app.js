@@ -15713,6 +15713,9 @@ var settingsOpen = y3(false);
 var groupAdminOpen = y3(false);
 var groupAdminTabRequest = y3(null);
 var credentialsUiEnabled = y3(false);
+function credentialsUiFor(gid) {
+  return credentialsUiEnabled.value || !!gid && !!groups.value.find((g8) => g8.id === gid)?.credentialGateway;
+}
 var groupPickerOpen = y3(false);
 var groupPickerMode = y3("all");
 var shareModalRequest = y3(null);
@@ -30393,8 +30396,9 @@ function CredentialsTab({ gid }) {
     credentialsFocus.value = null;
     setView(focus.view);
     const item = focus.key ? load.data.keys.find((k4) => k4.key === focus.key) : void 0;
-    if (focus.action === "set" && item && load.data.canEdit) setDialog({ kind: "replace", item });
-    if (focus.action === "add" && load.data.canEdit) setDialog({ kind: "add-key", match: focus.match });
+    const keysEditable = load.data.canEdit && load.data.keysEditable !== false;
+    if (focus.action === "set" && item && keysEditable) setDialog({ kind: "replace", item });
+    if (focus.action === "add" && keysEditable) setDialog({ kind: "add-key", match: focus.match });
     const app = focus.setupApp ? load.data.oauthApps.find((a4) => a4.id === focus.setupApp) : void 0;
     if (app && load.data.canEdit) setDialog({ kind: "oauth-app", app });
   }, [load.state]);
@@ -30566,8 +30570,9 @@ function SectionHead({ help, children }) {
   ] });
 }
 function KeysView({ data, onDialog }) {
-  const edit = data.canEdit;
+  const edit = data.canEdit && data.keysEditable !== false;
   return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
+    data.canEdit && data.keysEditable === false ? /* @__PURE__ */ u4("p", { class: "ga-cred-note", children: "Keys can be viewed here; adding and changing them arrives in a later update." }) : null,
     /* @__PURE__ */ u4(SectionHead, { help: "API keys and tokens the agent can use, and where each one is sent.", children: edit ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "add-key" }), children: "Add key" }) : null }),
     data.keys.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
       /* @__PURE__ */ u4("p", { children: "No keys yet." }),
@@ -30677,7 +30682,7 @@ function AccountsView({
         /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Disconnect ${a4.account ?? a4.providerLabel}`, title: "Disconnect", onClick: () => onDialog({ kind: "disconnect", account: a4 }), children: "\u2715" })
       ] }) : null
     ] }, a4.key)) }),
-    /* @__PURE__ */ u4(OAuthAppsSection, { data, onDialog })
+    data.oauthApps.length ? /* @__PURE__ */ u4(OAuthAppsSection, { data, onDialog }) : null
   ] });
 }
 function needsApp(data, m6) {
@@ -30814,7 +30819,7 @@ function McpServerAuth({
   } else {
     body = /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4("span", { class: "muted", children: "No key or sign-in." }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => open({ view: "keys", action: "add", match: mcpMatch(entry.url) }), children: "Add a key" })
+      load.data.keysEditable !== false ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => open({ view: "keys", action: "add", match: mcpMatch(entry.url) }), children: "Add a key" }) : null
     ] });
   }
   return /* @__PURE__ */ u4("div", { class: "ga-cred-mcp-auth", children: [
@@ -32978,7 +32983,7 @@ function GroupAdmin() {
     }
     setTab(requestedTab);
   }, [open, requestedTab]);
-  const tabItems = credentialsUiEnabled.value ? TAB_ITEMS : TAB_ITEMS.filter((it) => it.id !== "credentials");
+  const tabItems = credentialsUiFor(gid) ? TAB_ITEMS : TAB_ITEMS.filter((it) => it.id !== "credentials");
   if (!open || !gid) return null;
   const group = groups.value.find((g8) => g8.id === gid);
   const title = group ? `Agent Settings \xB7 ${group.name}` : "Agent Settings";
@@ -33048,7 +33053,7 @@ function GroupAdmin() {
               onActions: setActions
             }
           ) : null,
-          activeTab === "credentials" && credentialsUiEnabled.value ? /* @__PURE__ */ u4(CredentialsTab, { gid }) : null,
+          activeTab === "credentials" && credentialsUiFor(gid) ? /* @__PURE__ */ u4(CredentialsTab, { gid }) : null,
           activeTab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
           activeTab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
           activeTab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
@@ -33745,7 +33750,7 @@ function SettingsTab({
         busy,
         onChange: setDraftMcpServers,
         onTest: testMcpServer,
-        credentialsGid: credentialsUiEnabled.value ? gid : void 0,
+        credentialsGid: credentialsUiFor(gid) ? gid : void 0,
         savedServers: data.mcpServers
       }
     ) : null,

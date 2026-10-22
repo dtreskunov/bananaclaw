@@ -88,6 +88,16 @@ Listener behavior:
   - `mitm`: keep upstream's current behavior.
 - **If any service matches the host**, intercept TLS, as upstream does today.
 
+### R1 P2: OAuth completion relay
+
+The authenticated host relays the public callback to
+`POST /v1/oauth/complete {state, code, iss?}`. Forward `iss` unchanged when
+the authorization server supplies it. For servers advertising
+`authorization_response_iss_parameter_supported=true` (including Linear),
+the gateway requires `iss` to match the issuer pinned in the sign-in state.
+Missing or mismatched issuers fail the flow. Providers that do not advertise
+this support may omit `iss`; a supplied issuer must still match.
+
 ## NanoClaw side
 
 - **Switch:** `NANOCLAW_AGENT_VAULT_GROUPS=<group ids>` (spike only) moves those
@@ -248,3 +258,47 @@ values differ from OneCLI's; re-entering them is the next step.
 
 **Still to check:** a real conversation with "My Agent", and behavior across a
 gateway restart (sockets aren't rebound until P1).
+
+### R1 P2: MCP sign-in (2026-10-22)
+
+**Fork:** `176bb39` (F11) and `dd51e1d` (F4) on `bananaclaw`, pushed. The
+guide is `docs/guides/mcp-oauth.mdx` in the fork.
+
+**NanoClaw:**
+
+- [agent-vault-client.ts](../src/modules/credentials/agent-vault-client.ts)
+  is now the only reader of the host token; egress uses it.
+- [credentials-admin.ts](../src/ui/server/chat/credentials-admin.ts) serves
+  group settings → Credentials for gateway groups:
+  - MCP sign-in start, progress and disconnect.
+  - The overview: MCP sign-ins, plus each HTTP MCP server's status from the
+    vault's accounts, its services, and a cached gateway probe.
+  - Keys, read-only.
+  - Key edits and OAuth apps answer 501 until P3/P4.
+- [oauth-callback.ts](../src/ui/server/oauth-callback.ts) serves
+  `/ui/oauth/callback` and `/oauth/client-metadata.json`.
+- The tab appears for admins of groups listed in
+  `NANOCLAW_AGENT_VAULT_GROUPS`.
+
+**Verified:**
+
+- **Route tests** against a fake gateway:
+  - the callback is bound to the same user
+  - `iss` is forwarded and a mismatch fails
+  - a declined consent is forwarded
+  - the gateway being down gives a 503
+  - probes are cached
+- **The isolated P2 binary**, driven through the client module:
+  - Linear probes as `registered`.
+  - Two vaults get **different client IDs**, both with PKCE S256, `resource`
+    and the `/ui` redirect.
+  - A bogus state gives `invalid_state`, and disconnecting an unknown account
+    gives 404.
+- **Found for P4:** probing GitHub's MCP server
+  (`https://api.githubcopilot.com/mcp/`) fails with `discovery_failed`. The
+  gateway rejects its protected-resource metadata. NanoClaw shows such servers
+  as "no key or sign-in".
+
+**Live acceptance (pending deployment):** sign in to Linear from two groups,
+confirm their accounts are independent and that socket injection works, then
+disconnect one and check the other still works.

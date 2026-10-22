@@ -32,6 +32,7 @@ import { purgeExpiredPrivateWebSessions } from './private-web-db.js';
 import { resolvePrivateWebEntry } from './private-web-path.js';
 import { handleLandingPage, ASSETS_MOUNT_PREFIX } from './landing-page.js';
 import { handleOidcRoute, renderLoginPage } from './oidc-routes.js';
+import { CLIENT_METADATA_PATH, handleClientMetadata, handleOAuthCallback } from './oauth-callback.js';
 import { handleOnboarding } from './onboarding.js';
 import { handleSettings } from './settings.js';
 import { handle as chatHandle, CHAT_MOUNT_PREFIX, handleChatUpgrade } from './chat/routes.js';
@@ -112,6 +113,11 @@ export function startUi(): void {
   mountHandler(`${UI_MOUNT_PREFIX}/view`, withAccessLog('private-web-view', handlePrivateWebView));
   mountHandler(CHAT_MOUNT_PREFIX, withAccessLog('chat', chatHandle));
   mountUpgradeHandler(CHAT_MOUNT_PREFIX, handleChatUpgrade);
+
+  // Credential gateway OAuth: the sign-in popup's callback (under /ui so the
+  // session cookie is sent) and the public client metadata document.
+  mountHandler(`${UI_MOUNT_PREFIX}/oauth`, withAccessLog('oauth', handleOAuthCallback));
+  mountHandler(CLIENT_METADATA_PATH, withAccessLog('oauth-client-metadata', handleClientMetadata));
 
   // Settings (identity linking, etc.) — server-rendered, no SPA.
   mountHandler(`${UI_MOUNT_PREFIX}/settings`, withAccessLog('settings', handleSettings));

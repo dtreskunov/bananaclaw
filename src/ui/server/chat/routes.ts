@@ -51,6 +51,7 @@ import {
 } from './chat.js';
 import type { ThreadSummary } from './chat.js';
 import { handleGroupAdminRequest } from './group-admin.js';
+import { usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';
 import {
   addCatalog,
   deleteCatalog,
@@ -480,6 +481,8 @@ function handleGroups(ctx: Ctx, userId: string): void {
     folder: g.folder,
     siteUrl: g.site_enabled ? siteUrl(g) : null,
     isAdmin: hasAdminPrivilege(userId, g.id),
+    // Admins get group settings → Credentials for groups on the credential gateway.
+    credentialGateway: hasAdminPrivilege(userId, g.id) && usesAgentVault(g.id),
     elevatedOnly: !hasDirectAgentGroupAccess(userId, g.id),
     // Whether this viewer has any messaging context (web mg, or a non-web
     // mg matching one of their identities) in the group.
