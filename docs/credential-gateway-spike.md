@@ -299,6 +299,19 @@ guide is `docs/guides/mcp-oauth.mdx` in the fork.
   gateway rejects its protected-resource metadata. NanoClaw shows such servers
   as "no key or sign-in".
 
-**Live acceptance (pending deployment):** sign in to Linear from two groups,
-confirm their accounts are independent and that socket injection works, then
-disconnect one and check the other still works.
+**Live acceptance (2026-10-22, passed).** Deployed fork `4065e67` (P2 plus
+per-group `client_name`) and NanoClaw `9e4fb6600` to the canary. Cross-acct
+Test was moved to the gateway as the second group.
+
+1. **Sign-in:** Denis signed in to Linear from My Agent and Cross-acct Test.
+   Linear's consent screen showed each group's name. Each vault got its own
+   `registered` client, an `MCP_…` account and generated `mcp.linear.app/mcp`
+   services.
+2. **Test connection:** passed in both groups (Linear MCP, 68 tools). Each
+   vault's `last_used_at` moved at its own test.
+3. **Real tool call:** a container with no Linear credential, using each
+   group's socket session, called `list_teams` and got the real team.
+4. **Disconnect:** Cross-acct Test was disconnected through
+   `DELETE …/credentials/accounts/:key`. Its generated services were removed,
+   and its calls now get `401` with no `resource_metadata`. My Agent's call
+   still returns the team.
