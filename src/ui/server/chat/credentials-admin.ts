@@ -2,9 +2,9 @@
  * Group settings → Credentials routes (`…/admin/credentials/*`), backed by
  * the Agent Vault gateway. Mounted by group-admin.ts behind its admin gate.
  *
- * R1 scope so far: MCP sign-in with per-group dynamic registration (P2) and
- * static keys (P3). OAuth apps answer 501 until P4. Values never appear in
- * any response or log.
+ * R1: MCP sign-in with per-group dynamic registration (P2), static keys
+ * (P3), and OAuth apps with provider accounts (P4). Values and client
+ * secrets never appear in any response or log.
  *
  * Wire contract: src/ui/client/chat/src/components/GroupAdminCredentialsApi.ts.
  */
@@ -16,7 +16,11 @@ import { log } from '../../../log.js';
 import { AgentVaultError, gatewayMessage, usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';
 import {
   disconnectMcp,
+  disconnectProvider,
+  forgetAllProbes,
   forgetProbes,
+  startProviderSignIn,
+  type ProviderInfo,
   listCredentials,
   listMcpAccounts,
   listServices,
@@ -29,6 +33,15 @@ import {
   type KeyDto,
   type McpAccountInfo,
 } from '../../../modules/credentials/gateway-credentials.js';
+import {
+  AppInputError,
+  listApps,
+  providerAccountsOrEmpty,
+  providersOrEmpty,
+  removeApp,
+  saveApp,
+  type SaveAppInput,
+} from '../../../modules/credentials/oauth-apps.js';
 import {
   addKey,
   deleteKey,
@@ -68,7 +81,7 @@ interface McpAuthDto {
 
 interface AccountDto {
   key: string;
-  kind: 'mcp_oauth';
+  kind: 'mcp_oauth' | 'oauth_app';
   provider: string;
   providerLabel: string;
   account: string | null;
@@ -118,14 +131,38 @@ function toAccount(a: McpAccountInfo, servers: [string, string][]): AccountDto {
   };
 }
 
+function toProviderAccount(a: McpAccountInfo, providers: ProviderInfo[]): AccountDto {
+  const provider = providers.find((p) => p.id === a.provider);
+  const sets = a.scope_sets ?? [];
+  return {
+    key: a.key,
+    kind: 'oauth_app',
+    provider: a.provider ?? 'unknown',
+    providerLabel: provider?.label ?? a.provider ?? 'Account',
+    account: a.account,
+    scopes: sets.map((id) => ({ id, label: provider?.scope_sets.find((s) => s.id === id)?.label ?? id })),
+    status: a.status,
+    connectedAt: a.connected_at,
+    lastUsedAt: a.last_used_at,
+    client: 'app',
+  };
+}
+
+function canEditInstall(userId: string): boolean {
+  return isOwner(userId) || isGlobalAdmin(userId);
+}
+
 async function overview(ctx: CredentialsRouteContext): Promise<unknown> {
   const { gid } = ctx;
-  const [services, credentials, accounts] = await Promise.all([
+  const [services, credentials, accounts, providerAccounts, providers] = await Promise.all([
     listServices(gid),
     listCredentials(gid),
     listMcpAccounts(gid),
+    providerAccountsOrEmpty(gid),
+    providersOrEmpty(),
   ]);
   const servers = httpServers(ctx.mcpServers);
+  const oauthApps = await listApps(gid, providers, [...accounts, ...providerAccounts], servers);
   const keys: KeyDto[] = servicesToKeys(services, credentials);
   const credentialKeys = new Set(credentials.map((c) => c.key));
 
@@ -162,11 +199,14 @@ async function overview(ctx: CredentialsRouteContext): Promise<unknown> {
 
   return {
     canEdit: true,
-    canEditInstall: isOwner(ctx.actorUserId) || isGlobalAdmin(ctx.actorUserId),
+    canEditInstall: canEditInstall(ctx.actorUserId),
     keysEditable: true,
     keys,
-    accounts: accounts.map((a) => toAccount(a, servers)),
-    oauthApps: [],
+    accounts: [
+      ...providerAccounts.map((a) => toProviderAccount(a, providers)),
+      ...accounts.map((a) => toAccount(a, servers)),
+    ],
+    oauthApps,
     oauthRedirectUri: oauthRedirectUri(),
     presets: KEY_PRESETS,
     mcp,
@@ -222,12 +262,46 @@ export function clientNameFor(gid: string): string | undefined {
   return name ? [...name].slice(0, MAX_CLIENT_NAME).join('') : undefined;
 }
 
-async function startSignIn(ctx: CredentialsRouteContext): Promise<void> {
-  const body = (await ctx.readJsonBody(ctx.req)) as { mcpServer?: unknown; provider?: unknown };
-  if (typeof body.mcpServer !== 'string') {
-    ctx.writeJson(ctx.res, 501, { error: 'Connecting provider accounts arrives with OAuth apps in a later update' });
+async function startProviderAccount(
+  ctx: CredentialsRouteContext,
+  body: { provider?: unknown; scopeSets?: unknown; replaceKey?: unknown },
+): Promise<void> {
+  const provider = (await providersOrEmpty()).find((p) => p.id === body.provider);
+  if (!provider) {
+    ctx.writeJson(ctx.res, 404, { error: 'Unknown provider' });
     return;
   }
+  const sets = Array.isArray(body.scopeSets) ? body.scopeSets.filter((s): s is string => typeof s === 'string') : [];
+  if (!sets.length || sets.some((s) => !provider.scope_sets.some((p) => p.id === s))) {
+    ctx.writeJson(ctx.res, 400, { error: 'Choose what the agent may use' });
+    return;
+  }
+  const replaceKey =
+    typeof body.replaceKey === 'string' && body.replaceKey.startsWith('OAUTH_') ? body.replaceKey : undefined;
+  const started = await startProviderSignIn(ctx.gid, {
+    provider: provider.id,
+    scope_sets: sets,
+    replace_key: replaceKey,
+  });
+  recordSignIn({ state: started.state, userId: ctx.actorUserId, agentGroupId: ctx.gid, label: provider.label });
+  recordAdminAction({
+    actorUserId: ctx.actorUserId,
+    action: 'group_oauth_account_start',
+    targetKind: 'agent_group',
+    targetId: ctx.gid,
+    payload: { provider: provider.id, scopeSets: sets, replace: !!replaceKey },
+  });
+  ctx.writeJson(ctx.res, 200, { state: started.state, authorizeUrl: started.authorize_url, label: provider.label });
+}
+
+async function startSignIn(ctx: CredentialsRouteContext): Promise<void> {
+  const body = (await ctx.readJsonBody(ctx.req)) as {
+    mcpServer?: unknown;
+    provider?: unknown;
+    scopeSets?: unknown;
+    replaceKey?: unknown;
+  };
+  if (typeof body.mcpServer !== 'string') return startProviderAccount(ctx, body);
   const url = httpServers(ctx.mcpServers).find(([name]) => name === body.mcpServer)?.[1];
   if (!url) {
     ctx.writeJson(ctx.res, 404, { error: `No HTTP MCP server named ${body.mcpServer}; save it first` });
@@ -261,18 +335,51 @@ function signInProgress(ctx: CredentialsRouteContext, state: string): void {
 }
 
 async function disconnect(ctx: CredentialsRouteContext, key: string): Promise<void> {
-  if (!key.startsWith('MCP_')) {
-    ctx.writeJson(ctx.res, 501, { error: 'Only MCP sign-ins can be disconnected here for now' });
+  if (key.startsWith('OAUTH_')) await disconnectProvider(ctx.gid, key);
+  else if (key.startsWith('MCP_')) await disconnectMcp(ctx.gid, key);
+  else {
+    ctx.writeJson(ctx.res, 400, { error: 'Not an account key; delete keys under Keys' });
     return;
   }
-  await disconnectMcp(ctx.gid, key);
   forgetProbes(ctx.gid);
   recordAdminAction({
     actorUserId: ctx.actorUserId,
-    action: 'group_mcp_sign_in_disconnect',
+    action: key.startsWith('OAUTH_') ? 'group_oauth_account_disconnect' : 'group_mcp_sign_in_disconnect',
     targetKind: 'agent_group',
     targetId: ctx.gid,
     payload: { key },
+  });
+  ctx.writeJson(ctx.res, 200, { ok: true });
+}
+
+// ── OAuth apps (P4) ────────────────────────────────────────────────────────
+
+async function saveAppRoute(ctx: CredentialsRouteContext, provider: string): Promise<void> {
+  const body = (await ctx.readJsonBody(ctx.req)) as SaveAppInput;
+  const saved = await saveApp(ctx.gid, provider, body, canEditInstall(ctx.actorUserId));
+  if (saved.scope === 'install') forgetAllProbes();
+  else forgetProbes(ctx.gid);
+  recordAdminAction({
+    actorUserId: ctx.actorUserId,
+    action: 'group_oauth_app_save',
+    targetKind: 'agent_group',
+    targetId: ctx.gid,
+    payload: { provider, scope: saved.scope, clientId: saved.clientId, secretChanged: saved.secretChanged },
+  });
+  ctx.writeJson(ctx.res, 200, { ok: true });
+}
+
+async function removeAppRoute(ctx: CredentialsRouteContext, provider: string): Promise<void> {
+  const scope = new URL(ctx.req.url || '/', 'http://localhost').searchParams.get('scope') ?? 'group';
+  const removed = await removeApp(ctx.gid, provider, scope, canEditInstall(ctx.actorUserId));
+  if (removed === 'install') forgetAllProbes();
+  else forgetProbes(ctx.gid);
+  recordAdminAction({
+    actorUserId: ctx.actorUserId,
+    action: 'group_oauth_app_remove',
+    targetKind: 'agent_group',
+    targetId: ctx.gid,
+    payload: { provider, scope: removed },
   });
   ctx.writeJson(ctx.res, 200, { ok: true });
 }
@@ -298,12 +405,15 @@ export async function handleCredentialsRoute(ctx: CredentialsRouteContext): Prom
     m = /^\/keys\/([^/]+)$/.exec(sub);
     if (m && method === 'PUT') return await updateKeyRoute(ctx, decodeURIComponent(m[1]!));
     if (m && method === 'DELETE') return await deleteKeyRoute(ctx, decodeURIComponent(m[1]!));
-    if (/^\/oauth-apps(\/|$)/.test(sub)) {
-      ctx.writeJson(res, 501, { error: 'OAuth apps arrive in a later update' });
-      return;
-    }
+    m = /^\/oauth-apps\/([a-z0-9-]+)$/.exec(sub);
+    if (m && method === 'PUT') return await saveAppRoute(ctx, m[1]!);
+    if (m && method === 'DELETE') return await removeAppRoute(ctx, m[1]!);
     ctx.writeJson(res, 404, { error: 'not_found' });
   } catch (err) {
+    if (err instanceof AppInputError) {
+      ctx.writeJson(res, err.status, { error: err.message });
+      return;
+    }
     if (err instanceof KeyInputError) {
       ctx.writeJson(res, err.status, { error: err.message });
       return;

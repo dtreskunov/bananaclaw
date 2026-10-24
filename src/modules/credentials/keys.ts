@@ -2,25 +2,23 @@
  * Static keys in a group's vault: one credential plus the one service that
  * sends it. Shared by group settings → Credentials and `ncl credentials`.
  *
- * The gateway has no per-service write yet, so edits read-modify-write the
- * vault's whole service list under a per-group lock and leave the services
- * the gateway generated for MCP sign-ins untouched.
+ * Writes use the gateway's atomic key API, which replaces a key and its
+ * service in one transaction and refuses to touch services the gateway
+ * generated for MCP sign-ins and provider accounts. A per-group lock still
+ * serializes edits so service names are picked against a stable list.
  */
-import { log } from '../../log.js';
 import {
-  deleteCredentials,
   forgetProbes,
   injectionFor,
-  isMcpService,
+  isManagedKey,
   listCredentials,
   listServices,
-  putServices,
+  putKey,
   queryPlaceholder,
+  removeKey,
   sameInjection,
   serviceFromDestination,
   serviceIndexForKey,
-  serviceKeys,
-  setCredentials,
   uniqueServiceName,
   type DestinationDto,
   type GatewayService,
@@ -110,7 +108,7 @@ export function checkKeyName(key: unknown): string {
       'Key names are 2-64 characters: capital letters, digits and underscores, starting with a letter',
     );
   }
-  if (key.startsWith('MCP_')) throw new KeyInputError('Names starting with MCP_ are reserved for MCP sign-ins');
+  if (isManagedKey(key)) throw new KeyInputError('Names starting with MCP_ or OAUTH_ are reserved for sign-ins');
   return key;
 }
 
@@ -182,15 +180,7 @@ export async function addKey(gid: string, input: AddKeyInput): Promise<{ key: st
       throw new KeyInputError(`${key} already exists in this group`, 409);
     }
     const service = serviceFromDestination(uniqueServiceName(label, services), key, destination);
-    await setCredentials(gid, { [key]: value });
-    try {
-      await putServices(gid, [...services, service]);
-    } catch (err) {
-      await deleteCredentials(gid, [key]).catch((cleanup: unknown) =>
-        log.warn('Credential rollback failed', { gid, key, err: (cleanup as Error).message }),
-      );
-      throw err;
-    }
+    await putKey(gid, key, { value, service });
   });
   forgetProbes(gid);
   return { key, destination };
@@ -214,33 +204,24 @@ export async function updateKey(gid: string, rawKey: string, input: UpdateKeyInp
     const [services, credentials] = await Promise.all([listServices(gid), listCredentials(gid)]);
     const index = serviceIndexForKey(services, key);
     if (index < 0 && !credentials.some((c) => c.key === key)) throw new KeyInputError(`${key} doesn't exist`, 404);
-    let next: GatewayService[] | null = null;
-    if (label || destination) {
-      if (index < 0 && !destination) {
-        throw new KeyInputError(`${key} isn't sent anywhere yet; choose where to send it`);
-      }
-      const current = index >= 0 ? services[index]! : undefined;
-      const name = label
-        ? uniqueServiceName(label, services, current?.name)
-        : (current?.name ?? uniqueServiceName(key, services));
-      let service: GatewayService;
-      if (current && destination && sameInjection(destination.injection, injectionFor(current, key))) {
-        // Keep auth details the form can't express (e.g. extra headers); only the host or name changed.
-        service = { ...current, name, host: destination.match };
-      } else if (destination) {
-        service = serviceFromDestination(name, key, destination);
-      } else {
-        service = { ...current!, name };
-      }
-      next = index >= 0 ? services.map((s, i) => (i === index ? service : s)) : [...services, service];
-      if (label) changed.push('label');
-      if (destination) changed.push('destination');
+    const current = index >= 0 ? services[index]! : undefined;
+    if (!current && !destination) throw new KeyInputError(`${key} isn't sent anywhere yet; choose where to send it`);
+    const name = label
+      ? uniqueServiceName(label, services, current?.name)
+      : (current?.name ?? uniqueServiceName(key, services));
+    let service: GatewayService;
+    if (current && destination && sameInjection(destination.injection, injectionFor(current, key))) {
+      // Keep auth details the form can't express (e.g. extra headers); only the host or name changed.
+      service = { ...current, name, host: destination.match };
+    } else if (destination) {
+      service = serviceFromDestination(name, key, destination);
+    } else {
+      service = { ...current!, name };
     }
-    if (value) {
-      await setCredentials(gid, { [key]: value });
-      changed.push('value');
-    }
-    if (next) await putServices(gid, next);
+    await putKey(gid, key, { value, service });
+    if (label) changed.push('label');
+    if (destination) changed.push('destination');
+    if (value) changed.push('value');
   });
   forgetProbes(gid);
   return changed;
@@ -249,12 +230,12 @@ export async function updateKey(gid: string, rawKey: string, input: UpdateKeyInp
 export async function deleteKey(gid: string, rawKey: string): Promise<void> {
   const key = checkKeyName(rawKey);
   await withKeyLock(gid, async () => {
-    const [services, credentials] = await Promise.all([listServices(gid), listCredentials(gid)]);
-    const remaining = services.filter((s) => isMcpService(s) || !serviceKeys(s).includes(key));
-    const hasCredential = credentials.some((c) => c.key === key);
-    if (remaining.length === services.length && !hasCredential) throw new KeyInputError(`${key} doesn't exist`, 404);
-    if (remaining.length !== services.length) await putServices(gid, remaining);
-    if (hasCredential) await deleteCredentials(gid, [key]);
+    try {
+      await removeKey(gid, key);
+    } catch (err) {
+      if ((err as { status?: number }).status === 404) throw new KeyInputError(`${key} doesn't exist`, 404);
+      throw err;
+    }
   });
   forgetProbes(gid);
 }

@@ -32,9 +32,13 @@ async function main(): Promise<void> {
   }
 
   const { command, args, json } = parseArgv(argv);
-  if (args['value-stdin'] === true) {
-    if (process.stdin.isTTY) process.stderr.write('Enter the value, then press Ctrl-D:\n');
-    args.value = (await readStdin()).replace(/\r?\n$/, '');
+  for (const [flag, field] of [
+    ['value-stdin', 'value'],
+    ['secret-stdin', 'secret'],
+  ] as const) {
+    if (args[flag] !== true) continue;
+    if (process.stdin.isTTY) process.stderr.write(`Enter the ${field}, then press Ctrl-D:\n`);
+    args[field] = (await readStdin()).replace(/\r?\n$/, '');
   }
   const req: RequestFrame = { id: randomUUID(), command, args };
   const transport: Transport = pickTransport();

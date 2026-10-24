@@ -30,6 +30,10 @@ export interface GatewayService {
 }
 
 export interface McpAccountInfo {
+  /** `oauth_app` for provider accounts; MCP sign-ins may omit it. */
+  kind?: 'mcp_oauth' | 'oauth_app' | string;
+  provider?: string;
+  scope_sets?: string[];
   key: string;
   resource_url: string;
   account: string | null;
@@ -94,6 +98,7 @@ export interface CredentialItem {
   key: string;
   type?: string;
   updated_at?: string;
+  last_used_at?: string | null;
 }
 
 export async function listCredentials(agentGroupId: string): Promise<CredentialItem[]> {
@@ -146,6 +151,11 @@ export async function probeMcp(
   return info;
 }
 
+/** After an install-wide app change, every group's "needs an app" answer may be stale. */
+export function forgetAllProbes(): void {
+  probeCache.clear();
+}
+
 export function forgetProbes(agentGroupId: string): void {
   for (const key of probeCache.keys()) if (key.startsWith(`${agentGroupId}\n`)) probeCache.delete(key);
 }
@@ -165,7 +175,26 @@ export async function deleteCredentials(agentGroupId: string, keys: string[]): P
   });
 }
 
-/** Replaces the vault's whole service list (the gateway has no per-service write yet). */
+/**
+ * Sets a static key and its single service in one gateway transaction. Omitting
+ * `value` keeps the stored one; services that only sent this key are replaced.
+ */
+export async function putKey(
+  agentGroupId: string,
+  key: string,
+  input: { value?: string; service: GatewayService },
+): Promise<void> {
+  const body: Record<string, unknown> = { service: input.service };
+  if (input.value !== undefined) body.value = input.value;
+  await gatewayJson('PUT', `/v1/vaults/${enc(vaultName(agentGroupId))}/keys/${enc(key)}`, 'key update', { body });
+}
+
+/** Removes a static key and its services in one gateway transaction. */
+export async function removeKey(agentGroupId: string, key: string): Promise<void> {
+  await gatewayJson('DELETE', `/v1/vaults/${enc(vaultName(agentGroupId))}/keys/${enc(key)}`, 'key delete');
+}
+
+/** Replaces the vault's whole service list. Prefer putKey/removeKey. */
 export async function putServices(agentGroupId: string, services: GatewayService[]): Promise<void> {
   await gatewayJson('PUT', `/v1/vaults/${enc(vaultName(agentGroupId))}/services`, 'service update', {
     body: { services },
@@ -231,10 +260,15 @@ export function serviceKeys(service: GatewayService): string[] {
   return [...new Set(keys)];
 }
 
-/** Services the gateway generated for MCP sign-ins; managed as accounts, not keys. */
+/** Credential keys the gateway manages for MCP sign-ins and provider accounts. */
+export function isManagedKey(key: string): boolean {
+  return key.startsWith('MCP_') || key.startsWith('OAUTH_');
+}
+
+/** Services the gateway generated for MCP sign-ins or provider accounts; managed as accounts, not keys. */
 export function isMcpService(service: GatewayService): boolean {
   const keys = serviceKeys(service);
-  return keys.length > 0 && keys.every((k) => k.startsWith('MCP_'));
+  return keys.length > 0 && keys.every(isManagedKey);
 }
 
 function injectionFor(service: GatewayService, key: string): InjectionDto {
@@ -269,7 +303,7 @@ export function servicesToKeys(services: GatewayService[], credentials: Credenti
         label: service.name,
         status: credential ? 'set' : 'needs_value',
         updatedAt: credential?.updated_at ?? null,
-        lastUsedAt: null,
+        lastUsedAt: credential?.last_used_at ?? null,
         destination: { match: service.host, injection: injectionFor(service, key) },
       });
     }
@@ -388,3 +422,102 @@ export function sameInjection(a: InjectionDto, b: InjectionDto): boolean {
 }
 
 export { injectionFor };
+
+// ── OAuth apps and provider accounts (F11) ───────────────────────────────
+
+export interface ProviderScopeSet {
+  id: string;
+  label: string;
+  scopes: string[];
+  hosts: string[];
+}
+
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  issuer: string;
+  console_url: string;
+  scope_sets: ProviderScopeSet[];
+  mcp_servers?: string[];
+}
+
+export interface AppInfo {
+  client_id: string;
+  updated_at: string;
+  accounts: number;
+  accounts_all_vaults?: number;
+}
+
+const PROVIDERS_TTL_MS = 10 * 60_000;
+let providersCache: { at: number; providers: ProviderInfo[] } | null = null;
+
+/** The gateway's built-in provider catalog (Google, GitHub, …). */
+export async function listProviders(now = Date.now()): Promise<ProviderInfo[]> {
+  if (providersCache && now - providersCache.at < PROVIDERS_TTL_MS) return providersCache.providers;
+  const providers = (await gatewayJson<ProviderInfo[] | null>('GET', '/v1/oauth/providers', 'provider catalog')) ?? [];
+  providersCache = { at: now, providers };
+  return providers;
+}
+
+export function resetProvidersCache(): void {
+  providersCache = null;
+}
+
+function appRoute(agentGroupId: string | null, provider: string): string {
+  return agentGroupId
+    ? `/v1/vaults/${enc(vaultName(agentGroupId))}/oauth-apps/${enc(provider)}`
+    : `/v1/oauth-apps/${enc(provider)}`;
+}
+
+/** The install-wide app (`agentGroupId` null) or the group's own, or null when not set up. */
+export async function getApp(agentGroupId: string | null, provider: string): Promise<AppInfo | null> {
+  try {
+    return await gatewayJson<AppInfo>('GET', appRoute(agentGroupId, provider), 'OAuth app');
+  } catch (err) {
+    if ((err as { status?: number }).status === 404) return null;
+    throw err;
+  }
+}
+
+export async function putApp(
+  agentGroupId: string | null,
+  provider: string,
+  input: { client_id: string; client_secret?: string },
+): Promise<AppInfo> {
+  return gatewayJson('PUT', appRoute(agentGroupId, provider), 'OAuth app update', { body: input });
+}
+
+export async function deleteApp(agentGroupId: string | null, provider: string): Promise<void> {
+  await gatewayJson('DELETE', appRoute(agentGroupId, provider), 'OAuth app delete', { timeoutMs: 30_000 });
+}
+
+export async function listProviderAccounts(agentGroupId: string): Promise<McpAccountInfo[]> {
+  return (
+    (await gatewayJson<McpAccountInfo[] | null>(
+      'GET',
+      `/v1/vaults/${enc(vaultName(agentGroupId))}/oauth-accounts`,
+      'account list',
+    )) ?? []
+  );
+}
+
+export async function startProviderSignIn(
+  agentGroupId: string,
+  input: { provider: string; scope_sets: string[]; replace_key?: string },
+): Promise<{ state: string; authorize_url: string }> {
+  return gatewayJson(
+    'POST',
+    `/v1/vaults/${enc(vaultName(agentGroupId))}/oauth-accounts/start`,
+    'account sign-in start',
+    {
+      body: input,
+      timeoutMs: 30_000,
+    },
+  );
+}
+
+export async function disconnectProvider(agentGroupId: string, key: string): Promise<void> {
+  await gatewayJson('DELETE', `/v1/vaults/${enc(vaultName(agentGroupId))}/oauth-accounts/${enc(key)}`, 'disconnect', {
+    timeoutMs: 30_000,
+  });
+}

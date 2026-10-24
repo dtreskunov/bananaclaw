@@ -8,22 +8,36 @@
  *       [--match <host[/path]> --type bearer|basic|api-key|query|custom
  *        --header <name> --prefix <text> --template '<Basic {{ KEY }}>' --label <name>]
  *   ncl credentials delete --group <id> --key <KEY>
- *   ncl credentials disconnect --group <id> --key <MCP_…>
+ *   ncl credentials disconnect --group <id> --key <MCP_…|OAUTH_…>
+ *   ncl credentials oauth-app set --group <id> --provider google|github --client-id <id>
+ *       [--secret-stdin] [--install]
+ *   ncl credentials oauth-app remove --group <id> --provider <id> [--install]
  *
- * Values only arrive through --value-stdin (read by the client), so they never
- * appear in argv, shell history or process listings.
+ * Values and client secrets only arrive through --value-stdin / --secret-stdin
+ * (read by the client), so they never appear in argv, shell history or process
+ * listings. Connecting a provider account needs a browser: use group settings.
  */
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { AgentVaultError, gatewayMessage, usesAgentVault } from '../../modules/credentials/agent-vault-client.js';
 import {
   disconnectMcp,
+  disconnectProvider,
+  forgetAllProbes,
   forgetProbes,
+  getApp,
   listCredentials,
   listMcpAccounts,
   listServices,
   servicesToKeys,
 } from '../../modules/credentials/gateway-credentials.js';
 import { addKey, deleteKey, KeyInputError, updateKey } from '../../modules/credentials/keys.js';
+import {
+  AppInputError,
+  providerAccountsOrEmpty,
+  providersOrEmpty,
+  removeApp,
+  saveApp,
+} from '../../modules/credentials/oauth-apps.js';
 import { register } from '../registry.js';
 
 export const CREDENTIALS_RESOURCE = 'credentials';
@@ -61,7 +75,7 @@ async function run<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err) {
-    if (err instanceof KeyInputError) throw new Error(err.message, { cause: err });
+    if (err instanceof KeyInputError || err instanceof AppInputError) throw new Error(err.message, { cause: err });
     if (err instanceof AgentVaultError) {
       throw new Error(err.unreachable ? "The credential gateway isn't responding" : gatewayMessage(err), {
         cause: err,
@@ -80,10 +94,12 @@ register({
   handler: async (args) =>
     run(async () => {
       const gid = groupArg(args as Args);
-      const [services, credentials, accounts] = await Promise.all([
+      const [services, credentials, accounts, providerAccounts, providers] = await Promise.all([
         listServices(gid),
         listCredentials(gid),
         listMcpAccounts(gid),
+        providerAccountsOrEmpty(gid),
+        providersOrEmpty(),
       ]);
       const keys = servicesToKeys(services, credentials).map((k) => ({
         kind: 'key',
@@ -101,7 +117,36 @@ register({
         sent_to: a.resource_url.replace(/^https?:\/\//, ''),
         how: `oauth (${a.client})`,
       }));
-      return [...keys, ...signIns];
+      const provider = providerAccounts.map((a) => ({
+        kind: 'account',
+        key: a.key,
+        name: providers.find((p) => p.id === a.provider)?.label ?? a.provider ?? '',
+        status: a.status,
+        sent_to: (a.scope_sets ?? []).join(' '),
+        how: 'oauth (app)',
+      }));
+      const apps = (
+        await Promise.all(
+          providers.map(async (p) => {
+            const [install, group] = await Promise.all([getApp(null, p.id), getApp(gid, p.id)]);
+            const rows = [];
+            if (group)
+              rows.push({ kind: 'app', key: p.id, name: group.client_id, status: 'this group', sent_to: '', how: '' });
+            if (install) {
+              rows.push({
+                kind: 'app',
+                key: p.id,
+                name: install.client_id,
+                status: group ? 'install (overridden)' : 'install',
+                sent_to: '',
+                how: '',
+              });
+            }
+            return rows;
+          }),
+        )
+      ).flat();
+      return [...keys, ...signIns, ...provider, ...apps];
     }),
 });
 
@@ -156,7 +201,8 @@ register({
 
 register({
   name: 'credentials-disconnect',
-  description: 'Disconnect an MCP sign-in (revokes its tokens). Use --group <id> --key <MCP_…>.',
+  description:
+    'Disconnect an MCP sign-in or provider account (revokes its tokens). Use --group <id> --key <MCP_…|OAUTH_…>.',
   access: 'open',
   resource: CREDENTIALS_RESOURCE,
   parseArgs: (raw) => raw,
@@ -165,10 +211,58 @@ register({
       const a = args as Args;
       const gid = groupArg(a);
       const key = str(a, 'key');
-      if (!key?.startsWith('MCP_'))
-        throw new Error('--key must be an MCP sign-in key (MCP_…); see `ncl credentials list`');
-      await disconnectMcp(gid, key);
+      if (key?.startsWith('OAUTH_')) await disconnectProvider(gid, key);
+      else if (key?.startsWith('MCP_')) await disconnectMcp(gid, key);
+      else throw new Error('--key must be an account key (MCP_… or OAUTH_…); see `ncl credentials list`');
       forgetProbes(gid);
       return `Disconnected ${key} in ${gid}`;
+    }),
+});
+
+register({
+  name: 'credentials-oauth-app-set',
+  description:
+    'Set an OAuth app for a provider. Use --group <id> --provider google|github --client-id <id> [--secret-stdin] [--install]. The secret is required for a new client ID; --install sets the install-wide app every group uses unless it has its own.',
+  access: 'open',
+  resource: CREDENTIALS_RESOURCE,
+  parseArgs: (raw) => raw,
+  handler: async (args) =>
+    run(async () => {
+      const a = args as Args;
+      const gid = groupArg(a);
+      const provider = str(a, 'provider');
+      if (!provider) throw new Error('--provider <id> is required');
+      if (a.secret !== undefined && a['secret-stdin'] === undefined) {
+        throw new Error('Pass the client secret with --secret-stdin, not on the command line');
+      }
+      const saved = await saveApp(
+        gid,
+        provider,
+        { scope: a.install === true ? 'install' : 'group', clientId: str(a, 'client-id'), clientSecret: a.secret },
+        true,
+      );
+      if (saved.scope === 'install') forgetAllProbes();
+      else forgetProbes(gid);
+      return `Saved the ${saved.scope === 'install' ? 'install-wide' : gid} ${provider} app (${saved.clientId})`;
+    }),
+});
+
+register({
+  name: 'credentials-oauth-app-remove',
+  description:
+    'Remove an OAuth app; accounts issued to it are disconnected. Use --group <id> --provider <id> [--install].',
+  access: 'open',
+  resource: CREDENTIALS_RESOURCE,
+  parseArgs: (raw) => raw,
+  handler: async (args) =>
+    run(async () => {
+      const a = args as Args;
+      const gid = groupArg(a);
+      const provider = str(a, 'provider');
+      if (!provider) throw new Error('--provider <id> is required');
+      const scope = await removeApp(gid, provider, a.install === true ? 'install' : 'group', true);
+      if (scope === 'install') forgetAllProbes();
+      else forgetProbes(gid);
+      return `Removed the ${scope === 'install' ? 'install-wide' : gid} ${provider} app`;
     }),
 });

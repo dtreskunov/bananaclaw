@@ -37,7 +37,7 @@ vi.mock('../auth.js', () => ({
 
 import { initTestDb, closeDb, runMigrations, getDb } from '../../../db/index.js';
 import { clearSignIns } from '../../../modules/credentials/sign-ins.js';
-import { forgetProbes } from '../../../modules/credentials/gateway-credentials.js';
+import { forgetProbes, serviceKeys, type GatewayService } from '../../../modules/credentials/gateway-credentials.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { handleClientMetadata, handleOAuthCallback, resetClientMetadataCache } from '../oauth-callback.js';
 import { handle } from './routes.js';
@@ -49,6 +49,26 @@ const GID = 'ag-gw';
 const TOKEN = 'host-token-123';
 const LINEAR = 'https://mcp.linear.app/mcp';
 const LINEAR_ISSUER = 'https://mcp.linear.app';
+const PROVIDERS = [
+  {
+    id: 'google',
+    label: 'Google',
+    issuer: 'https://accounts.google.com',
+    console_url: 'https://console.cloud.google.com/apis/credentials',
+    scope_sets: [
+      { id: 'gmail-read', label: 'Gmail: read', scopes: ['gmail.readonly'], hosts: ['gmail.googleapis.com'] },
+      { id: 'calendar', label: 'Calendar', scopes: ['calendar'], hosts: ['www.googleapis.com/calendar/*'] },
+    ],
+  },
+  {
+    id: 'github',
+    label: 'GitHub',
+    issuer: 'https://github.com/login/oauth',
+    console_url: 'https://github.com/settings/applications/new',
+    scope_sets: [{ id: 'repo', label: 'Repositories', scopes: ['repo'], hosts: ['api.github.com/repos/*'] }],
+    mcp_servers: ['https://api.githubcopilot.com/mcp/'],
+  },
+];
 
 // ── fake gateway ───────────────────────────────────────────────────────────
 
@@ -67,6 +87,12 @@ const gw = {
   services: [] as Record<string, unknown>[],
   credentials: new Map<string, string>(),
   failServicePut: false,
+  failKeyPut: false,
+  apps: {
+    install: new Map<string, { client_id: string; secret: string }>(),
+    vault: new Map<string, { client_id: string; secret: string }>(),
+  },
+  providerAccounts: [] as Record<string, unknown>[],
   down: false,
 };
 
@@ -122,6 +148,36 @@ function fakeGateway(req: http.IncomingMessage, res: http.ServerResponse, raw: s
     );
     return send(200, { ok: true });
   }
+  const keyRoute = new RegExp(`^${vault}/keys/([A-Z][A-Z0-9_]*)$`).exec(url.pathname);
+  if (keyRoute && req.method === 'PUT') {
+    const key = keyRoute[1]!;
+    const service = body?.service as GatewayService | undefined;
+    if (gw.failKeyPut) return send(409, { error: 'service name already used by another key' });
+    if (!service || /^(mcp|oauth)-/.test(service.name)) {
+      return send(409, { error: 'managed OAuth services and credentials must be changed through account endpoints' });
+    }
+    const refs = serviceKeys(service);
+    if (refs.length !== 1 || refs[0] !== key) return send(400, { error: 'service must reference only the path key' });
+    if (!gw.credentials.has(key) && typeof body?.value !== 'string') return send(400, { error: 'value is required' });
+    const onlyThisKey = (s: Record<string, unknown>): boolean => {
+      const k = serviceKeys(s as unknown as GatewayService);
+      return k.length === 1 && k[0] === key;
+    };
+    if (gw.services.some((s) => s.name === service.name && !onlyThisKey(s))) {
+      return send(409, { error: 'service name collides' });
+    }
+    gw.services = [...gw.services.filter((s) => !onlyThisKey(s)), service as unknown as Record<string, unknown>];
+    if (typeof body?.value === 'string') gw.credentials.set(key, body.value);
+    return send(200, { key });
+  }
+  if (keyRoute && req.method === 'DELETE') {
+    const key = keyRoute[1]!;
+    const before = gw.services.length;
+    gw.services = gw.services.filter((s) => !serviceKeys(s as unknown as GatewayService).includes(key));
+    const had = gw.credentials.delete(key);
+    if (!had && gw.services.length === before) return send(404, { error: 'Key not found' });
+    return send(204);
+  }
   if (req.method === 'GET' && url.pathname === '/v1/credentials' && url.searchParams.get('vault') === GID) {
     return send(200, {
       credentials: [
@@ -142,19 +198,86 @@ function fakeGateway(req: http.IncomingMessage, res: http.ServerResponse, raw: s
   if (req.method === 'POST' && url.pathname === `${vault}/mcp-oauth/probe`) {
     const resource = String(body?.resource_url);
     if (resource === LINEAR) return send(200, { oauth: true, issuer: LINEAR_ISSUER, client: 'registered' });
-    if (resource.includes('githubcopilot'))
+    if (resource.includes('githubcopilot')) {
+      if (gw.apps.vault.has('github') || gw.apps.install.has('github')) {
+        return send(200, { oauth: true, issuer: 'https://github.com/login/oauth', client: 'app' });
+      }
       return send(200, {
         oauth: true,
         issuer: 'https://github.com/login/oauth',
         code: 'registration_unsupported',
         provider: 'github',
       });
+    }
     return send(200, { oauth: false });
   }
   if (req.method === 'POST' && url.pathname === `${vault}/mcp-oauth/start`) {
     if (body?.resource_url !== LINEAR)
       return send(400, { code: 'oauth_not_required', error: 'MCP resource did not request OAuth authentication' });
     return send(200, { state: 'mcp_oast_s1', authorize_url: 'https://linear.app/oauth/authorize?state=mcp_oast_s1' });
+  }
+  if (req.method === 'GET' && url.pathname === '/v1/oauth/providers') return send(200, PROVIDERS);
+  const installApp = /^\/v1\/oauth-apps\/([a-z]+)$/.exec(url.pathname);
+  const vaultApp = new RegExp(`^${vault}/oauth-apps/([a-z]+)$`).exec(url.pathname);
+  if (installApp || vaultApp) {
+    const provider = (installApp ?? vaultApp)![1]!;
+    const store = vaultApp ? gw.apps.vault : gw.apps.install;
+    const count = (): number => gw.providerAccounts.filter((a) => a.provider === provider).length;
+    const view = (a: { client_id: string }): Record<string, unknown> => ({
+      client_id: a.client_id,
+      updated_at: NOW(),
+      accounts: count(),
+      ...(vaultApp ? {} : { accounts_all_vaults: count() + 4 }),
+    });
+    if (req.method === 'GET') {
+      const a = store.get(provider);
+      return a ? send(200, view(a)) : send(404, { error: 'OAuth app not configured' });
+    }
+    if (req.method === 'PUT') {
+      const current = store.get(provider);
+      const secret = body?.client_secret as string | undefined;
+      if (!secret && (!current || current.client_id !== body?.client_id)) {
+        return send(400, { error: 'client secret required' });
+      }
+      store.set(provider, { client_id: String(body?.client_id), secret: secret ?? current!.secret });
+      return send(200, view(store.get(provider)!));
+    }
+    if (req.method === 'DELETE') {
+      if (!store.delete(provider)) return send(404, { error: 'OAuth app not configured' });
+      gw.providerAccounts = gw.providerAccounts.filter((a) => a.provider !== provider);
+      return send(204);
+    }
+  }
+  if (req.method === 'GET' && url.pathname === `${vault}/oauth-accounts`) return send(200, gw.providerAccounts);
+  if (req.method === 'POST' && url.pathname === `${vault}/oauth-accounts/start`) {
+    const provider = String(body?.provider);
+    if (!gw.apps.vault.has(provider) && !gw.apps.install.has(provider)) {
+      return send(400, { code: 'app_not_configured', error: 'OAuth app not configured' });
+    }
+    return send(200, { state: 'mcp_oast_p1', authorize_url: `https://accounts.example/${provider}?state=mcp_oast_p1` });
+  }
+  const pdel = new RegExp(`^${vault}/oauth-accounts/([^/]+)$`).exec(url.pathname);
+  if (req.method === 'DELETE' && pdel) {
+    const before = gw.providerAccounts.length;
+    gw.providerAccounts = gw.providerAccounts.filter((a) => a.key !== decodeURIComponent(pdel[1]!));
+    return gw.providerAccounts.length < before ? send(204) : send(404, { error: 'account not found' });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/oauth/complete' && body?.state === 'mcp_oast_p1') {
+    gw.providerAccounts.push({
+      kind: 'oauth_app',
+      provider: 'google',
+      scope_sets: ['gmail-read'],
+      key: 'OAUTH_G1',
+      resource_url: '',
+      account: null,
+      connected_at: NOW(),
+      last_used_at: null,
+      updated_at: NOW(),
+      status: 'connected',
+      client: 'app',
+      scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+    });
+    return send(200, { status: 'connected', vault: GID, key: 'OAUTH_G1', account: null });
   }
   if (req.method === 'POST' && url.pathname === '/v1/oauth/complete') {
     if (body?.state !== 'mcp_oast_s1')
@@ -324,6 +447,9 @@ beforeEach(() => {
     ['MINIMAX_API_KEY', 'mm-secret'],
   ]);
   gw.failServicePut = false;
+  gw.failKeyPut = false;
+  gw.apps = { install: new Map(), vault: new Map() };
+  gw.providerAccounts = [];
   gw.down = false;
   clearSignIns();
   forgetProbes(GID);
@@ -362,7 +488,6 @@ describe('GET …/credentials', () => {
       canEdit: true,
       canEditInstall: false,
       keysEditable: true,
-      oauthApps: [],
       accounts: [],
     });
     expect(body.oauthRedirectUri).toBe('https://nanoclaw.example.com/ui/oauth/callback');
@@ -407,12 +532,6 @@ describe('GET …/credentials', () => {
     mockUserId = 'web:owner';
     const owner = await run(handle, 'GET', '/ui/chat/api/groups/ag-onecli/admin/credentials');
     expect(owner.status()).toBe(409);
-  });
-
-  it('answers 501 for OAuth apps until P4', async () => {
-    const res = await api('PUT', '/oauth-apps/google', { scope: 'group', clientId: 'x', clientSecret: 'secret' });
-    expect(res.status()).toBe(501);
-    expect(gw.requests.some((r) => JSON.stringify(r.body ?? '').includes('secret'))).toBe(false);
   });
 });
 
@@ -596,11 +715,13 @@ describe('keys', () => {
     expect(gw.credentials.has('OPENROUTER_API_KEY')).toBe(false);
   });
 
-  it('removes the credential again when the service update fails', async () => {
-    gw.failServicePut = true;
+  it('uses the atomic key API and leaves nothing behind when the gateway refuses', async () => {
+    gw.failKeyPut = true;
     const res = await addKey({ key: 'B_KEY', value: 'v', destination: bearer('b.example') });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(409);
     expect(gw.credentials.has('B_KEY')).toBe(false);
+    expect(gw.requests.some((r) => r.url === '/v1/credentials' && r.method === 'POST')).toBe(false);
+    expect(gw.requests.some((r) => r.method === 'PUT' && r.url.endsWith('/services'))).toBe(false);
   });
 
   it('sets a missing value, renames and re-targets a key', async () => {
@@ -646,8 +767,11 @@ describe('keys', () => {
     expect((await api('DELETE', '/keys/TAVILY_API_KEY')).status()).toBe(200);
     expect(gw.credentials.has('TAVILY_API_KEY')).toBe(false);
     expect(gw.services.map((s) => s.name)).toEqual(['openrouter', 'minimax']);
-    const put = gw.requests.filter((r) => r.method === 'PUT' && r.url.endsWith('/services')).at(-1)!;
-    expect((put.body as { services: { name: string }[] }).services.map((s) => s.name)).toContain('mcp-x');
+    expect(gw.requests.some((r) => r.method === 'DELETE' && r.url === `/v1/vaults/${GID}/keys/TAVILY_API_KEY`)).toBe(
+      true,
+    );
+    expect(gw.requests.some((r) => r.method === 'PUT' && r.url.endsWith('/services'))).toBe(false);
+    expect(gw.accounts).toHaveLength(1);
     expect((await api('DELETE', '/keys/TAVILY_API_KEY')).status()).toBe(404);
     expect((await api('DELETE', '/keys/MCP_ABC')).status()).toBe(400);
   });
@@ -703,6 +827,33 @@ describe('ncl credentials (host)', () => {
     expect(gw.credentials.has('CLI_KEY')).toBe(false);
   });
 
+  it('sets and removes OAuth apps with the secret from stdin', async () => {
+    let resp = await run('credentials-oauth-app-set', {
+      group: GID,
+      provider: 'github',
+      'client-id': 'Iv-cli',
+      'secret-stdin': true,
+      secret: 'cli-secret',
+      install: true,
+    });
+    expect(resp.ok).toBe(true);
+    expect(gw.apps.install.get('github')).toEqual({ client_id: 'Iv-cli', secret: 'cli-secret' });
+    const inline = await run('credentials-oauth-app-set', {
+      group: GID,
+      provider: 'google',
+      'client-id': 'g',
+      secret: 'x',
+    });
+    expect(inline.ok).toBe(false);
+    if (!inline.ok) expect(inline.error.message).toContain('--secret-stdin');
+    resp = await run('credentials-list', { group: GID });
+    expect(resp.ok && JSON.stringify(resp.data)).toContain('Iv-cli');
+    expect(resp.ok && JSON.stringify(resp.data)).not.toContain('cli-secret');
+    resp = await run('credentials-oauth-app-remove', { group: GID, provider: 'github', install: true });
+    expect(resp.ok).toBe(true);
+    expect(gw.apps.install.size).toBe(0);
+  });
+
   it('refuses values passed on the command line and groups off the gateway', async () => {
     const inline = await run('credentials-set', { group: GID, key: 'CLI_KEY', value: 'oops', match: 'cli.example' });
     expect(inline.ok).toBe(false);
@@ -710,5 +861,108 @@ describe('ncl credentials (host)', () => {
     expect(gw.credentials.has('CLI_KEY')).toBe(false);
     const off = await run('credentials-list', { group: 'ag-onecli' });
     expect(off.ok).toBe(false);
+  });
+});
+
+describe('OAuth apps and provider accounts', () => {
+  type App = {
+    id: string;
+    install: Record<string, unknown> | null;
+    group: Record<string, unknown> | null;
+    mcpServers?: string[];
+  };
+  const apps = async (): Promise<App[]> => ((await api('GET', '')).body() as { oauthApps: App[] }).oauthApps;
+
+  it("lists catalog providers with their scope sets and the group's MCP servers that use them", async () => {
+    const list = await apps();
+    expect(list.map((a) => a.id)).toEqual(['google', 'github']);
+    expect(list[0]).toMatchObject({
+      install: null,
+      group: null,
+      consoleUrl: 'https://console.cloud.google.com/apis/credentials',
+      scopeSets: [
+        { id: 'gmail-read', label: 'Gmail: read', hosts: ['gmail.googleapis.com'] },
+        { id: 'calendar', label: 'Calendar', hosts: ['www.googleapis.com/calendar/*'] },
+      ],
+    });
+    expect(list[1]!.mcpServers).toEqual(['github']);
+  });
+
+  it("lets scoped admins set the group's own app but not the install-wide one", async () => {
+    const install = await api('PUT', '/oauth-apps/github', {
+      scope: 'install',
+      clientId: 'Iv1',
+      clientSecret: 'gh-secret',
+    });
+    expect(install.status()).toBe(403);
+    expect(gw.apps.install.size).toBe(0);
+    const own = await api('PUT', '/oauth-apps/github', { scope: 'group', clientId: 'Iv1', clientSecret: 'gh-secret' });
+    expect(own.status()).toBe(200);
+    expect(gw.apps.vault.get('github')).toEqual({ client_id: 'Iv1', secret: 'gh-secret' });
+    expect((await api('DELETE', '/oauth-apps/github?scope=install')).status()).toBe(403);
+  });
+
+  it('lets owners set the install-wide app, which clears the "needs an app" state', async () => {
+    let mcp = ((await api('GET', '')).body() as { mcp: Record<string, unknown>[] }).mcp;
+    expect(mcp.find((m) => m.server === 'github')).toMatchObject({ needsApp: 'github' });
+    mockUserId = 'web:owner';
+    const res = await api('PUT', '/oauth-apps/github', { scope: 'install', clientId: 'Iv-install', clientSecret: 's' });
+    expect(res.status()).toBe(200);
+    const github = (await apps()).find((a) => a.id === 'github')!;
+    expect(github.install).toMatchObject({ clientId: 'Iv-install', accounts: 0, accountsAllGroups: 4 });
+    mcp = ((await api('GET', '')).body() as { mcp: Record<string, unknown>[] }).mcp;
+    expect(mcp.find((m) => m.server === 'github')!.needsApp).toBeUndefined();
+  });
+
+  it('requires a secret for a new client ID but keeps it when only other fields change', async () => {
+    expect((await api('PUT', '/oauth-apps/google', { clientId: 'g-1' })).status()).toBe(400);
+    expect((await api('PUT', '/oauth-apps/google', { clientId: 'g-1', clientSecret: 'first' })).status()).toBe(200);
+    expect((await api('PUT', '/oauth-apps/google', { clientId: 'g-1' })).status()).toBe(200);
+    expect(gw.apps.vault.get('google')).toEqual({ client_id: 'g-1', secret: 'first' });
+    expect((await api('PUT', '/oauth-apps/google', { clientId: 'has space', clientSecret: 'x' })).status()).toBe(400);
+    expect((await api('PUT', '/oauth-apps/nope', { clientId: 'x', clientSecret: 'x' })).status()).toBe(404);
+  });
+
+  it('connects a provider account through the callback, then disconnects it', async () => {
+    await api('PUT', '/oauth-apps/google', { clientId: 'g-1', clientSecret: 'first' });
+    const started = await api('POST', '/accounts/start', { provider: 'google', scopeSets: ['gmail-read'] });
+    expect(started.status()).toBe(200);
+    expect(started.body()).toMatchObject({ state: 'mcp_oast_p1', label: 'Google' });
+    expect(gw.requests.at(-1)).toMatchObject({
+      url: `/v1/vaults/${GID}/oauth-accounts/start`,
+      body: { provider: 'google', scope_sets: ['gmail-read'] },
+    });
+    const page = await callback('state=mcp_oast_p1&code=c0de');
+    expect(page.text()).toContain('"status":"connected"');
+    const overview = (await api('GET', '')).body() as { accounts: Record<string, unknown>[]; oauthApps: App[] };
+    expect(overview.accounts[0]).toMatchObject({
+      key: 'OAUTH_G1',
+      kind: 'oauth_app',
+      provider: 'google',
+      providerLabel: 'Google',
+      scopes: [{ id: 'gmail-read', label: 'Gmail: read' }],
+      client: 'app',
+    });
+    expect(overview.oauthApps[0]!.group).toMatchObject({ clientId: 'g-1', accounts: 1 });
+    expect((await api('DELETE', '/accounts/OAUTH_G1')).status()).toBe(200);
+    expect(gw.providerAccounts).toEqual([]);
+  });
+
+  it('rejects unknown providers and scope sets before calling the gateway', async () => {
+    const before = gw.requests.filter((r) => r.url.endsWith('/oauth-accounts/start')).length;
+    expect((await api('POST', '/accounts/start', { provider: 'nope', scopeSets: ['x'] })).status()).toBe(404);
+    expect((await api('POST', '/accounts/start', { provider: 'google', scopeSets: ['bogus'] })).status()).toBe(400);
+    expect((await api('POST', '/accounts/start', { provider: 'google', scopeSets: [] })).status()).toBe(400);
+    expect(gw.requests.filter((r) => r.url.endsWith('/oauth-accounts/start')).length).toBe(before);
+  });
+
+  it('never returns client secrets', async () => {
+    mockUserId = 'web:owner';
+    await api('PUT', '/oauth-apps/github', {
+      scope: 'install',
+      clientId: 'Iv-install',
+      clientSecret: 'very-secret-value',
+    });
+    expect((await api('GET', '')).text()).not.toContain('very-secret-value');
   });
 });
