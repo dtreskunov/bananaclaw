@@ -5,7 +5,9 @@ import { cascadeDeleteAgentGroup } from '../../db/cascade-delete-agent-group.js'
 import { getDb } from '../../db/connection.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getSession } from '../../db/sessions.js';
+import { log } from '../../log.js';
 import { archiveAgentGroup } from '../../modules/archive/archive-group.js';
+import { deleteVault, usesAgentVault } from '../../modules/credentials/agent-vault-client.js';
 import { restoreAgentGroup } from '../../modules/archive/restore-group.js';
 import { createGroup, GroupCreateError } from '../../modules/groups/create.js';
 import { writeSessionMessage } from '../../session-manager.js';
@@ -126,7 +128,14 @@ registerResource({
       handler: async (args) => {
         const id = args.id as string;
         if (!id) throw new Error('--id is required');
+        const hadVault = usesAgentVault(id);
         const removed = cascadeDeleteAgentGroup(id);
+        // The group's gateway vault goes with it (archive keeps it so a restore works).
+        if (hadVault) {
+          await deleteVault(id).catch((err: unknown) =>
+            log.warn('Agent Vault vault delete failed; remove it on the gateway', { id, err: (err as Error).message }),
+          );
+        }
         return { deleted: id, removed };
       },
     },

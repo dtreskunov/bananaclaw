@@ -11,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR } from '../../config.js';
+import { agentVaultBackendGroups, getContainerConfig } from '../../db/container-configs.js';
 import { readEnvFile } from '../../env.js';
 
 const PROJECT_ROOT = path.dirname(DATA_DIR);
@@ -59,8 +60,8 @@ export function gatewaySettings(): GatewaySettings {
   };
 }
 
-/** Agent group IDs moved to Agent Vault (spike-only switch until `credential_backend` lands). */
-export function agentVaultGroups(): Set<string> {
+/** Groups listed in the spike-era NANOCLAW_AGENT_VAULT_GROUPS env var (still honoured). */
+function envAgentVaultGroups(): Set<string> {
   return new Set(
     (env('NANOCLAW_AGENT_VAULT_GROUPS') || '')
       .split(',')
@@ -69,8 +70,15 @@ export function agentVaultGroups(): Set<string> {
   );
 }
 
+/** Agent group IDs on the Agent Vault gateway: `credential_backend = 'agent-vault'`, plus the legacy env list. */
+export function agentVaultGroups(): Set<string> {
+  return new Set([...envAgentVaultGroups(), ...agentVaultBackendGroups()]);
+}
+
 export function usesAgentVault(agentGroupId: string): boolean {
-  return agentVaultGroups().has(agentGroupId);
+  return (
+    envAgentVaultGroups().has(agentGroupId) || getContainerConfig(agentGroupId)?.credential_backend === 'agent-vault'
+  );
 }
 
 /** Each agent group has exactly one vault, named after the group. */
@@ -165,4 +173,21 @@ export async function gatewayJson<T>(
 /** The user-facing part of an AgentVaultError, without the "Agent Vault … failed: HTTP n" prefix. */
 export function gatewayMessage(err: AgentVaultError): string {
   return err.message.replace(/^Agent Vault .*? failed: HTTP \d+ ?/, '') || err.message;
+}
+
+/** Creates the group's vault if it doesn't exist yet. */
+export async function ensureVault(agentGroupId: string): Promise<'created' | 'exists'> {
+  const res = await gatewayFetch('POST', '/v1/vaults', { body: { name: vaultName(agentGroupId) } });
+  if (res.status === 201 || res.status === 200) return 'created';
+  if (res.status === 409) return 'exists';
+  throw await gatewayFailure(res, 'vault create');
+}
+
+/** Deletes the group's vault; the gateway revokes its sign-ins first. A missing vault is fine. */
+export async function deleteVault(agentGroupId: string): Promise<void> {
+  const res = await gatewayFetch('DELETE', `/v1/vaults/${encodeURIComponent(vaultName(agentGroupId))}`, {
+    timeoutMs: 30_000,
+  });
+  if (res.ok || res.status === 404) return;
+  throw await gatewayFailure(res, 'vault delete');
 }

@@ -130,3 +130,21 @@ export function updateContainerConfigJson(
 export function deleteContainerConfig(agentGroupId: string): void {
   getDb().prepare('DELETE FROM container_configs WHERE agent_group_id = ?').run(agentGroupId);
 }
+
+export type CredentialBackend = 'onecli' | 'agent-vault';
+
+/** Host-only: moves a group between OneCLI and the Agent Vault gateway. Takes effect on the next container start. */
+export function setCredentialBackend(agentGroupId: string, backend: CredentialBackend): void {
+  getDb()
+    .prepare('UPDATE container_configs SET credential_backend = ?, updated_at = ? WHERE agent_group_id = ?')
+    .run(backend === 'onecli' ? null : backend, new Date().toISOString(), agentGroupId);
+}
+
+/** Groups whose credential_backend is 'agent-vault'. */
+export function agentVaultBackendGroups(): string[] {
+  return (
+    getDb().prepare("SELECT agent_group_id FROM container_configs WHERE credential_backend = 'agent-vault'").all() as {
+      agent_group_id: string;
+    }[]
+  ).map((r) => r.agent_group_id);
+}

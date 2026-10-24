@@ -12,6 +12,9 @@ import {
   releaseAgentVaultEgress,
   usesAgentVault,
 } from './agent-vault-egress.js';
+import { closeDb, initTestDb, runMigrations } from './db/index.js';
+import { setCredentialBackend } from './db/container-configs.js';
+import { getDb } from './db/connection.js';
 
 const CA = '-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----';
 const ENV_KEYS = [
@@ -36,6 +39,7 @@ let postStatus: number;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
+  runMigrations(initTestDb());
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'av-egress-')));
   fs.writeFileSync(path.join(tmp, 'host-token'), 'host-token-value\n');
   sessions = [];
@@ -87,6 +91,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeDb();
   for (const key of ENV_KEYS) {
     if (savedEnv[key] === undefined) delete process.env[key];
     else process.env[key] = savedEnv[key];
@@ -109,6 +114,21 @@ describe('agent vault egress', () => {
   it('switches only the listed groups', () => {
     expect(usesAgentVault('ag-two')).toBe(true);
     expect(usesAgentVault('ag-three')).toBe(false);
+  });
+
+  it('switches groups whose credential_backend is agent-vault', () => {
+    const now = new Date().toISOString();
+    getDb()
+      .prepare(
+        `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES ('ag-db', 'db', 'db', NULL, ?)`,
+      )
+      .run(now);
+    getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES ('ag-db', ?)`).run(now);
+    expect(usesAgentVault('ag-db')).toBe(false);
+    setCredentialBackend('ag-db', 'agent-vault');
+    expect(usesAgentVault('ag-db')).toBe(true);
+    setCredentialBackend('ag-db', 'onecli');
+    expect(usesAgentVault('ag-db')).toBe(false);
   });
 
   it('opens a socket session and mounts the socket directory and CA bundle', async () => {

@@ -12,13 +12,20 @@
  *   ncl credentials oauth-app set --group <id> --provider google|github --client-id <id>
  *       [--secret-stdin] [--install]
  *   ncl credentials oauth-app remove --group <id> --provider <id> [--install]
+ *   ncl credentials backend get|set --group <id> [--backend onecli|agent-vault]
  *
  * Values and client secrets only arrive through --value-stdin / --secret-stdin
  * (read by the client), so they never appear in argv, shell history or process
  * listings. Connecting a provider account needs a browser: use group settings.
  */
 import { getAgentGroup } from '../../db/agent-groups.js';
-import { AgentVaultError, gatewayMessage, usesAgentVault } from '../../modules/credentials/agent-vault-client.js';
+import { getContainerConfig, setCredentialBackend } from '../../db/container-configs.js';
+import {
+  AgentVaultError,
+  ensureVault,
+  gatewayMessage,
+  usesAgentVault,
+} from '../../modules/credentials/agent-vault-client.js';
 import {
   disconnectMcp,
   disconnectProvider,
@@ -53,7 +60,11 @@ function groupArg(args: Args): string {
   const gid = str(args, 'group') ?? str(args, 'id');
   if (!gid) throw new Error('--group <agent-group-id> is required');
   if (!getAgentGroup(gid)) throw new Error(`no agent group ${gid}`);
-  if (!usesAgentVault(gid)) throw new Error(`${gid} doesn't use the credential gateway (NANOCLAW_AGENT_VAULT_GROUPS)`);
+  if (!usesAgentVault(gid)) {
+    throw new Error(
+      `${gid} doesn't use the credential gateway; run \`ncl credentials backend set --backend agent-vault\``,
+    );
+  }
   return gid;
 }
 
@@ -264,5 +275,53 @@ register({
       if (scope === 'install') forgetAllProbes();
       else forgetProbes(gid);
       return `Removed the ${scope === 'install' ? 'install-wide' : gid} ${provider} app`;
+    }),
+});
+
+function existingGroup(args: Args): string {
+  const gid = str(args, 'group') ?? str(args, 'id');
+  if (!gid) throw new Error('--group <agent-group-id> is required');
+  if (!getAgentGroup(gid) || !getContainerConfig(gid)) throw new Error(`no agent group ${gid}`);
+  return gid;
+}
+
+register({
+  name: 'credentials-backend-get',
+  description: "Show where a group's containers get credentials (onecli or agent-vault). Use --group <id>.",
+  access: 'open',
+  resource: CREDENTIALS_RESOURCE,
+  parseArgs: (raw) => raw,
+  handler: async (args) => {
+    const gid = existingGroup(args as Args);
+    const stored = getContainerConfig(gid)?.credential_backend ?? 'onecli';
+    const effective = usesAgentVault(gid) ? 'agent-vault' : 'onecli';
+    return stored === effective
+      ? effective
+      : `${effective} (NANOCLAW_AGENT_VAULT_GROUPS overrides the stored ${stored})`;
+  },
+});
+
+register({
+  name: 'credentials-backend-set',
+  description:
+    "Move a group between OneCLI and the Agent Vault gateway. Use --group <id> --backend onecli|agent-vault. Creates the group's vault when needed; takes effect when its containers next start (`ncl groups restart --id <id>`). Keys aren't copied between backends.",
+  access: 'open',
+  resource: CREDENTIALS_RESOURCE,
+  parseArgs: (raw) => raw,
+  handler: async (args) =>
+    run(async () => {
+      const a = args as Args;
+      const gid = existingGroup(a);
+      const backend = str(a, 'backend');
+      if (backend !== 'onecli' && backend !== 'agent-vault') throw new Error('--backend must be onecli or agent-vault');
+      let vault = '';
+      if (backend === 'agent-vault') vault = (await ensureVault(gid)) === 'created' ? ' (vault created)' : '';
+      setCredentialBackend(gid, backend);
+      const pinned =
+        backend === 'onecli' && usesAgentVault(gid)
+          ? '; still on agent-vault while NANOCLAW_AGENT_VAULT_GROUPS lists it'
+          : '';
+      const kept = backend === 'onecli' ? '; its vault is kept, so switching back restores its keys and sign-ins' : '';
+      return `${gid} → ${backend}${vault}${kept}${pinned}. Restart its containers to apply: ncl groups restart --id ${gid}`;
     }),
 });

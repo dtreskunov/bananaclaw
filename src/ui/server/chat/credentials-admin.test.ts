@@ -43,6 +43,7 @@ import { handleClientMetadata, handleOAuthCallback, resetClientMetadataCache } f
 import { handle } from './routes.js';
 import { dispatch } from '../../../cli/dispatch.js';
 import '../../../cli/commands/credentials.js';
+import '../../../cli/resources/groups.js';
 
 const NOW = (): string => new Date().toISOString();
 const GID = 'ag-gw';
@@ -93,6 +94,7 @@ const gw = {
     vault: new Map<string, { client_id: string; secret: string }>(),
   },
   providerAccounts: [] as Record<string, unknown>[],
+  vaults: new Set<string>(),
   down: false,
 };
 
@@ -217,6 +219,16 @@ function fakeGateway(req: http.IncomingMessage, res: http.ServerResponse, raw: s
     return send(200, { state: 'mcp_oast_s1', authorize_url: 'https://linear.app/oauth/authorize?state=mcp_oast_s1' });
   }
   if (req.method === 'GET' && url.pathname === '/v1/oauth/providers') return send(200, PROVIDERS);
+  if (req.method === 'POST' && url.pathname === '/v1/vaults') {
+    const name = String(body?.name);
+    if (gw.vaults.has(name)) return send(409, { error: `Vault "${name}" already exists` });
+    gw.vaults.add(name);
+    return send(201, { name });
+  }
+  const vaultDel = /^\/v1\/vaults\/([^/]+)$/.exec(url.pathname);
+  if (req.method === 'DELETE' && vaultDel) {
+    return gw.vaults.delete(decodeURIComponent(vaultDel[1]!)) ? send(204) : send(404, { error: 'Vault not found' });
+  }
   const installApp = /^\/v1\/oauth-apps\/([a-z]+)$/.exec(url.pathname);
   const vaultApp = new RegExp(`^${vault}/oauth-apps/([a-z]+)$`).exec(url.pathname);
   if (installApp || vaultApp) {
@@ -450,6 +462,7 @@ beforeEach(() => {
   gw.failKeyPut = false;
   gw.apps = { install: new Map(), vault: new Map() };
   gw.providerAccounts = [];
+  gw.vaults = new Set([GID]);
   gw.down = false;
   clearSignIns();
   forgetProbes(GID);
@@ -964,5 +977,51 @@ describe('OAuth apps and provider accounts', () => {
       clientSecret: 'very-secret-value',
     });
     expect((await api('GET', '')).text()).not.toContain('very-secret-value');
+  });
+});
+
+describe('credential backend switch', () => {
+  const host = { caller: 'host' as const };
+  const cli = (command: string, args: Record<string, unknown>) => dispatch({ id: '1', command, args }, host);
+
+  it('moves a group onto the gateway, creating its vault, and back', async () => {
+    expect((await cli('credentials-backend-get', { group: 'ag-onecli' })).ok && 'onecli').toBe('onecli');
+    let resp = await cli('credentials-backend-set', { group: 'ag-onecli', backend: 'agent-vault' });
+    expect(resp.ok).toBe(true);
+    if (resp.ok) expect(String(resp.data)).toContain('vault created');
+    expect(gw.vaults.has('ag-onecli')).toBe(true);
+    resp = await cli('credentials-backend-get', { group: 'ag-onecli' });
+    expect(resp.ok && resp.data).toBe('agent-vault');
+    mockUserId = 'web:owner';
+    expect((await run(handle, 'GET', '/ui/chat/api/groups/ag-onecli/admin/credentials')).status()).not.toBe(409);
+    resp = await cli('credentials-backend-set', { group: 'ag-onecli', backend: 'agent-vault' });
+    expect(resp.ok && String(resp.data)).not.toContain('vault created');
+    resp = await cli('credentials-backend-set', { group: 'ag-onecli', backend: 'onecli' });
+    expect(resp.ok).toBe(true);
+    expect(gw.vaults.has('ag-onecli')).toBe(true);
+    expect((await cli('credentials-backend-get', { group: 'ag-onecli' })).ok).toBe(true);
+    expect((await run(handle, 'GET', '/ui/chat/api/groups/ag-onecli/admin/credentials')).status()).toBe(409);
+  });
+
+  it('rejects unknown backends and groups', async () => {
+    expect((await cli('credentials-backend-set', { group: 'ag-onecli', backend: 'vault' })).ok).toBe(false);
+    expect((await cli('credentials-backend-set', { group: 'ag-missing', backend: 'onecli' })).ok).toBe(false);
+  });
+
+  it('is refused from agent containers', async () => {
+    const resp = await dispatch(
+      { id: '1', command: 'credentials-backend-set', args: { group: GID, backend: 'onecli' } },
+      { caller: 'agent', sessionId: 's', agentGroupId: GID, messagingGroupId: 'mg' },
+    );
+    expect(resp.ok).toBe(false);
+    if (!resp.ok) expect(resp.error.code).toBe('forbidden');
+  });
+
+  it('deletes the vault when a gateway group is deleted', async () => {
+    await cli('credentials-backend-set', { group: 'ag-onecli', backend: 'agent-vault' });
+    expect(gw.vaults.has('ag-onecli')).toBe(true);
+    const resp = await cli('groups-delete', { id: 'ag-onecli' });
+    expect(resp.ok).toBe(true);
+    expect(gw.vaults.has('ag-onecli')).toBe(false);
   });
 });
