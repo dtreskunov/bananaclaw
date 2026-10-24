@@ -340,3 +340,56 @@ Test was moved to the gateway as the second group.
 - **Verified:**
   - Route, CLI and dispatcher tests pass.
   - Every injection type round-trips through an isolated real gateway.
+
+### R1 P4: OAuth apps, provider accounts and atomic keys (2026-10-24)
+
+**Fork (`a2d567b` on local `bananaclaw`, not pushed yet):**
+
+- `cddcaa2`: OAuth apps (install-wide and per vault), the provider catalog and
+  provider accounts.
+- `6953e17`: atomic static keys and per-service writes.
+- `0d6487b`: F8 token-endpoint stubs.
+- Two GitHub fixes and an upstream merge.
+- Guides: `oauth-apps.mdx`, `static-keys.mdx` and `oauth-token-stubs.mdx`.
+
+**NanoClaw (`165d783dc`):**
+
+- **Keys:** written with the atomic `PUT|DELETE /v1/vaults/{v}/keys/{KEY}`.
+  This replaces the whole-service-list rewrite and the manual rollback. Keys
+  now show updated and last-used times.
+- **Credentials → Accounts:**
+  - Shows the catalog with each provider's install-wide and group app.
+  - Owners and global admins set install-wide apps; group admins set the
+    group's own.
+  - Google and GitHub accounts connect and disconnect through the existing
+    callback.
+  - MCP servers like GitHub's stop showing "needs an app" once an app exists.
+- **CLI:** `ncl credentials oauth-app set|remove [--install]` reads the
+  secret from `--secret-stdin`. `list` and `disconnect` now cover provider
+  accounts.
+
+**Verified:**
+
+- **Tests:** 79 route, CLI and dispatcher tests against a fake gateway.
+- **Isolated build of `a2d567b`:**
+  - The fork's `internal/...` tests pass, except the Podman-socket isolation
+    test, which fails for host-environment reasons.
+  - Key add, rename/retarget and value-only update work; a duplicate gives
+    409 and a missing key gives 404.
+  - Setting an install-wide app as a scoped admin gives 403, and a new client
+    ID without a secret gives 400.
+  - The GitHub MCP probe answers `registration_unsupported` without an app and
+    `client:"app"` with one.
+  - Google sign-in starts with the group's client, the requested scopes,
+    `access_type=offline` and the `/ui` redirect.
+- **Live canary (gateway binary built from `a2d567b`):**
+  - The gateway upgrade kept My Agent's Linear sign-in, and a real `list_teams`
+    call still works.
+  - An atomic key add, rename and delete through `ncl` left no stray service.
+
+**Pending:**
+
+- **Live Google and GitHub consent:** needs real OAuth apps created by the
+  operator in the provider consoles.
+- **F8 on the host side:** writing `av-refresh:<key>` / `av-access:<key>`
+  placeholders into stdio MCP configs.
