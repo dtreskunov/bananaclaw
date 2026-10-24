@@ -393,3 +393,21 @@ Test was moved to the gateway as the second group.
   operator in the provider consoles.
 - **F8 on the host side:** writing `av-refresh:<key>` / `av-access:<key>`
   placeholders into stdio MCP configs.
+
+### R1 P1 follow-up: per-group backend switch (2026-10-24)
+
+- **Stored setting:** `container_configs.credential_backend` (migration
+  `container-configs-credential-backend`) replaces the
+  `NANOCLAW_AGENT_VAULT_GROUPS` env list. NULL means OneCLI. The env list is
+  still honoured, as a fallback.
+- **`ncl credentials backend get|set`** is host-only:
+  - Moving a group to `agent-vault` creates its vault, or reuses an existing
+    one.
+  - Moving back to OneCLI keeps the vault, so its keys and sign-ins return if
+    the group moves to the gateway again.
+  - The change applies when the group's containers next start.
+- **Deleting a group** with `ncl groups delete` also deletes its vault.
+  Archiving keeps it.
+- **Canary:** My Agent and Cross-acct Test now use the stored setting. The env
+  line is commented out in `.env` (backup `.env.bak.*.pre-backend-column`). A
+  live `list_teams` call through My Agent still works.
