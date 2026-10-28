@@ -411,3 +411,126 @@ Test was moved to the gateway as the second group.
 - **Canary:** My Agent and Cross-acct Test now use the stored setting. The env
   line is commented out in `.env` (backup `.env.bak.*.pre-backend-column`). A
   live `list_teams` call through My Agent still works.
+
+### R1 P5: pinned release and provider consent (2026-10-27)
+
+- **Deployed release:** `gw-v0.1.0`, source
+  `b292bc3e0b776ebd326117ed58d2ddee1b66321b`. The Linux amd64 checksum and
+  signed provenance were independently verified with a supported GitHub CLI,
+  constrained to the release workflow, source tag and full source commit.
+  `/init-agent-vault` and the [upgrade guide](agent-vault-upgrades.md) now
+  document the pinned, state-preserving installation path.
+- **Upgrade acceptance:** all three vaults and their account/service metadata,
+  the host token, password source and configuration survived. No token rotation,
+  database reset or group backend switch occurred. The gateway and NanoClaw
+  services are healthy after the approved restarts.
+- **Real operator consent, My Agent:** Google reauthorization granted
+  `gmail-read`, `gmail-send`, `calendar` and `drive-read`; GitHub reauthorization
+  preserved `repo` and `issues`. Both returned verified account labels and
+  retained their existing account keys through explicit replacement.
+- **Host/UI acceptance:** completion progress returned the gateway's actual
+  keys and labels, and the refreshed Credentials Accounts tab displayed both
+  verified labels and the selected scope sets. Each provider still has exactly
+  one account in the group. The existing Linear account remains connected.
+- **Validation boundary:** consent and metadata/UI checks passed; no mail,
+  events, Drive files or repository contents were read, and no send operation
+  was performed. Same-subject deduplication without `replace_key` was not
+  exercised by this live acceptance.
+- **Next:** F8 stdio token-placeholder wiring and read-only MCP acceptance
+  (completed below). Model-planned agent conversations are a separate check.
+
+### R1 F8: local stdio MCP acceptance (2026-10-27)
+
+**Scope:** My Agent's existing group-local servers only. No package install,
+image rebuild, host restart or other group's configuration change was needed.
+
+- Google clients now use `av-access:<key>` / `av-refresh:<key>` for the existing
+  verified Google account. The installed-client ID/secret are inert
+  `agent-vault-managed` placeholders, not provider app credentials.
+- Kept each client's token-file schema: Gmail's flat object, Calendar's
+  `normal` account map, and Drive's v2 `accounts.default` record. Stubs declare
+  the granted service-specific scopes, not the old overbroad scope list.
+- Initial expiry was set to `1`, not `0`: Calendar and Drive treat zero as
+  absent and can skip proactive refresh while an access placeholder is present.
+  Their SDKs successfully refreshed and persisted future synthetic expiries.
+- GitHub's existing `GITHUB_PERSONAL_ACCESS_TOKEN` env entry now holds its
+  `av-access:<key>` placeholder in the central DB. Materialization preserves it.
+- Drive's `GOOGLE_DRIVE_MCP_SCOPES` is `drive.readonly` so its default broad
+  scope expectations do not falsely suggest reconnecting for unrelated APIs.
+  All other MCP settings and other groups' configs were checked unchanged.
+- The legacy group-local OneCLI setup script refuses to overwrite F8 stubs.
+  Private pre-change stubs/config backups were retained for rollback.
+
+**Verification:** disposable containers used the normal host
+`buildContainerArgs` egress path, `--network=none`, the group's private Unix
+socket, the gateway CA and inherited proxy env. No host token or real account
+credentials were mounted or passed into a container.
+
+| Server | Discovered tools | Approved read-only tool | Result |
+| --- | ---: | --- | --- |
+| GitHub 2.0.3 | 41 | `list_branches` (one result maximum, this repository) | 1 branch |
+| Calendar 2.7.0 | 13 | `list-calendars` | 14 calendars |
+| Drive 2.13.0 | 130 | `search` (root file metadata, one result maximum) | 1 file |
+| Gmail package 1.1.11 | 19 | `list_email_labels` | 57 labels |
+
+Only counts were reported; names, IDs, response bodies and contents were not
+printed. No mail messages, calendar events, Drive file contents or repository
+file contents were read, and no send/create/edit/delete tool was invoked.
+
+Google and GitHub synthetic refresh endpoints returned only the expected
+placeholders with expiry and `Cache-Control: no-store`. Unknown account,
+wrong-provider and cross-vault placeholders returned OAuth
+`400 invalid_grant`. All temporary containers and socket sessions were removed.
+
+**Boundary:** this proved real stdio client discovery, refresh and read-only
+API calls through the gateway, not a model-planned conversation at that stage.
+The old scope-set labels did not establish the provider token's complete grant
+or enforce HTTP-method restrictions. No write operation was tested. The generic
+contract below exposes effective scope metadata and its provenance separately.
+
+### Catalog-free OAuth host rollout (2026-10-28)
+
+The fork agent deployed the operator-approved local `gw-v0.1.1-dev` build,
+source `8c240e88dd41032e85e11727a65a3dd3b0efec70`. This is not a published or
+attested release. See [the upgrade guide](agent-vault-upgrades.md#catalog-free-oauth-breaking-update).
+
+- NanoClaw now uses configured-app collection reads, arbitrary app IDs and
+  actual OAuth scopes. Catalog fetching, provider-enum validation and
+  older-gateway fallbacks were removed.
+- The Credentials UI supports generic safe configuration JSON and separate
+  write-only secrets, public/MCP-only clients, install/vault sources,
+  scope provenance, and explicit empty-scope requests. Legacy reconnects
+  prefill effective scopes rather than treating unavailable original requests
+  as an intentional empty request.
+- The host CLI uses `--app` and safe `--config` JSON with `--secret-stdin`.
+  Callback state/user binding and authoritative returned keys remain intact.
+- Shared gateway instructions select the backend using
+  `NANOCLAW_EGRESS_SOCKET`. My Agent's stale OneCLI memory was corrected, and
+  its shell helper now reads the host-materialized MCP configuration instead
+  of duplicating commands or hardcoding a OneCLI sentinel.
+- Host/browser builds, typechecks and changed-host lint passed; 78 focused
+  tests passed. The approved NanoClaw restart left both services healthy
+  and the deployed gateway binary unchanged.
+- Live Credentials enumeration, generic public-client creation/deletion and
+  legacy GitHub scope prefill passed. The temporary app was removed without
+  connecting an account. No real app, account key or F8 file was rewritten.
+- The repaired helper discovered the existing 41 GitHub tools inside the
+  normal network-isolated agent container.
+
+The fresh read-only overview acceptance is in thread
+`a120e2a3-2d43-49d9-ac8b-d7cc910ee3ee`. Private repositories remain outside
+acceptance until the operator explicitly selects/authorizes a target.
+
+The overview completed with live Google, GitHub and Linear connectivity,
+correct Agent Vault backend identification, and no new consent or provider-data
+writes. GitHub public search explicitly used `visibility:public fork:true`;
+no private repositories were enumerated. The agent distinguished endpoint
+errors from disconnection and corrected stale inventory/counting claims.
+Independent checks through the same scoped container confirmed GitHub
+`/user` identity and `X-OAuth-Scopes: repo`, and Google's tokeninfo identity with
+14 provider-reported scopes. Those are fresh observations; the gateway's migrated
+stored scope metadata remains marked `legacy`.
+
+Live CLI generic public-app creation, partial update and deletion also passed.
+Both UI/CLI test apps were removed. All three original account keys remain
+connected; the repaired helper also works from a non-group working directory.

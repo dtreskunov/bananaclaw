@@ -30169,34 +30169,61 @@ function EditKeyDialog({
     ] })
   ] });
 }
-var CLIENT_ID_RE = /^\S+$/;
 function OAuthAppDialog({
   gid,
   app,
   scope: fixedScope,
   canEditInstall,
   redirectUri,
+  issuer,
   onClose,
   onSaved
 }) {
   const [scope, setScope] = h2(fixedScope ?? (canEditInstall && !app.install ? "install" : "group"));
   const existing = scope === "install" ? app.install : app.group;
-  const [clientId, setClientId] = h2(existing?.clientId ?? "");
+  const [appId, setAppId] = h2(app.id);
+  const initialConfig = () => JSON.stringify(existing?.config ?? (app.install ?? app.group)?.config ?? {
+    label: app.label === "New app" ? "" : app.label,
+    issuer: issuer ?? (app.install ?? app.group)?.config.issuer ?? "",
+    client_id: "",
+    token_endpoint_auth_method: "client_secret_post",
+    authorization_endpoint: "",
+    token_endpoint: "",
+    api_hosts: [],
+    default_scopes: [],
+    authorization_params: {},
+    identity: "none",
+    token_scope_separator: "space"
+  }, null, 2);
+  const [configText, setConfigText] = h2(initialConfig);
   const [secret, setSecret] = h2("");
   const [busy, setBusy] = h2(false);
   useEscapeClose(onClose, busy);
-  y2(() => setClientId(existing?.clientId ?? ""), [scope]);
-  const id2 = clientId.trim();
-  const canSave = !busy && CLIENT_ID_RE.test(id2) && (existing ? id2 !== existing.clientId || secret !== "" : secret !== "");
+  y2(() => {
+    setConfigText(initialConfig());
+    setSecret("");
+  }, [scope]);
+  let config;
+  let configError = "";
+  try {
+    config = JSON.parse(configText);
+    if (!config || typeof config !== "object" || Array.isArray(config)) configError = "Configuration must be a JSON object.";
+    else if ("client_secret" in config) configError = "Use the separate client-secret field, not the configuration JSON.";
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    configError = "Configuration must be valid JSON.";
+  }
+  const id2 = appId.trim();
+  const canSave = !busy && !configError && /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(id2);
   const choosing = fixedScope === void 0 && canEditInstall && !app.install && !app.group;
   async function save(event) {
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
     const ok = await send(
-      credPath(gid, `/oauth-apps/${encodeURIComponent(app.id)}`),
+      credPath(gid, `/oauth-apps/${encodeURIComponent(id2)}`),
       "PUT",
-      secret ? { scope, clientId: id2, clientSecret: secret } : { scope, clientId: id2 },
+      secret ? { scope, config, clientSecret: secret } : { scope, config },
       `Saved the ${app.label} app`
     );
     setBusy(false);
@@ -30212,17 +30239,7 @@ function OAuthAppDialog({
   return /* @__PURE__ */ u4(MobileDialog, { title, onClose, maxWidth: "560px", className: "ga-cred-dialog", closeDisabled: busy, children: [
     /* @__PURE__ */ u4("form", { id: "ga-cred-oauth-app", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
       existing ? null : /* @__PURE__ */ u4("ol", { class: "ga-cred-steps group-admin-help", children: [
-        /* @__PURE__ */ u4("li", { children: [
-          "Create an OAuth client of type ",
-          /* @__PURE__ */ u4("em", { children: "Web application" }),
-          " in the",
-          " ",
-          /* @__PURE__ */ u4("a", { href: app.consoleUrl, target: "_blank", rel: "noopener noreferrer", children: [
-            app.label,
-            " console"
-          ] }),
-          "."
-        ] }),
+        /* @__PURE__ */ u4("li", { children: "Create an OAuth client with your authorization server." }),
         /* @__PURE__ */ u4("li", { children: "Add the redirect URI below as an authorized redirect URI." }),
         /* @__PURE__ */ u4("li", { children: "Paste the client ID and secret here." })
       ] }),
@@ -30244,13 +30261,16 @@ function OAuthAppDialog({
         /* @__PURE__ */ u4("code", { children: redirectUri }),
         /* @__PURE__ */ u4("button", { type: "button", onClick: copy, children: "Copy" })
       ] }) }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Client ID", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: clientId, spellcheck: false, autoFocus: !existing, onInput: (event) => setClientId(event.currentTarget.value) }) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "App ID", children: /* @__PURE__ */ u4("input", { type: "text", "aria-label": "App ID", class: "ga-cred-mono", value: appId, disabled: Boolean(app.id), spellcheck: false, autoFocus: !app.id, onInput: (event) => setAppId(event.currentTarget.value) }) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "OAuth configuration (JSON)", children: /* @__PURE__ */ u4("textarea", { "aria-label": "OAuth configuration (JSON)", class: "ga-cred-mono", rows: 16, value: configText, spellcheck: false, onInput: (event) => setConfigText(event.currentTarget.value) }) }),
+      configError ? /* @__PURE__ */ u4("p", { role: "alert", class: "ga-cred-error", children: configError }) : null,
+      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: 'Configure issuer, client_id, authorization_endpoint, token_endpoint, exact api_hosts and default_scopes. MCP-only apps can omit OAuth endpoints and API hosts. Optional fields include authorization_params, revocation_endpoint, identity (none, oidc, google or github), jwks_uri and token_scope_separator (space or comma). Public clients use token_endpoint_auth_method: "none"; confidential clients use client_secret_post or client_secret_basic.' }),
       /* @__PURE__ */ u4(GroupAdminField, { label: "Client secret", children: /* @__PURE__ */ u4(SecretInput, { value: secret, onInput: setSecret, placeholder: existing ? "Leave empty to keep the current secret" : "Paste the secret" }) }),
       /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: [
         scope === "install" ? "Every group without its own app uses this client. " : app.install ? "Only this group uses this client, instead of the install-wide app. " : "Only this group uses this client. ",
         "The secret is stored in the gateway and can't be viewed again.",
         existing ? ` Current client set ${ago(existing.updatedAt)}.` : "",
-        existing && existing.clientId !== id2 && id2 ? " Changing the client disconnects the accounts that use it." : ""
+        existing ? " Changing the issuer, client ID, OAuth endpoints or token-auth method disconnects accounts issued by this app source and requires a supplied confidential-client secret. Other configuration changes apply to new sign-ins." : ""
       ] })
     ] }),
     /* @__PURE__ */ u4(Footer, { children: [
@@ -30274,10 +30294,15 @@ function ConnectAccountDialog({
 }) {
   const initial = reconnect?.provider ?? provider;
   const [app, setApp] = h2(() => initial ? apps.find((a4) => a4.id === initial) ?? null : null);
-  const [scopes, setScopes] = h2(() => reconnect?.scopes ?? []);
+  const [scopes, setScopes] = h2(() => (reconnect?.scopes ?? (app?.group ?? app?.install)?.config.default_scopes ?? []).join("\n"));
+  const [mcpChoice, setMcpChoice] = h2(null);
   const [busy, setBusy] = h2(false);
   useEscapeClose(onClose, busy);
   const mcpSignIns = mcp.filter((m6) => m6.auth === "oauth");
+  if (mcpChoice) {
+    const candidates = apps.filter((a4) => !mcpChoice.issuer || (a4.group ?? a4.install)?.config.issuer === mcpChoice.issuer);
+    return /* @__PURE__ */ u4(MobileDialog, { title: `Choose an app for ${mcpChoice.server}`, onClose, onBack: () => setMcpChoice(null), children: /* @__PURE__ */ u4(MobileDialogList, { children: candidates.map((a4) => /* @__PURE__ */ u4(MobileDialogItem, { label: a4.label, sublabel: a4.id, onClick: () => void begin({ mcpServer: mcpChoice.server, appId: a4.id }) }, a4.id)) }) });
+  }
   async function begin(input) {
     setBusy(true);
     const ok = await onStart(input);
@@ -30287,27 +30312,32 @@ function ConnectAccountDialog({
   if (!app) {
     return /* @__PURE__ */ u4(MobileDialog, { title: "Connect an account", onClose, maxWidth: "520px", className: "ga-cred-dialog", children: [
       /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "You'll sign in with the provider in a new window. The agent can then use the account through the gateway, without seeing its tokens." }) }),
-      /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: apps.filter((a4) => a4.scopeSets.length > 0).map((a4) => /* @__PURE__ */ u4(
+      /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: apps.filter((a4) => {
+        const c4 = (a4.group ?? a4.install)?.config;
+        return c4?.authorization_endpoint && c4.token_endpoint && c4.api_hosts.length;
+      }).map((a4) => /* @__PURE__ */ u4(
         MobileDialogItem,
         {
           label: a4.label,
-          sublabel: appReady(a4) ? `${a4.scopeSets.length} kinds of access available` : "Needs an OAuth app first",
+          sublabel: (a4.group ?? a4.install)?.config.issuer,
           chevron: appReady(a4) || canEdit,
-          onClick: appReady(a4) ? () => setApp(a4) : canEdit ? () => onSetUp(a4) : void 0
+          onClick: () => {
+            setApp(a4);
+            setScopes((a4.group ?? a4.install).config.default_scopes.join("\n"));
+          }
         },
         a4.id
       )) }),
       mcpSignIns.length ? /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body ga-cred-dialog-subhead", children: /* @__PURE__ */ u4("h4", { children: "MCP servers" }) }),
         /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: mcpSignIns.map((m6) => {
-          const app2 = m6.needsApp ? apps.find((a4) => a4.id === m6.needsApp) : void 0;
           return /* @__PURE__ */ u4(
             MobileDialogItem,
             {
               label: m6.server,
-              sublabel: app2 ? `Needs the ${app2.label} OAuth app first` : m6.status === "ok" ? `Signed in${m6.account ? ` as ${m6.account}` : ""} \u2014 sign in again` : m6.url,
-              chevron: !app2 || canEdit,
-              onClick: busy ? void 0 : app2 ? canEdit ? () => onSetUp(app2) : void 0 : () => void begin({ mcpServer: m6.server })
+              sublabel: m6.needsApp ? `Needs an OAuth app for ${m6.issuer ?? "the discovered issuer"}` : m6.ambiguousApp ? "Choose a configured OAuth app" : m6.status === "ok" ? `Signed in${m6.account ? ` as ${m6.account}` : ""} \u2014 sign in again` : m6.url,
+              chevron: true,
+              onClick: busy ? void 0 : m6.needsApp ? () => onSetUp({ id: "", label: "New app", install: null, group: null, overridesInstall: false }, m6.issuer) : m6.ambiguousApp ? () => setMcpChoice(m6) : () => void begin({ mcpServer: m6.server })
             },
             m6.server
           );
@@ -30327,25 +30357,13 @@ function ConnectAccountDialog({
       closeDisabled: busy,
       children: [
         /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: [
+          /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Request OAuth scopes, one per line or separated by spaces. An empty field explicitly requests no scopes." }),
+          /* @__PURE__ */ u4(GroupAdminField, { label: "Requested OAuth scopes", children: /* @__PURE__ */ u4("textarea", { "aria-label": "Requested OAuth scopes", class: "ga-cred-mono", rows: 6, value: scopes, onInput: (event) => setScopes(event.currentTarget.value) }) }),
           /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-            "Choose what the agent may use. ",
-            app.label,
-            " will ask you to confirm."
-          ] }),
-          /* @__PURE__ */ u4("ul", { class: "ga-cred-checklist", children: app.scopeSets.map((s5) => /* @__PURE__ */ u4("li", { children: [
-            /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-              /* @__PURE__ */ u4(
-                "input",
-                {
-                  type: "checkbox",
-                  checked: scopes.includes(s5.id),
-                  onChange: (event) => setScopes(event.currentTarget.checked ? [...scopes, s5.id] : scopes.filter((x6) => x6 !== s5.id))
-                }
-              ),
-              /* @__PURE__ */ u4("span", { children: s5.label })
-            ] }),
-            /* @__PURE__ */ u4("span", { class: "ga-cred-checklist-note ga-cred-mono", children: s5.hosts.join(", ") })
-          ] }, s5.id)) })
+            "The provider decides the effective grant and may retain earlier permissions. Requesting fewer scopes does not revoke them. The agent can use all provider-permitted operations on ",
+            (app.group ?? app.install)?.config.api_hosts.join(", "),
+            "."
+          ] })
         ] }),
         /* @__PURE__ */ u4(Footer, { children: [
           /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
@@ -30354,8 +30372,8 @@ function ConnectAccountDialog({
             {
               type: "button",
               class: "primary",
-              disabled: busy || scopes.length === 0,
-              onClick: () => void begin({ provider: app.id, scopeSets: scopes, replaceKey: reconnect?.key }),
+              disabled: busy,
+              onClick: () => void begin({ appId: app.id, scopes: scopes.trim() ? scopes.trim().split(/\s+/) : [], replaceKey: reconnect?.key }),
               children: busy ? "Opening\u2026" : `Continue to ${app.label}`
             }
           )
@@ -30408,6 +30426,11 @@ function CredentialsTab({ gid }) {
     if (focus.action === "add" && keysEditable) setDialog({ kind: "add-key", match: focus.match });
     const app = focus.setupApp ? load.data.oauthApps.find((a4) => a4.id === focus.setupApp) : void 0;
     if (app && load.data.canEdit) setDialog({ kind: "oauth-app", app });
+    if (focus.setupIssuer && load.data.canEdit) setDialog({
+      kind: "oauth-app",
+      app: { id: "", label: "New app", install: null, group: null, overridesInstall: false },
+      issuer: focus.setupIssuer
+    });
   }, [load.state]);
   if (load.state === "loading") return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
   if (load.state === "down") return /* @__PURE__ */ u4(GatewayDown, { onRetry: () => void refresh() });
@@ -30479,7 +30502,7 @@ function CredentialsTab({ gid }) {
         canEdit: data.canEdit,
         provider: dialog.provider,
         reconnect: dialog.reconnect,
-        onSetUp: (app) => setDialog({ kind: "oauth-app", app, thenConnect: true }),
+        onSetUp: (app, issuer) => setDialog({ kind: "oauth-app", app, issuer, thenConnect: true }),
         onStart: signIn.start,
         onClose: close
       }
@@ -30492,6 +30515,7 @@ function CredentialsTab({ gid }) {
         scope: dialog.scope,
         canEditInstall: data.canEditInstall,
         redirectUri: data.oauthRedirectUri,
+        issuer: dialog.issuer,
         onClose: close,
         onSaved: () => {
           done();
@@ -30638,16 +30662,9 @@ function AccountsView({
           /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs sign-in" })
         ] }),
         /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: m6.url }) }),
-        needsApp(data, m6) ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
-          "This server doesn't register clients itself, so signing in needs a ",
-          needsApp(data, m6).label,
-          " OAuth app."
-        ] }) }) : null
+        m6.needsApp || m6.ambiguousApp ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: m6.ambiguousApp ? "Multiple OAuth apps match; choose one." : `Configure an OAuth app for ${m6.issuer ?? "the discovered issuer"}.` }) }) : null
       ] }),
-      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: needsApp(data, m6) ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "oauth-app", app: needsApp(data, m6) }), children: [
-        "Set up ",
-        needsApp(data, m6).label
-      ] }) : /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => void onSignIn({ mcpServer: m6.server }), children: "Sign in" }) }) : null
+      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: m6.needsApp ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "oauth-app", app: { id: "", label: "New app", install: null, group: null, overridesInstall: false }, issuer: m6.issuer }), children: "Set up app" }) : m6.ambiguousApp ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "connect" }), children: "Choose app" }) : /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => void onSignIn({ mcpServer: m6.server }), children: "Sign in" }) }) : null
     ] }, m6.server)) }) : null,
     data.accounts.length === 0 && pendingMcp.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
       /* @__PURE__ */ u4("p", { children: "No accounts connected." }),
@@ -30662,6 +30679,21 @@ function AccountsView({
           a4.status === "needs_reconnect" ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs reconnecting" }) : null
         ] }),
         a4.scopes.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-chips", children: a4.scopes.map((s5) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip", children: s5.label }, s5.id)) }) : null,
+        a4.kind === "oauth_app" ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
+          /* @__PURE__ */ u4("span", { children: [
+            "Scope metadata: ",
+            a4.scopeSource ?? "unknown",
+            a4.grantedScopes === null ? " (provider grant not reported)" : ""
+          ] }),
+          /* @__PURE__ */ u4("span", { children: [
+            "API hosts: ",
+            a4.apiHosts?.join(", ") || "none"
+          ] }),
+          /* @__PURE__ */ u4("span", { children: [
+            "App source: ",
+            a4.appSource ?? "unknown"
+          ] })
+        ] }) : null,
         /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
           a4.status === "needs_reconnect" ? /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
             a4.providerLabel,
@@ -30682,18 +30714,15 @@ function AccountsView({
           {
             type: "button",
             class: a4.status === "needs_reconnect" ? "primary" : "",
-            onClick: () => a4.kind === "mcp_oauth" && a4.mcpServer ? void onSignIn({ mcpServer: a4.mcpServer }) : onDialog({ kind: "connect", reconnect: { provider: a4.provider, key: a4.key, scopes: a4.scopes.map((s5) => s5.id) } }),
-            children: a4.status === "needs_reconnect" ? "Reconnect" : "Change access"
+            onClick: () => a4.kind === "mcp_oauth" && a4.mcpServer ? void onSignIn({ mcpServer: a4.mcpServer }) : onDialog({ kind: "connect", reconnect: { provider: a4.provider, key: a4.key, scopes: a4.scopeSource !== "legacy" && a4.requestedScopes !== null && a4.requestedScopes !== void 0 ? a4.requestedScopes : a4.scopes.map((s5) => s5.id) } }),
+            children: a4.status === "needs_reconnect" ? "Reconnect" : "Reauthorize"
           }
         ),
         /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Disconnect ${a4.account ?? a4.providerLabel}`, title: "Disconnect", onClick: () => onDialog({ kind: "disconnect", account: a4 }), children: "\u2715" })
       ] }) : null
     ] }, a4.key)) }),
-    data.oauthApps.length ? /* @__PURE__ */ u4(OAuthAppsSection, { data, onDialog }) : null
+    /* @__PURE__ */ u4(OAuthAppsSection, { data, onDialog })
   ] });
-}
-function needsApp(data, m6) {
-  return m6.needsApp ? data.oauthApps.find((a4) => a4.id === m6.needsApp) : void 0;
 }
 function countAccounts(n3) {
   return n3 === 1 ? "1 account" : `${n3} accounts`;
@@ -30705,7 +30734,7 @@ function removeAppText(app, scope) {
     return all > 0 ? `Groups without their own ${app.label} app can no longer connect accounts. ${countAccounts(all)} across all groups (${app.install?.accounts ?? 0} here) are disconnected, and their tokens are revoked.${others}` : `Groups without their own ${app.label} app can no longer connect accounts.${others}`;
   }
   const n3 = app.group?.accounts ?? 0;
-  const fallback = app.install ? `This group goes back to the install-wide app.` : `New ${app.label} accounts can't be connected here until an app is set up again.`;
+  const fallback = app.install || app.overridesInstall ? `This group goes back to the install-wide app.` : `New ${app.label} accounts can't be connected here until an app is set up again.`;
   return n3 > 0 ? `${fallback} This group's ${countAccounts(n3)} connected through its own app are disconnected, and their tokens are revoked.` : fallback;
 }
 function OAuthAppsSection({ data, onDialog }) {
@@ -30713,6 +30742,7 @@ function OAuthAppsSection({ data, onDialog }) {
   const inst = data.canEditInstall;
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("h4", { class: "ga-cred-subhead", children: "OAuth apps" }),
+    edit ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app: { id: "", label: "New app", install: null, group: null, overridesInstall: false } }), children: "Add OAuth app" }) : null,
     /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Providers that don't register clients themselves, like Google and GitHub, need an OAuth client created in their console. An install-wide app is shared by every group; a group can use its own instead. Tokens always stay in each group." }),
     /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.oauthApps.map((app) => {
       const client = app.group ?? app.install;
@@ -30737,19 +30767,22 @@ function OAuthAppsSection({ data, onDialog }) {
               !app.group && app.install?.accountsAllGroups !== void 0 ? `, ${app.install.accountsAllGroups} in all groups` : ""
             ] })
           ] }) : null,
-          app.group && app.install ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { children: [
-            "Used instead of the install-wide app (",
-            /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: app.install.clientId }),
-            ")"
+          app.group && app.overridesInstall ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { children: [
+            "Used instead of the install-wide app",
+            app.install ? ` (${app.install.clientId})` : ""
           ] }) }) : null,
-          app.mcpServers?.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { children: [
-            "Also signs in to MCP: ",
-            app.mcpServers.join(", ")
-          ] }) }) : null
+          /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
+            /* @__PURE__ */ u4("span", { children: client?.config.issuer }),
+            /* @__PURE__ */ u4("span", { children: client?.config.api_hosts.join(", ") || "MCP-only app" })
+          ] })
         ] }),
         edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: app.group ? /* @__PURE__ */ u4(k, { children: [
           /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app, scope: "group" }), children: "Edit" }),
-          /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove this group's ${app.label} app`, title: "Remove this group's app", onClick: () => onDialog({ kind: "remove-app", app, scope: "group" }), children: "\u2715" })
+          /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove this group's ${app.label} app`, title: "Remove this group's app", onClick: () => onDialog({ kind: "remove-app", app, scope: "group" }), children: "\u2715" }),
+          inst && app.install ? /* @__PURE__ */ u4(k, { children: [
+            /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app, scope: "install" }), children: "Edit install-wide" }),
+            /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove the install-wide ${app.label} app`, onClick: () => onDialog({ kind: "remove-app", app, scope: "install" }), children: "\u2715" })
+          ] }) : null
         ] }) : app.install ? /* @__PURE__ */ u4(k, { children: [
           inst ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app, scope: "install" }), children: "Edit" }) : null,
           /* @__PURE__ */ u4("button", { type: "button", title: "Use a different OAuth app in this group only", onClick: () => onDialog({ kind: "oauth-app", app, scope: "group" }), children: "Use own app" }),
@@ -30785,15 +30818,10 @@ function McpServerAuth({
     load.message
   ] });
   else if (!entry) body = /* @__PURE__ */ u4("span", { class: "muted", children: "Save the server to check whether it needs a key or sign-in." });
-  else if (entry.auth === "oauth" && entry.needsApp) {
-    const app = load.state === "ready" ? load.data.oauthApps.find((a4) => a4.id === entry.needsApp) : void 0;
+  else if (entry.auth === "oauth" && (entry.needsApp || entry.ambiguousApp)) {
     body = /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
-        "This server doesn't register clients itself; signing in needs a ",
-        app?.label ?? entry.needsApp,
-        " OAuth app."
-      ] }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => open({ view: "accounts", setupApp: entry.needsApp }), children: "Set it up in Credentials" })
+      /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: entry.ambiguousApp ? "Choose a configured OAuth app for this server." : `Configure an OAuth app for ${entry.issuer ?? "the discovered issuer"}.` }),
+      /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => open({ view: "accounts", setupIssuer: entry.needsApp ? entry.issuer : void 0 }), children: "Manage in Credentials" })
     ] });
   } else if (entry.auth === "oauth") {
     body = entry.status === "ok" ? /* @__PURE__ */ u4(k, { children: [

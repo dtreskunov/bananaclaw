@@ -30,7 +30,7 @@ import { showToast } from './Toast';
 type View = 'keys' | 'accounts';
 
 /** Where the Credentials tab should open next, e.g. when linked from the MCP editor. */
-export const credentialsFocus = signal<{ view: View; key?: string; action?: 'set' | 'add'; match?: string; setupApp?: string } | null>(null);
+export const credentialsFocus = signal<{ view: View; key?: string; action?: 'set' | 'add'; match?: string; setupApp?: string; setupIssuer?: string } | null>(null);
 
 type Dialog =
   | { kind: 'add-key'; match?: string }
@@ -39,7 +39,7 @@ type Dialog =
   | { kind: 'delete-key'; item: KeyDto }
   | { kind: 'connect'; provider?: string; reconnect?: { provider: string; key: string; scopes: string[] } }
   | { kind: 'disconnect'; account: AccountDto }
-  | { kind: 'oauth-app'; app: OAuthAppDto; scope?: OAuthAppScope; thenConnect?: boolean }
+  | { kind: 'oauth-app'; app: OAuthAppDto; scope?: OAuthAppScope; thenConnect?: boolean; issuer?: string }
   | { kind: 'remove-app'; app: OAuthAppDto; scope: OAuthAppScope };
 
 type Load =
@@ -92,6 +92,9 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
     if (focus.action === 'add' && keysEditable) setDialog({ kind: 'add-key', match: focus.match });
     const app = focus.setupApp ? load.data.oauthApps.find((a) => a.id === focus.setupApp) : undefined;
     if (app && load.data.canEdit) setDialog({ kind: 'oauth-app', app });
+    if (focus.setupIssuer && load.data.canEdit) setDialog({
+      kind: 'oauth-app', app: { id: '', label: 'New app', install: null, group: null, overridesInstall: false }, issuer: focus.setupIssuer,
+    });
   }, [load.state]);
 
   if (load.state === 'loading') return <p class="muted">Loading…</p>;
@@ -172,7 +175,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
           canEdit={data.canEdit}
           provider={dialog.provider}
           reconnect={dialog.reconnect}
-          onSetUp={(app) => setDialog({ kind: 'oauth-app', app, thenConnect: true })}
+          onSetUp={(app, issuer) => setDialog({ kind: 'oauth-app', app, issuer, thenConnect: true })}
           onStart={signIn.start}
           onClose={close}
         />
@@ -184,6 +187,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
           scope={dialog.scope}
           canEditInstall={data.canEditInstall}
           redirectUri={data.oauthRedirectUri}
+          issuer={dialog.issuer}
           onClose={close}
           onSaved={() => {
             done();
@@ -359,16 +363,18 @@ function AccountsView({
                   <StatusPill tone="warn">Needs sign-in</StatusPill>
                 </div>
                 <div class="ga-cred-meta"><span class="ga-cred-mono">{m.url}</span></div>
-                {needsApp(data, m) ? (
+                {m.needsApp || m.ambiguousApp ? (
                   <div class="ga-cred-meta">
-                    <span class="ga-cred-warn-text">This server doesn't register clients itself, so signing in needs a {needsApp(data, m)!.label} OAuth app.</span>
+                    <span class="ga-cred-warn-text">{m.ambiguousApp ? 'Multiple OAuth apps match; choose one.' : `Configure an OAuth app for ${m.issuer ?? 'the discovered issuer'}.`}</span>
                   </div>
                 ) : null}
               </div>
               {edit ? (
                 <div class="ga-cred-item-actions">
-                  {needsApp(data, m) ? (
-                    <button type="button" class="primary" onClick={() => onDialog({ kind: 'oauth-app', app: needsApp(data, m)! })}>Set up {needsApp(data, m)!.label}</button>
+                  {m.needsApp ? (
+                    <button type="button" class="primary" onClick={() => onDialog({ kind: 'oauth-app', app: { id: '', label: 'New app', install: null, group: null, overridesInstall: false }, issuer: m.issuer })}>Set up app</button>
+                  ) : m.ambiguousApp ? (
+                    <button type="button" class="primary" onClick={() => onDialog({ kind: 'connect' })}>Choose app</button>
                   ) : (
                     <button type="button" class="primary" onClick={() => void onSignIn({ mcpServer: m.server })}>Sign in</button>
                   )}
@@ -398,6 +404,11 @@ function AccountsView({
                 {a.scopes.length ? (
                   <div class="ga-cred-chips">{a.scopes.map((s) => <span key={s.id} class="ga-cred-chip">{s.label}</span>)}</div>
                 ) : null}
+                {a.kind === 'oauth_app' ? <div class="ga-cred-meta">
+                  <span>Scope metadata: {a.scopeSource ?? 'unknown'}{a.grantedScopes === null ? ' (provider grant not reported)' : ''}</span>
+                  <span>API hosts: {a.apiHosts?.join(', ') || 'none'}</span>
+                  <span>App source: {a.appSource ?? 'unknown'}</span>
+                </div> : null}
                 <div class="ga-cred-meta">
                   {a.status === 'needs_reconnect'
                     ? <span class="ga-cred-warn-text">{a.providerLabel} stopped accepting the saved sign-in. Reconnect to restore access.</span>
@@ -412,9 +423,9 @@ function AccountsView({
                     class={a.status === 'needs_reconnect' ? 'primary' : ''}
                     onClick={() => (a.kind === 'mcp_oauth' && a.mcpServer
                       ? void onSignIn({ mcpServer: a.mcpServer })
-                      : onDialog({ kind: 'connect', reconnect: { provider: a.provider, key: a.key, scopes: a.scopes.map((s) => s.id) } }))}
+                      : onDialog({ kind: 'connect', reconnect: { provider: a.provider, key: a.key, scopes: a.scopeSource !== 'legacy' && a.requestedScopes !== null && a.requestedScopes !== undefined ? a.requestedScopes : a.scopes.map((s) => s.id) } }))}
                   >
-                    {a.status === 'needs_reconnect' ? 'Reconnect' : 'Change access'}
+                    {a.status === 'needs_reconnect' ? 'Reconnect' : 'Reauthorize'}
                   </button>
                   <button type="button" class="ga-cred-icon danger" aria-label={`Disconnect ${a.account ?? a.providerLabel}`} title="Disconnect" onClick={() => onDialog({ kind: 'disconnect', account: a })}>{'\u2715'}</button>
                 </div>
@@ -423,13 +434,9 @@ function AccountsView({
           ))}
         </ul>
       )}
-      {data.oauthApps.length ? <OAuthAppsSection data={data} onDialog={onDialog} /> : null}
+      <OAuthAppsSection data={data} onDialog={onDialog} />
     </div>
   );
-}
-
-function needsApp(data: CredentialsOverviewDto, m: McpAuthDto): OAuthAppDto | undefined {
-  return m.needsApp ? data.oauthApps.find((a) => a.id === m.needsApp) : undefined;
 }
 
 function countAccounts(n: number): string {
@@ -445,7 +452,7 @@ function removeAppText(app: OAuthAppDto, scope: OAuthAppScope): string {
       : `Groups without their own ${app.label} app can no longer connect accounts.${others}`;
   }
   const n = app.group?.accounts ?? 0;
-  const fallback = app.install ? `This group goes back to the install-wide app.` : `New ${app.label} accounts can't be connected here until an app is set up again.`;
+  const fallback = app.install || app.overridesInstall ? `This group goes back to the install-wide app.` : `New ${app.label} accounts can't be connected here until an app is set up again.`;
   return n > 0 ? `${fallback} This group's ${countAccounts(n)} connected through its own app are disconnected, and their tokens are revoked.` : fallback;
 }
 
@@ -455,6 +462,7 @@ function OAuthAppsSection({ data, onDialog }: { data: CredentialsOverviewDto; on
   return (
     <>
       <h4 class="ga-cred-subhead">OAuth apps</h4>
+      {edit ? <button type="button" onClick={() => onDialog({ kind: 'oauth-app', app: { id: '', label: 'New app', install: null, group: null, overridesInstall: false } })}>Add OAuth app</button> : null}
       <p class="group-admin-help">
         Providers that don't register clients themselves, like Google and GitHub, need an OAuth client created in their
         console. An install-wide app is shared by every group; a group can use its own instead. Tokens always stay in
@@ -477,12 +485,10 @@ function OAuthAppsSection({ data, onDialog }: { data: CredentialsOverviewDto; on
                     <span>{countAccounts(client.accounts)} here{!app.group && app.install?.accountsAllGroups !== undefined ? `, ${app.install.accountsAllGroups} in all groups` : ''}</span>
                   </div>
                 ) : null}
-                {app.group && app.install ? (
-                  <div class="ga-cred-meta"><span>Used instead of the install-wide app (<span class="ga-cred-mono">{app.install.clientId}</span>)</span></div>
+                {app.group && app.overridesInstall ? (
+                  <div class="ga-cred-meta"><span>Used instead of the install-wide app{app.install ? ` (${app.install.clientId})` : ''}</span></div>
                 ) : null}
-                {app.mcpServers?.length ? (
-                  <div class="ga-cred-meta"><span>Also signs in to MCP: {app.mcpServers.join(', ')}</span></div>
-                ) : null}
+                <div class="ga-cred-meta"><span>{client?.config.issuer}</span><span>{client?.config.api_hosts.join(', ') || 'MCP-only app'}</span></div>
               </div>
               {edit ? (
                 <div class="ga-cred-item-actions">
@@ -490,6 +496,10 @@ function OAuthAppsSection({ data, onDialog }: { data: CredentialsOverviewDto; on
                     <>
                       <button type="button" onClick={() => onDialog({ kind: 'oauth-app', app, scope: 'group' })}>Edit</button>
                       <button type="button" class="ga-cred-icon danger" aria-label={`Remove this group's ${app.label} app`} title="Remove this group's app" onClick={() => onDialog({ kind: 'remove-app', app, scope: 'group' })}>{'\u2715'}</button>
+                      {inst && app.install ? <>
+                        <button type="button" onClick={() => onDialog({ kind: 'oauth-app', app, scope: 'install' })}>Edit install-wide</button>
+                        <button type="button" class="ga-cred-icon danger" aria-label={`Remove the install-wide ${app.label} app`} onClick={() => onDialog({ kind: 'remove-app', app, scope: 'install' })}>{'\u2715'}</button>
+                      </> : null}
                     </>
                   ) : app.install ? (
                     <>
@@ -540,12 +550,11 @@ export function McpServerAuth({
   else if (load.state === 'down') body = <span class="ga-cred-warn-text">The credential gateway isn't responding.</span>;
   else if (load.state === 'error') body = <span class="ga-cred-warn-text">Couldn't check sign-in: {load.message}</span>;
   else if (!entry) body = <span class="muted">Save the server to check whether it needs a key or sign-in.</span>;
-  else if (entry.auth === 'oauth' && entry.needsApp) {
-    const app = load.state === 'ready' ? load.data.oauthApps.find((a) => a.id === entry.needsApp) : undefined;
+  else if (entry.auth === 'oauth' && (entry.needsApp || entry.ambiguousApp)) {
     body = (
       <>
-        <span class="ga-cred-warn-text">This server doesn't register clients itself; signing in needs a {app?.label ?? entry.needsApp} OAuth app.</span>
-        <button type="button" class="primary" onClick={() => open({ view: 'accounts', setupApp: entry.needsApp })}>Set it up in Credentials</button>
+        <span class="ga-cred-warn-text">{entry.ambiguousApp ? 'Choose a configured OAuth app for this server.' : `Configure an OAuth app for ${entry.issuer ?? 'the discovered issuer'}.`}</span>
+        <button type="button" class="primary" onClick={() => open({ view: 'accounts', setupIssuer: entry.needsApp ? entry.issuer : undefined })}>Manage in Credentials</button>
       </>
     );
   } else if (entry.auth === 'oauth') {

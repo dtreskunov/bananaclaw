@@ -26,8 +26,8 @@ export class AgentVaultError extends Error {
     readonly status?: number,
     /** Machine-readable code from the gateway's error body, e.g. `service_conflict`. */
     readonly code?: string,
-    /** Catalog provider named by a `registration_unsupported` failure. */
-    readonly provider?: string,
+    /** Authorization issuer, when included by the gateway failure. */
+    readonly issuer?: string,
     options?: { cause?: unknown },
   ) {
     super(message, options);
@@ -138,7 +138,7 @@ export async function gatewayFetch(
 /** Turns a non-2xx gateway response into an AgentVaultError carrying its code and message. */
 export async function gatewayFailure(res: Response, what: string): Promise<AgentVaultError> {
   const text = await res.text().catch(() => '');
-  type ErrorBody = { error?: unknown; code?: unknown; provider?: unknown };
+  type ErrorBody = { error?: unknown; code?: unknown; issuer?: unknown };
   let parsed: ErrorBody | null;
   try {
     parsed = JSON.parse(text) as ErrorBody | null;
@@ -151,7 +151,7 @@ export async function gatewayFailure(res: Response, what: string): Promise<Agent
     `Agent Vault ${what} failed: HTTP ${res.status}${message ? ` ${message}` : ''}`,
     res.status,
     typeof parsed?.code === 'string' ? parsed.code : undefined,
-    typeof parsed?.provider === 'string' ? parsed.provider : undefined,
+    typeof parsed?.issuer === 'string' ? parsed.issuer : undefined,
   );
 }
 

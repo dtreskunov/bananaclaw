@@ -4,6 +4,20 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Agent Vault OAuth management is catalog-free.** Configure generic
+  apps, request actual OAuth scopes, and route credentials by exact API hosts;
+  the provider enforces token permissions. The old provider/scope-set API and
+  compatibility fallbacks are removed. Requires a coordinated catalog-free
+  gateway deployment; `gw-v0.1.0` is incompatible. The current canary uses a
+  locally authorized `gw-v0.1.1-dev` build, not a published or attested release.
+  See [Agent Vault upgrades](docs/agent-vault-upgrades.md#catalog-free-oauth-breaking-update).
+
+- **Agent Vault gateway release pinned to `gw-v0.1.0`.** Run `/init-agent-vault`
+  for platform-specific checksum and signed source-provenance verification,
+  followed by an approved state-preserving upgrade. Existing OneCLI and group
+  backends are unchanged. OAuth progress now retains the gateway's returned
+  account key, including reused keys. See [Agent Vault upgrades](docs/agent-vault-upgrades.md).
+
 - **More reliable web dictation.** Microphone capture starts alongside connection setup with bounded, paced startup buffering; selected text is replaced correctly and the caret stays before the suffix. ElevenLabs removes filler words, including authoritative empty results. Zero-audio Stop avoids empty provider commits, and privacy-safe attempt diagnostics correlate browser, host, and provider failures.
 
 - **[BREAKING] Native MCP tool search defaults to lazy `always`; `auto` is removed.**

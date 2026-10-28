@@ -9,9 +9,9 @@
  *        --header <name> --prefix <text> --template '<Basic {{ KEY }}>' --label <name>]
  *   ncl credentials delete --group <id> --key <KEY>
  *   ncl credentials disconnect --group <id> --key <MCP_…|OAUTH_…>
- *   ncl credentials oauth-app set --group <id> --provider google|github --client-id <id>
+ *   ncl credentials oauth-app set --group <id> --app <id> --config '<safe JSON>'
  *       [--secret-stdin] [--install]
- *   ncl credentials oauth-app remove --group <id> --provider <id> [--install]
+ *   ncl credentials oauth-app remove --group <id> --app <id> [--install]
  *   ncl credentials backend get|set --group <id> [--backend onecli|agent-vault]
  *
  * Values and client secrets only arrive through --value-stdin / --secret-stdin
@@ -31,20 +31,15 @@ import {
   disconnectProvider,
   forgetAllProbes,
   forgetProbes,
-  getApp,
+  listConfiguredApps,
+  listProviderAccounts,
   listCredentials,
   listMcpAccounts,
   listServices,
   servicesToKeys,
 } from '../../modules/credentials/gateway-credentials.js';
 import { addKey, deleteKey, KeyInputError, updateKey } from '../../modules/credentials/keys.js';
-import {
-  AppInputError,
-  providerAccountsOrEmpty,
-  providersOrEmpty,
-  removeApp,
-  saveApp,
-} from '../../modules/credentials/oauth-apps.js';
+import { AppInputError, removeApp, saveApp } from '../../modules/credentials/oauth-apps.js';
 import { register } from '../registry.js';
 
 export const CREDENTIALS_RESOURCE = 'credentials';
@@ -105,12 +100,12 @@ register({
   handler: async (args) =>
     run(async () => {
       const gid = groupArg(args as Args);
-      const [services, credentials, accounts, providerAccounts, providers] = await Promise.all([
+      const [services, credentials, accounts, providerAccounts, apps] = await Promise.all([
         listServices(gid),
         listCredentials(gid),
         listMcpAccounts(gid),
-        providerAccountsOrEmpty(gid),
-        providersOrEmpty(),
+        listProviderAccounts(gid),
+        listConfiguredApps(gid),
       ]);
       const keys = servicesToKeys(services, credentials).map((k) => ({
         kind: 'key',
@@ -131,33 +126,22 @@ register({
       const provider = providerAccounts.map((a) => ({
         kind: 'account',
         key: a.key,
-        name: providers.find((p) => p.id === a.provider)?.label ?? a.provider ?? '',
+        name: apps.find((p) => p.id === a.app_id)?.label ?? a.app_id ?? '',
         status: a.status,
-        sent_to: (a.scope_sets ?? []).join(' '),
+        sent_to: a.api_hosts.join(' '),
         how: 'oauth (app)',
+        scopes: a.scopes,
+        scope_source: a.scope_source,
       }));
-      const apps = (
-        await Promise.all(
-          providers.map(async (p) => {
-            const [install, group] = await Promise.all([getApp(null, p.id), getApp(gid, p.id)]);
-            const rows = [];
-            if (group)
-              rows.push({ kind: 'app', key: p.id, name: group.client_id, status: 'this group', sent_to: '', how: '' });
-            if (install) {
-              rows.push({
-                kind: 'app',
-                key: p.id,
-                name: install.client_id,
-                status: group ? 'install (overridden)' : 'install',
-                sent_to: '',
-                how: '',
-              });
-            }
-            return rows;
-          }),
-        )
-      ).flat();
-      return [...keys, ...signIns, ...provider, ...apps];
+      const appRows = apps.map((app) => ({
+        kind: 'app',
+        key: app.id,
+        name: app.client_id,
+        status: app.source,
+        sent_to: app.api_hosts.join(' '),
+        how: app.token_endpoint_auth_method,
+      }));
+      return [...keys, ...signIns, ...provider, ...appRows];
     }),
 });
 
@@ -233,7 +217,7 @@ register({
 register({
   name: 'credentials-oauth-app-set',
   description:
-    'Set an OAuth app for a provider. Use --group <id> --provider google|github --client-id <id> [--secret-stdin] [--install]. The secret is required for a new client ID; --install sets the install-wide app every group uses unless it has its own.',
+    "Set a generic OAuth app. Use --group <id> --app <id> --config '<JSON configuration without secrets>' [--secret-stdin] [--install]. Secrets must use stdin.",
   access: 'open',
   resource: CREDENTIALS_RESOURCE,
   parseArgs: (raw) => raw,
@@ -241,27 +225,35 @@ register({
     run(async () => {
       const a = args as Args;
       const gid = groupArg(a);
-      const provider = str(a, 'provider');
-      if (!provider) throw new Error('--provider <id> is required');
+      const appId = str(a, 'app');
+      if (!appId) throw new Error('--app <id> is required');
+      const rawConfig = str(a, 'config');
+      if (!rawConfig) throw new Error('--config <JSON configuration> is required');
+      let config: unknown;
+      try {
+        config = JSON.parse(rawConfig);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new Error('--config must be valid JSON', { cause: error });
+      }
       if (a.secret !== undefined && a['secret-stdin'] === undefined) {
         throw new Error('Pass the client secret with --secret-stdin, not on the command line');
       }
       const saved = await saveApp(
         gid,
-        provider,
-        { scope: a.install === true ? 'install' : 'group', clientId: str(a, 'client-id'), clientSecret: a.secret },
+        appId,
+        { scope: a.install === true ? 'install' : 'group', config, clientSecret: a.secret },
         true,
       );
       if (saved.scope === 'install') forgetAllProbes();
       else forgetProbes(gid);
-      return `Saved the ${saved.scope === 'install' ? 'install-wide' : gid} ${provider} app (${saved.clientId})`;
+      return `Saved the ${saved.scope === 'install' ? 'install-wide' : gid} ${appId} app (${saved.clientId})`;
     }),
 });
 
 register({
   name: 'credentials-oauth-app-remove',
-  description:
-    'Remove an OAuth app; accounts issued to it are disconnected. Use --group <id> --provider <id> [--install].',
+  description: 'Remove an OAuth app; accounts issued to it are disconnected. Use --group <id> --app <id> [--install].',
   access: 'open',
   resource: CREDENTIALS_RESOURCE,
   parseArgs: (raw) => raw,
@@ -269,12 +261,12 @@ register({
     run(async () => {
       const a = args as Args;
       const gid = groupArg(a);
-      const provider = str(a, 'provider');
-      if (!provider) throw new Error('--provider <id> is required');
-      const scope = await removeApp(gid, provider, a.install === true ? 'install' : 'group', true);
+      const appId = str(a, 'app');
+      if (!appId) throw new Error('--app <id> is required');
+      const scope = await removeApp(gid, appId, a.install === true ? 'install' : 'group', true);
       if (scope === 'install') forgetAllProbes();
       else forgetProbes(gid);
-      return `Removed the ${scope === 'install' ? 'install-wide' : gid} ${provider} app`;
+      return `Removed the ${scope === 'install' ? 'install-wide' : gid} ${appId} app`;
     }),
 });
 

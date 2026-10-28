@@ -129,6 +129,7 @@ export async function handleOAuthCallback(req: http.IncomingMessage, res: http.S
         : (result.error ?? 'The provider did not accept the sign-in.');
     finishSignIn(state, {
       status: ok ? 'connected' : 'failed',
+      key: ok ? result.key : undefined,
       account: result.account ?? null,
       error: ok ? undefined : detail,
     });

@@ -20,9 +20,10 @@ import {
   forgetAllProbes,
   forgetProbes,
   startProviderSignIn,
-  type ProviderInfo,
   listCredentials,
   listMcpAccounts,
+  listConfiguredApps,
+  listProviderAccounts,
   listServices,
   probeMcp,
   resourceId,
@@ -36,8 +37,6 @@ import {
 import {
   AppInputError,
   listApps,
-  providerAccountsOrEmpty,
-  providersOrEmpty,
   removeApp,
   saveApp,
   type SaveAppInput,
@@ -76,7 +75,10 @@ interface McpAuthDto {
   status: 'ok' | 'needs_sign_in' | 'needs_reconnect' | 'needs_value';
   key?: string;
   account?: string | null;
-  needsApp?: string;
+  needsApp?: boolean;
+  issuer?: string;
+  appId?: string;
+  ambiguousApp?: boolean;
 }
 
 interface AccountDto {
@@ -84,6 +86,12 @@ interface AccountDto {
   kind: 'mcp_oauth' | 'oauth_app';
   provider: string;
   providerLabel: string;
+  appSource?: 'install' | 'vault';
+  issuer?: string;
+  apiHosts?: string[];
+  requestedScopes?: string[] | null;
+  grantedScopes?: string[] | null;
+  scopeSource?: string;
   account: string | null;
   scopes: { id: string; label: string }[];
   status: 'connected' | 'needs_reconnect';
@@ -131,16 +139,21 @@ function toAccount(a: McpAccountInfo, servers: [string, string][]): AccountDto {
   };
 }
 
-function toProviderAccount(a: McpAccountInfo, providers: ProviderInfo[]): AccountDto {
-  const provider = providers.find((p) => p.id === a.provider);
-  const sets = a.scope_sets ?? [];
+function toProviderAccount(a: McpAccountInfo, apps: Awaited<ReturnType<typeof listApps>>): AccountDto {
+  const app = apps.find((p) => p.id === a.app_id);
   return {
     key: a.key,
     kind: 'oauth_app',
-    provider: a.provider ?? 'unknown',
-    providerLabel: provider?.label ?? a.provider ?? 'Account',
+    provider: a.app_id ?? 'unknown',
+    providerLabel: app?.label ?? a.app_id ?? 'Account',
+    appSource: a.app_source,
+    issuer: a.issuer,
+    apiHosts: a.api_hosts,
+    requestedScopes: a.requested_scopes,
+    grantedScopes: a.granted_scopes,
+    scopeSource: a.scope_source,
     account: a.account,
-    scopes: sets.map((id) => ({ id, label: provider?.scope_sets.find((s) => s.id === id)?.label ?? id })),
+    scopes: a.scopes.map((id) => ({ id, label: id })),
     status: a.status,
     connectedAt: a.connected_at,
     lastUsedAt: a.last_used_at,
@@ -154,15 +167,14 @@ function canEditInstall(userId: string): boolean {
 
 async function overview(ctx: CredentialsRouteContext): Promise<unknown> {
   const { gid } = ctx;
-  const [services, credentials, accounts, providerAccounts, providers] = await Promise.all([
+  const [services, credentials, accounts, providerAccounts] = await Promise.all([
     listServices(gid),
     listCredentials(gid),
     listMcpAccounts(gid),
-    providerAccountsOrEmpty(gid),
-    providersOrEmpty(),
+    listProviderAccounts(gid),
   ]);
   const servers = httpServers(ctx.mcpServers);
-  const oauthApps = await listApps(gid, providers, [...accounts, ...providerAccounts], servers);
+  const oauthApps = await listApps(gid, [...accounts, ...providerAccounts], canEditInstall(ctx.actorUserId));
   const keys: KeyDto[] = servicesToKeys(services, credentials);
   const credentialKeys = new Set(credentials.map((c) => c.key));
 
@@ -192,7 +204,10 @@ async function overview(ctx: CredentialsRouteContext): Promise<unknown> {
         url,
         auth: 'oauth',
         status: 'needs_sign_in',
-        needsApp: probe.code === 'registration_unsupported' ? probe.provider : undefined,
+        needsApp: probe.code === 'registration_unsupported',
+        ambiguousApp: probe.code === 'ambiguous_app',
+        issuer: probe.issuer,
+        appId: probe.app_id,
       };
     }),
   );
@@ -203,7 +218,7 @@ async function overview(ctx: CredentialsRouteContext): Promise<unknown> {
     keysEditable: true,
     keys,
     accounts: [
-      ...providerAccounts.map((a) => toProviderAccount(a, providers)),
+      ...providerAccounts.map((a) => toProviderAccount(a, oauthApps)),
       ...accounts.map((a) => toAccount(a, servers)),
     ],
     oauthApps,
@@ -264,50 +279,69 @@ export function clientNameFor(gid: string): string | undefined {
 
 async function startProviderAccount(
   ctx: CredentialsRouteContext,
-  body: { provider?: unknown; scopeSets?: unknown; replaceKey?: unknown },
+  body: { appId?: unknown; scopes?: unknown; replaceKey?: unknown },
 ): Promise<void> {
-  const provider = (await providersOrEmpty()).find((p) => p.id === body.provider);
-  if (!provider) {
-    ctx.writeJson(ctx.res, 404, { error: 'Unknown provider' });
+  const app = (await listConfiguredApps(ctx.gid)).find((p) => p.id === body.appId);
+  if (!app) {
+    ctx.writeJson(ctx.res, 404, { error: 'Unknown OAuth app' });
     return;
   }
-  const sets = Array.isArray(body.scopeSets) ? body.scopeSets.filter((s): s is string => typeof s === 'string') : [];
-  if (!sets.length || sets.some((s) => !provider.scope_sets.some((p) => p.id === s))) {
-    ctx.writeJson(ctx.res, 400, { error: 'Choose what the agent may use' });
+  const scopes = body.scopes;
+  if (
+    scopes !== undefined &&
+    (!Array.isArray(scopes) || !scopes.every((s): s is string => typeof s === 'string' && Boolean(s) && !/\s/.test(s)))
+  ) {
+    ctx.writeJson(ctx.res, 400, { error: 'scopes must be an array of nonempty OAuth scope strings' });
     return;
   }
   const replaceKey =
     typeof body.replaceKey === 'string' && body.replaceKey.startsWith('OAUTH_') ? body.replaceKey : undefined;
   const started = await startProviderSignIn(ctx.gid, {
-    provider: provider.id,
-    scope_sets: sets,
+    app_id: app.id,
+    scopes,
     replace_key: replaceKey,
   });
-  recordSignIn({ state: started.state, userId: ctx.actorUserId, agentGroupId: ctx.gid, label: provider.label });
+  recordSignIn({ state: started.state, userId: ctx.actorUserId, agentGroupId: ctx.gid, label: app.label });
   recordAdminAction({
     actorUserId: ctx.actorUserId,
     action: 'group_oauth_account_start',
     targetKind: 'agent_group',
     targetId: ctx.gid,
-    payload: { provider: provider.id, scopeSets: sets, replace: !!replaceKey },
+    payload: { appId: app.id, scopes: body.scopes ?? app.default_scopes, replace: !!replaceKey },
   });
-  ctx.writeJson(ctx.res, 200, { state: started.state, authorizeUrl: started.authorize_url, label: provider.label });
+  ctx.writeJson(ctx.res, 200, { state: started.state, authorizeUrl: started.authorize_url, label: app.label });
 }
 
 async function startSignIn(ctx: CredentialsRouteContext): Promise<void> {
-  const body = (await ctx.readJsonBody(ctx.req)) as {
+  const raw = await ctx.readJsonBody(ctx.req);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    ctx.writeJson(ctx.res, 400, { error: 'Sign-in input must be an object' });
+    return;
+  }
+  const body = raw as {
     mcpServer?: unknown;
+    appId?: unknown;
+    scopes?: unknown;
     provider?: unknown;
     scopeSets?: unknown;
     replaceKey?: unknown;
   };
+  if ('provider' in body || 'scopeSets' in body || 'scope_sets' in body) {
+    ctx.writeJson(ctx.res, 400, { error: 'Use appId and actual OAuth scopes' });
+    return;
+  }
   if (typeof body.mcpServer !== 'string') return startProviderAccount(ctx, body);
   const url = httpServers(ctx.mcpServers).find(([name]) => name === body.mcpServer)?.[1];
   if (!url) {
     ctx.writeJson(ctx.res, 404, { error: `No HTTP MCP server named ${body.mcpServer}; save it first` });
     return;
   }
-  const started = await startMcpSignIn(ctx.gid, url, clientNameFor(ctx.gid));
+  const started = await startMcpSignIn(
+    ctx.gid,
+    url,
+    clientNameFor(ctx.gid),
+    typeof body.appId === 'string' ? body.appId : undefined,
+  );
   recordSignIn({
     state: started.state,
     userId: ctx.actorUserId,
@@ -331,7 +365,7 @@ function signInProgress(ctx: CredentialsRouteContext, state: string): void {
     ctx.writeJson(ctx.res, 404, { error: 'Unknown or expired sign-in' });
     return;
   }
-  ctx.writeJson(ctx.res, 200, { status: signIn.status, account: signIn.account, error: signIn.error });
+  ctx.writeJson(ctx.res, 200, { status: signIn.status, key: signIn.key, account: signIn.account, error: signIn.error });
 }
 
 async function disconnect(ctx: CredentialsRouteContext, key: string): Promise<void> {
@@ -425,6 +459,6 @@ export async function handleCredentialsRoute(ctx: CredentialsRouteContext): Prom
       return;
     }
     const status = err.status === 409 || err.status === 404 ? err.status : err.status! >= 500 ? 502 : 400;
-    ctx.writeJson(res, status, { error: gatewayMessage(err), code: err.code, provider: err.provider });
+    ctx.writeJson(res, status, { error: gatewayMessage(err), code: err.code, issuer: err.issuer });
   }
 }

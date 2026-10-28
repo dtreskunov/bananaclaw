@@ -12,6 +12,7 @@ import type {
   McpAuthDto,
   OAuthAppDto,
   OAuthAppScope,
+  OAuthAppConfiguration,
 } from '../src/components/GroupAdminCredentialsApi';
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
 
@@ -61,44 +62,29 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const iso = (msAgo: number): string => new Date(Date.now() - msAgo).toISOString();
 
-const GOOGLE_SCOPES: Record<string, { label: string; hosts: string[] }> = {
-  'gmail-read': { label: 'Gmail: read', hosts: ['gmail.googleapis.com'] },
-  'gmail-send': { label: 'Gmail: send', hosts: ['gmail.googleapis.com'] },
-  calendar: { label: 'Calendar', hosts: ['www.googleapis.com/calendar/*'] },
-  'drive-read': { label: 'Drive: read', hosts: ['www.googleapis.com/drive/*'] },
-  docs: { label: 'Docs', hosts: ['docs.googleapis.com'] },
-};
-
 const REDIRECT_URI = 'https://nanoclaw.example.com/oauth/callback';
-
-const SCOPE_SETS: Record<string, Record<string, { label: string; hosts: string[] }>> = {
-  google: GOOGLE_SCOPES,
-  github: {
-    repo: { label: 'Repositories', hosts: ['api.github.com/repos/*'] },
-    issues: { label: 'Issues and pull requests', hosts: ['api.github.com/repos/*/issues/*', 'api.github.com/repos/*/pulls/*'] },
-  },
-  microsoft: {
-    mail: { label: 'Outlook mail', hosts: ['graph.microsoft.com/v1.0/me/messages*'] },
-    calendar: { label: 'Outlook calendar', hosts: ['graph.microsoft.com/v1.0/me/events*'] },
-    files: { label: 'OneDrive: read', hosts: ['graph.microsoft.com/v1.0/me/drive/*'] },
-  },
-};
 
 interface AppClient {
   clientId: string;
+  config: OAuthAppConfiguration;
+  clientSecretSet: boolean;
   updatedAt: string;
 }
-
-const APP_CATALOG: { id: string; label: string; consoleUrl: string; mcpServers?: string[] }[] = [
-  { id: 'google', label: 'Google', consoleUrl: 'https://console.cloud.google.com/apis/credentials' },
-  { id: 'github', label: 'GitHub', consoleUrl: 'https://github.com/settings/applications/new', mcpServers: ['github'] },
-  { id: 'microsoft', label: 'Microsoft 365', consoleUrl: 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps' },
-];
 
 /** MCP servers whose authorization server needs a pre-registered app. */
 const MCP_APP: Record<string, string> = { github: 'github' };
 
-const GOOGLE_INSTALL: AppClient = { clientId: '604218840137-q7k2n9f1c8d3.apps.googleusercontent.com', updatedAt: iso(45 * DAY) };
+const GOOGLE_INSTALL: AppClient = {
+  clientId: 'example-client.apps.googleusercontent.com', clientSecretSet: true, updatedAt: iso(45 * DAY),
+  config: {
+    label: 'Google', issuer: 'https://accounts.google.com', client_id: 'example-client.apps.googleusercontent.com',
+    authorization_endpoint: 'https://accounts.google.com/o/oauth2/v2/auth', token_endpoint: 'https://oauth2.googleapis.com/token',
+    token_endpoint_auth_method: 'client_secret_post', api_hosts: ['gmail.googleapis.com', 'www.googleapis.com'],
+    default_scopes: ['openid', 'email', 'https://www.googleapis.com/auth/gmail.readonly'],
+    authorization_params: { access_type: 'offline', include_granted_scopes: 'true', prompt: 'consent' },
+    identity: 'google', token_scope_separator: 'space',
+  },
+};
 
 function appReady(provider: string): AppClient | null {
   const a = state.apps[provider];
@@ -106,18 +92,15 @@ function appReady(provider: string): AppClient | null {
 }
 
 function appDtos(): OAuthAppDto[] {
-  return APP_CATALOG.map((c) => {
-    const a = state.apps[c.id] ?? { install: null, group: null };
+  return Object.entries(state.apps).filter(([, a]) => a.group || a.install).map(([id, a]) => {
     const count = (scope: OAuthAppScope): number =>
-      Object.values(state.via).filter((v) => v.provider === c.id && v.scope === scope).length;
+      Object.values(state.via).filter((v) => v.provider === id && v.scope === scope).length;
     return {
-      id: c.id,
-      label: c.label,
-      consoleUrl: c.consoleUrl,
-      mcpServers: c.mcpServers,
-      install: a.install ? { ...a.install, accounts: count('install'), accountsAllGroups: count('install') + (state.otherGroups[c.id] ?? 0) } : null,
+      id,
+      label: (a.group ?? a.install)!.config.label,
+      overridesInstall: Boolean(a.group && a.install),
+      install: a.install ? { ...a.install, accounts: count('install'), accountsAllGroups: count('install') + (state.otherGroups[id] ?? 0) } : null,
       group: a.group ? { ...a.group, accounts: count('group') } : null,
-      scopeSets: Object.entries(SCOPE_SETS[c.id] ?? {}).map(([sid, s]) => ({ id: sid, label: s.label, hosts: s.hosts })),
     };
   });
 }
@@ -131,10 +114,6 @@ function dropAccountsVia(provider: string, scope: OAuthAppScope): void {
     state.accounts = state.accounts.filter((a) => a.key !== key);
     delete state.via[key];
   }
-}
-
-function scopeLabel(provider: string, id: string): string {
-  return SCOPE_SETS[provider]?.[id]?.label ?? id;
 }
 
 const PRESETS: KeyPresetDto[] = [
@@ -166,12 +145,12 @@ function typicalState(): State {
     accounts: [
       {
         key: 'GOOGLE_ALEX', kind: 'oauth_app', provider: 'google', providerLabel: 'Google', account: 'alex@example.com',
-        scopes: ['gmail-read', 'gmail-send', 'calendar'].map((id) => ({ id, label: GOOGLE_SCOPES[id]!.label })),
+        scopes: ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/calendar'].map((id) => ({ id, label: id })),
         status: 'connected', connectedAt: iso(30 * DAY), lastUsedAt: iso(25 * MINUTE),
       },
       {
         key: 'GOOGLE_SAM', kind: 'oauth_app', provider: 'google', providerLabel: 'Google', account: 'sam@example.com',
-        scopes: [{ id: 'drive-read', label: GOOGLE_SCOPES['drive-read']!.label }],
+        scopes: [{ id: 'https://www.googleapis.com/auth/drive.readonly', label: 'https://www.googleapis.com/auth/drive.readonly' }],
         status: 'needs_reconnect', connectedAt: iso(90 * DAY), lastUsedAt: iso(8 * DAY),
       },
       {
@@ -258,8 +237,8 @@ function overview(): CredentialsOverviewDto {
       }
       if (auth.auth === 'oauth') {
         const provider = MCP_APP[name];
-        const needsApp = provider && !appReady(provider) && auth.status !== 'ok' ? provider : undefined;
-        return { server: name, url, auth: 'oauth', status: auth.status ?? 'needs_sign_in', account: auth.account ?? null, needsApp };
+        const needsApp = Boolean(provider && !appReady(provider) && auth.status !== 'ok');
+        return { server: name, url, auth: 'oauth', status: auth.status ?? 'needs_sign_in', account: auth.account ?? null, needsApp, issuer: name === 'github' ? 'https://github.com/login/oauth' : undefined };
       }
       return { server: name, url, auth: 'none', status: 'ok' };
     });
@@ -396,12 +375,12 @@ function route(method: string, path: string, init?: RequestInit, search = ''): u
     const input = body<AccountStartInput>(init);
     const stateId = `st-${state.seq++}-${Math.random().toString(36).slice(2, 8)}`;
     state.signIns.set(stateId, { input, status: 'pending' });
-    const needed = 'mcpServer' in input ? MCP_APP[input.mcpServer] : input.provider;
+    const needed = 'mcpServer' in input ? input.appId ?? MCP_APP[input.mcpServer] : input.appId;
     if (needed && !appReady(needed)) {
       throw new HttpError(409, 'mcpServer' in input ? 'registration_unsupported: set up the OAuth app for this server first' : 'Set up this provider’s OAuth app first');
     }
-    const label = 'mcpServer' in input ? input.mcpServer : APP_CATALOG.find((a) => a.id === input.provider)?.label ?? input.provider;
-    const scopes = 'mcpServer' in input ? '' : input.scopeSets.map((s) => scopeLabel(input.provider, s)).join('|');
+    const label = 'mcpServer' in input ? input.mcpServer : appReady(input.appId)?.config.label ?? input.appId;
+    const scopes = 'mcpServer' in input ? '' : (input.scopes ?? appReady(input.appId)?.config.default_scopes ?? []).join('|');
     const query = new URLSearchParams({ consent: stateId, provider: label, scopes });
     return { state: stateId, label, authorizeUrl: `${location.pathname}?${query}` } satisfies AccountStartDto;
   }
@@ -421,19 +400,23 @@ function route(method: string, path: string, init?: RequestInit, search = ''): u
 
   if ((m = /^\/oauth-apps\/([a-z0-9-]+)(\?scope=(group|install))?$/.exec(cred + search))) {
     const id = m[1]!;
-    if (!APP_CATALOG.some((c) => c.id === id)) throw new HttpError(404, 'Unknown provider');
     const current = state.apps[id] ?? { install: null, group: null };
     if (method === 'PUT') {
-      const b = body<{ scope: OAuthAppScope; clientId: string; clientSecret?: string }>(init);
+      const b = body<{ scope: OAuthAppScope; config: Partial<OAuthAppConfiguration>; clientSecret?: string }>(init);
       if (b.scope === 'install' && !options.owner) throw new HttpError(403, 'Only owners can change install-wide OAuth apps');
       const existing = current[b.scope];
-      if (!b.clientId?.trim()) throw new HttpError(400, 'A client ID is required');
-      if (!existing && !b.clientSecret) throw new HttpError(400, 'A client secret is required');
-      if (existing && existing.clientId !== b.clientId.trim()) {
+      const config: OAuthAppConfiguration = {
+        label: id, issuer: '', client_id: '', token_endpoint_auth_method: 'client_secret_post',
+        api_hosts: [], default_scopes: [], identity: 'none', token_scope_separator: 'space',
+        ...existing?.config, ...b.config,
+      };
+      if (!config.client_id || !config.issuer) throw new HttpError(400, 'Issuer and client ID are required');
+      if (!existing && config.token_endpoint_auth_method !== 'none' && !b.clientSecret) throw new HttpError(400, 'A client secret is required');
+      if (existing && existing.clientId !== config.client_id) {
         dropAccountsVia(id, b.scope);
         if (b.scope === 'install') state.otherGroups[id] = 0;
       }
-      state.apps[id] = { ...current, [b.scope]: { clientId: b.clientId.trim(), updatedAt: now } };
+      state.apps[id] = { ...current, [b.scope]: { clientId: config.client_id, config, clientSecretSet: config.token_endpoint_auth_method !== 'none', updatedAt: now } };
       return { ok: true };
     }
     if (method === 'DELETE') {
@@ -478,16 +461,19 @@ export function completeSignIn(stateId: string, allow: boolean): void {
     const replaced = input.replaceKey ? state.accounts.find((a) => a.key === input.replaceKey) : undefined;
     account = replaced?.account ?? `user${state.seq}@example.com`;
     // Signing in to an account this group already has adds to its access, as provider re-consent does.
-    const existing = replaced ?? state.accounts.find((a) => a.provider === input.provider && a.account === account);
-    const key = existing?.key ?? `${input.provider.toUpperCase()}_${account.split('@')[0]!.replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
-    const scopeIds = replaced ? input.scopeSets : [...new Set([...(existing?.scopes.map((s) => s.id) ?? []), ...input.scopeSets])];
+    const existing = replaced ?? state.accounts.find((a) => a.provider === input.appId && a.account === account);
+    const key = existing?.key ?? `OAUTH_${state.seq++}`;
+    const config = appReady(input.appId)!.config;
+    const scopeIds = input.scopes ?? config.default_scopes;
     const entry: AccountDto = {
-      key, kind: 'oauth_app', provider: input.provider, providerLabel: APP_CATALOG.find((a) => a.id === input.provider)?.label ?? input.provider,
-      account, scopes: scopeIds.map((id) => ({ id, label: scopeLabel(input.provider, id) })),
+      key, kind: 'oauth_app', provider: input.appId, providerLabel: config.label,
+      appSource: state.apps[input.appId]?.group ? 'vault' : 'install',
+      account, scopes: scopeIds.map((id) => ({ id, label: id })),
+      requestedScopes: scopeIds, grantedScopes: scopeIds, scopeSource: 'provider', apiHosts: config.api_hosts,
       status: 'connected', connectedAt: now, lastUsedAt: existing?.lastUsedAt ?? null,
     };
     state.accounts = state.accounts.some((a) => a.key === key) ? state.accounts.map((a) => (a.key === key ? entry : a)) : [...state.accounts, entry];
-    state.via[key] = { provider: input.provider, scope: state.apps[input.provider]?.group ? 'group' : 'install' };
+    state.via[key] = { provider: input.appId, scope: state.apps[input.appId]?.group ? 'group' : 'install' };
   }
   state.signIns.set(stateId, { ...signIn, status: 'connected', account });
   emit();

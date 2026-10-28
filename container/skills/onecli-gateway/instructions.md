@@ -1,7 +1,19 @@
-# Credentials & External Services
+# Credentials and external services
 
-Your HTTP requests go through the OneCLI proxy, which injects real credentials automatically. Just call any API directly (Gmail, GitHub, Slack, etc.) — the proxy adds auth before it reaches the service.
+Outbound HTTPS uses the configured credential gateway and CA. Check the backend:
 
-Use any method: curl, Python, a CLI tool, whatever fits. If a tool checks for credentials locally, pass any placeholder value — the proxy replaces it with real credentials at request time.
+- If `NANOCLAW_EGRESS_SOCKET` is set, this is **Agent Vault**, not OneCLI.
+  Prefer configured MCP tools. API accounts authenticate on their exact configured
+  API hosts; the provider controls token permissions. Stdio credentials are
+  account-specific `av-access:<key>` / `av-refresh:<key>` placeholders.
+  Never replace them with OneCLI sentinels. A 401/403 alone does not establish
+  disconnection: report the endpoint/error and use Agent Settings → Credentials
+  for account/app checks. Do not recommend the OneCLI dashboard or trust old
+  OneCLI account memory. Scope metadata can be legacy/requested rather than
+  provider-verified; requesting fewer scopes does not revoke earlier grants.
+- Otherwise this is the OneCLI path. Requests use its proxy-injected credentials;
+  present a returned `connect_url` when connection is required. The OneCLI
+  dashboard applies only to this backend.
 
-If you get a `401`/`403`/`app_not_connected`, the error response contains a `connect_url` — you MUST show it to the user as a bare URL on its own line (no angle brackets, no markdown link syntax) so they can click to connect. Run `/onecli-gateway` for the full error-handling flow. Never ask the user for API keys or tokens.
+Load `/onecli-gateway` for the backend-specific details. Keep proxy/CA validation
+enabled, respect policy errors, and never request or reveal raw credentials.

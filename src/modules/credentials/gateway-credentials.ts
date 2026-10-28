@@ -5,7 +5,8 @@
  *
  * Gateway API: Agent Vault fork `docs/guides/mcp-oauth.mdx`.
  */
-import { gatewayJson, vaultName } from './agent-vault-client.js';
+import { AgentVaultError, gatewayJson, vaultName } from './agent-vault-client.js';
+import type { OAuthAppConfiguration, OAuthAppInput } from '../../ui/shared/oauth-app.js';
 
 // ── gateway shapes ────────────────────────────────────────────────────────
 
@@ -32,8 +33,13 @@ export interface GatewayService {
 export interface McpAccountInfo {
   /** `oauth_app` for provider accounts; MCP sign-ins may omit it. */
   kind?: 'mcp_oauth' | 'oauth_app' | string;
-  provider?: string;
-  scope_sets?: string[];
+  app_id?: string;
+  app_source?: 'install' | 'vault';
+  issuer: string;
+  api_hosts: string[];
+  requested_scopes: string[] | null;
+  granted_scopes: string[] | null;
+  scope_source: 'provider' | 'requested' | 'legacy' | 'unknown';
   key: string;
   resource_url: string;
   account: string | null;
@@ -50,7 +56,7 @@ export interface McpProbeInfo {
   issuer?: string;
   client?: string;
   code?: string;
-  provider?: string;
+  app_id?: string;
 }
 
 export interface CompleteResult {
@@ -144,6 +150,11 @@ export async function probeMcp(
       { body: { resource_url: resourceUrl }, timeoutMs: 25_000 },
     );
   } catch (err) {
+    if (err instanceof AgentVaultError && err.code === 'ambiguous_app') {
+      info = { oauth: true, code: 'ambiguous_app' };
+      probeCache.set(cacheKey, { at: now, info });
+      return info;
+    }
     if ((err as { unreachable?: boolean }).unreachable) throw err;
     info = null;
   }
@@ -209,9 +220,11 @@ export async function startMcpSignIn(
   agentGroupId: string,
   resourceUrl: string,
   clientName?: string,
+  appId?: string,
 ): Promise<{ state: string; authorize_url: string }> {
   const body: Record<string, string> = { resource_url: resourceUrl };
   if (clientName) body.client_name = clientName;
+  if (appId) body.app_id = appId;
   return gatewayJson('POST', `/v1/vaults/${enc(vaultName(agentGroupId))}/mcp-oauth/start`, 'MCP sign-in start', {
     body,
     timeoutMs: 30_000,
@@ -425,42 +438,21 @@ export { injectionFor };
 
 // ── OAuth apps and provider accounts (F11) ───────────────────────────────
 
-export interface ProviderScopeSet {
+export interface AppInfo extends OAuthAppConfiguration {
   id: string;
-  label: string;
-  scopes: string[];
-  hosts: string[];
-}
-
-export interface ProviderInfo {
-  id: string;
-  label: string;
-  issuer: string;
-  console_url: string;
-  scope_sets: ProviderScopeSet[];
-  mcp_servers?: string[];
-}
-
-export interface AppInfo {
-  client_id: string;
+  source: 'install' | 'vault';
+  overrides_install: boolean;
+  client_secret_set: boolean;
   updated_at: string;
   accounts: number;
   accounts_all_vaults?: number;
 }
 
-const PROVIDERS_TTL_MS = 10 * 60_000;
-let providersCache: { at: number; providers: ProviderInfo[] } | null = null;
-
-/** The gateway's built-in provider catalog (Google, GitHub, …). */
-export async function listProviders(now = Date.now()): Promise<ProviderInfo[]> {
-  if (providersCache && now - providersCache.at < PROVIDERS_TTL_MS) return providersCache.providers;
-  const providers = (await gatewayJson<ProviderInfo[] | null>('GET', '/v1/oauth/providers', 'provider catalog')) ?? [];
-  providersCache = { at: now, providers };
-  return providers;
-}
-
-export function resetProvidersCache(): void {
-  providersCache = null;
+export async function listConfiguredApps(agentGroupId: string | null): Promise<AppInfo[]> {
+  const route = agentGroupId ? `/v1/vaults/${enc(vaultName(agentGroupId))}/oauth-apps` : '/v1/oauth-apps';
+  const body = await gatewayJson<{ items: AppInfo[] }>('GET', route, 'OAuth app list');
+  if (!Array.isArray(body.items)) throw new Error('Agent Vault OAuth app list has no items array');
+  return body.items;
 }
 
 function appRoute(agentGroupId: string | null, provider: string): string {
@@ -479,11 +471,7 @@ export async function getApp(agentGroupId: string | null, provider: string): Pro
   }
 }
 
-export async function putApp(
-  agentGroupId: string | null,
-  provider: string,
-  input: { client_id: string; client_secret?: string },
-): Promise<AppInfo> {
+export async function putApp(agentGroupId: string | null, provider: string, input: OAuthAppInput): Promise<AppInfo> {
   return gatewayJson('PUT', appRoute(agentGroupId, provider), 'OAuth app update', { body: input });
 }
 
@@ -503,7 +491,7 @@ export async function listProviderAccounts(agentGroupId: string): Promise<McpAcc
 
 export async function startProviderSignIn(
   agentGroupId: string,
-  input: { provider: string; scope_sets: string[]; replace_key?: string },
+  input: { app_id: string; scopes?: string[]; replace_key?: string },
 ): Promise<{ state: string; authorize_url: string }> {
   return gatewayJson(
     'POST',

@@ -373,14 +373,13 @@ export function EditKeyDialog({
   );
 }
 
-const CLIENT_ID_RE = /^\S+$/;
-
 export function OAuthAppDialog({
   gid,
   app,
   scope: fixedScope,
   canEditInstall,
   redirectUri,
+  issuer,
   onClose,
   onSaved,
 }: {
@@ -390,18 +389,43 @@ export function OAuthAppDialog({
   scope?: OAuthAppScope;
   canEditInstall: boolean;
   redirectUri: string;
+  issuer?: string;
   onClose: () => void;
   onSaved: () => void;
 }): JSX.Element {
   const [scope, setScope] = useState<OAuthAppScope>(fixedScope ?? (canEditInstall && !app.install ? 'install' : 'group'));
   const existing = scope === 'install' ? app.install : app.group;
-  const [clientId, setClientId] = useState(existing?.clientId ?? '');
+  const [appId, setAppId] = useState(app.id);
+  const initialConfig = () => JSON.stringify(existing?.config ?? (app.install ?? app.group)?.config ?? {
+    label: app.label === 'New app' ? '' : app.label,
+    issuer: issuer ?? (app.install ?? app.group)?.config.issuer ?? '',
+    client_id: '',
+    token_endpoint_auth_method: 'client_secret_post',
+    authorization_endpoint: '',
+    token_endpoint: '',
+    api_hosts: [],
+    default_scopes: [],
+    authorization_params: {},
+    identity: 'none',
+    token_scope_separator: 'space',
+  }, null, 2);
+  const [configText, setConfigText] = useState(initialConfig);
   const [secret, setSecret] = useState('');
   const [busy, setBusy] = useState(false);
   useEscapeClose(onClose, busy);
-  useEffect(() => setClientId(existing?.clientId ?? ''), [scope]);
-  const id = clientId.trim();
-  const canSave = !busy && CLIENT_ID_RE.test(id) && (existing ? id !== existing.clientId || secret !== '' : secret !== '');
+  useEffect(() => { setConfigText(initialConfig()); setSecret(''); }, [scope]);
+  let config: unknown;
+  let configError = '';
+  try {
+    config = JSON.parse(configText);
+    if (!config || typeof config !== 'object' || Array.isArray(config)) configError = 'Configuration must be a JSON object.';
+    else if ('client_secret' in config) configError = 'Use the separate client-secret field, not the configuration JSON.';
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    configError = 'Configuration must be valid JSON.';
+  }
+  const id = appId.trim();
+  const canSave = !busy && !configError && /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(id);
   const choosing = fixedScope === undefined && canEditInstall && !app.install && !app.group;
 
   async function save(event: Event): Promise<void> {
@@ -409,9 +433,9 @@ export function OAuthAppDialog({
     if (!canSave) return;
     setBusy(true);
     const ok = await send(
-      credPath(gid, `/oauth-apps/${encodeURIComponent(app.id)}`),
+      credPath(gid, `/oauth-apps/${encodeURIComponent(id)}`),
       'PUT',
-      secret ? { scope, clientId: id, clientSecret: secret } : { scope, clientId: id },
+      secret ? { scope, config, clientSecret: secret } : { scope, config },
       `Saved the ${app.label} app`,
     );
     setBusy(false);
@@ -436,10 +460,7 @@ export function OAuthAppDialog({
       <form id="ga-cred-oauth-app" class="settings-body ga-cred-dialog-body" onSubmit={save}>
         {existing ? null : (
           <ol class="ga-cred-steps group-admin-help">
-            <li>
-              Create an OAuth client of type <em>Web application</em> in the{' '}
-              <a href={app.consoleUrl} target="_blank" rel="noopener noreferrer">{app.label} console</a>.
-            </li>
+            <li>Create an OAuth client with your authorization server.</li>
             <li>Add the redirect URI below as an authorized redirect URI.</li>
             <li>Paste the client ID and secret here.</li>
           </ol>
@@ -463,9 +484,19 @@ export function OAuthAppDialog({
             <button type="button" onClick={copy}>Copy</button>
           </div>
         </Field>
-        <Field label="Client ID">
-          <input type="text" class="ga-cred-mono" value={clientId} spellcheck={false} autoFocus={!existing} onInput={(event) => setClientId(event.currentTarget.value)} />
+        <Field label="App ID">
+          <input type="text" aria-label="App ID" class="ga-cred-mono" value={appId} disabled={Boolean(app.id)} spellcheck={false} autoFocus={!app.id} onInput={(event) => setAppId(event.currentTarget.value)} />
         </Field>
+        <Field label="OAuth configuration (JSON)">
+          <textarea aria-label="OAuth configuration (JSON)" class="ga-cred-mono" rows={16} value={configText} spellcheck={false} onInput={(event) => setConfigText(event.currentTarget.value)} />
+        </Field>
+        {configError ? <p role="alert" class="ga-cred-error">{configError}</p> : null}
+        <p class="group-admin-help">
+          Configure issuer, client_id, authorization_endpoint, token_endpoint, exact api_hosts and default_scopes.
+          MCP-only apps can omit OAuth endpoints and API hosts. Optional fields include authorization_params,
+          revocation_endpoint, identity (none, oidc, google or github), jwks_uri and token_scope_separator (space or comma).
+          Public clients use token_endpoint_auth_method: "none"; confidential clients use client_secret_post or client_secret_basic.
+        </p>
         <Field label="Client secret">
           <SecretInput value={secret} onInput={setSecret} placeholder={existing ? 'Leave empty to keep the current secret' : 'Paste the secret'} />
         </Field>
@@ -477,7 +508,7 @@ export function OAuthAppDialog({
               : 'Only this group uses this client. '}
           The secret is stored in the gateway and can't be viewed again.
           {existing ? ` Current client set ${ago(existing.updatedAt)}.` : ''}
-          {existing && existing.clientId !== id && id ? ' Changing the client disconnects the accounts that use it.' : ''}
+          {existing ? ' Changing the issuer, client ID, OAuth endpoints or token-auth method disconnects accounts issued by this app source and requires a supplied confidential-client secret. Other configuration changes apply to new sign-ins.' : ''}
         </p>
       </form>
       <Footer>
@@ -488,9 +519,7 @@ export function OAuthAppDialog({
   );
 }
 
-function appReady(app: OAuthAppDto): boolean {
-  return Boolean(app.group ?? app.install);
-}
+function appReady(app: OAuthAppDto): boolean { return Boolean(app.group ?? app.install); }
 
 export function ConnectAccountDialog({
   apps,
@@ -508,16 +537,28 @@ export function ConnectAccountDialog({
   /** Opens straight to this provider's access choices. */
   provider?: string;
   reconnect?: { provider: string; key: string; scopes: string[] };
-  onSetUp: (app: OAuthAppDto) => void;
+  onSetUp: (app: OAuthAppDto, issuer?: string) => void;
   onStart: (input: AccountStartInput) => Promise<boolean>;
   onClose: () => void;
 }): JSX.Element {
   const initial = reconnect?.provider ?? provider;
   const [app, setApp] = useState<OAuthAppDto | null>(() => (initial ? apps.find((a) => a.id === initial) ?? null : null));
-  const [scopes, setScopes] = useState<string[]>(() => reconnect?.scopes ?? []);
+  const [scopes, setScopes] = useState<string>(() => (reconnect?.scopes ?? (app?.group ?? app?.install)?.config.default_scopes ?? []).join('\n'));
+  const [mcpChoice, setMcpChoice] = useState<McpAuthDto | null>(null);
   const [busy, setBusy] = useState(false);
   useEscapeClose(onClose, busy);
   const mcpSignIns = mcp.filter((m) => m.auth === 'oauth');
+
+  if (mcpChoice) {
+    const candidates = apps.filter((a) => !mcpChoice.issuer || (a.group ?? a.install)?.config.issuer === mcpChoice.issuer);
+    return (
+      <MobileDialog title={`Choose an app for ${mcpChoice.server}`} onClose={onClose} onBack={() => setMcpChoice(null)}>
+        <MobileDialogList>
+          {candidates.map((a) => <MobileDialogItem key={a.id} label={a.label} sublabel={a.id} onClick={() => void begin({ mcpServer: mcpChoice.server, appId: a.id })} />)}
+        </MobileDialogList>
+      </MobileDialog>
+    );
+  }
 
   async function begin(input: AccountStartInput): Promise<void> {
     setBusy(true);
@@ -533,13 +574,16 @@ export function ConnectAccountDialog({
           <p class="group-admin-help">You'll sign in with the provider in a new window. The agent can then use the account through the gateway, without seeing its tokens.</p>
         </div>
         <MobileDialogList className="ga-cred-preset-list">
-          {apps.filter((a) => a.scopeSets.length > 0).map((a) => (
+          {apps.filter((a) => {
+            const c = (a.group ?? a.install)?.config;
+            return c?.authorization_endpoint && c.token_endpoint && c.api_hosts.length;
+          }).map((a) => (
             <MobileDialogItem
               key={a.id}
               label={a.label}
-              sublabel={appReady(a) ? `${a.scopeSets.length} kinds of access available` : 'Needs an OAuth app first'}
+              sublabel={(a.group ?? a.install)?.config.issuer}
               chevron={appReady(a) || canEdit}
-              onClick={appReady(a) ? () => setApp(a) : canEdit ? () => onSetUp(a) : undefined}
+              onClick={() => { setApp(a); setScopes((a.group ?? a.install)!.config.default_scopes.join('\n')); }}
             />
           ))}
         </MobileDialogList>
@@ -548,16 +592,18 @@ export function ConnectAccountDialog({
             <div class="settings-body ga-cred-dialog-body ga-cred-dialog-subhead"><h4>MCP servers</h4></div>
             <MobileDialogList className="ga-cred-preset-list">
               {mcpSignIns.map((m) => {
-                const app = m.needsApp ? apps.find((a) => a.id === m.needsApp) : undefined;
                 return (
                   <MobileDialogItem
                     key={m.server}
                     label={m.server}
-                    sublabel={app
-                      ? `Needs the ${app.label} OAuth app first`
+                    sublabel={m.needsApp
+                      ? `Needs an OAuth app for ${m.issuer ?? 'the discovered issuer'}`
+                      : m.ambiguousApp ? 'Choose a configured OAuth app'
                       : m.status === 'ok' ? `Signed in${m.account ? ` as ${m.account}` : ''} — sign in again` : m.url}
-                    chevron={!app || canEdit}
-                    onClick={busy ? undefined : app ? (canEdit ? () => onSetUp(app) : undefined) : () => void begin({ mcpServer: m.server })}
+                    chevron
+                    onClick={busy ? undefined : m.needsApp
+                      ? () => onSetUp({ id: '', label: 'New app', install: null, group: null, overridesInstall: false }, m.issuer)
+                      : m.ambiguousApp ? () => setMcpChoice(m) : () => void begin({ mcpServer: m.server })}
                   />
                 );
               })}
@@ -579,30 +625,22 @@ export function ConnectAccountDialog({
       closeDisabled={busy}
     >
       <div class="settings-body ga-cred-dialog-body">
-        <p class="group-admin-help">Choose what the agent may use. {app.label} will ask you to confirm.</p>
-        <ul class="ga-cred-checklist">
-          {app.scopeSets.map((s) => (
-            <li key={s.id}>
-              <label class="group-admin-check">
-                <input
-                  type="checkbox"
-                  checked={scopes.includes(s.id)}
-                  onChange={(event) => setScopes(event.currentTarget.checked ? [...scopes, s.id] : scopes.filter((x) => x !== s.id))}
-                />
-                <span>{s.label}</span>
-              </label>
-              <span class="ga-cred-checklist-note ga-cred-mono">{s.hosts.join(', ')}</span>
-            </li>
-          ))}
-        </ul>
+        <p class="group-admin-help">Request OAuth scopes, one per line or separated by spaces. An empty field explicitly requests no scopes.</p>
+        <Field label="Requested OAuth scopes">
+          <textarea aria-label="Requested OAuth scopes" class="ga-cred-mono" rows={6} value={scopes} onInput={(event) => setScopes(event.currentTarget.value)} />
+        </Field>
+        <p class="group-admin-help">
+          The provider decides the effective grant and may retain earlier permissions. Requesting fewer scopes does not revoke them.
+          The agent can use all provider-permitted operations on {(app.group ?? app.install)?.config.api_hosts.join(', ')}.
+        </p>
       </div>
       <Footer>
         <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
         <button
           type="button"
           class="primary"
-          disabled={busy || scopes.length === 0}
-          onClick={() => void begin({ provider: app.id, scopeSets: scopes, replaceKey: reconnect?.key })}
+          disabled={busy}
+          onClick={() => void begin({ appId: app.id, scopes: scopes.trim() ? scopes.trim().split(/\s+/) : [], replaceKey: reconnect?.key })}
         >
           {busy ? 'Opening…' : `Continue to ${app.label}`}
         </button>

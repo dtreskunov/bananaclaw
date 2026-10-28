@@ -15,6 +15,8 @@ export interface SignIn {
   mcpServer?: string;
   createdAt: number;
   status: 'pending' | 'connected' | 'failed';
+  /** Authoritative completion key; reconnecting may reuse an existing account. */
+  key?: string;
   account?: string | null;
   error?: string;
 }
@@ -40,7 +42,7 @@ export function getSignIn(state: string, now = Date.now()): SignIn | undefined {
 
 export function finishSignIn(
   state: string,
-  result: { status: 'connected' | 'failed'; account?: string | null; error?: string },
+  result: { status: 'connected' | 'failed'; key?: string; account?: string | null; error?: string },
 ): SignIn | undefined {
   const signIn = signIns.get(state);
   if (!signIn) return undefined;

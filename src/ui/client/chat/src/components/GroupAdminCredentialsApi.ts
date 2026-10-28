@@ -17,6 +17,8 @@
 //
 // When the gateway is down, every route answers 503 { error: 'gateway_unreachable' }.
 import { apiPath } from './GroupAdminApi';
+import type { OAuthAppConfiguration } from '../../../../shared/oauth-app';
+export type { OAuthAppConfiguration } from '../../../../shared/oauth-app';
 
 export function credPath(gid: string, sub = ''): string {
   return apiPath(gid, `/credentials${sub}`);
@@ -56,6 +58,12 @@ export interface AccountDto {
   kind: 'oauth_app' | 'mcp_oauth';
   provider: string;
   providerLabel: string;
+  appSource?: 'install' | 'vault';
+  issuer?: string;
+  apiHosts?: string[];
+  requestedScopes?: string[] | null;
+  grantedScopes?: string[] | null;
+  scopeSource?: 'provider' | 'requested' | 'legacy' | 'unknown';
   account: string | null;
   scopes: { id: string; label: string }[];
   status: 'connected' | 'needs_reconnect';
@@ -71,17 +79,13 @@ export interface AccountDto {
   client?: 'registered' | 'metadata' | 'app';
 }
 
-export interface ScopeSetDto {
-  id: string;
-  label: string;
-  hosts: string[];
-}
-
 export type OAuthAppScope = 'group' | 'install';
 
 /** One configured client; the secret is write-only. */
 export interface OAuthClientDto {
   clientId: string;
+  clientSecretSet: boolean;
+  config: OAuthAppConfiguration;
   updatedAt: string;
   /** Accounts and MCP sign-ins using this client: in this group, and (install only) across all groups. */
   accounts: number;
@@ -98,12 +102,7 @@ export interface OAuthAppDto {
   label: string;
   install: OAuthClientDto | null;
   group: OAuthClientDto | null;
-  /** Where to create the client in the provider's console. */
-  consoleUrl: string;
-  /** Scope sets for connecting accounts; empty when the app is only used for MCP sign-in. */
-  scopeSets: ScopeSetDto[];
-  /** MCP servers known to sign in through this provider, e.g. GitHub's. */
-  mcpServers?: string[];
+  overridesInstall: boolean;
 }
 
 export interface KeyPresetDto {
@@ -122,11 +121,11 @@ export interface McpAuthDto {
   status: 'ok' | 'needs_sign_in' | 'needs_reconnect' | 'needs_value';
   key?: string;
   account?: string | null;
-  /**
-   * The server's authorization server doesn't support dynamic registration, so
-   * sign-in needs this OAuth app (provider id); set when that app isn't set up.
-   */
-  needsApp?: string;
+  /** Discovery requires a configured app for the returned issuer. */
+  needsApp?: boolean;
+  issuer?: string;
+  appId?: string;
+  ambiguousApp?: boolean;
 }
 
 export interface CredentialsOverviewDto {
@@ -144,7 +143,9 @@ export interface CredentialsOverviewDto {
   mcp: McpAuthDto[];
 }
 
-export type AccountStartInput = { provider: string; scopeSets: string[]; replaceKey?: string } | { mcpServer: string };
+export type AccountStartInput =
+  | { appId: string; scopes?: string[]; replaceKey?: string }
+  | { mcpServer: string; appId?: string };
 
 export interface AccountStartDto {
   state: string;
@@ -154,6 +155,8 @@ export interface AccountStartDto {
 
 export interface AccountProgressDto {
   status: 'pending' | 'connected' | 'failed';
+  /** Gateway's completion key, which may identify an existing account. Reload the overview after completion. */
+  key?: string;
   /** `registration_unsupported`: the MCP server allows neither dynamic registration nor a client metadata document. */
   code?: 'declined' | 'registration_unsupported';
   error?: string;
