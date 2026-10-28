@@ -32,10 +32,16 @@ async function main(): Promise<void> {
   }
 
   const { command, args, json } = parseArgv(argv);
-  for (const [flag, field] of [
+  const stdinFields = [
     ['value-stdin', 'value'],
     ['secret-stdin', 'secret'],
-  ] as const) {
+    ['values-stdin', 'value'],
+  ] as const;
+  if (stdinFields.filter(([flag]) => args[flag] === true).length > 1) {
+    process.stderr.write('Choose only one stdin credential flag.\n');
+    process.exit(2);
+  }
+  for (const [flag, field] of stdinFields) {
     if (args[flag] !== true) continue;
     if (process.stdin.isTTY) process.stderr.write(`Enter the ${field}, then press Ctrl-D:\n`);
     args[field] = (await readStdin()).replace(/\r?\n$/, '');

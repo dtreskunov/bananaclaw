@@ -9,22 +9,21 @@ This is the `dtreskunov/agent-vault` gateway, not OneCLI. Do not run
 `/init-onecli`, an upstream installer, or a `latest` download for this task.
 Follow [the release and upgrade guide](../../../docs/agent-vault-upgrades.md).
 
-**Compatibility stop:** this NanoClaw checkout requires catalog-free OAuth.
-The historical `gw-v0.1.0` release is incompatible. The authorized canary's
-`gw-v0.1.1-dev` is a local build, not a published/attested release. Do not
-reinstall/downgrade it, invent a release URL or bypass provenance checks.
-Until a compatible reviewed release is pinned, stop the installation workflow.
-The gateway's migrated database must only be rolled back with its matching
-previous binary and consistent state backup.
+**Compatibility requirement:** this checkout requires catalog-free OAuth and
+conditional atomic key sets. The reviewed pin is `gw-v0.1.1`, source
+`32f233b2ebc53786ab4e74b28fc4ef6d75e674e9`. The historical `gw-v0.1.0` is
+incompatible; `gw-v0.1.1-dev` was an authorized local canary, not an attested
+release. Do not invent release metadata or bypass provenance checks.
+Rollback requires the matching previous binary and consistent state backup.
 
 ## 1. Inventory and obtain approval
 
 - Ask whether the operator wants a fresh installation or an upgrade. Discover
   the running service, executable, working directory, HOME and configuration
-  paths before making changes.
+  paths before making changes. Existing explicit upgrade approval remains valid.
 - On upgrade, preserve the master-password input, bootstrap-token file,
   database, CA, socket root, OAuth redirect URL, bind addresses and network
-  allowlist. Inspect only the necessary configuration keys; never print secret
+  policy, including any approved private-range opt-in. Inspect only necessary keys; never print secret
   values or read them into chat.
 - An existing database or bootstrap token means this is an upgrade, not a fresh
   installation. Do not rotate the host token, reset the database, create another
@@ -34,7 +33,7 @@ previous binary and consistent state backup.
 
 ## 2. Download and verify the sanctioned release
 
-The pin is `agent-vault-gateway` in `versions.json`, currently `gw-v0.1.0`.
+The pin is `agent-vault-gateway` in `versions.json`, currently `gw-v0.1.1`.
 Reviewed source and three platform hashes live in `setup/agent-vault-release.ts`.
 The binaries are standalone executables, not archives.
 

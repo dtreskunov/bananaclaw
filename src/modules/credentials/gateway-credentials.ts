@@ -25,7 +25,9 @@ export interface GatewayService {
   name: string;
   /** Matcher pattern: `host[:port][/path-glob]`. */
   host: string;
+  path?: string;
   enabled?: boolean;
+  https_only?: boolean;
   auth: GatewayAuth;
   substitutions?: { key: string; placeholder: string; in?: string[] }[];
 }
@@ -85,6 +87,7 @@ export interface KeyDto {
   lastUsedAt: string | null;
   destination: { match: string; injection: InjectionDto };
   mcpServer?: string;
+  sharedService?: string;
 }
 
 // ── reads ─────────────────────────────────────────────────────────────────
@@ -318,6 +321,7 @@ export function servicesToKeys(services: GatewayService[], credentials: Credenti
         updatedAt: credential?.updated_at ?? null,
         lastUsedAt: credential?.last_used_at ?? null,
         destination: { match: service.host, injection: injectionFor(service, key) },
+        ...(serviceKeys(service).length > 1 ? { sharedService: service.name } : {}),
       });
     }
   }
@@ -508,4 +512,35 @@ export async function disconnectProvider(agentGroupId: string, key: string): Pro
   await gatewayJson('DELETE', `/v1/vaults/${enc(vaultName(agentGroupId))}/oauth-accounts/${enc(key)}`, 'disconnect', {
     timeoutMs: 30_000,
   });
+}
+
+export interface KeySetInfo {
+  service: GatewayService;
+  keys: string[];
+  revision: string;
+}
+
+function keySetRoute(gid: string, name: string): string {
+  return `/v1/vaults/${enc(vaultName(gid))}/key-sets/${enc(name)}`;
+}
+
+export function getKeySet(gid: string, name: string): Promise<KeySetInfo> {
+  return gatewayJson('GET', keySetRoute(gid, name), 'key-set metadata');
+}
+
+export function putKeySet(
+  gid: string,
+  name: string,
+  service: GatewayService,
+  values: Record<string, string>,
+  condition: { createOnly: true } | { revision: string },
+): Promise<KeySetInfo> {
+  return gatewayJson('PUT', keySetRoute(gid, name), 'atomic key-set update', {
+    body: { service, values },
+    ...('createOnly' in condition ? { ifNoneMatch: '*' as const } : { ifMatch: condition.revision }),
+  });
+}
+
+export async function deleteKeySet(gid: string, name: string, revision: string): Promise<void> {
+  await gatewayJson('DELETE', keySetRoute(gid, name), 'atomic key-set delete', { ifMatch: revision });
 }

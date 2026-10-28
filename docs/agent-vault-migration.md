@@ -1,0 +1,296 @@
+# OneCLI migration inventory, private preparation and target provisioning
+
+The Agent Vault canary is working. This tooling advances the remaining
+per-group migration without copying credentials or changing live access.
+Inventory and preparation remain read-only with respect to live access.
+The separate, explicitly gated provisioning mode creates target key sets;
+**no mode performs a backend cutover or retires OneCLI**.
+
+## What it reads
+
+Run from the checkout root:
+
+```bash
+pnpm exec tsx scripts/migrate-from-onecli.ts
+pnpm exec tsx scripts/migrate-from-onecli.ts --group <group-id>
+```
+
+Default output is a JSON inventory on stdout. To retain it, use a private
+directory and `umask 077` before redirecting output.
+
+The tool reads:
+
+- The central SQLite database with `readonly:true`: group IDs, names, effective
+  backend (including the legacy env override), provider and MCP-server count.
+- OneCLI's metadata-only `GET /v1/secrets`, agent identifiers, explicit grants
+  and effective credential metadata, plus project-scope effective app-tool
+  policies for the exact source agent. It does not retrieve secret values,
+  OAuth tokens, container proxy credentials or saved credential stubs.
+- Agent Vault's vault list, credential-key metadata and service definitions.
+
+Only safe projected metadata and generated templates enter the report.
+Arbitrary secret metadata, values and external-store references are discarded.
+Agents are matched by exact group identifier, never display name or default
+agent. Missing or ambiguous source agents require investigation.
+
+Effective access determines the candidates; listing every secret in OneCLI
+does not grant every group all of them. Blocked, limited, unknown and
+non-effective credentials are not converted into usable target access.
+
+## Reading the plan
+
+Each group has a stable `digest`, required actions and these possible static
+entry states:
+
+| State | Meaning |
+| --- | --- |
+| `needs-value` | Recognized metadata produced a template; the operator must supply its value separately |
+| `manual-review` | Unsupported/incomplete metadata or overlapping source recipients; do not guess or merge values |
+| `source-restricted` | Source effective access does not permit treating the credential as usable |
+| `target-exists` | An existing target key/service/recipient needs review; never overwrite it |
+
+Generated key/service names are deterministic from the OneCLI secret ID.
+Known single-header formats preserve their prefix. Pre-encoded Basic values
+are not base64-encoded again. Anthropic API-key metadata can propose `x-api-key`;
+unknown/OAuth modes need manual review. Query templates include an explicit
+client-rewiring task: the existing query parameter must use the new placeholder.
+
+OAuth connection entries require new vault-local authorization, not token
+export. Several OneCLI connections may describe the same provider identity;
+their counts are not counts of distinct people or final Agent Vault accounts.
+Choose generic app configuration and requested scopes deliberately.
+
+All plans have `policyReviewRequired:true` and `readyToCutover:false`.
+Effective/grant metadata is not proof of parity for approvals, rate limits,
+method/path conditions, network restrictions or host-side OneCLI callers.
+The installed edition may not expose organization-policy enumeration. Do not
+bypass that limitation or interpret missing visibility as no policy.
+
+The digest covers captured source grant/effective metadata, the generated plan
+and target metadata. It is not proof that secrets are unchanged or that hidden
+policies were fully audited.
+
+`appPolicies` records the supported project-scope effective policy for each
+source provider and agent: tool verdicts and rate limits. Effective approvals,
+blocks, mixed/unmanaged results, missing tool coverage and rate limits remain
+explicit review blockers even when an attachment grant says `full`.
+Metadata read failures are surfaced, not converted into an all-allowed policy.
+The inventory does not query unavailable organization resources.
+This evidence is per agent/provider, not proof of OAuth scope grants or
+complete raw-HTTP/static-secret/connection-specific policy parity.
+
+### Workload and overlap evidence
+
+New inventories include safe per-client metadata: transport, recipient host,
+query-parameter/header names, executable basename and credential/proxy/CA
+environment-variable names. They do not export URL userinfo, paths, query values,
+header/env values or command arguments. The configured provider remains a
+configured value; a null row may inherit the runtime default and is not proof
+that a group has no provider.
+
+Client review flags distinguish query-placeholder rewiring, inline credentials,
+proxy/CA overrides, dependency checks and network access. An HTTP endpoint can
+require an explicit private-network decision. Reading metadata does not test
+that endpoint or change the gateway allowlist.
+
+`queryClientRewires` identifies parameters that must be **added** as well as
+existing ones that must be replaced with a target placeholder. These are
+host-based association hints, with `exactResourceMatchVerified:false`, not
+proof that the original resource path matches a source route. No client URL
+is rewritten by inventory or preparation.
+
+`routingReviews` separates complementary headers on an identical recipient
+from conflicting header selectors or different path patterns. A complementary
+case may include a `serviceProposal` referencing **distinct** target keys.
+This does not compare or assume equality of secret values. Complementary-header
+proposals have `applySupported:true` because the conditional key-set API and
+shared-service UI support their lifecycle. Explicit routing review is still
+required before provisioning; conflicting/path-overlapping proposals remain
+unsupported. Never send a composite proposal to a single-key or upsert API.
+
+Matching OAuth labels are grouped only as `accountReviewGroups`, with
+`identityVerified:false` and `scopeUnionKnown:false`. Labels are not stable
+subjects: they do not prove that accounts can be combined or establish requested
+scope unions. Actual issuer/identity and intended permissions need confirmation
+at sign-in. These hints do not reinstate a provider permission catalog.
+
+The additional evidence changes plan digests. Retain old review bundles as
+snapshots; never edit them or silently reuse their confirmation for a new plan.
+
+## Explicitly gated preparation
+
+After reviewing a group's inventory, run:
+
+```bash
+pnpm exec tsx scripts/migrate-from-onecli.ts \
+  --prepare --group <group-id> --confirm-group <same-group-id> \
+  --expect-digest <reviewed-digest> \
+  --out /absolute/path/to/a-new-private-directory
+```
+
+The command re-reads current metadata and requires the same plan digest.
+It refuses missing/mismatched confirmations, already-migrated groups,
+missing/ambiguous source agents, relative paths and existing output directories.
+The parent output directory must already exist.
+
+It writes only `bundle.json`, mode 0600, in a new directory, mode 0700. The bundle
+states `purpose:"metadata-review-only"`, `liveChanges:false` and
+`readyToCutover:false`. It can contain unresolved blockers; writing the bundle
+does not resolve them or authorize import.
+
+There is deliberately no `--apply` or `--yes`. Preparation does **not**:
+
+- Create/change a live vault, credential or service.
+- Change OneCLI grants or policy.
+- Export/re-enter values or connect OAuth accounts.
+- Change a group backend or its MCP configuration.
+- Restart, stop, uninstall or retire either service.
+
+Agent Vault's legacy service API is an upsert, not a create-only import
+transaction. Preparation still uses local bundles rather than making an unsafe
+check-then-upsert promise about concurrent edits.
+The existing proposal mechanism is transactional but its `set` action also
+upserts services/credentials; it is not a create-only alternative. An importer
+must not assume conditional headers or create semantics that the server does
+not implement.
+
+## Inactive target and atomic provisioning
+
+The approved conditional API is `GET|PUT|DELETE
+/v1/vaults/{vault}/key-sets/{service-name}`. Use a compatible, verified gateway
+release before provisioning; a missing endpoint is an error, never a reason to
+fall back to upserts.
+
+Prepare a vault without touching the backend:
+
+```bash
+pnpm ncl credentials target prepare --group <group-id>
+```
+
+In group settings → Credentials, “Prepare / open Agent Vault target” does the
+same thing. The target banner explicitly says OneCLI remains active. Requests
+use `?target=agent-vault`; without that explicit mode, OneCLI groups remain
+backend-gated. Group-admin/host-only permissions are unchanged.
+
+Single-key, OAuth app and sign-in operations are available in this target mode.
+Install-wide OAuth app changes still affect other groups and require the
+existing owner/global-admin permission; prefer a group override for an
+intentional group-only change. OAuth callback state remains bound to its
+initiating user and group; completion keys remain authoritative.
+
+The shared-service dialog supports create-only creation, write-only per-key
+rotation, routing edits and deletion of the entire set. Existing membership is
+immutable, blank edit fields preserve values, and stale revisions require a
+fresh review. Single-key row actions are not offered for shared services.
+CLI equivalents are `credentials key-set get|create|update|delete`, with
+`--name`, safe `--service` JSON, `--values-stdin`, exact `--revision` for
+update/delete, and explicit `--target-only` while OneCLI is active.
+Only one of `--value-stdin`, `--secret-stdin`, `--values-stdin` may consume stdin.
+
+For batch provisioning, first obtain a **fresh** inventory after target
+preparation, review its digest, and supply actual values keyed by generated
+target key names through stdin:
+
+```bash
+pnpm exec tsx scripts/migrate-from-onecli.ts \
+  --provision --group <group-id> --confirm-group <same-group-id> \
+  --expect-digest <fresh-reviewed-digest> --ack-source-policy \
+  --ack-composite-routing --values-stdin \
+  < /secure/operator-supplied-values.json
+```
+
+Do not paste values into chat, argv, shell history, reports or bundle files.
+The stdin JSON must contain exactly the selected keys. Each invocation accepts
+at most 64 values; use `--services name-one,name-two` for a smaller batch.
+Source-policy acknowledgement records a review decision, not a claim that
+unavailable policies were audited or equivalent. Composite acknowledgement
+authorizes distinct complementary headers, not value equality or precedence
+parity. Restricted source entries are never promoted by either acknowledgement.
+
+Every set uses `If-None-Match: *`. The vault lock and SQL transaction cover
+collision checks and all its credentials/service together. Existing names/keys
+return `412`; overlapping recipients or foreign references fail explicitly.
+Sets are HTTPS-only: allowing private network dialing does **not** make an
+existing plaintext HTTP MCP workload TLS-ready.
+
+On failure, the command exits nonzero and prints a safe partial receipt with
+completed sets and the failed service. Prior successful sets are not rolled
+back or overwritten. A lost/malformed response may hide a committed set:
+re-inventory and review; never assume that matching metadata proves equal
+values. Select only still-missing sets on a later reviewed invocation.
+`status:"complete"` means the selected static sets completed, **not** that the
+group, OAuth accounts, clients or policy parity are ready. Receipts always
+retain `readyToCutover:false`, `backendChanged:false` and `oneCliChanged:false`.
+
+No values/tokens are exported from OneCLI. No provisioning operation changes
+its grants, MCP configuration, active backend or running containers.
+
+### Approved private-network mode
+
+The operator approved removing the per-address allowlist for this deployment.
+Its gateway environment now uses `AGENT_VAULT_ALLOW_PRIVATE_RANGES=true` and no
+`AGENT_VAULT_NETWORK_ALLOWLIST`. This permits private/reserved destinations,
+including loopback/link-local, but retains hard blocks on known IMDS endpoints,
+per-dial DNS checks, TLS validation and per-vault socket isolation.
+The Home Assistant host accepted a scoped TCP CONNECT; that was a transport
+check without an application payload, not model/MCP acceptance.
+
+## Before any live cutover
+
+The operator sequence remains:
+
+1. Finish the compatible verified gateway release/pin and preserve the matching
+   database/binary rollback path.
+2. Select the group explicitly and review its source access and policy needs.
+3. Resolve overlaps, unsupported injections and existing target state without
+   assuming two keys have the same value.
+4. Prepare the inactive target and use the explicitly reviewed, create-only
+   provisioning workflow above. Do not temporarily flip its backend to enter
+   values.
+5. Enter values through a write-only operator path and reconnect accounts in the
+   intended vault. Preserve or deliberately rewire client placeholders.
+6. Validate actual model/MCP workloads and policy behavior before the separately
+   authorized backend switch. Standing approval is not evidence that missing
+   credential values, consent or workload checks have completed.
+7. Complete the sustained acceptance period and audit host-side OneCLI use
+   before removing its runtime/setup/uninstall dependencies.
+
+Re-running inventory is read-only. Repeating preparation into a new directory
+is harmless; an existing bundle is never silently replaced. Do not downgrade
+the gateway binary without its matching state backup.
+
+## OneCLI retirement dependencies
+
+Removing a group's container dependency is not the same as removing every host
+dependency. Before deleting OneCLI support, review these surfaces:
+
+| Surface | Required exit condition |
+| --- | --- |
+| Container spawn and agent provisioning | Intended groups use Agent Vault; default/new-group behavior is deliberately migrated |
+| OneCLI approval bridge and pending responses | Equivalent policy or explicitly accepted behavior; no pending credential approvals lost |
+| Docker egress network and host-gateway helpers | Remaining OneCLI container networking is no longer needed; Agent Vault isolation remains intact |
+| Setup, uninstall and channel/provider/tool recipes | Fresh installs and removal use the compatible gateway without affecting another copy |
+| Runtime SDK/config and backend CLI/schema defaults | No remaining runtime consumer before removal; migration-only tooling must not keep a runtime dependency alive |
+| Host-side public metadata | OpenRouter's public model catalog is unauthenticated and no longer requires OneCLI |
+
+These are retirement gates, not permission to remove active paths. The current
+dual-backend installation still needs OneCLI for its unmigrated groups.
+
+## Batch the operator session
+
+Before requesting consent or credential entry, assemble one current review:
+
+- Fresh inventory digest and source-policy evidence, with unknown coverage clear.
+- Routing conflicts and any composite-service lifecycle decision; never assume
+  two stored values are equal.
+- Client query/header/env rewiring tasks and offline dependency evidence.
+- Required private-network access, distinguishing configured allowlist data from
+  a successful scoped gateway test.
+- Candidate account consolidation, with verified issuer/identity and intended
+  OAuth scopes still requiring confirmation.
+- Compatible gateway release/pin, backup and separate live-cutover approval.
+
+Request real values only through a write-only local/UI path, never chat. Keep
+private-repository checks outside acceptance until a target is explicitly
+authorized. Code-only readiness work must not silently perform a live import,
+scope change, allowlist change or backend switch.

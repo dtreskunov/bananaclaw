@@ -4,15 +4,36 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **OneCLI migration inventory, private preparation and create-only provisioning.**
+  `scripts/migrate-from-onecli.ts` reports per-group effective credential
+  requirements without exporting values. Explicit group/digest confirmation
+  can create a private review bundle. A separate `--provision` mode accepts
+  write-only values on stdin and creates conditional atomic key sets, including
+  explicitly reviewed complementary-header services. Failures report partial
+  receipts; nothing switches backends, changes grants or retires OneCLI.
+  The Credentials UI/CLI can explicitly prepare inactive targets, and shared
+  services have revision-guarded edit/delete controls.
+  See [migration preparation](docs/agent-vault-migration.md).
+  Readiness evidence also identifies MCP client rewiring/network review,
+  complementary-header proposals, unverified account-label groupings and
+  agent-specific project tool policies. Policy metadata is not treated as
+  proof of OAuth grants or full policy parity.
+
+- **Public model metadata no longer depends on OneCLI.** OpenRouter catalog
+  discovery now uses an explicitly unauthenticated, bounded request. The unused
+  host OneCLI proxy bridge was removed; authenticated container and approval
+  paths remain until their migration gates are met.
+
 - **[BREAKING] Agent Vault OAuth management is catalog-free.** Configure generic
   apps, request actual OAuth scopes, and route credentials by exact API hosts;
   the provider enforces token permissions. The old provider/scope-set API and
   compatibility fallbacks are removed. Requires a coordinated catalog-free
-  gateway deployment; `gw-v0.1.0` is incompatible. The current canary uses a
-  locally authorized `gw-v0.1.1-dev` build, not a published or attested release.
+  gateway deployment; `gw-v0.1.0` is incompatible. The reviewed pin is now
+  published `gw-v0.1.1`, with catalog-free OAuth and conditional atomic key sets.
+  Consumer-side binary and checksum-manifest provenance verification passed.
   See [Agent Vault upgrades](docs/agent-vault-upgrades.md#catalog-free-oauth-breaking-update).
 
-- **Agent Vault gateway release pinned to `gw-v0.1.0`.** Run `/init-agent-vault`
+- **Agent Vault gateway release pinned to `gw-v0.1.1`.** Run `/init-agent-vault`
   for platform-specific checksum and signed source-provenance verification,
   followed by an approved state-preserving upgrade. Existing OneCLI and group
   backends are unchanged. OAuth progress now retains the gateway's returned

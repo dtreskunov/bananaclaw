@@ -121,7 +121,7 @@ function openSignInWindow(url: string): boolean {
  * Completion is detected by polling, with the callback's postMessage as a
  * fast path; the code exchange itself happens inside the gateway.
  */
-export function useSignIn(gid: string, onFinished: () => void): {
+export function useSignIn(gid: string, onFinished: () => void, targetOnly = false): {
   waiting: SignInWaiting | null;
   start: (input: AccountStartInput) => Promise<boolean>;
   reopen: () => void;
@@ -130,7 +130,7 @@ export function useSignIn(gid: string, onFinished: () => void): {
   const [waiting, setWaiting] = useState<SignInWaiting | null>(null);
 
   async function start(input: AccountStartInput): Promise<boolean> {
-    const r = await call<AccountStartDto>(credPath(gid, '/accounts/start'), 'POST', input);
+    const r = await call<AccountStartDto>(credPath(gid, '/accounts/start', targetOnly), 'POST', input);
     if (!r.ok) {
       showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
       return false;
@@ -145,7 +145,7 @@ export function useSignIn(gid: string, onFinished: () => void): {
   useEffect(() => {
     if (!waiting) return undefined;
     let settled = false;
-    const progressUrl = credPath(gid, `/accounts/start/${encodeURIComponent(waiting.state)}`);
+    const progressUrl = credPath(gid, `/accounts/start/${encodeURIComponent(waiting.state)}`, targetOnly);
     async function poll(): Promise<void> {
       const r = await call<AccountProgressDto>(progressUrl);
       if (settled || !r.ok || r.data.status === 'pending') return;
@@ -174,7 +174,7 @@ export function useSignIn(gid: string, onFinished: () => void): {
       clearInterval(timer);
       clearTimeout(timeout);
     };
-  }, [waiting?.state, gid]);
+  }, [waiting?.state, gid, targetOnly]);
 
   return {
     waiting,

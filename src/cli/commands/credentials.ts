@@ -37,7 +37,11 @@ import {
   listMcpAccounts,
   listServices,
   servicesToKeys,
+  getKeySet,
+  putKeySet,
+  deleteKeySet,
 } from '../../modules/credentials/gateway-credentials.js';
+import { checkSetRevision, checkSetService, parseSetValues } from '../../modules/credentials/key-sets.js';
 import { addKey, deleteKey, KeyInputError, updateKey } from '../../modules/credentials/keys.js';
 import { AppInputError, removeApp, saveApp } from '../../modules/credentials/oauth-apps.js';
 import { register } from '../registry.js';
@@ -55,9 +59,9 @@ function groupArg(args: Args): string {
   const gid = str(args, 'group') ?? str(args, 'id');
   if (!gid) throw new Error('--group <agent-group-id> is required');
   if (!getAgentGroup(gid)) throw new Error(`no agent group ${gid}`);
-  if (!usesAgentVault(gid)) {
+  if (!usesAgentVault(gid) && args['target-only'] !== true) {
     throw new Error(
-      `${gid} doesn't use the credential gateway; run \`ncl credentials backend set --backend agent-vault\``,
+      `${gid} doesn't use Agent Vault; use --target-only for explicit inactive-target provisioning, not a temporary backend switch`,
     );
   }
   return gid;
@@ -278,6 +282,66 @@ function existingGroup(args: Args): string {
 }
 
 register({
+  name: 'credentials-target-prepare',
+  description: 'Create or reuse an inactive Agent Vault target without switching the group. Use --group <id>.',
+  access: 'open',
+  resource: CREDENTIALS_RESOURCE,
+  parseArgs: (raw) => raw,
+  handler: async (args) =>
+    run(async () => {
+      const gid = existingGroup(args as Args);
+      const state = await ensureVault(gid);
+      return {
+        group: gid,
+        vault: state,
+        activeBackend: usesAgentVault(gid) ? 'agent-vault' : 'onecli',
+        backendChanged: false,
+      };
+    }),
+});
+
+for (const verb of ['get', 'create', 'update', 'delete'] as const)
+  register({
+    name: `credentials-key-set-${verb}`,
+    description: `Atomically ${verb} a static key set. Use --group <id> --name <service> [--target-only]; create/update: --service '<safe JSON>' --values-stdin; update/delete: --revision '<metadata revision>'.`,
+    access: 'open',
+    resource: CREDENTIALS_RESOURCE,
+    parseArgs: (raw) => raw,
+    handler: async (raw) =>
+      run(async () => {
+        const args = raw as Args;
+        const gid = groupArg(args);
+        const name = str(args, 'name');
+        if (!name) throw new Error('--name <service-name> is required');
+        if (verb === 'get') return getKeySet(gid, name);
+        const revision = verb === 'create' ? undefined : checkSetRevision(args.revision);
+        if (verb === 'delete') {
+          await deleteKeySet(gid, name, revision!);
+          return `Deleted key set ${name}`;
+        }
+        if (args.value !== undefined && args['values-stdin'] !== true)
+          throw new Error('Use --values-stdin; never pass credential values in arguments');
+        const values = args['values-stdin'] === true ? parseSetValues(args.value) : {};
+        let service: unknown;
+        try {
+          service = JSON.parse(str(args, 'service') ?? '');
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+          throw new Error('--service must be safe service JSON without values', { cause: error });
+        }
+        const checked = checkSetService(service);
+        if (checked.name !== name) throw new Error('Service name must match --name');
+        return putKeySet(
+          gid,
+          name,
+          checked,
+          values,
+          verb === 'create' ? { createOnly: true } : { revision: revision! },
+        );
+      }),
+  });
+
+register({
   name: 'credentials-backend-get',
   description: "Show where a group's containers get credentials (onecli or agent-vault). Use --group <id>.",
   access: 'open',
@@ -303,6 +367,7 @@ register({
   handler: async (args) =>
     run(async () => {
       const a = args as Args;
+      if (a['target-only'] === true) throw new Error('--target-only cannot change the active backend');
       const gid = existingGroup(a);
       const backend = str(a, 'backend');
       if (backend !== 'onecli' && backend !== 'agent-vault') throw new Error('--backend must be onecli or agent-vault');

@@ -174,7 +174,9 @@ export function GroupAdmin(): JSX.Element | null {
     }
     setTab(requestedTab as Tab);
   }, [open, requestedTab]);
-  const tabItems = credentialsUiFor(gid) ? TAB_ITEMS : TAB_ITEMS.filter((it) => it.id !== 'credentials');
+  const tabItems = TAB_ITEMS.map((item) => item.id === 'credentials' && !credentialsUiFor(gid)
+    ? { ...item, sublabel: 'Stage an Agent Vault target; OneCLI stays active' }
+    : item);
 
   if (!open || !gid) return null;
   const group = groups.value.find((g) => g.id === gid);
@@ -253,7 +255,7 @@ export function GroupAdmin(): JSX.Element | null {
               onActions={setActions}
             />
           ) : null}
-          {activeTab === 'credentials' && credentialsUiFor(gid) ? <CredentialsTab gid={gid} /> : null}
+          {activeTab === 'credentials' ? <CredentialsTab gid={gid} /> : null}
           {activeTab === 'members' ? <MembersTab gid={gid} /> : null}
           {activeTab === 'roles' ? <RolesTab gid={gid} /> : null}
           {activeTab === 'destinations' ? <DestinationsTab gid={gid} /> : null}
@@ -1005,7 +1007,7 @@ function SettingsTab({
           busy={busy}
           onChange={setDraftMcpServers}
           onTest={testMcpServer}
-          credentialsGid={credentialsUiFor(gid) ? gid : undefined}
+          credentialsGid={gid}
           savedServers={data.mcpServers}
         />
       ) : null}

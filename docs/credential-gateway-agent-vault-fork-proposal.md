@@ -309,8 +309,11 @@ also work, but are then stored unencrypted on disk.
   add a missing key or account in group settings → Credentials.
   [upload-trace.ts](../container/agent-runner/src/upload-trace.ts) is updated
   for those codes.
-- **Host-side calls:** use the host token with the loopback MITM port, replacing
-  [onecli-proxy.ts](../src/ui/server/chat/onecli-proxy.ts).
+- **Host-side calls:** the former OneCLI proxy helper was used only for the
+  public OpenRouter model catalog. That metadata now uses an explicitly
+  unauthenticated fetch in [models-catalog.ts](../src/ui/server/chat/models-catalog.ts).
+  Any future authenticated host caller must have an explicit scoped credential
+  path, not an implicit default-agent fallback.
 - **Stubs** are written by the host. They contain no secrets.
 - **`ncl credentials`** (host only,
   [credentials.ts](../src/cli/commands/credentials.ts)): `list`, `set`

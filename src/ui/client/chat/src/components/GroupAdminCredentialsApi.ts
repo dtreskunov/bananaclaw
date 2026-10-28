@@ -20,8 +20,8 @@ import { apiPath } from './GroupAdminApi';
 import type { OAuthAppConfiguration } from '../../../../shared/oauth-app';
 export type { OAuthAppConfiguration } from '../../../../shared/oauth-app';
 
-export function credPath(gid: string, sub = ''): string {
-  return apiPath(gid, `/credentials${sub}`);
+export function credPath(gid: string, sub = '', targetOnly = false): string {
+  return apiPath(gid, `/credentials${sub}${targetOnly ? `${sub.includes('?') ? '&' : '?'}target=agent-vault` : ''}`);
 }
 
 export type InjectionType = 'bearer' | 'basic' | 'api-key' | 'query' | 'custom';
@@ -51,6 +51,7 @@ export interface KeyDto {
   destination: DestinationDto;
   /** MCP server in this group that uses this key, when known. */
   mcpServer?: string;
+  sharedService?: string;
 }
 
 export interface AccountDto {
@@ -129,6 +130,8 @@ export interface McpAuthDto {
 }
 
 export interface CredentialsOverviewDto {
+  targetOnly?: boolean;
+  activeBackend?: 'onecli' | 'agent-vault';
   canEdit: boolean;
   /** May set install-wide OAuth apps (owner or global admin). */
   canEditInstall: boolean;

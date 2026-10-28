@@ -36,7 +36,6 @@
  * Catalog cached in memory (~1h TTL + brief negative cache on failure).
  */
 import { log } from '../../../log.js';
-import { proxyFetch } from './onecli-proxy.js';
 import { listNativeModels, listOpenCodeModels } from './models-dev-catalog.js';
 
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
@@ -106,7 +105,13 @@ async function fetchCatalog(): Promise<OpenRouterModel[] | null> {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const r = await proxyFetch(OPENROUTER_MODELS_URL, { timeout: 15_000 });
+      const r = await fetch(OPENROUTER_MODELS_URL, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        credentials: 'omit',
+        redirect: 'error',
+        signal: AbortSignal.timeout(15_000),
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const json = (await r.json()) as OpenRouterResponse;
       cache = { fetchedAt: Date.now(), models: json.data };

@@ -82,6 +82,8 @@ interface Recorded {
   url: string;
   auth: string | undefined;
   body: unknown;
+  ifMatch?: string;
+  ifNoneMatch?: string;
 }
 
 const gw = {
@@ -104,6 +106,7 @@ const gw = {
   down: false,
   missingApps: false,
   ambiguousApp: false,
+  setVersion: 1,
 };
 
 function initialServices(): Record<string, unknown>[] {
@@ -129,7 +132,14 @@ function initialServices(): Record<string, unknown>[] {
 function fakeGateway(req: http.IncomingMessage, res: http.ServerResponse, raw: string): void {
   const url = new URL(req.url || '/', 'http://gw');
   const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : undefined;
-  gw.requests.push({ method: req.method!, url: `${url.pathname}${url.search}`, auth: req.headers.authorization, body });
+  gw.requests.push({
+    method: req.method!,
+    url: `${url.pathname}${url.search}`,
+    auth: req.headers.authorization,
+    body,
+    ifMatch: req.headers['if-match'] as string | undefined,
+    ifNoneMatch: req.headers['if-none-match'] as string | undefined,
+  });
   const send = (status: number, payload?: unknown): void => {
     res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(payload === undefined ? undefined : JSON.stringify(payload));
@@ -157,6 +167,39 @@ function fakeGateway(req: http.IncomingMessage, res: http.ServerResponse, raw: s
       (s) => !String(s.name).startsWith('mcp-'),
     );
     return send(200, { ok: true });
+  }
+  const setRoute = new RegExp(`^${vault}/key-sets/([a-z0-9-]+)$`).exec(url.pathname);
+  if (setRoute) {
+    const name = setRoute[1]!;
+    const existing = gw.services.find((s) => s.name === name);
+    const revision = () => `"${gw.setVersion.toString(16).padStart(64, '0')}"`;
+    const metadata = (service: GatewayService) => ({
+      service,
+      keys: serviceKeys(service).sort(),
+      revision: revision(),
+    });
+    if (req.method === 'GET')
+      return existing
+        ? send(200, metadata(existing as unknown as GatewayService))
+        : send(404, { error: 'Key set not found' });
+    const creating = req.headers['if-none-match'] === '*';
+    if (creating ? existing : req.headers['if-match'] !== revision())
+      return send(412, { error: 'credential set revision does not match' });
+    if (req.method === 'DELETE') {
+      if (!existing) return send(404, { error: 'Key set not found' });
+      for (const key of serviceKeys(existing as unknown as GatewayService)) gw.credentials.delete(key);
+      gw.services = gw.services.filter((s) => s.name !== name);
+      gw.setVersion++;
+      return send(204);
+    }
+    const service = body?.service as GatewayService;
+    const values = body?.values as Record<string, string>;
+    if (creating && serviceKeys(service).some((key) => gw.credentials.has(key)))
+      return send(412, { error: 'existing key' });
+    gw.services = [...gw.services.filter((s) => s.name !== name), { ...service, https_only: true }];
+    for (const [key, value] of Object.entries(values)) gw.credentials.set(key, value);
+    gw.setVersion++;
+    return send(200, metadata(service));
   }
   const keyRoute = new RegExp(`^${vault}/keys/([A-Z][A-Z0-9_]*)$`).exec(url.pathname);
   if (keyRoute && req.method === 'PUT') {
@@ -519,6 +562,7 @@ beforeEach(() => {
   gw.down = false;
   gw.missingApps = false;
   gw.ambiguousApp = false;
+  gw.setVersion = 1;
   clearSignIns();
   forgetProbes(GID);
   resetClientMetadataCache();
@@ -879,6 +923,102 @@ describe('ncl credentials (host)', () => {
       ]),
     );
     expect(JSON.stringify(resp.data)).not.toContain('secret');
+  });
+
+  describe('inactive target and conditional key sets', () => {
+    const service: GatewayService = {
+      name: 'combined-test',
+      host: 'combined.example.com',
+      auth: { type: 'custom', headers: { Authorization: 'Bearer {{ FIRST_KEY }}', 'x-api-key': '{{ SECOND_KEY }}' } },
+    };
+    const values = { FIRST_KEY: 'synthetic-first', SECOND_KEY: 'synthetic-second' };
+    const cli = (command: string, args: Record<string, unknown>) =>
+      dispatch({ id: 'keyset', command, args }, { caller: 'host' });
+
+    it('prepares an inactive target through UI or CLI without changing its backend', async () => {
+      vi.stubEnv('NANOCLAW_AGENT_VAULT_GROUPS', '');
+      expect((await api('GET', '')).body()).toMatchObject({ error: 'inactive_gateway_target' });
+      expect((await api('POST', '/target', {})).status()).toBe(200);
+      expect((await cli('credentials-target-prepare', { group: GID })).ok).toBe(true);
+      expect((await api('GET', '?target=agent-vault')).body()).toMatchObject({
+        targetOnly: true,
+        activeBackend: 'onecli',
+      });
+      expect(
+        getDb().prepare('SELECT credential_backend FROM container_configs WHERE agent_group_id=?').get(GID),
+      ).toEqual({ credential_backend: null });
+      expect(
+        (await cli('credentials-backend-set', { group: GID, backend: 'agent-vault', 'target-only': true })).ok,
+      ).toBe(false);
+      expect((await api('POST', '/key-sets', { service, values })).status()).toBe(409);
+      const created = await api('POST', '/key-sets?target=agent-vault', { service, values });
+      expect(created.status()).toBe(200);
+      expect(gw.credentials.get('FIRST_KEY')).toBe(values.FIRST_KEY);
+      expect(await cli('credentials-backend-get', { group: GID })).toMatchObject({ ok: true, data: 'onecli' });
+    });
+
+    it('preserves create/update/delete preconditions and exposes shared-service metadata, never values', async () => {
+      const created = await api('POST', '/key-sets', { service, values });
+      expect(created.status()).toBe(200);
+      const info = created.body() as { revision: string };
+      expect(created.text()).not.toContain('synthetic-');
+      expect(gw.requests.at(-1)).toMatchObject({ ifNoneMatch: '*' });
+      expect((await api('POST', '/key-sets', { service, values })).status()).toBe(412);
+      const overview = await api('GET', '');
+      expect(overview.text()).not.toContain('synthetic-');
+      expect((overview.body() as { keys: unknown[] }).keys).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: 'FIRST_KEY', sharedService: service.name }),
+          expect.objectContaining({ key: 'SECOND_KEY', sharedService: service.name }),
+        ]),
+      );
+      const edited = await api('PUT', `/key-sets/${service.name}`, {
+        service,
+        values: { SECOND_KEY: 'synthetic-new' },
+        revision: info.revision,
+      });
+      expect(edited.status()).toBe(200);
+      expect(gw.requests.at(-1)?.ifMatch).toBe(info.revision);
+      expect(gw.credentials.get('FIRST_KEY')).toBe(values.FIRST_KEY);
+      expect(gw.credentials.get('SECOND_KEY')).toBe('synthetic-new');
+      expect((await api('DELETE', `/key-sets/${service.name}`, { revision: info.revision })).status()).toBe(412);
+      expect((await api('DELETE', `/key-sets/${service.name}`, edited.body())).status()).toBe(200);
+      expect(gw.credentials.has('FIRST_KEY')).toBe(false);
+    });
+
+    it('requires safe values stdin and exact revisions for CLI key-set operations', async () => {
+      const args = { group: GID, name: service.name, service: JSON.stringify(service), value: JSON.stringify(values) };
+      expect((await cli('credentials-key-set-create', args)).ok).toBe(false);
+      const created = await cli('credentials-key-set-create', { ...args, 'values-stdin': true });
+      expect(created.ok).toBe(true);
+      expect(JSON.stringify(created)).not.toContain('synthetic-');
+      expect((await cli('credentials-key-set-update', { ...args, 'values-stdin': true })).ok).toBe(false);
+      const bad = await cli('credentials-key-set-create', {
+        ...args,
+        'values-stdin': true,
+        value: '{"FIRST_KEY":"synthetic-private',
+      });
+      expect(bad.ok).toBe(false);
+      expect(JSON.stringify(bad)).not.toContain('synthetic-private');
+    });
+
+    it('retains the group admin and host-only gates in target mode', async () => {
+      mockUserId = null;
+      expect((await api('POST', '/target', {})).status()).toBe(401);
+      mockUserId = 'web:scoped';
+      const denied = makeRes();
+      await handle(makeReq('POST', '/ui/chat/api/groups/ag-onecli/admin/credentials/target', {}), denied.res);
+      expect(denied.status()).toBe(403);
+      const count = gw.requests.length;
+      for (const command of ['credentials-target-prepare', 'credentials-key-set-create']) {
+        const result = await dispatch(
+          { id: 'agent', command, args: { group: GID, 'target-only': true } },
+          { caller: 'agent', agentGroupId: GID, sessionId: 's', messagingGroupId: 'm' },
+        );
+        expect(result.ok).toBe(false);
+      }
+      expect(gw.requests).toHaveLength(count);
+    });
   });
 
   it('adds a key from stdin, then replaces its value and deletes it', async () => {

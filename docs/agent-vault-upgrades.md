@@ -7,14 +7,14 @@ provider catalog, capability negotiation or old-gateway fallback. Gateway and
 NanoClaw updates must be coordinated; `gw-v0.1.0` cannot serve this host's OAuth
 management UI. Do not downgrade an already migrated gateway to that binary.
 
-The current operator-authorized canary runs **`gw-v0.1.1-dev`**, source
-`8c240e88dd41032e85e11727a65a3dd3b0efec70`, Linux amd64 SHA-256
-`0ff5c55cf8d187b9387fcf0afdd0f4cdb5a17fbb0c8505765ca30c21c45cda13`.
-This is a local dev deployment: no tag, published release, signed release
-provenance or consumer attestation verification was produced. The historical
-published release pin below is not a compatible generic-OAuth installation.
-Setup must stop until a compatible reviewed release is pinned; do not invent
-release URLs or treat the dev binary as an attested release.
+The sanctioned **`gw-v0.1.1`** release, source
+`32f233b2ebc53786ab4e74b28fc4ef6d75e674e9`, includes catalog-free OAuth and
+conditional atomic key sets. It replaces the separately authorized
+`gw-v0.1.1-dev` canary; that earlier local build was not an attested release.
+The release passed the full clean-CI suites, race tests, vet, three-platform
+builds, checkout/archive reproducibility and exact-configuration vulnerability
+scans. Its signed binary and checksum-manifest provenance were independently
+verified with GitHub CLI 2.103.3 against the exact source, tag and workflow.
 
 ### Configure and use apps
 
@@ -65,25 +65,25 @@ together; binary-only rollback is not assumed safe. Preserve the host token,
 password source, CA, socket root and configuration. See the gateway's
 `docs/guides/oauth-apps.mdx` for the deployed contract and migration details.
 
-## Historical published release
+## Published release
 
 `/init-agent-vault` installs the headless gateway from
-[`dtreskunov/agent-vault`](https://github.com/dtreskunov/agent-vault/releases/tag/gw-v0.1.0).
+[`dtreskunov/agent-vault`](https://github.com/dtreskunov/agent-vault/releases/tag/gw-v0.1.1).
 It does not replace OneCLI for every group or perform consent on the operator's
 behalf. A release being published does not mean the live canary was upgraded.
 
 ## Pin and verification
 
-[`versions.json`](../versions.json) pins `agent-vault-gateway` to `gw-v0.1.0`.
+[`versions.json`](../versions.json) pins `agent-vault-gateway` to `gw-v0.1.1`.
 [`setup/agent-vault-release.ts`](../setup/agent-vault-release.ts) binds that pin to
-source `b292bc3e0b776ebd326117ed58d2ddee1b66321b`, platform assets and reviewed
+source `32f233b2ebc53786ab4e74b28fc4ef6d75e674e9`, platform assets and reviewed
 SHA-256 hashes:
 
 | Platform | Asset | SHA-256 |
 | --- | --- | --- |
-| Linux amd64 | `agent-vault_gw-v0.1.0_linux_amd64` | `2d8b54784871f8f33d1cad6292fe5a60860edb32dc2f9c43c135e4878f6cd83a` |
-| Linux arm64 | `agent-vault_gw-v0.1.0_linux_arm64` | `8b946f31eedb06fe9fcee72258a5364cd9e3c1a865b46886a8ea033e33e9eff3` |
-| macOS arm64 | `agent-vault_gw-v0.1.0_darwin_arm64` | `97521867e6fe144cd0d31230bc9e89349f73ab66818ae815bd5dd0ee4bd7ed42` |
+| Linux amd64 | `agent-vault_gw-v0.1.1_linux_amd64` | `474b807a88bb227901d5fa03c9cc1ec90a2f69573ce46af4d476fd14f906c9e6` |
+| Linux arm64 | `agent-vault_gw-v0.1.1_linux_arm64` | `70d619482c0a931b1cd5f33f8d8b0b616017f811f7e9bc788616c6eb35d04c79` |
+| macOS arm64 | `agent-vault_gw-v0.1.1_darwin_arm64` | `c1db265b207574459126a3d438de4e86cab727ef96620bdbb56587e7de08c7a1` |
 
 These are standalone binaries, not archives. Other platforms fail explicitly.
 New pins require reviewed source and hash metadata; changing only the version
@@ -107,7 +107,7 @@ then verifies signed provenance with:
 
 - Repository `dtreskunov/agent-vault`.
 - Signer workflow `dtreskunov/agent-vault/.github/workflows/gateway-release.yml`.
-- Source ref `refs/tags/gw-v0.1.0` and the full source commit above.
+- Source ref `refs/tags/gw-v0.1.1` and the full source commit above.
 - GitHub-hosted rather than self-hosted build runners.
 
 Any verification failure aborts. The helper never installs a binary, changes
@@ -115,7 +115,7 @@ configuration, starts a new gateway or restarts a service. Do not execute staged
 bytes until it succeeds. Retain the verification files and license notices
 alongside the installed release.
 
-`version` reports `gw-v0.1.0`; commit/build-time fields remain `unknown` and Go
+`version` reports `gw-v0.1.1`; commit/build-time fields remain `unknown` and Go
 module metadata may be `(devel)`. These are intentional reproducible-build
 properties. The tag and signed provenance bind source, not those fields.
 
@@ -157,7 +157,8 @@ AGENT_VAULT_OAUTH_REDIRECT_URL=https://your-nanoclaw-origin.example/ui/oauth/cal
 
 The redirect must exactly match NanoClaw's configured UI origin and the OAuth
 app's registered callback. Retain the existing bootstrap-token path, socket root,
-master-password input, database, CA and any network allowlist. Keep API/proxy
+master-password input, database, CA and the approved network policy, including
+`AGENT_VAULT_ALLOW_PRIVATE_RANGES=true` where explicitly authorized. Keep API/proxy
 listeners on localhost. Do not change process-level overrides incidentally.
 
 For fresh setup, explicitly configure the token and socket paths. The gateway
@@ -208,15 +209,17 @@ accounts do not acquire an identity merely by upgrading; `account:null` is
 legitimate, including when a new identity check fails. Do not infer identity
 from an unverified claim or expose stable internal subjects.
 
-The same verified provider account may reconnect under its existing key and
-union scope sets. NanoClaw retains the completion's returned `key` in sign-in
+The same verified provider account may reconnect under its existing key.
+Provider-reported scopes remain authoritative; never blindly union requested
+scopes into grants. NanoClaw retains the completion's returned `key` in sign-in
 progress and reloads the overview after completion; it must not append a
 presumed new account or invent a new key. Reconnect/disconnect actions use
 the keys in that reloaded overview.
 
-Pending operator acceptance includes real Google/GitHub consent and F8 stdio MCP
-configuration using `av-refresh:<key>` / `av-access:<key>`. Do not claim those
-passed from checksum, provenance, API readiness or fake-gateway tests.
+The existing canary completed real Google/GitHub consent and F8 stdio acceptance
+using `av-refresh:<key>` / `av-access:<key>`. Preserve those keys and files.
+New target vaults still require their own credential entry, authorization and
+workload acceptance; release verification does not establish those outcomes.
 
 ### F8 stdio wiring
 
@@ -248,8 +251,8 @@ gateway-generated services. This does not turn the placeholder into a usable
 GitHub token outside that vault's scoped proxy.
 
 Keep the normal scoped socket, gateway CA and proxy environment. The F8 token
-endpoint intentionally intercepts its catalog host even in unmatched-host
-tunnel mode. Do not disable TLS validation, give a test container unrestricted
+endpoint derives interception from account-pinned metadata and the persistent
+authority registry, even in unmatched-host tunnel mode. Do not disable TLS validation, give a test container unrestricted
 network access or route these clients back through OneCLI.
 
 Back up existing files privately before changes. If they contain real tokens

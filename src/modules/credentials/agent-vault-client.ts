@@ -91,6 +91,8 @@ export interface GatewayRequestOptions {
   /** Send the host token; false only for the gateway's public endpoints. */
   auth?: boolean;
   timeoutMs?: number;
+  ifMatch?: string;
+  ifNoneMatch?: '*';
 }
 
 /** Raw gateway call. Throws AgentVaultError only when the gateway can't be reached. */
@@ -117,6 +119,8 @@ export async function gatewayFetch(
     headers.Authorization = `Bearer ${token}`;
   }
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (opts.ifMatch !== undefined) headers['If-Match'] = opts.ifMatch;
+  if (opts.ifNoneMatch !== undefined) headers['If-None-Match'] = opts.ifNoneMatch;
   try {
     return await fetch(`${s.url}${route}`, {
       method,

@@ -17,7 +17,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe('readVersionPin', () => {
   it('resolves the Agent Vault gateway pin from the real versions.json', () => {
-    expect(readVersionPin('agent-vault-gateway')).toBe('gw-v0.1.0');
+    expect(readVersionPin('agent-vault-gateway')).toBe('gw-v0.1.1');
   });
 
   it('resolves the onecli-gateway pin from the real versions.json', () => {

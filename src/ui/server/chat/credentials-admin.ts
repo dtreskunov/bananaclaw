@@ -13,7 +13,12 @@ import http from 'http';
 import type { McpServerConfig } from '../../../container-config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { log } from '../../../log.js';
-import { AgentVaultError, gatewayMessage, usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';
+import {
+  AgentVaultError,
+  ensureVault,
+  gatewayMessage,
+  usesAgentVault,
+} from '../../../modules/credentials/agent-vault-client.js';
 import {
   disconnectMcp,
   disconnectProvider,
@@ -30,6 +35,9 @@ import {
   serviceForUrl,
   serviceKeys,
   servicesToKeys,
+  getKeySet,
+  putKeySet,
+  deleteKeySet,
   startMcpSignIn,
   type KeyDto,
   type McpAccountInfo,
@@ -50,6 +58,7 @@ import {
   type AddKeyInput,
   type UpdateKeyInput,
 } from '../../../modules/credentials/keys.js';
+import { checkSetRevision, checkSetService, checkSetValues } from '../../../modules/credentials/key-sets.js';
 import { getSignIn, recordSignIn } from '../../../modules/credentials/sign-ins.js';
 import { isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
 import { uiBaseUrl } from '../server.js';
@@ -214,6 +223,8 @@ async function overview(ctx: CredentialsRouteContext): Promise<unknown> {
 
   return {
     canEdit: true,
+    targetOnly: !usesAgentVault(gid),
+    activeBackend: usesAgentVault(gid) ? 'agent-vault' : 'onecli',
     canEditInstall: canEditInstall(ctx.actorUserId),
     keysEditable: true,
     keys,
@@ -421,17 +432,68 @@ async function removeAppRoute(ctx: CredentialsRouteContext, provider: string): P
 /** Handles `…/admin/credentials*`; always writes a response. */
 export async function handleCredentialsRoute(ctx: CredentialsRouteContext): Promise<void> {
   const { method, sub, res } = ctx;
-  if (!usesAgentVault(ctx.gid)) {
-    ctx.writeJson(res, 409, { error: "This group doesn't use the credential gateway" });
+  const targetOnly = new URL(ctx.req.url || '/', 'http://localhost').searchParams.get('target') === 'agent-vault';
+  if (!usesAgentVault(ctx.gid) && !targetOnly && !(sub === '/target' && method === 'POST')) {
+    ctx.writeJson(res, 409, { error: 'inactive_gateway_target', canPrepareTarget: true });
     return;
   }
   try {
+    if (sub === '/target' && method === 'POST') {
+      const state = await ensureVault(ctx.gid);
+      recordAdminAction({
+        actorUserId: ctx.actorUserId,
+        action: 'group_credential_target_prepare',
+        targetKind: 'agent_group',
+        targetId: ctx.gid,
+        payload: { state, backendChanged: false },
+      });
+      ctx.writeJson(res, 200, { state, backendChanged: false });
+      return;
+    }
     if (sub === '' && method === 'GET') {
       ctx.writeJson(res, 200, await overview(ctx));
       return;
     }
     if (sub === '/accounts/start' && method === 'POST') return await startSignIn(ctx);
-    let m = /^\/accounts\/start\/([^/]+)$/.exec(sub);
+    let m = /^\/key-sets\/([a-z0-9-]+)$/.exec(sub);
+    if (
+      (sub === '/key-sets' && method === 'POST') ||
+      (m && (method === 'GET' || method === 'PUT' || method === 'DELETE'))
+    ) {
+      const name = m?.[1];
+      if (method === 'GET') {
+        ctx.writeJson(res, 200, await getKeySet(ctx.gid, name!));
+        return;
+      }
+      const body: unknown = await ctx.readJsonBody(ctx.req);
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new KeyInputError('Provide key-set JSON');
+      const revision = method === 'POST' ? undefined : checkSetRevision('revision' in body ? body.revision : undefined);
+      let result: unknown;
+      if (method === 'DELETE') await deleteKeySet(ctx.gid, name!, revision!);
+      else {
+        const service = checkSetService('service' in body ? body.service : undefined);
+        if (name && name !== service.name) throw new KeyInputError('Service name must match the key-set URL');
+        const values = checkSetValues('values' in body ? body.values : {});
+        result = await putKeySet(
+          ctx.gid,
+          service.name,
+          service,
+          values,
+          method === 'POST' ? { createOnly: true } : { revision: revision! },
+        );
+      }
+      forgetProbes(ctx.gid);
+      recordAdminAction({
+        actorUserId: ctx.actorUserId,
+        action: `group_credential_set_${method.toLowerCase()}`,
+        targetKind: 'agent_group',
+        targetId: ctx.gid,
+        payload: { service: name, backendChanged: false },
+      });
+      ctx.writeJson(res, 200, result ?? { ok: true });
+      return;
+    }
+    m = /^\/accounts\/start\/([^/]+)$/.exec(sub);
     if (m && method === 'GET') return signInProgress(ctx, decodeURIComponent(m[1]!));
     m = /^\/accounts\/([^/]+)$/.exec(sub);
     if (m && method === 'DELETE') return await disconnect(ctx, decodeURIComponent(m[1]!));
@@ -458,7 +520,12 @@ export async function handleCredentialsRoute(ctx: CredentialsRouteContext): Prom
       ctx.writeJson(res, 503, { error: 'gateway_unreachable' });
       return;
     }
-    const status = err.status === 409 || err.status === 404 ? err.status : err.status! >= 500 ? 502 : 400;
+    const status =
+      err.status !== undefined && [404, 409, 412, 428].includes(err.status)
+        ? err.status
+        : err.status! >= 500
+          ? 502
+          : 400;
     ctx.writeJson(res, status, { error: gatewayMessage(err), code: err.code, issuer: err.issuer });
   }
 }

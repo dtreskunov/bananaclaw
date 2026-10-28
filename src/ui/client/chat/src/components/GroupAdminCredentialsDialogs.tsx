@@ -49,6 +49,99 @@ function Footer({ children }: { children: JSX.Element | (JSX.Element | null)[] }
   return <MobileDialogFooter className="ga-confirm-foot ga-cred-foot">{children}</MobileDialogFooter>;
 }
 
+export function KeySetDialog({ gid, targetOnly = false, name, onClose, onSaved }: {
+  gid: string;
+  targetOnly?: boolean;
+  name?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}): JSX.Element {
+  const [info, setInfo] = useState<{ keys: string[]; revision: string; service: unknown } | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [stale, setStale] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [names, setNames] = useState('KEY_ONE, KEY_TWO');
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [text, setText] = useState(JSON.stringify({
+    name: 'new-service', host: 'api.example.com',
+    auth: { type: 'custom', headers: { Authorization: 'Bearer {{ KEY_ONE }}', 'x-api-key': '{{ KEY_TWO }}' } },
+  }, null, 2));
+  useEscapeClose(onClose, busy);
+  useEffect(() => {
+    if (!name) return;
+    let active = true;
+    void (async () => {
+      const r = await call<{ keys: string[]; revision: string; service: unknown }>(credPath(gid, `/key-sets/${encodeURIComponent(name)}`, targetOnly));
+      if (!active) return;
+      if (!r.ok) setLoadError(errMsg(r.data, `HTTP ${r.status}`));
+      else { setInfo(r.data); setText(JSON.stringify(r.data.service, null, 2)); }
+    })();
+    return () => { active = false; };
+  }, [gid, name, targetOnly]);
+  const keys = info?.keys ?? [...new Set(names.split(/[\s,]+/).filter(Boolean))];
+  const ready = !busy && !loadError && !stale && (!name || !!info);
+  const canSave = ready && keys.length > 0 && keys.length <= 64 && (!!name || keys.every((key) => !!values[key]));
+  const path = credPath(gid, name ? `/key-sets/${encodeURIComponent(name)}` : '/key-sets', targetOnly);
+
+  async function change(method: 'POST' | 'PUT' | 'DELETE', body: unknown): Promise<void> {
+    setBusy(true);
+    const r = await call(path, method, body);
+    setBusy(false);
+    if (!r.ok) {
+      if (r.status === 412) setStale(true);
+      showToast(errMsg(r.data, `HTTP ${r.status}`), 'err');
+      return;
+    }
+    showToast(method === 'DELETE' ? 'Deleted the entire key set' : 'Saved key set atomically');
+    onSaved();
+    onClose();
+  }
+  async function save(event: Event): Promise<void> {
+    event.preventDefault();
+    if (!canSave) return;
+    let service: unknown;
+    try { service = JSON.parse(text); }
+    catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      showToast('Provide valid service JSON. Put values only in the separate password fields.', 'err');
+      return;
+    }
+    await change(name ? 'PUT' : 'POST', {
+      service, revision: info?.revision,
+      values: Object.fromEntries(keys.filter((key) => !!values[key]).map((key) => [key, values[key]])),
+    });
+  }
+  return (
+    <MobileDialog title={name ? `Manage ${name}` : 'Create atomic key set'} onClose={onClose} maxWidth="680px" className="ga-cred-dialog" closeDisabled={busy}>
+      <form id="ga-cred-set" class="settings-body ga-cred-dialog-body" onSubmit={save}>
+        <p class="group-admin-help">One service and its exclusive keys are saved or deleted together. Values remain write-only. Existing keys or services are never overwritten by creation.</p>
+        {loadError ? <p role="alert">{loadError}</p> : null}
+        {stale ? <p role="alert">This set changed elsewhere. Close and reopen it to review the current routing before trying again.</p> : null}
+        {name && !info && !loadError ? <p>Loading metadata...</p> : null}
+        {!name ? <Field label="Referenced key names" info="Comma-separated names. They must match the service's credential references.">
+          <input value={names} disabled={busy} onInput={(e) => setNames(e.currentTarget.value)} />
+        </Field> : null}
+        <Field label="Service routing JSON" info="Safe configuration only, never credential values. Set membership and name cannot be changed by an edit.">
+          <textarea class="ga-cred-mono" rows={12} value={text} disabled={!ready} spellcheck={false} onInput={(e) => setText(e.currentTarget.value)} />
+        </Field>
+        {keys.map((key) => <Field key={key} label={key} info={name ? 'Leave blank to preserve its current value.' : 'Required for creation.'}>
+          <SecretInput value={values[key] ?? ''} disabled={!ready} placeholder={name ? 'Keep current value' : 'New value'} onInput={(value) => setValues((old) => ({ ...old, [key]: value }))} />
+        </Field>)}
+        {confirmDelete ? <p role="alert">Delete this service and all {keys.length} keys? This cannot be undone.</p> : null}
+      </form>
+      <Footer>
+        <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
+        {name ? <button type="button" class="danger" disabled={!ready} onClick={async () => {
+          if (!confirmDelete) { setConfirmDelete(true); return; }
+          await change('DELETE', { revision: info!.revision });
+        }}>{confirmDelete ? 'Confirm delete entire set' : 'Delete entire set'}</button> : null}
+        <button type="submit" form="ga-cred-set" class="primary" disabled={!canSave}>{busy ? 'Saving...' : name ? 'Save atomically' : 'Create only'}</button>
+      </Footer>
+    </MobileDialog>
+  );
+}
+
 export function ConfirmDialog({
   title,
   children,
@@ -154,6 +247,7 @@ function destinationValid(value: DestinationDto): boolean {
 
 export function AddKeyDialog({
   gid,
+  targetOnly = false,
   presets,
   existingKeys,
   initialMatch,
@@ -162,6 +256,7 @@ export function AddKeyDialog({
   onSaved,
 }: {
   gid: string;
+  targetOnly?: boolean;
   presets: KeyPresetDto[];
   existingKeys: string[];
   /** Host pattern to start from, e.g. when adding a key for an MCP server. */
@@ -224,7 +319,7 @@ export function AddKeyDialog({
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
-    const ok = await send(credPath(gid, '/keys'), 'POST', { key, label: label.trim(), value, destination: { ...destination, match: destination.match.trim() } }, `Saved ${label.trim()}`);
+    const ok = await send(credPath(gid, '/keys', targetOnly), 'POST', { key, label: label.trim(), value, destination: { ...destination, match: destination.match.trim() } }, `Saved ${label.trim()}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -281,11 +376,13 @@ export function AddKeyDialog({
 
 export function ReplaceKeyDialog({
   gid,
+  targetOnly = false,
   item,
   onClose,
   onSaved,
 }: {
   gid: string;
+  targetOnly?: boolean;
   item: KeyDto;
   onClose: () => void;
   onSaved: () => void;
@@ -299,7 +396,7 @@ export function ReplaceKeyDialog({
     event.preventDefault();
     if (!value) return;
     setBusy(true);
-    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), 'PUT', { value }, `Updated ${item.label}`);
+    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`, targetOnly), 'PUT', { value }, `Updated ${item.label}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -325,11 +422,13 @@ export function ReplaceKeyDialog({
 
 export function EditKeyDialog({
   gid,
+  targetOnly = false,
   item,
   onClose,
   onSaved,
 }: {
   gid: string;
+  targetOnly?: boolean;
   item: KeyDto;
   onClose: () => void;
   onSaved: () => void;
@@ -345,7 +444,7 @@ export function EditKeyDialog({
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
-    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), 'PUT', {
+    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`, targetOnly), 'PUT', {
       label: label.trim(),
       destination: { ...destination, match: destination.match.trim() },
     }, `Updated ${label.trim()}`);
@@ -375,6 +474,7 @@ export function EditKeyDialog({
 
 export function OAuthAppDialog({
   gid,
+  targetOnly = false,
   app,
   scope: fixedScope,
   canEditInstall,
@@ -384,6 +484,7 @@ export function OAuthAppDialog({
   onSaved,
 }: {
   gid: string;
+  targetOnly?: boolean;
   app: OAuthAppDto;
   /** Which app to edit; when omitted, an owner chooses (defaulting to install-wide). */
   scope?: OAuthAppScope;
@@ -433,7 +534,7 @@ export function OAuthAppDialog({
     if (!canSave) return;
     setBusy(true);
     const ok = await send(
-      credPath(gid, `/oauth-apps/${encodeURIComponent(id)}`),
+      credPath(gid, `/oauth-apps/${encodeURIComponent(id)}`, targetOnly),
       'PUT',
       secret ? { scope, config, clientSecret: secret } : { scope, config },
       `Saved the ${app.label} app`,

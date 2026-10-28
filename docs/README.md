@@ -17,6 +17,9 @@ The files in this directory are original design documents and developer referenc
 - [Agent Vault releases and safe upgrades](agent-vault-upgrades.md): pinned
   binaries, checksum/provenance verification, preserved state and rollback via
   `/init-agent-vault`.
+- [OneCLI migration inventory and preparation](agent-vault-migration.md):
+  metadata-only per-group plans and explicitly confirmed private staging bundles,
+  without live access changes.
 
 - [Native credential gateway](credential-gateway-proposal.md): retire OneCLI with a
   NanoClaw-owned egress gateway service (separate from the host), encrypted vault,

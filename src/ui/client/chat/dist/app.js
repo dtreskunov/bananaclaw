@@ -29720,8 +29720,8 @@ function UserPicker({
 }
 
 // src/components/GroupAdminCredentialsApi.ts
-function credPath(gid, sub = "") {
-  return apiPath(gid, `/credentials${sub}`);
+function credPath(gid, sub = "", targetOnly = false) {
+  return apiPath(gid, `/credentials${sub}${targetOnly ? `${sub.includes("?") ? "&" : "?"}target=agent-vault` : ""}`);
 }
 var ERROR_GATEWAY_UNREACHABLE = "gateway_unreachable";
 
@@ -29809,10 +29809,10 @@ function useEscapeClose(onClose, busy = false) {
 function openSignInWindow(url) {
   return window.open(url, "nanoclaw-oauth", "popup,width=520,height=720") !== null;
 }
-function useSignIn(gid, onFinished) {
+function useSignIn(gid, onFinished, targetOnly = false) {
   const [waiting, setWaiting] = h2(null);
   async function start(input) {
-    const r4 = await call(credPath(gid, "/accounts/start"), "POST", input);
+    const r4 = await call(credPath(gid, "/accounts/start", targetOnly), "POST", input);
     if (!r4.ok) {
       showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
       return false;
@@ -29826,7 +29826,7 @@ function useSignIn(gid, onFinished) {
   y2(() => {
     if (!waiting) return void 0;
     let settled = false;
-    const progressUrl = credPath(gid, `/accounts/start/${encodeURIComponent(waiting.state)}`);
+    const progressUrl = credPath(gid, `/accounts/start/${encodeURIComponent(waiting.state)}`, targetOnly);
     async function poll() {
       const r4 = await call(progressUrl);
       if (settled || !r4.ok || r4.data.status === "pending") return;
@@ -29855,7 +29855,7 @@ function useSignIn(gid, onFinished) {
       clearInterval(timer2);
       clearTimeout(timeout);
     };
-  }, [waiting?.state, gid]);
+  }, [waiting?.state, gid, targetOnly]);
   return {
     waiting,
     start,
@@ -29920,6 +29920,98 @@ async function send(url, method, body, success) {
 }
 function Footer({ children }) {
   return /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot ga-cred-foot", children });
+}
+function KeySetDialog({ gid, targetOnly = false, name, onClose, onSaved }) {
+  const [info, setInfo] = h2(null);
+  const [loadError, setLoadError] = h2("");
+  const [stale, setStale] = h2(false);
+  const [busy, setBusy] = h2(false);
+  const [confirmDelete, setConfirmDelete] = h2(false);
+  const [names, setNames] = h2("KEY_ONE, KEY_TWO");
+  const [values, setValues] = h2({});
+  const [text2, setText] = h2(JSON.stringify({
+    name: "new-service",
+    host: "api.example.com",
+    auth: { type: "custom", headers: { Authorization: "Bearer {{ KEY_ONE }}", "x-api-key": "{{ KEY_TWO }}" } }
+  }, null, 2));
+  useEscapeClose(onClose, busy);
+  y2(() => {
+    if (!name) return;
+    let active = true;
+    void (async () => {
+      const r4 = await call(credPath(gid, `/key-sets/${encodeURIComponent(name)}`, targetOnly));
+      if (!active) return;
+      if (!r4.ok) setLoadError(errMsg2(r4.data, `HTTP ${r4.status}`));
+      else {
+        setInfo(r4.data);
+        setText(JSON.stringify(r4.data.service, null, 2));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [gid, name, targetOnly]);
+  const keys = info?.keys ?? [...new Set(names.split(/[\s,]+/).filter(Boolean))];
+  const ready = !busy && !loadError && !stale && (!name || !!info);
+  const canSave = ready && keys.length > 0 && keys.length <= 64 && (!!name || keys.every((key) => !!values[key]));
+  const path = credPath(gid, name ? `/key-sets/${encodeURIComponent(name)}` : "/key-sets", targetOnly);
+  async function change(method, body) {
+    setBusy(true);
+    const r4 = await call(path, method, body);
+    setBusy(false);
+    if (!r4.ok) {
+      if (r4.status === 412) setStale(true);
+      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
+      return;
+    }
+    showToast(method === "DELETE" ? "Deleted the entire key set" : "Saved key set atomically");
+    onSaved();
+    onClose();
+  }
+  async function save(event) {
+    event.preventDefault();
+    if (!canSave) return;
+    let service;
+    try {
+      service = JSON.parse(text2);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      showToast("Provide valid service JSON. Put values only in the separate password fields.", "err");
+      return;
+    }
+    await change(name ? "PUT" : "POST", {
+      service,
+      revision: info?.revision,
+      values: Object.fromEntries(keys.filter((key) => !!values[key]).map((key) => [key, values[key]]))
+    });
+  }
+  return /* @__PURE__ */ u4(MobileDialog, { title: name ? `Manage ${name}` : "Create atomic key set", onClose, maxWidth: "680px", className: "ga-cred-dialog", closeDisabled: busy, children: [
+    /* @__PURE__ */ u4("form", { id: "ga-cred-set", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
+      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "One service and its exclusive keys are saved or deleted together. Values remain write-only. Existing keys or services are never overwritten by creation." }),
+      loadError ? /* @__PURE__ */ u4("p", { role: "alert", children: loadError }) : null,
+      stale ? /* @__PURE__ */ u4("p", { role: "alert", children: "This set changed elsewhere. Close and reopen it to review the current routing before trying again." }) : null,
+      name && !info && !loadError ? /* @__PURE__ */ u4("p", { children: "Loading metadata..." }) : null,
+      !name ? /* @__PURE__ */ u4(GroupAdminField, { label: "Referenced key names", info: "Comma-separated names. They must match the service's credential references.", children: /* @__PURE__ */ u4("input", { value: names, disabled: busy, onInput: (e4) => setNames(e4.currentTarget.value) }) }) : null,
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Service routing JSON", info: "Safe configuration only, never credential values. Set membership and name cannot be changed by an edit.", children: /* @__PURE__ */ u4("textarea", { class: "ga-cred-mono", rows: 12, value: text2, disabled: !ready, spellcheck: false, onInput: (e4) => setText(e4.currentTarget.value) }) }),
+      keys.map((key) => /* @__PURE__ */ u4(GroupAdminField, { label: key, info: name ? "Leave blank to preserve its current value." : "Required for creation.", children: /* @__PURE__ */ u4(SecretInput, { value: values[key] ?? "", disabled: !ready, placeholder: name ? "Keep current value" : "New value", onInput: (value) => setValues((old) => ({ ...old, [key]: value })) }) }, key)),
+      confirmDelete ? /* @__PURE__ */ u4("p", { role: "alert", children: [
+        "Delete this service and all ",
+        keys.length,
+        " keys? This cannot be undone."
+      ] }) : null
+    ] }),
+    /* @__PURE__ */ u4(Footer, { children: [
+      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
+      name ? /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled: !ready, onClick: async () => {
+        if (!confirmDelete) {
+          setConfirmDelete(true);
+          return;
+        }
+        await change("DELETE", { revision: info.revision });
+      }, children: confirmDelete ? "Confirm delete entire set" : "Delete entire set" }) : null,
+      /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-set", class: "primary", disabled: !canSave, children: busy ? "Saving..." : name ? "Save atomically" : "Create only" })
+    ] })
+  ] });
 }
 function ConfirmDialog({
   title,
@@ -29997,6 +30089,7 @@ function destinationValid(value) {
 }
 function AddKeyDialog({
   gid,
+  targetOnly = false,
   presets,
   existingKeys,
   initialMatch,
@@ -30042,7 +30135,7 @@ function AddKeyDialog({
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
-    const ok = await send(credPath(gid, "/keys"), "POST", { key, label: label.trim(), value, destination: { ...destination, match: destination.match.trim() } }, `Saved ${label.trim()}`);
+    const ok = await send(credPath(gid, "/keys", targetOnly), "POST", { key, label: label.trim(), value, destination: { ...destination, match: destination.match.trim() } }, `Saved ${label.trim()}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -30095,6 +30188,7 @@ function AddKeyDialog({
 }
 function ReplaceKeyDialog({
   gid,
+  targetOnly = false,
   item,
   onClose,
   onSaved
@@ -30107,7 +30201,7 @@ function ReplaceKeyDialog({
     event.preventDefault();
     if (!value) return;
     setBusy(true);
-    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), "PUT", { value }, `Updated ${item.label}`);
+    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`, targetOnly), "PUT", { value }, `Updated ${item.label}`);
     setBusy(false);
     if (ok) {
       onSaved();
@@ -30130,6 +30224,7 @@ function ReplaceKeyDialog({
 }
 function EditKeyDialog({
   gid,
+  targetOnly = false,
   item,
   onClose,
   onSaved
@@ -30144,7 +30239,7 @@ function EditKeyDialog({
     event.preventDefault();
     if (!canSave) return;
     setBusy(true);
-    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`), "PUT", {
+    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`, targetOnly), "PUT", {
       label: label.trim(),
       destination: { ...destination, match: destination.match.trim() }
     }, `Updated ${label.trim()}`);
@@ -30171,6 +30266,7 @@ function EditKeyDialog({
 }
 function OAuthAppDialog({
   gid,
+  targetOnly = false,
   app,
   scope: fixedScope,
   canEditInstall,
@@ -30221,7 +30317,7 @@ function OAuthAppDialog({
     if (!canSave) return;
     setBusy(true);
     const ok = await send(
-      credPath(gid, `/oauth-apps/${encodeURIComponent(id2)}`),
+      credPath(gid, `/oauth-apps/${encodeURIComponent(id2)}`, targetOnly),
       "PUT",
       secret ? { scope, config, clientSecret: secret } : { scope, config },
       `Saved the ${app.label} app`
@@ -30394,26 +30490,34 @@ async function mutate(url, method, body, success) {
   showToast(success);
   return true;
 }
-function useOverview(gid) {
+function useOverview(gid, targetOnly = false) {
   const [load, setLoad] = h2({ state: "loading" });
   async function refresh() {
-    const r4 = await call(credPath(gid));
+    const r4 = await call(credPath(gid, "", targetOnly));
     if (r4.ok) setLoad({ state: "ready", data: r4.data });
     else if (r4.status === 503 && errMsg2(r4.data, "") === ERROR_GATEWAY_UNREACHABLE) setLoad({ state: "down" });
+    else if (r4.status === 409 && errMsg2(r4.data, "") === "inactive_gateway_target") setLoad({ state: "inactive-target" });
     else setLoad({ state: "error", message: errMsg2(r4.data, `HTTP ${r4.status}`) });
   }
   y2(() => {
     setLoad({ state: "loading" });
     void refresh();
-  }, [gid]);
+  }, [gid, targetOnly]);
   return { load, refresh };
 }
 function CredentialsTab({ gid }) {
-  const { load, refresh } = useOverview(gid);
+  const [targetGroup, setTargetGroup] = h2(null);
+  const targetOnly = targetGroup === gid;
+  const [preparing, setPreparing] = h2(false);
+  const { load, refresh } = useOverview(gid, targetOnly);
   const [view, setView] = h2("keys");
   const [dialog, setDialog] = h2(null);
-  const signIn = useSignIn(gid, () => void refresh());
-  y2(() => setView("keys"), [gid]);
+  const signIn = useSignIn(gid, () => void refresh(), targetOnly);
+  y2(() => {
+    setView("keys");
+    setTargetGroup(null);
+    setDialog(null);
+  }, [gid]);
   y2(() => {
     if (load.state !== "ready") return;
     const focus = credentialsFocus.peek();
@@ -30422,7 +30526,7 @@ function CredentialsTab({ gid }) {
     setView(focus.view);
     const item = focus.key ? load.data.keys.find((k4) => k4.key === focus.key) : void 0;
     const keysEditable = load.data.canEdit && load.data.keysEditable !== false;
-    if (focus.action === "set" && item && keysEditable) setDialog({ kind: "replace", item });
+    if (focus.action === "set" && item && keysEditable) setDialog(item.sharedService ? { kind: "key-set", name: item.sharedService } : { kind: "replace", item });
     if (focus.action === "add" && keysEditable) setDialog({ kind: "add-key", match: focus.match });
     const app = focus.setupApp ? load.data.oauthApps.find((a4) => a4.id === focus.setupApp) : void 0;
     if (app && load.data.canEdit) setDialog({ kind: "oauth-app", app });
@@ -30433,6 +30537,15 @@ function CredentialsTab({ gid }) {
     });
   }, [load.state]);
   if (load.state === "loading") return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
+  if (load.state === "inactive-target") return /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
+    /* @__PURE__ */ u4("p", { children: "This group still uses OneCLI. Prepare or open its inactive Agent Vault target to stage credentials and consent. This does not switch the backend or change OneCLI grants." }),
+    /* @__PURE__ */ u4("button", { type: "button", disabled: preparing, onClick: async () => {
+      setPreparing(true);
+      const ok = await mutate(credPath(gid, "/target"), "POST", {}, "Agent Vault target prepared; OneCLI remains active");
+      setPreparing(false);
+      if (ok) setTargetGroup(gid);
+    }, children: preparing ? "Preparing\u2026" : "Prepare / open Agent Vault target" })
+  ] });
   if (load.state === "down") return /* @__PURE__ */ u4(GatewayDown, { onRetry: () => void refresh() });
   if (load.state === "error") {
     return /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
@@ -30459,6 +30572,10 @@ function CredentialsTab({ gid }) {
   ];
   return /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
     /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-intro", children: "The agent uses these keys and accounts through the credential gateway, which adds them to matching requests. The agent never sees them, and nobody can view a key after it's saved." }),
+    data.targetOnly ? /* @__PURE__ */ u4("div", { class: "ga-cred-callout warn", role: "status", children: [
+      /* @__PURE__ */ u4("strong", { children: "Inactive Agent Vault target" }),
+      /* @__PURE__ */ u4("p", { children: "OneCLI remains active. These credentials are staged only; saving keys or signing in does not cut this group over." })
+    ] }) : null,
     signIn.waiting ? /* @__PURE__ */ u4(SignInBanner, { waiting: signIn.waiting, onReopen: signIn.reopen, onCancel: signIn.cancel }) : null,
     /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: segments.map((s5) => /* @__PURE__ */ u4(
       "button",
@@ -30481,19 +30598,21 @@ function CredentialsTab({ gid }) {
       AddKeyDialog,
       {
         gid,
+        targetOnly,
         presets: data.presets,
         existingKeys: keyNames,
         initialMatch: dialog.match,
         onExisting: (key) => {
           const item = data.keys.find((k4) => k4.key === key);
-          setDialog(item ? { kind: "replace", item } : null);
+          setDialog(item ? item.sharedService ? { kind: "key-set", name: item.sharedService } : { kind: "replace", item } : null);
         },
         onClose: close,
         onSaved: done
       }
     ) : null,
-    dialog?.kind === "replace" ? /* @__PURE__ */ u4(ReplaceKeyDialog, { gid, item: dialog.item, onClose: close, onSaved: done }) : null,
-    dialog?.kind === "edit" ? /* @__PURE__ */ u4(EditKeyDialog, { gid, item: dialog.item, onClose: close, onSaved: done }) : null,
+    dialog?.kind === "replace" ? /* @__PURE__ */ u4(ReplaceKeyDialog, { gid, targetOnly, item: dialog.item, onClose: close, onSaved: done }) : null,
+    dialog?.kind === "edit" ? /* @__PURE__ */ u4(EditKeyDialog, { gid, targetOnly, item: dialog.item, onClose: close, onSaved: done }) : null,
+    dialog?.kind === "key-set" ? /* @__PURE__ */ u4(KeySetDialog, { gid, targetOnly, name: dialog.name, onClose: close, onSaved: done }) : null,
     dialog?.kind === "connect" ? /* @__PURE__ */ u4(
       ConnectAccountDialog,
       {
@@ -30511,6 +30630,7 @@ function CredentialsTab({ gid }) {
       OAuthAppDialog,
       {
         gid,
+        targetOnly,
         app: dialog.app,
         scope: dialog.scope,
         canEditInstall: data.canEditInstall,
@@ -30531,7 +30651,7 @@ function CredentialsTab({ gid }) {
         danger: true,
         onClose: close,
         onConfirm: async () => {
-          const url = credPath(gid, `/oauth-apps/${encodeURIComponent(dialog.app.id)}?scope=${dialog.scope}`);
+          const url = credPath(gid, `/oauth-apps/${encodeURIComponent(dialog.app.id)}?scope=${dialog.scope}`, targetOnly);
           const ok = await mutate(url, "DELETE", void 0, `Removed the ${dialog.app.label} app`);
           if (ok) done();
           return ok;
@@ -30547,7 +30667,7 @@ function CredentialsTab({ gid }) {
         danger: true,
         onClose: close,
         onConfirm: async () => {
-          const ok = await mutate(credPath(gid, `/keys/${encodeURIComponent(dialog.item.key)}`), "DELETE", void 0, `Deleted ${dialog.item.label}`);
+          const ok = await mutate(credPath(gid, `/keys/${encodeURIComponent(dialog.item.key)}`, targetOnly), "DELETE", void 0, `Deleted ${dialog.item.label}`);
           if (ok) done();
           return ok;
         },
@@ -30566,7 +30686,7 @@ function CredentialsTab({ gid }) {
         danger: true,
         onClose: close,
         onConfirm: async () => {
-          const ok = await mutate(credPath(gid, `/accounts/${encodeURIComponent(dialog.account.key)}`), "DELETE", void 0, "Account disconnected");
+          const ok = await mutate(credPath(gid, `/accounts/${encodeURIComponent(dialog.account.key)}`, targetOnly), "DELETE", void 0, "Account disconnected");
           if (ok) done();
           return ok;
         },
@@ -30604,7 +30724,10 @@ function KeysView({ data, onDialog }) {
   const edit = data.canEdit && data.keysEditable !== false;
   return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
     data.canEdit && data.keysEditable === false ? /* @__PURE__ */ u4("p", { class: "ga-cred-note", children: "Keys can be viewed here; adding and changing them arrives in a later update." }) : null,
-    /* @__PURE__ */ u4(SectionHead, { help: "API keys and tokens the agent can use, and where each one is sent.", children: edit ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "add-key" }), children: "Add key" }) : null }),
+    /* @__PURE__ */ u4(SectionHead, { help: "API keys and tokens the agent can use, and where each one is sent.", children: [
+      edit ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "key-set" }), children: "Create atomic key set" }) : null,
+      edit ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "add-key" }), children: "Add key" }) : null
+    ] }),
     data.keys.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
       /* @__PURE__ */ u4("p", { children: "No keys yet." }),
       /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Add a key for a service; it's only ever sent to the host you choose." })
@@ -30637,11 +30760,11 @@ function KeysView({ data, onDialog }) {
           ] }) : null
         ] }) : null
       ] }),
-      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: [
+      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: k4.sharedService ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "key-set", name: k4.sharedService }), children: "Manage key set" }) : /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4("button", { type: "button", class: k4.status === "needs_value" ? "primary" : "", onClick: () => onDialog({ kind: "replace", item: k4 }), children: k4.status === "needs_value" ? "Set value" : "Replace" }),
         /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "edit", item: k4 }), children: "Edit" }),
         /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Delete ${k4.label}`, title: "Delete", onClick: () => onDialog({ kind: "delete-key", item: k4 }), children: "\u2715" })
-      ] }) : null
+      ] }) }) : null
     ] }, k4.key)) })
   ] });
 }
@@ -30816,6 +30939,10 @@ function McpServerAuth({
   else if (load.state === "error") body = /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
     "Couldn't check sign-in: ",
     load.message
+  ] });
+  else if (load.state === "inactive-target") body = /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("span", { class: "muted", children: "OneCLI remains active. Agent Vault credentials can be staged separately." }),
+    /* @__PURE__ */ u4("button", { type: "button", onClick: () => open({ view: "accounts" }), children: "Open target setup" })
   ] });
   else if (!entry) body = /* @__PURE__ */ u4("span", { class: "muted", children: "Save the server to check whether it needs a key or sign-in." });
   else if (entry.auth === "oauth" && (entry.needsApp || entry.ambiguousApp)) {
@@ -33018,7 +33145,7 @@ function GroupAdmin() {
     }
     setTab(requestedTab);
   }, [open, requestedTab]);
-  const tabItems = credentialsUiFor(gid) ? TAB_ITEMS : TAB_ITEMS.filter((it) => it.id !== "credentials");
+  const tabItems = TAB_ITEMS.map((item) => item.id === "credentials" && !credentialsUiFor(gid) ? { ...item, sublabel: "Stage an Agent Vault target; OneCLI stays active" } : item);
   if (!open || !gid) return null;
   const group = groups.value.find((g8) => g8.id === gid);
   const title = group ? `Agent Settings \xB7 ${group.name}` : "Agent Settings";
@@ -33088,7 +33215,7 @@ function GroupAdmin() {
               onActions: setActions
             }
           ) : null,
-          activeTab === "credentials" && credentialsUiFor(gid) ? /* @__PURE__ */ u4(CredentialsTab, { gid }) : null,
+          activeTab === "credentials" ? /* @__PURE__ */ u4(CredentialsTab, { gid }) : null,
           activeTab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
           activeTab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
           activeTab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
@@ -33785,7 +33912,7 @@ function SettingsTab({
         busy,
         onChange: setDraftMcpServers,
         onTest: testMcpServer,
-        credentialsGid: credentialsUiFor(gid) ? gid : void 0,
+        credentialsGid: gid,
         savedServers: data.mcpServers
       }
     ) : null,

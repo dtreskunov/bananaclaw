@@ -24,6 +24,7 @@ import {
   EditKeyDialog,
   OAuthAppDialog,
   ReplaceKeyDialog,
+  KeySetDialog,
 } from './GroupAdminCredentialsDialogs';
 import { showToast } from './Toast';
 
@@ -37,6 +38,7 @@ type Dialog =
   | { kind: 'replace'; item: KeyDto }
   | { kind: 'edit'; item: KeyDto }
   | { kind: 'delete-key'; item: KeyDto }
+  | { kind: 'key-set'; name?: string }
   | { kind: 'connect'; provider?: string; reconnect?: { provider: string; key: string; scopes: string[] } }
   | { kind: 'disconnect'; account: AccountDto }
   | { kind: 'oauth-app'; app: OAuthAppDto; scope?: OAuthAppScope; thenConnect?: boolean; issuer?: string }
@@ -45,6 +47,7 @@ type Dialog =
 type Load =
   | { state: 'loading' }
   | { state: 'down' }
+  | { state: 'inactive-target' }
   | { state: 'error'; message: string }
   | { state: 'ready'; data: CredentialsOverviewDto };
 
@@ -58,28 +61,32 @@ async function mutate(url: string, method: string, body: unknown, success: strin
   return true;
 }
 
-function useOverview(gid: string): { load: Load; refresh: () => Promise<void> } {
+function useOverview(gid: string, targetOnly = false): { load: Load; refresh: () => Promise<void> } {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   async function refresh(): Promise<void> {
-    const r = await call<CredentialsOverviewDto>(credPath(gid));
+    const r = await call<CredentialsOverviewDto>(credPath(gid, '', targetOnly));
     if (r.ok) setLoad({ state: 'ready', data: r.data });
     else if (r.status === 503 && errMsg(r.data, '') === ERROR_GATEWAY_UNREACHABLE) setLoad({ state: 'down' });
+    else if (r.status === 409 && errMsg(r.data, '') === 'inactive_gateway_target') setLoad({ state: 'inactive-target' });
     else setLoad({ state: 'error', message: errMsg(r.data, `HTTP ${r.status}`) });
   }
   useEffect(() => {
     setLoad({ state: 'loading' });
     void refresh();
-  }, [gid]);
+  }, [gid, targetOnly]);
   return { load, refresh };
 }
 
 export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
-  const { load, refresh } = useOverview(gid);
+  const [targetGroup, setTargetGroup] = useState<string | null>(null);
+  const targetOnly = targetGroup === gid;
+  const [preparing, setPreparing] = useState(false);
+  const { load, refresh } = useOverview(gid, targetOnly);
   const [view, setView] = useState<View>('keys');
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const signIn = useSignIn(gid, () => void refresh());
+  const signIn = useSignIn(gid, () => void refresh(), targetOnly);
 
-  useEffect(() => setView('keys'), [gid]);
+  useEffect(() => { setView('keys'); setTargetGroup(null); setDialog(null); }, [gid]);
   useEffect(() => {
     if (load.state !== 'ready') return;
     const focus = credentialsFocus.peek();
@@ -88,7 +95,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
     setView(focus.view);
     const item = focus.key ? load.data.keys.find((k) => k.key === focus.key) : undefined;
     const keysEditable = load.data.canEdit && load.data.keysEditable !== false;
-    if (focus.action === 'set' && item && keysEditable) setDialog({ kind: 'replace', item });
+    if (focus.action === 'set' && item && keysEditable) setDialog(item.sharedService ? { kind: 'key-set', name: item.sharedService } : { kind: 'replace', item });
     if (focus.action === 'add' && keysEditable) setDialog({ kind: 'add-key', match: focus.match });
     const app = focus.setupApp ? load.data.oauthApps.find((a) => a.id === focus.setupApp) : undefined;
     if (app && load.data.canEdit) setDialog({ kind: 'oauth-app', app });
@@ -98,6 +105,17 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
   }, [load.state]);
 
   if (load.state === 'loading') return <p class="muted">Loading…</p>;
+  if (load.state === 'inactive-target') return (
+    <section class="ga-cred">
+      <p>This group still uses OneCLI. Prepare or open its inactive Agent Vault target to stage credentials and consent. This does not switch the backend or change OneCLI grants.</p>
+      <button type="button" disabled={preparing} onClick={async () => {
+        setPreparing(true);
+        const ok = await mutate(credPath(gid, '/target'), 'POST', {}, 'Agent Vault target prepared; OneCLI remains active');
+        setPreparing(false);
+        if (ok) setTargetGroup(gid);
+      }}>{preparing ? 'Preparing…' : 'Prepare / open Agent Vault target'}</button>
+    </section>
+  );
   if (load.state === 'down') return <GatewayDown onRetry={() => void refresh()} />;
   if (load.state === 'error') {
     return (
@@ -130,6 +148,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
         The agent uses these keys and accounts through the credential gateway, which adds them to matching requests.
         The agent never sees them, and nobody can view a key after it's saved.
       </p>
+      {data.targetOnly ? <div class="ga-cred-callout warn" role="status"><strong>Inactive Agent Vault target</strong><p>OneCLI remains active. These credentials are staged only; saving keys or signing in does not cut this group over.</p></div> : null}
       {signIn.waiting ? <SignInBanner waiting={signIn.waiting} onReopen={signIn.reopen} onCancel={signIn.cancel} /> : null}
       <nav class="ga-cred-segments" aria-label="Credentials sections">
         {segments.map((s) => (
@@ -155,19 +174,21 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
       {dialog?.kind === 'add-key' ? (
         <AddKeyDialog
           gid={gid}
+          targetOnly={targetOnly}
           presets={data.presets}
           existingKeys={keyNames}
           initialMatch={dialog.match}
           onExisting={(key) => {
             const item = data.keys.find((k) => k.key === key);
-            setDialog(item ? { kind: 'replace', item } : null);
+            setDialog(item ? item.sharedService ? { kind: 'key-set', name: item.sharedService } : { kind: 'replace', item } : null);
           }}
           onClose={close}
           onSaved={done}
         />
       ) : null}
-      {dialog?.kind === 'replace' ? <ReplaceKeyDialog gid={gid} item={dialog.item} onClose={close} onSaved={done} /> : null}
-      {dialog?.kind === 'edit' ? <EditKeyDialog gid={gid} item={dialog.item} onClose={close} onSaved={done} /> : null}
+      {dialog?.kind === 'replace' ? <ReplaceKeyDialog gid={gid} targetOnly={targetOnly} item={dialog.item} onClose={close} onSaved={done} /> : null}
+      {dialog?.kind === 'edit' ? <EditKeyDialog gid={gid} targetOnly={targetOnly} item={dialog.item} onClose={close} onSaved={done} /> : null}
+      {dialog?.kind === 'key-set' ? <KeySetDialog gid={gid} targetOnly={targetOnly} name={dialog.name} onClose={close} onSaved={done} /> : null}
       {dialog?.kind === 'connect' ? (
         <ConnectAccountDialog
           apps={data.oauthApps}
@@ -183,6 +204,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
       {dialog?.kind === 'oauth-app' ? (
         <OAuthAppDialog
           gid={gid}
+          targetOnly={targetOnly}
           app={dialog.app}
           scope={dialog.scope}
           canEditInstall={data.canEditInstall}
@@ -202,7 +224,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
           danger
           onClose={close}
           onConfirm={async () => {
-            const url = credPath(gid, `/oauth-apps/${encodeURIComponent(dialog.app.id)}?scope=${dialog.scope}`);
+            const url = credPath(gid, `/oauth-apps/${encodeURIComponent(dialog.app.id)}?scope=${dialog.scope}`, targetOnly);
             const ok = await mutate(url, 'DELETE', undefined, `Removed the ${dialog.app.label} app`);
             if (ok) done();
             return ok;
@@ -218,7 +240,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
           danger
           onClose={close}
           onConfirm={async () => {
-            const ok = await mutate(credPath(gid, `/keys/${encodeURIComponent(dialog.item.key)}`), 'DELETE', undefined, `Deleted ${dialog.item.label}`);
+            const ok = await mutate(credPath(gid, `/keys/${encodeURIComponent(dialog.item.key)}`, targetOnly), 'DELETE', undefined, `Deleted ${dialog.item.label}`);
             if (ok) done();
             return ok;
           }}
@@ -236,7 +258,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
           danger
           onClose={close}
           onConfirm={async () => {
-            const ok = await mutate(credPath(gid, `/accounts/${encodeURIComponent(dialog.account.key)}`), 'DELETE', undefined, 'Account disconnected');
+            const ok = await mutate(credPath(gid, `/accounts/${encodeURIComponent(dialog.account.key)}`, targetOnly), 'DELETE', undefined, 'Account disconnected');
             if (ok) done();
             return ok;
           }}
@@ -290,6 +312,7 @@ function KeysView({ data, onDialog }: { data: CredentialsOverviewDto; onDialog: 
         <p class="ga-cred-note">Keys can be viewed here; adding and changing them arrives in a later update.</p>
       ) : null}
       <SectionHead help="API keys and tokens the agent can use, and where each one is sent.">
+        {edit ? <button type="button" onClick={() => onDialog({ kind: 'key-set' })}>Create atomic key set</button> : null}
         {edit ? <button type="button" class="primary" onClick={() => onDialog({ kind: 'add-key' })}>Add key</button> : null}
       </SectionHead>
       {data.keys.length === 0 ? (
@@ -321,11 +344,13 @@ function KeysView({ data, onDialog }: { data: CredentialsOverviewDto; onDialog: 
               </div>
               {edit ? (
                 <div class="ga-cred-item-actions">
+                  {k.sharedService ? <button type="button" onClick={() => onDialog({ kind: 'key-set', name: k.sharedService })}>Manage key set</button> : <>
                   <button type="button" class={k.status === 'needs_value' ? 'primary' : ''} onClick={() => onDialog({ kind: 'replace', item: k })}>
                     {k.status === 'needs_value' ? 'Set value' : 'Replace'}
                   </button>
                   <button type="button" onClick={() => onDialog({ kind: 'edit', item: k })}>Edit</button>
                   <button type="button" class="ga-cred-icon danger" aria-label={`Delete ${k.label}`} title="Delete" onClick={() => onDialog({ kind: 'delete-key', item: k })}>{'\u2715'}</button>
+                  </>}
                 </div>
               ) : null}
             </li>
@@ -549,6 +574,10 @@ export function McpServerAuth({
   if (load.state === 'loading') body = <span class="muted">Checking…</span>;
   else if (load.state === 'down') body = <span class="ga-cred-warn-text">The credential gateway isn't responding.</span>;
   else if (load.state === 'error') body = <span class="ga-cred-warn-text">Couldn't check sign-in: {load.message}</span>;
+  else if (load.state === 'inactive-target') body = <>
+    <span class="muted">OneCLI remains active. Agent Vault credentials can be staged separately.</span>
+    <button type="button" onClick={() => open({ view: 'accounts' })}>Open target setup</button>
+  </>;
   else if (!entry) body = <span class="muted">Save the server to check whether it needs a key or sign-in.</span>;
   else if (entry.auth === 'oauth' && (entry.needsApp || entry.ambiguousApp)) {
     body = (

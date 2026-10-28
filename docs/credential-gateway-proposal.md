@@ -381,8 +381,10 @@ Rules:
 
 - `credentialFetch(url, init)` in the host client proxies the call through
   `control.sock` as principal `host:ui`, with the same matching, policy and
-  audit as container traffic. It replaces
-  [onecli-proxy.ts](../src/ui/server/chat/onecli-proxy.ts).
+  audit as container traffic. This remains a proposed authenticated host path.
+  The historical OneCLI proxy helper was removed after its sole remaining
+  caller, the [public model catalog](../src/ui/server/chat/models-catalog.ts),
+  was made explicitly unauthenticated.
 - The OpenCode `models.dev` `NO_PROXY` workaround is removed, because hosts with
   no binding are now tunneled blindly.
 
