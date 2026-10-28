@@ -166,7 +166,8 @@ export function useSignIn(gid: string, onFinished: () => void, targetOnly = fals
       if (settled) return;
       settled = true;
       setWaiting(null);
-      showToast('Sign-in timed out. Start again when you are ready.', 'err');
+      showToast('Stopped waiting for sign-in. Refresh credentials to check whether authorization completed before signing in again.', 'err');
+      onFinished();
     }, SIGN_IN_TIMEOUT_MS);
     return () => {
       settled = true;

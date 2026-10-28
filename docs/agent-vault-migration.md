@@ -177,6 +177,9 @@ Install-wide OAuth app changes still affect other groups and require the
 existing owner/global-admin permission; prefer a group override for an
 intentional group-only change. OAuth callback state remains bound to its
 initiating user and group; completion keys remain authoritative.
+Returning to Keys/Accounts or using “Refresh credentials” reloads gateway
+metadata. A popup wait timing out does not prove that provider authorization
+failed; check the refreshed account list before starting another sign-in.
 
 The shared-service dialog supports create-only creation, write-only per-key
 rotation, routing edits and deletion of the entire set. Existing membership is

@@ -2,7 +2,7 @@
 // group's vault in the credential gateway. Values are write-only throughout.
 import './GroupAdminCredentials.css';
 import { signal } from '@preact/signals';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
 import { call, errMsg } from './GroupAdminApi';
@@ -63,8 +63,15 @@ async function mutate(url: string, method: string, body: unknown, success: strin
 
 function useOverview(gid: string, targetOnly = false): { load: Load; refresh: () => Promise<void> } {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
+  const context = `${gid}:${targetOnly}`;
+  const currentContext = useRef(context);
+  const requestId = useRef(0);
+  currentContext.current = context;
   async function refresh(): Promise<void> {
+    if (currentContext.current !== context) return;
+    const request = ++requestId.current;
     const r = await call<CredentialsOverviewDto>(credPath(gid, '', targetOnly));
+    if (currentContext.current !== context || request !== requestId.current) return;
     if (r.ok) setLoad({ state: 'ready', data: r.data });
     else if (r.status === 503 && errMsg(r.data, '') === ERROR_GATEWAY_UNREACHABLE) setLoad({ state: 'down' });
     else if (r.status === 409 && errMsg(r.data, '') === 'inactive_gateway_target') setLoad({ state: 'inactive-target' });
@@ -73,6 +80,7 @@ function useOverview(gid: string, targetOnly = false): { load: Load; refresh: ()
   useEffect(() => {
     setLoad({ state: 'loading' });
     void refresh();
+    return () => { requestId.current++; };
   }, [gid, targetOnly]);
   return { load, refresh };
 }
@@ -149,6 +157,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
         The agent never sees them, and nobody can view a key after it's saved.
       </p>
       {data.targetOnly ? <div class="ga-cred-callout warn" role="status"><strong>Inactive Agent Vault target</strong><p>OneCLI remains active. These credentials are staged only; saving keys or signing in does not cut this group over.</p></div> : null}
+      <button type="button" class="ga-cred-link" onClick={() => void refresh()}>Refresh credentials</button>
       {signIn.waiting ? <SignInBanner waiting={signIn.waiting} onReopen={signIn.reopen} onCancel={signIn.cancel} /> : null}
       <nav class="ga-cred-segments" aria-label="Credentials sections">
         {segments.map((s) => (
@@ -157,7 +166,7 @@ export function CredentialsTab({ gid }: { gid: string }): JSX.Element {
             key={s.id}
             class={view === s.id ? 'active' : ''}
             aria-current={view === s.id ? 'page' : undefined}
-            onClick={() => setView(s.id)}
+            onClick={() => { setView(s.id); void refresh(); }}
           >
             {s.label}
             {s.count !== undefined ? <span class={`ga-cred-count${s.alert ? ' alert' : ''}`}>{s.count}</span> : null}

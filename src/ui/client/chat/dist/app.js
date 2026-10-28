@@ -29856,7 +29856,8 @@ function useSignIn(gid, onFinished, targetOnly = false) {
       if (settled) return;
       settled = true;
       setWaiting(null);
-      showToast("Sign-in timed out. Start again when you are ready.", "err");
+      showToast("Stopped waiting for sign-in. Refresh credentials to check whether authorization completed before signing in again.", "err");
+      onFinished();
     }, SIGN_IN_TIMEOUT_MS);
     return () => {
       settled = true;
@@ -30501,8 +30502,15 @@ async function mutate(url, method, body, success) {
 }
 function useOverview(gid, targetOnly = false) {
   const [load, setLoad] = h2({ state: "loading" });
+  const context = `${gid}:${targetOnly}`;
+  const currentContext = A2(context);
+  const requestId = A2(0);
+  currentContext.current = context;
   async function refresh() {
+    if (currentContext.current !== context) return;
+    const request = ++requestId.current;
     const r4 = await call(credPath(gid, "", targetOnly));
+    if (currentContext.current !== context || request !== requestId.current) return;
     if (r4.ok) setLoad({ state: "ready", data: r4.data });
     else if (r4.status === 503 && errMsg2(r4.data, "") === ERROR_GATEWAY_UNREACHABLE) setLoad({ state: "down" });
     else if (r4.status === 409 && errMsg2(r4.data, "") === "inactive_gateway_target") setLoad({ state: "inactive-target" });
@@ -30511,6 +30519,9 @@ function useOverview(gid, targetOnly = false) {
   y2(() => {
     setLoad({ state: "loading" });
     void refresh();
+    return () => {
+      requestId.current++;
+    };
   }, [gid, targetOnly]);
   return { load, refresh };
 }
@@ -30585,6 +30596,7 @@ function CredentialsTab({ gid }) {
       /* @__PURE__ */ u4("strong", { children: "Inactive Agent Vault target" }),
       /* @__PURE__ */ u4("p", { children: "OneCLI remains active. These credentials are staged only; saving keys or signing in does not cut this group over." })
     ] }) : null,
+    /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => void refresh(), children: "Refresh credentials" }),
     signIn.waiting ? /* @__PURE__ */ u4(SignInBanner, { waiting: signIn.waiting, onReopen: signIn.reopen, onCancel: signIn.cancel }) : null,
     /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: segments.map((s5) => /* @__PURE__ */ u4(
       "button",
@@ -30592,7 +30604,10 @@ function CredentialsTab({ gid }) {
         type: "button",
         class: view === s5.id ? "active" : "",
         "aria-current": view === s5.id ? "page" : void 0,
-        onClick: () => setView(s5.id),
+        onClick: () => {
+          setView(s5.id);
+          void refresh();
+        },
         children: [
           s5.label,
           s5.count !== void 0 ? /* @__PURE__ */ u4("span", { class: `ga-cred-count${s5.alert ? " alert" : ""}`, children: s5.count }) : null
