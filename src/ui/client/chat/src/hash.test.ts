@@ -66,13 +66,18 @@ describe('file search hash state', () => {
 
   describe('startup conversation routing', () => {
     let router: RouterApi;
+    let serverThreads: typeof threads.value;
 
     beforeEach(() => {
       groups.value = [{ id: 'agent' }] as typeof groups.value;
-      threads.value = [{ threadId: 'latest', channelType: 'web' }] as typeof threads.value;
+      serverThreads = [{ threadId: 'latest', channelType: 'web' }] as typeof threads.value;
+      threads.value = serverThreads;
       router = {
         selectGroup: vi.fn().mockResolvedValue(undefined),
-        loadThreads: vi.fn().mockResolvedValue(true),
+        loadThreads: vi.fn().mockImplementation(async () => {
+          threads.value = serverThreads;
+          return true;
+        }),
         openChat: vi.fn().mockResolvedValue(undefined),
         clearChat: vi.fn(),
         loadTree: vi.fn().mockResolvedValue(undefined),
@@ -105,8 +110,8 @@ describe('file search hash state', () => {
 
     it.each(['web', 'telegram'])('resumes an explicit %s thread on startup or refresh', async (channelType) => {
       location.hash = '#g/agent/t/linked';
-      threads.value = [
-        ...threads.value,
+      serverThreads = [
+        ...serverThreads,
         { threadId: 'linked', channelType, messagingGroupId: 'messaging-group', canSend: true },
       ] as typeof threads.value;
 

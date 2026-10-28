@@ -81,6 +81,9 @@ Blank conversations are remembered in the tab's browser history until a warmup
 or send creates their server session, so refreshing before typing also keeps
 the same conversation.
 Switching agents after startup continues to open that agent's most recent thread.
+Group changes clear the previous group's chat connection and thread list before
+syncing, so unsent blank threads cannot be reused under another agent's web room.
+An older navigation request cannot reopen a group after a newer selection.
 
 #### Intent-triggered thread warmup
 

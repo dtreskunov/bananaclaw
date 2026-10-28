@@ -18161,8 +18161,11 @@ async function applyHash(router2, options = {}) {
     return;
   }
   const groupChanged = groupId.value !== parsed.groupId;
+  if (groupChanged) router2.clearChat();
+  const generation2 = refs.chatGeneration;
   const routedParent = parsed.isDir ? parsed.path : parentPath(parsed.path);
   n2(() => {
+    if (groupChanged) threads.value = [];
     groupId.value = parsed.groupId;
     treePath.value = routedParent;
     filePath.value = parsed.isDir ? null : parsed.path;
@@ -18174,6 +18177,7 @@ async function applyHash(router2, options = {}) {
   const searchRoot = parsed.fileSearchRoot ?? routedParent;
   const restoredSearch = router2.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
   const threadsFresh = groupChanged ? await router2.loadThreads(parsed.groupId) : true;
+  if (generation2 !== refs.chatGeneration || groupId.value !== parsed.groupId) return;
   if (parsed.threadId && blank?.groupId === parsed.groupId && blank.thread?.threadId === parsed.threadId && blank.thread.channelType === "web" && blank.thread.title === "(new thread)" && blank.thread.messageCount === 0 && !threads.value.some((t4) => t4.threadId === parsed.threadId))
     threads.value = [...threads.value, blank.thread];
   const routedThread = parsed.threadId && (!threadsFresh || threads.value.some((t4) => t4.threadId === parsed.threadId)) ? parsed.threadId : null;
@@ -21092,8 +21096,11 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
   }
 }
 async function selectGroup(gid, options = {}) {
+  const groupChanged = groupId.value !== gid;
   clearChat();
+  const generation2 = refs.chatGeneration;
   n2(() => {
+    if (groupChanged) threads.value = [];
     groupId.value = gid;
     treePath.value = "";
     filePath.value = null;
@@ -21101,7 +21108,9 @@ async function selectGroup(gid, options = {}) {
   clearSearch();
   clearFileSearch();
   const threadsFresh = await loadThreads(gid);
+  if (generation2 !== refs.chatGeneration || groupId.value !== gid) return;
   await loadTree("");
+  if (generation2 !== refs.chatGeneration || groupId.value !== gid) return;
   const latest = threadsFresh && !options.newConversation && threads.value.length > 0 ? threads.value[0] : null;
   if (latest) {
     openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error("chat open failed", err));

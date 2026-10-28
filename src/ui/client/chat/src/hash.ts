@@ -140,8 +140,11 @@ export async function applyHash(router: RouterApi, options: { newConversation?: 
     return;
   }
   const groupChanged = groupId.value !== parsed.groupId;
+  if (groupChanged) router.clearChat();
+  const generation = refs.chatGeneration;
   const routedParent = parsed.isDir ? parsed.path : parentPath(parsed.path);
   batch(() => {
+    if (groupChanged) threads.value = [];
     groupId.value = parsed.groupId;
     treePath.value = routedParent;
     filePath.value = parsed.isDir ? null : parsed.path;
@@ -153,6 +156,7 @@ export async function applyHash(router: RouterApi, options: { newConversation?: 
   const searchRoot = parsed.fileSearchRoot ?? routedParent;
   const restoredSearch = router.restoreFileSearch(parsed.fileSearchOpen, searchRoot, parsed.fileSearchQuery);
   const threadsFresh = groupChanged ? await router.loadThreads(parsed.groupId) : true;
+  if (generation !== refs.chatGeneration || groupId.value !== parsed.groupId) return;
   // A blank conversation has no server session yet. Keep it on refresh without
   // treating arbitrary missing or foreign thread links as new conversations.
   if (

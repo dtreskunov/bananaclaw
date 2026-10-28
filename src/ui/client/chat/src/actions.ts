@@ -1083,6 +1083,7 @@ async function submitChatPacket(
 
 // ── files ───────────────────────────────────────────────────────────
 export async function selectGroup(gid: string, options: { newConversation?: boolean } = {}): Promise<void> {
+  const groupChanged = groupId.value !== gid;
   // Tear down the previous group's thread/WS state synchronously before we
   // start awaiting the new group's thread list. selectGroup sets groupId
   // immediately but only resolves the new threadId later (inside openChat,
@@ -1095,7 +1096,9 @@ export async function selectGroup(gid: string, options: { newConversation?: bool
   // here makes sendChat early-return and disables the composer until
   // openChat wires up the new group's thread.
   clearChat();
+  const generation = refs.chatGeneration;
   batch(() => {
+    if (groupChanged) threads.value = [];
     groupId.value = gid;
     treePath.value = '';
     filePath.value = null;
@@ -1103,13 +1106,12 @@ export async function selectGroup(gid: string, options: { newConversation?: bool
   clearSearch();
   clearFileSearch();
   const threadsFresh = await loadThreads(gid);
+  if (generation !== refs.chatGeneration || groupId.value !== gid) return;
   // Threads list refresh now happens via the unified sync ticker
   // (startSyncPoll), which picks up groupId.value automatically.
   await loadTree('');
-  // A refresh that failed (server restart, offline) leaves `threads` describing
-  // the *previous* group. Opening its newest entry pins a foreign thread onto
-  // this group, and the server rejects that socket for good while the client
-  // retries forever — so wait for a real list instead.
+  if (generation !== refs.chatGeneration || groupId.value !== gid) return;
+  // Only open a thread after the selected group's list has loaded.
   const latest = threadsFresh && !options.newConversation && threads.value.length > 0 ? threads.value[0]! : null;
   if (latest) {
     openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error('chat open failed', err));
