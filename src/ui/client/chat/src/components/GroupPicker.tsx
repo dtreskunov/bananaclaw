@@ -10,7 +10,9 @@ import {
   nowTick,
   groupPickerOpen,
   groupPickerMode,
+  credentialsOpen,
 } from '../state';
+import { openChat } from '../credentials-navigation';
 import { selectGroup } from '../actions';
 import { fmtRelative, fmtAbsolute } from '../utils';
 import type { Group } from '../types';
@@ -80,6 +82,7 @@ export function GroupStrip(): JSX.Element | null {
   }
 
   const pick = (gid: string): void => {
+    if (credentialsOpen.value) openChat();
     if (gid !== groupId.value) selectGroup(gid).catch(console.error);
   };
 

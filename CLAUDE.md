@@ -58,6 +58,22 @@ Exactly one writer per file; host DBs are not mounted into containers. Host uses
 
 `data/v2.db` holds everything that isn't per-session: users, user*roles, agent_groups, messaging_groups, wiring, pending_approvals, user_dms, chat_sdk*\* (for the Chat SDK bridge), schema_version. Migrations live at `src/db/migrations/`.
 
+### User-owned credentials
+
+The canonical AgentVault contract maps stable NanoClaw users to native managed
+users and personal libraries; those users cannot log in to the gateway.
+Top-level **Credentials** owns static/OAuth connections, while Agent Settings
+shows **Access** grants. The host token authenticates transport, not the
+effective user's authority. Never copy secrets between groups or use a
+group-owned credential API as a fallback.
+
+The central DB persists the gateway installation UUID and a durable identity
+reconciliation outbox. Role/membership/deletion changes must reach the gateway;
+OAuth callbacks bind the initiating user/native user to the exact connection.
+The host requires the coordinated revision-7 gateway API, not the published
+`gw-v0.1.1` contract. Do not deploy the host/UI alone or convert live state
+automatically. See [the plan of record](docs/credential-gateway-agent-vault-fork-proposal.md).
+
 For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than the `sqlite3` CLI: `pnpm exec tsx scripts/q.ts <db> "<sql>"`. The host setup intentionally avoids depending on the `sqlite3` binary (`setup/verify.ts:5`); the wrapper goes through the `better-sqlite3` dep that setup already installs and verifies. Default-output format matches `sqlite3 -list` (pipe-separated, no header) so existing skill text reads identically.
 
 ## Key Files

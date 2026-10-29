@@ -2,8 +2,9 @@ import './GroupAdminMcp.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
-import { groupAdminTabRequest, isMobile } from '../state';
-import { McpServerAuth } from './GroupAdminCredentials';
+import { isMobile } from '../state';
+import { McpConnectionAccess } from './GroupCredentialAccess';
+import { openCredentials } from '../credentials-navigation';
 import { MobileDialog, MobileDialogFooter } from './MobileDialog';
 
 interface McpStdioServerDto {
@@ -161,10 +162,12 @@ export function McpServersSection({
       onTest={() => onTest(selectedName, selectedValue)}
       auth={credentialsGid && mcpServerType(selectedValue) !== 'stdio' ? (
         JSON.stringify(savedServers?.[selectedName]) === JSON.stringify(selectedValue) ? (
-          <McpServerAuth
+          <McpConnectionAccess
             gid={credentialsGid}
-            server={selectedName}
-            onOpenCredentials={() => { groupAdminTabRequest.value = 'credentials'; }}
+            resourceUrl={(selectedValue as McpHttpServerDto).url}
+            onOpenCredentials={(create, connectionId) => openCredentials({
+              create, connectionId, resourceUrl: (selectedValue as McpHttpServerDto).url,
+            })}
           />
         ) : (
           <div class="ga-cred-mcp-auth">

@@ -1,5 +1,57 @@
 # OneCLI migration inventory, private preparation and target provisioning
 
+## Plan of record: shared references (revision 7)
+
+The [gateway plan of record](credential-gateway-agent-vault-fork-proposal.md)
+now replaces duplicated group-owned credentials with user-owned connections
+and explicit service-level group grants. Ownership reuses native AgentVault
+users, mapped from stable NanoClaw installation/user IDs; those managed users
+cannot log in to the headless gateway. **F12 copying is removed.**
+
+The commands and per-group key-set workflow below describe the **published
+vault-local implementation**, not the target revision-7 importer or a promise
+to retain its APIs. Their metadata remains useful source evidence; do not
+bulk-provision more duplicated values as the new migration strategy.
+The working tree has removed `--provision`, the per-group provisioning module
+and old credential-management commands. The retained inventory/`--prepare`
+tooling only reads metadata or writes private review bundles. The vault-local
+provisioning snippets below are an archived release reference, not commands
+supported by the canonical host.
+
+The target transition must:
+
+- Keep working AgentVault groups, including Denis's Lab, on their current
+  deployment until the coordinated replacement is ready; do not undo their
+  cutover or delete entered values/sign-ins.
+- Confirm each credential owner's native managed-user mapping and personal
+  library. Do not infer ownership from a group's creator, display name or
+  OAuth account email.
+- Adopt existing gateway-held static/OAuth state in a reviewed offline
+  conversion, preserving client/grant/resource/scope and refresh-token state.
+  Rewrite group bindings and F8 references without runtime legacy aliases.
+  Storage ownership changes alone must not force re-entry or re-consent.
+- For remaining OneCLI sources, create a static connection once from a private
+  operator-supplied value or authorize an OAuth connection once per intended
+  owner/identity/scope profile. Attach only explicitly approved recipient groups.
+- Preserve unknown/restricted-policy, conflicting-routing and existing-target
+  blockers. Matching values/identities and safe scope unions are not established
+  by matching names, email addresses or source IDs.
+- Never copy live OAuth tokens into receiving vaults. Sharing references one
+  connection's lifecycle; group detachment/deletion must not disconnect it.
+- Use create-only/revision-checked transactions and safe receipts. Credential
+  provisioning, sharing, OAuth consent and backend cutover are separate actions.
+- Coordinate host, gateway, runner assets and schema, with consistent private
+  backups and matched-state rollback. Do not negotiate or maintain old fork
+  APIs, schema models, ownership paths or copy/fan-out implementations.
+- Remove temporary conversion/import utilities and superseded fork code from
+  the shipped runtime/maintenance surface after acceptance. Historical metadata
+  bundles, protected rollback backups and receipts are not runtime compatibility.
+- Complete workload/policy acceptance before retiring OneCLI. Remove its
+  runtime/setup/networking/defaults and temporary migration dependencies only
+  after no active group or host caller needs them.
+
+## Deployed vault-local tooling
+
 The Agent Vault canary is working. This tooling advances the remaining
 per-group migration without copying credentials or changing live access.
 Inventory and preparation remain read-only with respect to live access.
@@ -42,12 +94,12 @@ non-effective credentials are not converted into usable target access.
 Each group has a stable `digest`, required actions and these possible static
 entry states:
 
-| State | Meaning |
-| --- | --- |
-| `needs-value` | Recognized metadata produced a template; the operator must supply its value separately |
-| `manual-review` | Unsupported/incomplete metadata or overlapping source recipients; do not guess or merge values |
-| `source-restricted` | Source effective access does not permit treating the credential as usable |
-| `target-exists` | An existing target key/service/recipient needs review; never overwrite it |
+| State               | Meaning                                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `needs-value`       | Recognized metadata produced a template; the operator must supply its value separately         |
+| `manual-review`     | Unsupported/incomplete metadata or overlapping source recipients; do not guess or merge values |
+| `source-restricted` | Source effective access does not permit treating the credential as usable                      |
+| `target-exists`     | An existing target key/service/recipient needs review; never overwrite it                      |
 
 Generated key/service names are deterministic from the OneCLI secret ID.
 Known single-header formats preserve their prefix. Pre-encoded Basic values
@@ -240,6 +292,10 @@ check without an application payload, not model/MCP acceptance.
 
 ## Before any live cutover
 
+This deployed-workflow checklist does not override the revision-7 target
+transition above. Use the reviewed contract for the binary being deployed,
+not the old per-group provisioning flags against a shared-reference release.
+
 The operator sequence remains:
 
 1. Finish the compatible verified gateway release/pin and preserve the matching
@@ -267,14 +323,14 @@ the gateway binary without its matching state backup.
 Removing a group's container dependency is not the same as removing every host
 dependency. Before deleting OneCLI support, review these surfaces:
 
-| Surface | Required exit condition |
-| --- | --- |
-| Container spawn and agent provisioning | Intended groups use Agent Vault; default/new-group behavior is deliberately migrated |
-| OneCLI approval bridge and pending responses | Equivalent policy or explicitly accepted behavior; no pending credential approvals lost |
-| Docker egress network and host-gateway helpers | Remaining OneCLI container networking is no longer needed; Agent Vault isolation remains intact |
-| Setup, uninstall and channel/provider/tool recipes | Fresh installs and removal use the compatible gateway without affecting another copy |
+| Surface                                            | Required exit condition                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Container spawn and agent provisioning             | Intended groups use Agent Vault; default/new-group behavior is deliberately migrated                          |
+| OneCLI approval bridge and pending responses       | Equivalent policy or explicitly accepted behavior; no pending credential approvals lost                       |
+| Docker egress network and host-gateway helpers     | Remaining OneCLI container networking is no longer needed; Agent Vault isolation remains intact               |
+| Setup, uninstall and channel/provider/tool recipes | Fresh installs and removal use the compatible gateway without affecting another copy                          |
 | Runtime SDK/config and backend CLI/schema defaults | No remaining runtime consumer before removal; migration-only tooling must not keep a runtime dependency alive |
-| Host-side public metadata | OpenRouter's public model catalog is unauthenticated and no longer requires OneCLI |
+| Host-side public metadata                          | OpenRouter's public model catalog is unauthenticated and no longer requires OneCLI                            |
 
 These are retirement gates, not permission to remove active paths. The current
 dual-backend installation still needs OneCLI for its unmigrated groups.

@@ -13143,7 +13143,7 @@ var require_yaml = __commonJS({
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
-      const KEY = {
+      const KEY2 = {
         className: "attr",
         variants: [
           // added brackets support and special char support
@@ -13248,7 +13248,7 @@ var require_yaml = __commonJS({
         relevance: 0
       };
       const MODES = [
-        KEY,
+        KEY2,
         {
           className: "meta",
           begin: "^---\\s*$",
@@ -15712,10 +15712,7 @@ var userMenuOpen = y3(false);
 var settingsOpen = y3(false);
 var groupAdminOpen = y3(false);
 var groupAdminTabRequest = y3(null);
-var credentialsUiEnabled = y3(false);
-function credentialsUiFor(gid) {
-  return credentialsUiEnabled.value || !!gid && !!groups.value.find((g8) => g8.id === gid)?.credentialGateway;
-}
+var credentialsOpen = y3(false);
 var groupPickerOpen = y3(false);
 var groupPickerMode = y3("all");
 var shareModalRequest = y3(null);
@@ -15764,844 +15761,6 @@ var CHANNEL_META = {
 };
 function channelMeta(ct) {
   return ct && CHANNEL_META[ct] || { label: ct || "Channel", icon: "\u2022" };
-}
-
-// ../../shared/voice.ts
-var VOICE_SAMPLE_RATE = 16e3;
-var VOICE_BYTES_PER_SECOND = VOICE_SAMPLE_RATE * 2;
-var VOICE_MAX_FRAME_BYTES = 32768;
-var VOICE_MAX_BUFFER_BYTES = VOICE_BYTES_PER_SECOND * 4;
-var VOICE_UPLOAD_BURST_BYTES = VOICE_MAX_BUFFER_BYTES - VOICE_MAX_FRAME_BYTES;
-
-// src/voice.ts
-function replaceSegment(segments, next) {
-  const index = segments.findIndex((segment) => segment.id === next.id);
-  if (index < 0) return [...segments, next];
-  const previous = segments[index];
-  if (previous.sequence >= next.sequence || previous.final && !next.final) return segments;
-  return segments.map((segment, i5) => i5 === index ? next : segment);
-}
-function insertVoiceText(prefix, text2, suffix) {
-  if (!text2) return prefix + suffix;
-  const before = prefix && !/[\s([{]$/.test(prefix) && !/^[,.;:!?%)\]}]/.test(text2) ? " " : "";
-  const after = suffix && !/^[\s,.;:!?%)\]}]/.test(suffix) && !/[([{]$/.test(text2) ? " " : "";
-  return prefix + before + text2 + after + suffix;
-}
-var initialState = () => ({
-  phase: "idle",
-  target: null,
-  elapsedMs: 0,
-  error: "",
-  sending: false,
-  connected: false
-});
-var VoiceController = class {
-  constructor(deps) {
-    this.deps = deps;
-  }
-  state = y3(initialState());
-  target = null;
-  generation = 0;
-  socket = null;
-  capture = null;
-  captureAbort = null;
-  timeout = null;
-  timer = null;
-  drainTimer = null;
-  audioQueue = [];
-  queuedBytes = 0;
-  uploadAllowance = VOICE_UPLOAD_BURST_BYTES;
-  allowanceAt = 0;
-  captureFlushed = false;
-  startedAt = 0;
-  diagnostics = null;
-  segments = [];
-  draft = "";
-  selection = { start: 0, end: 0 };
-  intent = "stop";
-  finishSent = false;
-  update(patch) {
-    this.state.value = { ...this.state.value, ...patch };
-  }
-  current(generation2) {
-    return this.generation === generation2 && !!this.target?.isCurrent();
-  }
-  start(target, start = target.getText().length, end = start) {
-    if (this.state.value.sending || !["idle", "error"].includes(this.state.value.phase)) return;
-    this.detach();
-    this.target = target;
-    this.update({ target: target.key });
-    this.connect(start, end);
-  }
-  connect(start, end) {
-    const target = this.target;
-    const draft = target.getText();
-    this.draft = draft;
-    start = Math.max(0, Math.min(start, draft.length));
-    end = Math.max(start, Math.min(end, draft.length));
-    this.selection = { start, end };
-    this.segments = [];
-    this.intent = "stop";
-    this.finishSent = false;
-    this.startedAt = Date.now();
-    this.diagnostics = { attemptId: this.deps.attemptId(), peakQueuedBytes: 0 };
-    this.captureFlushed = false;
-    this.uploadAllowance = VOICE_UPLOAD_BURST_BYTES;
-    const generation2 = ++this.generation;
-    this.update({ phase: "connecting", error: "" });
-    void this.acquireCapture(generation2);
-    if (!this.current(generation2)) return;
-    const base = this.deps.origin().replace(/^http/, "ws");
-    const params = new URLSearchParams();
-    params.set("attempt", this.diagnostics.attemptId);
-    if (target.channelType && target.channelType !== "web") {
-      params.set("channel", target.channelType);
-      if (target.messagingGroupId) params.set("mg", target.messagingGroupId);
-    }
-    let socket;
-    try {
-      socket = this.deps.socket(
-        `${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream?${params}`
-      );
-    } catch (error) {
-      this.fail(error instanceof Error ? error.message : "Could not connect to voice input.", "connection");
-      return;
-    }
-    this.socket = socket;
-    this.timeout = setTimeout(() => {
-      if (this.current(generation2)) this.fail("Voice input did not become ready. Try again.", "connection");
-    }, 15e3);
-    socket.onmessage = (event) => this.handleMessage(event.data, generation2);
-    socket.onerror = () => {
-      if (this.current(generation2)) this.fail("Voice connection failed. Current text has been kept.", "connection");
-    };
-    socket.onclose = () => {
-      if (this.current(generation2))
-        this.fail("Voice connection closed before finalization. Current text has been kept.", "connection");
-    };
-  }
-  async acquireCapture(generation2) {
-    const abort = new AbortController();
-    this.captureAbort = abort;
-    try {
-      const capture = await this.deps.capture(
-        (chunk) => this.enqueueAudio(chunk, generation2),
-        (message2) => {
-          if (this.current(generation2)) this.fail(message2, "capture");
-        },
-        abort.signal
-      );
-      if (!this.current(generation2)) {
-        capture.cancel();
-        return;
-      }
-      this.capture = capture;
-      if (this.diagnostics) this.diagnostics.captureReadyMs = this.elapsed();
-      this.update({ phase: "listening" });
-      const started = Date.now();
-      this.timer = setInterval(() => this.update({ elapsedMs: Date.now() - started }), 250);
-    } catch (error) {
-      if (this.current(generation2))
-        this.fail(
-          error instanceof Error ? error.message : "Microphone unavailable.",
-          error instanceof Error && error.name === "NotAllowedError" ? "permission" : "capture"
-        );
-    }
-  }
-  handleMessage(data, generation2) {
-    if (!this.current(generation2)) return;
-    const target = this.target;
-    let message2;
-    try {
-      message2 = JSON.parse(data);
-    } catch {
-      this.fail("Invalid voice server response.", "protocol");
-      return;
-    }
-    if (!message2 || typeof message2 !== "object") {
-      this.fail("Invalid voice server response.", "protocol");
-      return;
-    }
-    if (message2.type === "ready" && !this.state.value.connected) {
-      if (this.state.value.phase !== "finalizing") {
-        if (this.timeout) clearTimeout(this.timeout);
-        this.timeout = null;
-      }
-      this.update({ connected: true });
-      if (this.diagnostics) this.diagnostics.socketReadyMs = this.elapsed();
-      this.allowanceAt = Date.now();
-      this.drainAudio(generation2);
-    } else if (message2.type === "transcript" && (this.state.value.phase === "listening" || this.state.value.phase === "finalizing")) {
-      if (typeof message2.id !== "string" || typeof message2.sequence !== "number" || !Number.isSafeInteger(message2.sequence) || typeof message2.text !== "string" || typeof message2.final !== "boolean") {
-        this.fail("Invalid transcript response. Current text has been kept.", "protocol");
-        return;
-      }
-      if (this.diagnostics && this.diagnostics.firstTranscriptMs === void 0 && message2.text.trim()) {
-        this.diagnostics.firstTranscriptMs = this.elapsed();
-      }
-      this.segments = replaceSegment(this.segments, {
-        id: message2.id,
-        sequence: message2.sequence,
-        text: message2.text,
-        final: message2.final
-      });
-      const text2 = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
-      if (text2) {
-        const prefix = this.draft.slice(0, this.selection.start);
-        const suffix = this.draft.slice(this.selection.end);
-        const caret = insertVoiceText(prefix, text2, "").length;
-        target.setText(insertVoiceText(prefix, text2, suffix), { start: caret, end: caret });
-      } else {
-        target.setText(this.draft, this.selection);
-      }
-    } else if (message2.type === "finished" && this.state.value.phase === "finalizing" && this.finishSent) {
-      if (this.intent === "send" && !this.segments.some((segment) => segment.text.trim()) || this.segments.some((segment) => segment.text.trim() && !segment.final)) {
-        this.fail("No complete transcript was received. Review current text before using it.", "protocol");
-        return;
-      }
-      const intent = this.intent;
-      this.report("finished");
-      this.release();
-      if (intent === "send") void this.sendDraft();
-      else this.detach();
-    } else if (message2.type === "error") {
-      this.fail(
-        typeof message2.message === "string" ? message2.message : "Voice input failed. Current text has been kept."
-      );
-    }
-  }
-  enqueueAudio(chunk, generation2) {
-    if (!this.current(generation2) || this.finishSent) return;
-    if (this.diagnostics && this.diagnostics.firstAudioMs === void 0) this.diagnostics.firstAudioMs = this.elapsed();
-    if (this.queuedBytes + chunk.byteLength + (this.socket?.bufferedAmount ?? 0) > VOICE_MAX_BUFFER_BYTES) {
-      this.fail("Voice connection is too slow. Current text has been kept; please try again.", "buffer");
-      return;
-    }
-    for (let offset = 0; offset < chunk.byteLength; offset += VOICE_MAX_FRAME_BYTES) {
-      const frame = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
-      this.audioQueue.push(frame);
-      this.queuedBytes += frame.byteLength;
-    }
-    if (this.diagnostics)
-      this.diagnostics.peakQueuedBytes = Math.max(this.diagnostics.peakQueuedBytes, this.queuedBytes);
-    this.drainAudio(generation2);
-  }
-  drainAudio(generation2) {
-    const socket = this.socket;
-    if (!this.current(generation2) || !this.state.value.connected || socket?.readyState !== 1 || this.finishSent) return;
-    if (this.drainTimer) clearTimeout(this.drainTimer);
-    this.drainTimer = null;
-    const now = Date.now();
-    this.uploadAllowance = Math.min(
-      VOICE_UPLOAD_BURST_BYTES,
-      this.uploadAllowance + (now - this.allowanceAt) * VOICE_BYTES_PER_SECOND / 1e3
-    );
-    this.allowanceAt = now;
-    try {
-      while (this.audioQueue.length) {
-        const frame = this.audioQueue[0];
-        if (frame.byteLength > this.uploadAllowance || socket.bufferedAmount + frame.byteLength > VOICE_MAX_BUFFER_BYTES) {
-          this.drainTimer = setTimeout(() => this.drainAudio(generation2), 25);
-          return;
-        }
-        socket.send(frame);
-        this.uploadAllowance -= frame.byteLength;
-        this.audioQueue.shift();
-        this.queuedBytes -= frame.byteLength;
-      }
-      if (this.captureFlushed) {
-        socket.send(JSON.stringify({ type: "finish" }));
-        this.finishSent = true;
-      }
-    } catch {
-      this.fail("Voice connection was interrupted. Current text has been kept.", "connection");
-    }
-  }
-  stop() {
-    if (this.state.value.sending) return;
-    if (this.state.value.phase === "connecting") this.detach();
-    else this.finalize("stop");
-  }
-  send() {
-    if (this.state.value.phase === "listening") this.finalize("send");
-    else if (this.state.value.phase === "error") void this.sendDraft();
-  }
-  async sendDraft() {
-    const target = this.target;
-    if (!target?.isCurrent() || this.state.value.sending) return;
-    this.update({ sending: true });
-    const generation2 = this.generation;
-    try {
-      const sent = await target.send();
-      if (!this.current(generation2)) return;
-      if (sent) this.detach();
-      else this.fail("Message was not sent. Your draft is still available.");
-    } catch {
-      if (this.current(generation2)) this.fail("Message was not sent. Your draft is still available.");
-    } finally {
-      if (this.current(generation2)) this.update({ sending: false });
-    }
-  }
-  finalize(intent) {
-    if (this.state.value.phase !== "listening") return;
-    this.intent = intent;
-    this.update({ phase: "finalizing" });
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-    if (this.timeout) clearTimeout(this.timeout);
-    const generation2 = this.generation;
-    this.timeout = setTimeout(() => {
-      if (this.current(generation2))
-        this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.", "finalize");
-    }, 2e4);
-    const capture = this.capture;
-    void (capture?.stop() ?? Promise.resolve()).then(() => {
-      if (!this.current(generation2)) return;
-      this.capture = null;
-      this.captureFlushed = true;
-      this.drainAudio(generation2);
-    }).catch(() => {
-      if (this.current(generation2))
-        this.fail("Could not finalize voice input. Current text has been kept.", "finalize");
-    });
-  }
-  /** Navigation/unmount invalidates callbacks before stopping hardware. No automatic resume. */
-  detach() {
-    this.report("cancelled");
-    this.release(true);
-    this.target = null;
-    this.state.value = initialState();
-  }
-  interrupt(reason = "Microphone stopped because this page is no longer active. Review current text before sending or dictating again.") {
-    if (["connecting", "listening", "finalizing"].includes(this.state.value.phase)) {
-      this.fail(reason, "interrupted");
-    }
-  }
-  elapsed() {
-    return Math.max(0, Date.now() - this.startedAt);
-  }
-  report(outcome, failure) {
-    const diagnostic = this.diagnostics;
-    if (!diagnostic || !this.target) return;
-    this.diagnostics = null;
-    this.deps.report(this.target.groupId, {
-      ...diagnostic,
-      outcome,
-      elapsedMs: this.elapsed(),
-      ...failure ? { failure } : {}
-    });
-  }
-  fail(error, failure = "provider") {
-    this.report("failed", failure);
-    this.release(true);
-    this.intent = "stop";
-    this.update({ phase: "error", error, sending: false });
-  }
-  release(cancel = false) {
-    ++this.generation;
-    if (this.timeout) clearTimeout(this.timeout);
-    if (this.timer) clearInterval(this.timer);
-    if (this.drainTimer) clearTimeout(this.drainTimer);
-    this.timeout = this.timer = null;
-    this.drainTimer = null;
-    this.audioQueue = [];
-    this.queuedBytes = 0;
-    this.captureAbort?.abort();
-    this.captureAbort = null;
-    this.capture?.cancel();
-    this.capture = null;
-    const socket = this.socket;
-    this.socket = null;
-    if (socket) {
-      socket.onmessage = socket.onclose = socket.onerror = null;
-      try {
-        if (cancel && socket.readyState === 1) socket.send(JSON.stringify({ type: "cancel" }));
-        socket.close();
-      } catch {
-      }
-    }
-  }
-};
-
-// src/voice-audio.ts
-function voiceBrowserReason() {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia)
-    return "Microphone access requires a supported browser and HTTPS.";
-  if (typeof AudioContext === "undefined" || typeof AudioWorkletNode === "undefined")
-    return "Live voice requires AudioWorklet support in this browser.";
-  return null;
-}
-async function captureVoice(onChunk, onError, signal) {
-  const reason = voiceBrowserReason();
-  if (reason) throw new Error(reason);
-  const context = new AudioContext();
-  let stream2 = null;
-  let node = null;
-  let source = null;
-  let closed = false;
-  const stopTracks = () => {
-    for (const track of stream2?.getTracks() ?? []) {
-      track.onended = null;
-      try {
-        track.stop();
-      } catch {
-      }
-    }
-  };
-  const cancel = () => {
-    if (closed) return;
-    closed = true;
-    signal?.removeEventListener("abort", cancel);
-    stopTracks();
-    try {
-      source?.disconnect();
-    } catch {
-    }
-    try {
-      node?.disconnect();
-    } catch {
-    }
-    try {
-      void context.close().catch(() => {
-      });
-    } catch {
-    }
-  };
-  signal?.addEventListener("abort", cancel, { once: true });
-  if (signal?.aborted) cancel();
-  const checkCancelled = () => {
-    if (!closed) return;
-    stopTracks();
-    throw new Error("Microphone capture was cancelled.");
-  };
-  try {
-    checkCancelled();
-    const resumed = context.resume();
-    const worklet = context.audioWorklet.addModule("/ui/chat/voice-worklet.js");
-    const microphone = navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
-    }).then((value) => {
-      stream2 = value;
-      if (closed) {
-        stopTracks();
-        stream2 = null;
-      }
-      return value;
-    });
-    const [, , readyStream] = await Promise.all([resumed, worklet, microphone]);
-    checkCancelled();
-    node = new AudioWorkletNode(context, "voice-pcm");
-    source = context.createMediaStreamSource(readyStream);
-    source.connect(node);
-    node.connect(context.destination);
-    node.port.onmessage = ({ data }) => {
-      if (!closed && data instanceof ArrayBuffer) onChunk(data);
-    };
-    node.onprocessorerror = () => onError("Audio capture failed. Current text has been kept.");
-    for (const track of readyStream.getTracks())
-      track.onended = () => onError("Microphone disconnected. Current text has been kept.");
-    return {
-      cancel,
-      stop: () => new Promise((resolve, reject) => {
-        if (closed) {
-          resolve();
-          return;
-        }
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Audio flush timed out"));
-        }, 1e3);
-        node.port.onmessage = ({ data }) => {
-          if (data instanceof ArrayBuffer) onChunk(data);
-          else if (data === "flushed") {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        };
-        try {
-          node.port.postMessage("finish");
-        } catch (error) {
-          clearTimeout(timeout);
-          cancel();
-          reject(error);
-        }
-      })
-    };
-  } catch (error) {
-    cancel();
-    throw error;
-  }
-}
-async function reportVoiceDiagnostic(groupId2, diagnostic) {
-  try {
-    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/voice/diagnostics`, {
-      method: "POST",
-      credentials: "same-origin",
-      keepalive: true,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(diagnostic)
-    });
-    if (!response.ok)
-      console.warn("Voice diagnostics delivery failed", { attemptId: diagnostic.attemptId, status: response.status });
-  } catch {
-    console.warn("Voice diagnostics delivery failed", { attemptId: diagnostic.attemptId });
-  }
-}
-var voice = new VoiceController({
-  socket: (url) => new WebSocket(url),
-  capture: captureVoice,
-  origin: () => location.origin,
-  attemptId: () => crypto.randomUUID(),
-  report: reportVoiceDiagnostic
-});
-if (typeof document !== "undefined") {
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) voice.interrupt();
-  });
-  window.addEventListener("pagehide", () => voice.interrupt());
-}
-
-// src/recorder.ts
-var isRecording = y3(false);
-var recordingDuration = y3(0);
-function hasGetUserMedia() {
-  return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
-}
-var recorder = null;
-var stream = null;
-var timer = null;
-var generation = 0;
-var startedAt = 0;
-var chunks = [];
-async function startRecording() {
-  if (isRecording.value || !hasGetUserMedia() || typeof MediaRecorder === "undefined") return false;
-  const token = ++generation;
-  isRecording.value = true;
-  try {
-    const next = await navigator.mediaDevices.getUserMedia({ audio: true });
-    if (token !== generation) {
-      next.getTracks().forEach((track) => track.stop());
-      return false;
-    }
-    stream = next;
-    const mimeType = ["audio/ogg;codecs=opus", "audio/mp4;codecs=opus", "audio/mp4", "audio/webm;codecs=opus"].find(
-      (type) => MediaRecorder.isTypeSupported(type)
-    );
-    recorder = new MediaRecorder(next, mimeType ? { mimeType } : void 0);
-    chunks = [];
-    recorder.ondataavailable = ({ data }) => {
-      if (token === generation && data.size) chunks.push(data);
-    };
-    recorder.onerror = () => {
-      if (token === generation) cancelRecording();
-    };
-    recorder.start(250);
-    startedAt = Date.now();
-    timer = setInterval(() => {
-      recordingDuration.value = Date.now() - startedAt;
-    }, 250);
-    return true;
-  } catch {
-    if (token === generation) cancelRecording();
-    return false;
-  }
-}
-function stopRecording() {
-  return new Promise((resolve) => {
-    if (!recorder || recorder.state === "inactive") {
-      cancelRecording();
-      resolve(null);
-      return;
-    }
-    const active = recorder;
-    const token = generation;
-    active.onstop = () => {
-      if (token !== generation) {
-        resolve(null);
-        return;
-      }
-      const durationMs = Date.now() - startedAt;
-      const blob = new Blob(chunks, { type: active.mimeType || "audio/webm" });
-      cleanup();
-      resolve(durationMs < 2e3 ? null : { blob, durationMs });
-    };
-    active.stop();
-  });
-}
-function cancelRecording() {
-  if (recorder && recorder.state !== "inactive") recorder.stop();
-  cleanup();
-}
-function cleanup() {
-  generation++;
-  if (timer) clearInterval(timer);
-  timer = null;
-  stream?.getTracks().forEach((track) => track.stop());
-  stream = null;
-  recorder = null;
-  chunks = [];
-  isRecording.value = false;
-  recordingDuration.value = 0;
-}
-
-// src/appearance.ts
-var THEMES = [
-  { id: "default", name: "Default", description: "The original look" },
-  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
-];
-var APPEARANCE_MODES = [
-  { id: "system", name: "System" },
-  { id: "light", name: "Light" },
-  { id: "dark", name: "Dark" }
-];
-var TEXT_DENSITIES = [
-  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
-  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
-];
-var APPEARANCE_KEY = "nanoclaw:appearance";
-var DEFAULT_APPEARANCE = {
-  version: 3,
-  theme: "default",
-  mode: "system",
-  density: "compact",
-  showTechnicalStatus: false
-};
-var InvalidAppearanceError = class extends Error {
-};
-function parseAppearance(raw) {
-  if (raw === null) return { ...DEFAULT_APPEARANCE };
-  const value = JSON.parse(raw);
-  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
-  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
-    throw new InvalidAppearanceError("Invalid appearance preferences");
-  }
-  return {
-    version: 3,
-    theme: value.theme,
-    mode: value.mode,
-    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
-    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
-  };
-}
-function isThemeId(value) {
-  return THEMES.some((theme) => theme.id === value);
-}
-function isAppearanceMode(value) {
-  return APPEARANCE_MODES.some((mode) => mode.id === value);
-}
-function isTextDensity(value) {
-  return TEXT_DENSITIES.some((density) => density.id === value);
-}
-function isStorageError(cause) {
-  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
-}
-function resolveMode(mode, systemDark) {
-  return mode === "system" ? systemDark ? "dark" : "light" : mode;
-}
-function createAppearanceController(win, doc) {
-  const media = win.matchMedia("(prefers-color-scheme: dark)");
-  const listeners = /* @__PURE__ */ new Set();
-  const densityListeners = /* @__PURE__ */ new Set();
-  let preferences = { ...DEFAULT_APPEARANCE };
-  let error = null;
-  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
-  function report(message2, cause) {
-    console.warn(message2, cause);
-    error = message2;
-  }
-  function read(raw, persistMigration = false) {
-    try {
-      preferences = parseAppearance(raw);
-    } catch (cause) {
-      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
-      preferences = { ...DEFAULT_APPEARANCE };
-      report("Saved appearance was invalid and has been reset to the defaults.", cause);
-      try {
-        win.localStorage.removeItem(APPEARANCE_KEY);
-      } catch (storageError) {
-        if (!isStorageError(storageError)) throw storageError;
-        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
-      }
-      return;
-    }
-    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report(
-          "Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.",
-          cause
-        );
-      }
-    }
-  }
-  try {
-    read(win.localStorage.getItem(APPEARANCE_KEY), true);
-  } catch (cause) {
-    if (!isStorageError(cause)) throw cause;
-    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
-  }
-  function getSnapshot() {
-    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
-  }
-  function updateBrowserColor() {
-    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
-    const next = color || brandedBrowserColor;
-    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
-  }
-  function apply2() {
-    const snapshot = getSnapshot();
-    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
-    doc.documentElement.dataset.theme = preferences.theme;
-    doc.documentElement.dataset.mode = snapshot.resolvedMode;
-    doc.documentElement.dataset.density = preferences.density;
-    updateBrowserColor();
-    for (const restore of restoreDensity) restore();
-    for (const listener of listeners) listener(snapshot);
-  }
-  function onStorage(event) {
-    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
-    try {
-      if (event.storageArea !== win.localStorage) return;
-    } catch (cause) {
-      if (!isStorageError(cause)) throw cause;
-      report("Appearance could not be synchronized with another tab.", cause);
-      apply2();
-      return;
-    }
-    error = null;
-    read(event.key === null ? null : event.newValue);
-    apply2();
-  }
-  function onSystemChange() {
-    if (preferences.mode === "system") apply2();
-  }
-  apply2();
-  media.addEventListener("change", onSystemChange);
-  win.addEventListener("storage", onStorage);
-  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
-  return {
-    getSnapshot,
-    setPreferences(next) {
-      preferences = parseAppearance(JSON.stringify(next));
-      error = null;
-      try {
-        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
-      } catch (cause) {
-        if (!isStorageError(cause)) throw cause;
-        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
-      }
-      apply2();
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    beforeDensityChange(listener) {
-      densityListeners.add(listener);
-      return () => {
-        densityListeners.delete(listener);
-      };
-    },
-    dispose() {
-      listeners.clear();
-      densityListeners.clear();
-      media.removeEventListener("change", onSystemChange);
-      win.removeEventListener("storage", onStorage);
-      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
-    }
-  };
-}
-function getAppearanceController() {
-  return window.nanoclawAppearance ??= createAppearanceController(window, document);
-}
-
-// src/appearance-state.ts
-var appearance = y3({
-  preferences: { ...DEFAULT_APPEARANCE },
-  resolvedMode: "light",
-  error: null
-});
-function initAppearance(onError) {
-  const controller = getAppearanceController();
-  const update = (snapshot) => {
-    const previousError = appearance.value.error;
-    appearance.value = snapshot;
-    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
-  };
-  update(controller.getSnapshot());
-  return controller.subscribe(update);
-}
-function setAppearance(preferences) {
-  getAppearanceController().setPreferences(preferences);
-}
-
-// src/activity-trace-state.ts
-var traceOpen = y3(/* @__PURE__ */ new Map());
-var metricsOpen = y3(/* @__PURE__ */ new Map());
-var initialTracePending = true;
-function toggle(panel, ownerId, follow) {
-  const next = new Map(panel.peek());
-  if (!next.delete(ownerId)) next.set(ownerId, follow ? "follow" : "open");
-  panel.value = next;
-}
-function move(panel, from, to) {
-  const next = new Map(panel.peek());
-  const mode = next.get(from);
-  next.delete(from);
-  next.set(to, mode);
-  panel.value = next;
-}
-function activityMetricsExpanded(ownerId) {
-  return metricsOpen.value.has(ownerId);
-}
-function toggleActivityMetrics(ownerId, follow = false) {
-  toggle(metricsOpen, ownerId, follow);
-}
-function activityTraceOwner(message2) {
-  if (message2.turnTraceOwner) {
-    if (!message2.turnId) throw new Error("Activity trace owner is missing its authoritative turn ID");
-    return `turn:${message2.turnId}`;
-  }
-  if (!message2.id) throw new Error("Activity trace message is missing its authoritative ID");
-  return `message:${message2.id}`;
-}
-function activityTraceExpanded(ownerId) {
-  return traceOpen.value.has(ownerId);
-}
-function toggleActivityTrace(ownerId, follow = false) {
-  initialTracePending = false;
-  toggle(traceOpen, ownerId, follow);
-}
-function submissionTraceOwner(messageId) {
-  return `submission:${messageId}`;
-}
-function inheritActivityPanels(ownerId) {
-  for (const panel of [traceOpen, metricsOpen]) {
-    for (const [from, mode] of panel.peek()) if (mode === "follow" && from !== ownerId) move(panel, from, ownerId);
-  }
-  if (initialTracePending && appearance.peek().preferences.showTechnicalStatus) {
-    initialTracePending = false;
-    if (!traceOpen.peek().has(ownerId)) toggle(traceOpen, ownerId, true);
-  }
-}
-function adoptSubmissionTraces(turns) {
-  for (const turn2 of turns) {
-    for (const id2 of turn2.inputIds) {
-      for (const panel of [traceOpen, metricsOpen]) {
-        if (panel.peek().has(submissionTraceOwner(id2))) move(panel, submissionTraceOwner(id2), `turn:${turn2.id}`);
-      }
-    }
-  }
-}
-function resetActivityTraceView() {
-  traceOpen.value = /* @__PURE__ */ new Map();
-  metricsOpen.value = /* @__PURE__ */ new Map();
-  initialTracePending = true;
 }
 
 // src/hash.ts
@@ -18096,6 +17255,7 @@ function parseHash() {
   return null;
 }
 function buildHash() {
+  if (credentialsOpen.value) return "#credentials";
   if (!groupId.value) return "";
   const hasThread = !!threadId.value;
   const path = filePath.value || treePath.value;
@@ -18150,6 +17310,8 @@ function threadCtx(t4) {
   return { channelType: t4.channelType, messagingGroupId: t4.messagingGroupId ?? null, canSend: !!t4.canSend };
 }
 async function applyHash(router2, options = {}) {
+  credentialsOpen.value = location.hash === "#credentials";
+  if (credentialsOpen.value) return;
   const parsed = parseHash();
   const blank = history.state?.blankConversation;
   if (!parsed) {
@@ -18198,6 +17360,870 @@ async function applyHash(router2, options = {}) {
     await router2.selectFile({ path: parsed.path, name });
   }
   await restoredSearch;
+}
+
+// src/credentials-navigation.ts
+var credentialsIntent = y3(null);
+function openCredentials(intent) {
+  drawerOpen.threads.value = false;
+  drawerOpen.files.value = false;
+  const navigate = () => {
+    credentialsIntent.value = intent ?? null;
+    credentialsOpen.value = true;
+    writeHash();
+  };
+  if (groupAdminOpen.value && history.state?.__modal_back__) {
+    window.addEventListener("popstate", () => {
+      setTimeout(navigate, 0);
+    }, { once: true });
+    groupAdminOpen.value = false;
+  } else {
+    groupAdminOpen.value = false;
+    navigate();
+  }
+}
+function openChat() {
+  credentialsOpen.value = false;
+  writeHash();
+  if (location.hash === "#credentials") location.hash = "";
+}
+
+// ../../shared/voice.ts
+var VOICE_SAMPLE_RATE = 16e3;
+var VOICE_BYTES_PER_SECOND = VOICE_SAMPLE_RATE * 2;
+var VOICE_MAX_FRAME_BYTES = 32768;
+var VOICE_MAX_BUFFER_BYTES = VOICE_BYTES_PER_SECOND * 4;
+var VOICE_UPLOAD_BURST_BYTES = VOICE_MAX_BUFFER_BYTES - VOICE_MAX_FRAME_BYTES;
+
+// src/voice.ts
+function replaceSegment(segments, next) {
+  const index = segments.findIndex((segment) => segment.id === next.id);
+  if (index < 0) return [...segments, next];
+  const previous = segments[index];
+  if (previous.sequence >= next.sequence || previous.final && !next.final) return segments;
+  return segments.map((segment, i5) => i5 === index ? next : segment);
+}
+function insertVoiceText(prefix, text2, suffix) {
+  if (!text2) return prefix + suffix;
+  const before = prefix && !/[\s([{]$/.test(prefix) && !/^[,.;:!?%)\]}]/.test(text2) ? " " : "";
+  const after = suffix && !/^[\s,.;:!?%)\]}]/.test(suffix) && !/[([{]$/.test(text2) ? " " : "";
+  return prefix + before + text2 + after + suffix;
+}
+var initialState = () => ({
+  phase: "idle",
+  target: null,
+  elapsedMs: 0,
+  error: "",
+  sending: false,
+  connected: false
+});
+var VoiceController = class {
+  constructor(deps) {
+    this.deps = deps;
+  }
+  state = y3(initialState());
+  target = null;
+  generation = 0;
+  socket = null;
+  capture = null;
+  captureAbort = null;
+  timeout = null;
+  timer = null;
+  drainTimer = null;
+  audioQueue = [];
+  queuedBytes = 0;
+  uploadAllowance = VOICE_UPLOAD_BURST_BYTES;
+  allowanceAt = 0;
+  captureFlushed = false;
+  startedAt = 0;
+  diagnostics = null;
+  segments = [];
+  draft = "";
+  selection = { start: 0, end: 0 };
+  intent = "stop";
+  finishSent = false;
+  update(patch) {
+    this.state.value = { ...this.state.value, ...patch };
+  }
+  current(generation2) {
+    return this.generation === generation2 && !!this.target?.isCurrent();
+  }
+  start(target, start = target.getText().length, end = start) {
+    if (this.state.value.sending || !["idle", "error"].includes(this.state.value.phase)) return;
+    this.detach();
+    this.target = target;
+    this.update({ target: target.key });
+    this.connect(start, end);
+  }
+  connect(start, end) {
+    const target = this.target;
+    const draft = target.getText();
+    this.draft = draft;
+    start = Math.max(0, Math.min(start, draft.length));
+    end = Math.max(start, Math.min(end, draft.length));
+    this.selection = { start, end };
+    this.segments = [];
+    this.intent = "stop";
+    this.finishSent = false;
+    this.startedAt = Date.now();
+    this.diagnostics = { attemptId: this.deps.attemptId(), peakQueuedBytes: 0 };
+    this.captureFlushed = false;
+    this.uploadAllowance = VOICE_UPLOAD_BURST_BYTES;
+    const generation2 = ++this.generation;
+    this.update({ phase: "connecting", error: "" });
+    void this.acquireCapture(generation2);
+    if (!this.current(generation2)) return;
+    const base = this.deps.origin().replace(/^http/, "ws");
+    const params = new URLSearchParams();
+    params.set("attempt", this.diagnostics.attemptId);
+    if (target.channelType && target.channelType !== "web") {
+      params.set("channel", target.channelType);
+      if (target.messagingGroupId) params.set("mg", target.messagingGroupId);
+    }
+    let socket;
+    try {
+      socket = this.deps.socket(
+        `${base}/ui/chat/api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/voice/stream?${params}`
+      );
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : "Could not connect to voice input.", "connection");
+      return;
+    }
+    this.socket = socket;
+    this.timeout = setTimeout(() => {
+      if (this.current(generation2)) this.fail("Voice input did not become ready. Try again.", "connection");
+    }, 15e3);
+    socket.onmessage = (event) => this.handleMessage(event.data, generation2);
+    socket.onerror = () => {
+      if (this.current(generation2)) this.fail("Voice connection failed. Current text has been kept.", "connection");
+    };
+    socket.onclose = () => {
+      if (this.current(generation2))
+        this.fail("Voice connection closed before finalization. Current text has been kept.", "connection");
+    };
+  }
+  async acquireCapture(generation2) {
+    const abort = new AbortController();
+    this.captureAbort = abort;
+    try {
+      const capture = await this.deps.capture(
+        (chunk) => this.enqueueAudio(chunk, generation2),
+        (message2) => {
+          if (this.current(generation2)) this.fail(message2, "capture");
+        },
+        abort.signal
+      );
+      if (!this.current(generation2)) {
+        capture.cancel();
+        return;
+      }
+      this.capture = capture;
+      if (this.diagnostics) this.diagnostics.captureReadyMs = this.elapsed();
+      this.update({ phase: "listening" });
+      const started = Date.now();
+      this.timer = setInterval(() => this.update({ elapsedMs: Date.now() - started }), 250);
+    } catch (error) {
+      if (this.current(generation2))
+        this.fail(
+          error instanceof Error ? error.message : "Microphone unavailable.",
+          error instanceof Error && error.name === "NotAllowedError" ? "permission" : "capture"
+        );
+    }
+  }
+  handleMessage(data, generation2) {
+    if (!this.current(generation2)) return;
+    const target = this.target;
+    let message2;
+    try {
+      message2 = JSON.parse(data);
+    } catch {
+      this.fail("Invalid voice server response.", "protocol");
+      return;
+    }
+    if (!message2 || typeof message2 !== "object") {
+      this.fail("Invalid voice server response.", "protocol");
+      return;
+    }
+    if (message2.type === "ready" && !this.state.value.connected) {
+      if (this.state.value.phase !== "finalizing") {
+        if (this.timeout) clearTimeout(this.timeout);
+        this.timeout = null;
+      }
+      this.update({ connected: true });
+      if (this.diagnostics) this.diagnostics.socketReadyMs = this.elapsed();
+      this.allowanceAt = Date.now();
+      this.drainAudio(generation2);
+    } else if (message2.type === "transcript" && (this.state.value.phase === "listening" || this.state.value.phase === "finalizing")) {
+      if (typeof message2.id !== "string" || typeof message2.sequence !== "number" || !Number.isSafeInteger(message2.sequence) || typeof message2.text !== "string" || typeof message2.final !== "boolean") {
+        this.fail("Invalid transcript response. Current text has been kept.", "protocol");
+        return;
+      }
+      if (this.diagnostics && this.diagnostics.firstTranscriptMs === void 0 && message2.text.trim()) {
+        this.diagnostics.firstTranscriptMs = this.elapsed();
+      }
+      this.segments = replaceSegment(this.segments, {
+        id: message2.id,
+        sequence: message2.sequence,
+        text: message2.text,
+        final: message2.final
+      });
+      const text2 = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
+      if (text2) {
+        const prefix = this.draft.slice(0, this.selection.start);
+        const suffix = this.draft.slice(this.selection.end);
+        const caret = insertVoiceText(prefix, text2, "").length;
+        target.setText(insertVoiceText(prefix, text2, suffix), { start: caret, end: caret });
+      } else {
+        target.setText(this.draft, this.selection);
+      }
+    } else if (message2.type === "finished" && this.state.value.phase === "finalizing" && this.finishSent) {
+      if (this.intent === "send" && !this.segments.some((segment) => segment.text.trim()) || this.segments.some((segment) => segment.text.trim() && !segment.final)) {
+        this.fail("No complete transcript was received. Review current text before using it.", "protocol");
+        return;
+      }
+      const intent = this.intent;
+      this.report("finished");
+      this.release();
+      if (intent === "send") void this.sendDraft();
+      else this.detach();
+    } else if (message2.type === "error") {
+      this.fail(
+        typeof message2.message === "string" ? message2.message : "Voice input failed. Current text has been kept."
+      );
+    }
+  }
+  enqueueAudio(chunk, generation2) {
+    if (!this.current(generation2) || this.finishSent) return;
+    if (this.diagnostics && this.diagnostics.firstAudioMs === void 0) this.diagnostics.firstAudioMs = this.elapsed();
+    if (this.queuedBytes + chunk.byteLength + (this.socket?.bufferedAmount ?? 0) > VOICE_MAX_BUFFER_BYTES) {
+      this.fail("Voice connection is too slow. Current text has been kept; please try again.", "buffer");
+      return;
+    }
+    for (let offset = 0; offset < chunk.byteLength; offset += VOICE_MAX_FRAME_BYTES) {
+      const frame = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
+      this.audioQueue.push(frame);
+      this.queuedBytes += frame.byteLength;
+    }
+    if (this.diagnostics)
+      this.diagnostics.peakQueuedBytes = Math.max(this.diagnostics.peakQueuedBytes, this.queuedBytes);
+    this.drainAudio(generation2);
+  }
+  drainAudio(generation2) {
+    const socket = this.socket;
+    if (!this.current(generation2) || !this.state.value.connected || socket?.readyState !== 1 || this.finishSent) return;
+    if (this.drainTimer) clearTimeout(this.drainTimer);
+    this.drainTimer = null;
+    const now = Date.now();
+    this.uploadAllowance = Math.min(
+      VOICE_UPLOAD_BURST_BYTES,
+      this.uploadAllowance + (now - this.allowanceAt) * VOICE_BYTES_PER_SECOND / 1e3
+    );
+    this.allowanceAt = now;
+    try {
+      while (this.audioQueue.length) {
+        const frame = this.audioQueue[0];
+        if (frame.byteLength > this.uploadAllowance || socket.bufferedAmount + frame.byteLength > VOICE_MAX_BUFFER_BYTES) {
+          this.drainTimer = setTimeout(() => this.drainAudio(generation2), 25);
+          return;
+        }
+        socket.send(frame);
+        this.uploadAllowance -= frame.byteLength;
+        this.audioQueue.shift();
+        this.queuedBytes -= frame.byteLength;
+      }
+      if (this.captureFlushed) {
+        socket.send(JSON.stringify({ type: "finish" }));
+        this.finishSent = true;
+      }
+    } catch {
+      this.fail("Voice connection was interrupted. Current text has been kept.", "connection");
+    }
+  }
+  stop() {
+    if (this.state.value.sending) return;
+    if (this.state.value.phase === "connecting") this.detach();
+    else this.finalize("stop");
+  }
+  send() {
+    if (this.state.value.phase === "listening") this.finalize("send");
+    else if (this.state.value.phase === "error") void this.sendDraft();
+  }
+  async sendDraft() {
+    const target = this.target;
+    if (!target?.isCurrent() || this.state.value.sending) return;
+    this.update({ sending: true });
+    const generation2 = this.generation;
+    try {
+      const sent = await target.send();
+      if (!this.current(generation2)) return;
+      if (sent) this.detach();
+      else this.fail("Message was not sent. Your draft is still available.");
+    } catch {
+      if (this.current(generation2)) this.fail("Message was not sent. Your draft is still available.");
+    } finally {
+      if (this.current(generation2)) this.update({ sending: false });
+    }
+  }
+  finalize(intent) {
+    if (this.state.value.phase !== "listening") return;
+    this.intent = intent;
+    this.update({ phase: "finalizing" });
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    if (this.timeout) clearTimeout(this.timeout);
+    const generation2 = this.generation;
+    this.timeout = setTimeout(() => {
+      if (this.current(generation2))
+        this.fail("Finalization timed out. Current text is unconfirmed; review it before using it.", "finalize");
+    }, 2e4);
+    const capture = this.capture;
+    void (capture?.stop() ?? Promise.resolve()).then(() => {
+      if (!this.current(generation2)) return;
+      this.capture = null;
+      this.captureFlushed = true;
+      this.drainAudio(generation2);
+    }).catch(() => {
+      if (this.current(generation2))
+        this.fail("Could not finalize voice input. Current text has been kept.", "finalize");
+    });
+  }
+  /** Navigation/unmount invalidates callbacks before stopping hardware. No automatic resume. */
+  detach() {
+    this.report("cancelled");
+    this.release(true);
+    this.target = null;
+    this.state.value = initialState();
+  }
+  interrupt(reason = "Microphone stopped because this page is no longer active. Review current text before sending or dictating again.") {
+    if (["connecting", "listening", "finalizing"].includes(this.state.value.phase)) {
+      this.fail(reason, "interrupted");
+    }
+  }
+  elapsed() {
+    return Math.max(0, Date.now() - this.startedAt);
+  }
+  report(outcome, failure) {
+    const diagnostic = this.diagnostics;
+    if (!diagnostic || !this.target) return;
+    this.diagnostics = null;
+    this.deps.report(this.target.groupId, {
+      ...diagnostic,
+      outcome,
+      elapsedMs: this.elapsed(),
+      ...failure ? { failure } : {}
+    });
+  }
+  fail(error, failure = "provider") {
+    this.report("failed", failure);
+    this.release(true);
+    this.intent = "stop";
+    this.update({ phase: "error", error, sending: false });
+  }
+  release(cancel = false) {
+    ++this.generation;
+    if (this.timeout) clearTimeout(this.timeout);
+    if (this.timer) clearInterval(this.timer);
+    if (this.drainTimer) clearTimeout(this.drainTimer);
+    this.timeout = this.timer = null;
+    this.drainTimer = null;
+    this.audioQueue = [];
+    this.queuedBytes = 0;
+    this.captureAbort?.abort();
+    this.captureAbort = null;
+    this.capture?.cancel();
+    this.capture = null;
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
+      socket.onmessage = socket.onclose = socket.onerror = null;
+      try {
+        if (cancel && socket.readyState === 1) socket.send(JSON.stringify({ type: "cancel" }));
+        socket.close();
+      } catch {
+      }
+    }
+  }
+};
+
+// src/voice-audio.ts
+function voiceBrowserReason() {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia)
+    return "Microphone access requires a supported browser and HTTPS.";
+  if (typeof AudioContext === "undefined" || typeof AudioWorkletNode === "undefined")
+    return "Live voice requires AudioWorklet support in this browser.";
+  return null;
+}
+async function captureVoice(onChunk, onError, signal) {
+  const reason = voiceBrowserReason();
+  if (reason) throw new Error(reason);
+  const context = new AudioContext();
+  let stream2 = null;
+  let node = null;
+  let source = null;
+  let closed = false;
+  const stopTracks = () => {
+    for (const track of stream2?.getTracks() ?? []) {
+      track.onended = null;
+      try {
+        track.stop();
+      } catch {
+      }
+    }
+  };
+  const cancel = () => {
+    if (closed) return;
+    closed = true;
+    signal?.removeEventListener("abort", cancel);
+    stopTracks();
+    try {
+      source?.disconnect();
+    } catch {
+    }
+    try {
+      node?.disconnect();
+    } catch {
+    }
+    try {
+      void context.close().catch(() => {
+      });
+    } catch {
+    }
+  };
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
+  const checkCancelled = () => {
+    if (!closed) return;
+    stopTracks();
+    throw new Error("Microphone capture was cancelled.");
+  };
+  try {
+    checkCancelled();
+    const resumed = context.resume();
+    const worklet = context.audioWorklet.addModule("/ui/chat/voice-worklet.js");
+    const microphone = navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+    }).then((value) => {
+      stream2 = value;
+      if (closed) {
+        stopTracks();
+        stream2 = null;
+      }
+      return value;
+    });
+    const [, , readyStream] = await Promise.all([resumed, worklet, microphone]);
+    checkCancelled();
+    node = new AudioWorkletNode(context, "voice-pcm");
+    source = context.createMediaStreamSource(readyStream);
+    source.connect(node);
+    node.connect(context.destination);
+    node.port.onmessage = ({ data }) => {
+      if (!closed && data instanceof ArrayBuffer) onChunk(data);
+    };
+    node.onprocessorerror = () => onError("Audio capture failed. Current text has been kept.");
+    for (const track of readyStream.getTracks())
+      track.onended = () => onError("Microphone disconnected. Current text has been kept.");
+    return {
+      cancel,
+      stop: () => new Promise((resolve, reject) => {
+        if (closed) {
+          resolve();
+          return;
+        }
+        const timeout = setTimeout(() => {
+          cancel();
+          reject(new Error("Audio flush timed out"));
+        }, 1e3);
+        node.port.onmessage = ({ data }) => {
+          if (data instanceof ArrayBuffer) onChunk(data);
+          else if (data === "flushed") {
+            clearTimeout(timeout);
+            cancel();
+            resolve();
+          }
+        };
+        try {
+          node.port.postMessage("finish");
+        } catch (error) {
+          clearTimeout(timeout);
+          cancel();
+          reject(error);
+        }
+      })
+    };
+  } catch (error) {
+    cancel();
+    throw error;
+  }
+}
+async function reportVoiceDiagnostic(groupId2, diagnostic) {
+  try {
+    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/voice/diagnostics`, {
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(diagnostic)
+    });
+    if (!response.ok)
+      console.warn("Voice diagnostics delivery failed", { attemptId: diagnostic.attemptId, status: response.status });
+  } catch {
+    console.warn("Voice diagnostics delivery failed", { attemptId: diagnostic.attemptId });
+  }
+}
+var voice = new VoiceController({
+  socket: (url) => new WebSocket(url),
+  capture: captureVoice,
+  origin: () => location.origin,
+  attemptId: () => crypto.randomUUID(),
+  report: reportVoiceDiagnostic
+});
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) voice.interrupt();
+  });
+  window.addEventListener("pagehide", () => voice.interrupt());
+}
+
+// src/recorder.ts
+var isRecording = y3(false);
+var recordingDuration = y3(0);
+function hasGetUserMedia() {
+  return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+}
+var recorder = null;
+var stream = null;
+var timer = null;
+var generation = 0;
+var startedAt = 0;
+var chunks = [];
+async function startRecording() {
+  if (isRecording.value || !hasGetUserMedia() || typeof MediaRecorder === "undefined") return false;
+  const token = ++generation;
+  isRecording.value = true;
+  try {
+    const next = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (token !== generation) {
+      next.getTracks().forEach((track) => track.stop());
+      return false;
+    }
+    stream = next;
+    const mimeType = ["audio/ogg;codecs=opus", "audio/mp4;codecs=opus", "audio/mp4", "audio/webm;codecs=opus"].find(
+      (type) => MediaRecorder.isTypeSupported(type)
+    );
+    recorder = new MediaRecorder(next, mimeType ? { mimeType } : void 0);
+    chunks = [];
+    recorder.ondataavailable = ({ data }) => {
+      if (token === generation && data.size) chunks.push(data);
+    };
+    recorder.onerror = () => {
+      if (token === generation) cancelRecording();
+    };
+    recorder.start(250);
+    startedAt = Date.now();
+    timer = setInterval(() => {
+      recordingDuration.value = Date.now() - startedAt;
+    }, 250);
+    return true;
+  } catch {
+    if (token === generation) cancelRecording();
+    return false;
+  }
+}
+function stopRecording() {
+  return new Promise((resolve) => {
+    if (!recorder || recorder.state === "inactive") {
+      cancelRecording();
+      resolve(null);
+      return;
+    }
+    const active = recorder;
+    const token = generation;
+    active.onstop = () => {
+      if (token !== generation) {
+        resolve(null);
+        return;
+      }
+      const durationMs = Date.now() - startedAt;
+      const blob = new Blob(chunks, { type: active.mimeType || "audio/webm" });
+      cleanup();
+      resolve(durationMs < 2e3 ? null : { blob, durationMs });
+    };
+    active.stop();
+  });
+}
+function cancelRecording() {
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+  cleanup();
+}
+function cleanup() {
+  generation++;
+  if (timer) clearInterval(timer);
+  timer = null;
+  stream?.getTracks().forEach((track) => track.stop());
+  stream = null;
+  recorder = null;
+  chunks = [];
+  isRecording.value = false;
+  recordingDuration.value = 0;
+}
+
+// src/appearance.ts
+var THEMES = [
+  { id: "default", name: "Default", description: "The original look" },
+  { id: "autumn", name: "Autumn", description: "Parchment, walnut and warm copper" }
+];
+var APPEARANCE_MODES = [
+  { id: "system", name: "System" },
+  { id: "light", name: "Light" },
+  { id: "dark", name: "Dark" }
+];
+var TEXT_DENSITIES = [
+  { id: "comfortable", name: "Comfortable", description: "Larger text and more breathing room." },
+  { id: "compact", name: "Compact", description: "Smaller text and tighter spacing." }
+];
+var APPEARANCE_KEY = "nanoclaw:appearance";
+var DEFAULT_APPEARANCE = {
+  version: 3,
+  theme: "default",
+  mode: "system",
+  density: "compact",
+  showTechnicalStatus: false
+};
+var InvalidAppearanceError = class extends Error {
+};
+function parseAppearance(raw) {
+  if (raw === null) return { ...DEFAULT_APPEARANCE };
+  const value = JSON.parse(raw);
+  if (!value || typeof value !== "object") throw new InvalidAppearanceError("Invalid appearance preferences");
+  if (!("version" in value) || value.version !== 1 && value.version !== 2 && value.version !== 3 || !("theme" in value) || !isThemeId(value.theme) || !("mode" in value) || !isAppearanceMode(value.mode) || value.version >= 2 && (!("density" in value) || !isTextDensity(value.density)) || value.version === 3 && (!("showTechnicalStatus" in value) || typeof value.showTechnicalStatus !== "boolean")) {
+    throw new InvalidAppearanceError("Invalid appearance preferences");
+  }
+  return {
+    version: 3,
+    theme: value.theme,
+    mode: value.mode,
+    density: value.version >= 2 && "density" in value && isTextDensity(value.density) ? value.density : "compact",
+    showTechnicalStatus: value.version === 3 && "showTechnicalStatus" in value ? value.showTechnicalStatus : false
+  };
+}
+function isThemeId(value) {
+  return THEMES.some((theme) => theme.id === value);
+}
+function isAppearanceMode(value) {
+  return APPEARANCE_MODES.some((mode) => mode.id === value);
+}
+function isTextDensity(value) {
+  return TEXT_DENSITIES.some((density) => density.id === value);
+}
+function isStorageError(cause) {
+  return cause instanceof DOMException && ["SecurityError", "QuotaExceededError", "InvalidStateError"].includes(cause.name);
+}
+function resolveMode(mode, systemDark) {
+  return mode === "system" ? systemDark ? "dark" : "light" : mode;
+}
+function createAppearanceController(win, doc) {
+  const media = win.matchMedia("(prefers-color-scheme: dark)");
+  const listeners = /* @__PURE__ */ new Set();
+  const densityListeners = /* @__PURE__ */ new Set();
+  let preferences = { ...DEFAULT_APPEARANCE };
+  let error = null;
+  const brandedBrowserColor = doc.querySelector('meta[name="theme-color"]')?.getAttribute("content");
+  function report(message2, cause) {
+    console.warn(message2, cause);
+    error = message2;
+  }
+  function read(raw, persistMigration = false) {
+    try {
+      preferences = parseAppearance(raw);
+    } catch (cause) {
+      if (!(cause instanceof SyntaxError || cause instanceof InvalidAppearanceError)) throw cause;
+      preferences = { ...DEFAULT_APPEARANCE };
+      report("Saved appearance was invalid and has been reset to the defaults.", cause);
+      try {
+        win.localStorage.removeItem(APPEARANCE_KEY);
+      } catch (storageError) {
+        if (!isStorageError(storageError)) throw storageError;
+        report("Saved appearance was invalid, but could not be cleared. Using the defaults for now.", storageError);
+      }
+      return;
+    }
+    if (persistMigration && raw !== null && JSON.stringify(preferences) !== raw) {
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report(
+          "Appearance was upgraded, but could not be saved. Changes will apply only until this page is closed.",
+          cause
+        );
+      }
+    }
+  }
+  try {
+    read(win.localStorage.getItem(APPEARANCE_KEY), true);
+  } catch (cause) {
+    if (!isStorageError(cause)) throw cause;
+    report("Appearance storage is unavailable. Changes will apply only until this page is closed.", cause);
+  }
+  function getSnapshot() {
+    return { preferences: { ...preferences }, resolvedMode: resolveMode(preferences.mode, media.matches), error };
+  }
+  function updateBrowserColor() {
+    const color = win.getComputedStyle(doc.documentElement).getPropertyValue("--browser-theme-color").trim();
+    const next = color || brandedBrowserColor;
+    if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
+  }
+  function apply2() {
+    const snapshot = getSnapshot();
+    const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
+    doc.documentElement.dataset.theme = preferences.theme;
+    doc.documentElement.dataset.mode = snapshot.resolvedMode;
+    doc.documentElement.dataset.density = preferences.density;
+    updateBrowserColor();
+    for (const restore of restoreDensity) restore();
+    for (const listener of listeners) listener(snapshot);
+  }
+  function onStorage(event) {
+    if (event.key !== APPEARANCE_KEY && event.key !== null) return;
+    try {
+      if (event.storageArea !== win.localStorage) return;
+    } catch (cause) {
+      if (!isStorageError(cause)) throw cause;
+      report("Appearance could not be synchronized with another tab.", cause);
+      apply2();
+      return;
+    }
+    error = null;
+    read(event.key === null ? null : event.newValue);
+    apply2();
+  }
+  function onSystemChange() {
+    if (preferences.mode === "system") apply2();
+  }
+  apply2();
+  media.addEventListener("change", onSystemChange);
+  win.addEventListener("storage", onStorage);
+  doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
+  return {
+    getSnapshot,
+    setPreferences(next) {
+      preferences = parseAppearance(JSON.stringify(next));
+      error = null;
+      try {
+        win.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(preferences));
+      } catch (cause) {
+        if (!isStorageError(cause)) throw cause;
+        report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
+      }
+      apply2();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    beforeDensityChange(listener) {
+      densityListeners.add(listener);
+      return () => {
+        densityListeners.delete(listener);
+      };
+    },
+    dispose() {
+      listeners.clear();
+      densityListeners.clear();
+      media.removeEventListener("change", onSystemChange);
+      win.removeEventListener("storage", onStorage);
+      doc.removeEventListener("DOMContentLoaded", updateBrowserColor);
+    }
+  };
+}
+function getAppearanceController() {
+  return window.nanoclawAppearance ??= createAppearanceController(window, document);
+}
+
+// src/appearance-state.ts
+var appearance = y3({
+  preferences: { ...DEFAULT_APPEARANCE },
+  resolvedMode: "light",
+  error: null
+});
+function initAppearance(onError) {
+  const controller = getAppearanceController();
+  const update = (snapshot) => {
+    const previousError = appearance.value.error;
+    appearance.value = snapshot;
+    if (snapshot.error && snapshot.error !== previousError) onError(snapshot.error);
+  };
+  update(controller.getSnapshot());
+  return controller.subscribe(update);
+}
+function setAppearance(preferences) {
+  getAppearanceController().setPreferences(preferences);
+}
+
+// src/activity-trace-state.ts
+var traceOpen = y3(/* @__PURE__ */ new Map());
+var metricsOpen = y3(/* @__PURE__ */ new Map());
+var initialTracePending = true;
+function toggle(panel, ownerId, follow) {
+  const next = new Map(panel.peek());
+  if (!next.delete(ownerId)) next.set(ownerId, follow ? "follow" : "open");
+  panel.value = next;
+}
+function move(panel, from, to) {
+  const next = new Map(panel.peek());
+  const mode = next.get(from);
+  next.delete(from);
+  next.set(to, mode);
+  panel.value = next;
+}
+function activityMetricsExpanded(ownerId) {
+  return metricsOpen.value.has(ownerId);
+}
+function toggleActivityMetrics(ownerId, follow = false) {
+  toggle(metricsOpen, ownerId, follow);
+}
+function activityTraceOwner(message2) {
+  if (message2.turnTraceOwner) {
+    if (!message2.turnId) throw new Error("Activity trace owner is missing its authoritative turn ID");
+    return `turn:${message2.turnId}`;
+  }
+  if (!message2.id) throw new Error("Activity trace message is missing its authoritative ID");
+  return `message:${message2.id}`;
+}
+function activityTraceExpanded(ownerId) {
+  return traceOpen.value.has(ownerId);
+}
+function toggleActivityTrace(ownerId, follow = false) {
+  initialTracePending = false;
+  toggle(traceOpen, ownerId, follow);
+}
+function submissionTraceOwner(messageId) {
+  return `submission:${messageId}`;
+}
+function inheritActivityPanels(ownerId) {
+  for (const panel of [traceOpen, metricsOpen]) {
+    for (const [from, mode] of panel.peek()) if (mode === "follow" && from !== ownerId) move(panel, from, ownerId);
+  }
+  if (initialTracePending && appearance.peek().preferences.showTechnicalStatus) {
+    initialTracePending = false;
+    if (!traceOpen.peek().has(ownerId)) toggle(traceOpen, ownerId, true);
+  }
+}
+function adoptSubmissionTraces(turns) {
+  for (const turn2 of turns) {
+    for (const id2 of turn2.inputIds) {
+      for (const panel of [traceOpen, metricsOpen]) {
+        if (panel.peek().has(submissionTraceOwner(id2))) move(panel, submissionTraceOwner(id2), `turn:${turn2.id}`);
+      }
+    }
+  }
+}
+function resetActivityTraceView() {
+  traceOpen.value = /* @__PURE__ */ new Map();
+  metricsOpen.value = /* @__PURE__ */ new Map();
+  initialTracePending = true;
 }
 
 // src/chat-protocol.ts
@@ -19317,7 +19343,7 @@ function confirmCancelledInput(id2, key = currentInputKey(id2)) {
   cancelledInputs.add(key);
   if (key === currentInputKey(id2)) {
     pendingWebSends.value = pendingWebSends.value.filter(
-      (send2) => send2.groupId !== groupId.value || send2.threadId !== threadId.value || send2.messageId !== id2
+      (send) => send.groupId !== groupId.value || send.threadId !== threadId.value || send.messageId !== id2
     );
   }
   const request = pendingCancellations.value.get(key);
@@ -19865,13 +19891,13 @@ function submissionContext(view) {
     active: !!view?.connection.activeTurnId
   };
 }
-function classifySubmission(send2, context) {
-  const input = context.inputs.get(send2.messageId);
-  const awaitingTurn = send2.startsResponse && !context.active && !context.ownedIds.has(send2.messageId) && !hasFollowupDisposition(input?.inputState) && input?.inputState?.status !== "cancelled";
+function classifySubmission(send, context) {
+  const input = context.inputs.get(send.messageId);
+  const awaitingTurn = send.startsResponse && !context.active && !context.ownedIds.has(send.messageId) && !hasFollowupDisposition(input?.inputState) && input?.inputState?.status !== "cancelled";
   return {
     echoed: !!input,
     retain: !input || awaitingTurn,
-    starting: awaitingTurn && send2.status !== "failed"
+    starting: awaitingTurn && send.status !== "failed"
   };
 }
 function reconcileWebSubmissions(submissions, view, groupId2) {
@@ -19884,10 +19910,10 @@ function reconcileWebSubmissions(submissions, view, groupId2) {
   });
 }
 function submissionPresentation(transcript, submissions, view, groupId2, threadId2) {
-  const local = submissions.filter((send2) => send2.groupId === groupId2 && send2.threadId === threadId2);
+  const local = submissions.filter((send) => send.groupId === groupId2 && send.threadId === threadId2);
   const context = submissionContext(view);
-  const starts = local.filter((send2) => classifySubmission(send2, context).starting);
-  const startingIds = new Set(starts.map((send2) => send2.messageId));
+  const starts = local.filter((send) => classifySubmission(send, context).starting);
+  const startingIds = new Set(starts.map((send) => send.messageId));
   const seen = new Set(context.inputs.keys());
   const rows = transcript.map((row) => {
     if (row.kind !== "message") return row;
@@ -20465,7 +20491,7 @@ async function deleteThread(thread, cascade = false) {
   });
   if (threadId.value && gone.has(threadId.value)) {
     const latest = threads.value.length > 0 ? threads.value[0] : null;
-    if (latest) openChat(groupId.value, latest.threadId, threadCtxOf(latest)).catch(console.error);
+    if (latest) openChat2(groupId.value, latest.threadId, threadCtxOf(latest)).catch(console.error);
     else clearChat();
   }
 }
@@ -20502,7 +20528,7 @@ async function forkThreadAt(thread, atMessageId, options = {}) {
   }
   await loadThreads(gid);
   const branch = threads.value.find((x6) => x6.threadId === created.threadId) ?? null;
-  await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
+  await openChat2(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
   focusBranchComposerSoon({ groupId: gid, threadId: created.threadId }, options.composerDraft);
   return true;
 }
@@ -20510,7 +20536,7 @@ async function editMessageInBranch(thread, previousMessageId, draft) {
   if (previousMessageId) return forkThreadAt(thread, previousMessageId, { composerDraft: draft });
   const gid = groupId.value;
   if (!gid) return false;
-  await openChat(gid, null, null);
+  await openChat2(gid, null, null);
   const targetThreadId = threadId.value;
   if (!targetThreadId || targetThreadId === thread.threadId) return false;
   focusBranchComposerSoon({ groupId: gid, threadId: targetThreadId }, draft);
@@ -20695,7 +20721,7 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-async function openChat(gid, resumeTid, opts) {
+async function openChat2(gid, resumeTid, opts) {
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
   if (!resumeTid && refs.newChatInFlight) return;
   resetConversation();
@@ -20840,7 +20866,7 @@ async function openChat(gid, resumeTid, opts) {
 function startNewThread() {
   const gid = groupId.value;
   if (!gid) return;
-  openChat(gid, null, null).then(() => {
+  openChat2(gid, null, null).then(() => {
     drawerOpen.threads.value = false;
     drawerOpen.files.value = false;
   }).catch(console.error);
@@ -20967,7 +20993,7 @@ function captureChatSendContext() {
 async function retryChatSend(messageId) {
   const context = captureChatSendContext();
   const submission = pendingWebSends.peek().find(
-    (send2) => send2.messageId === messageId && send2.groupId === groupId.value && send2.threadId === threadId.value && send2.status === "failed"
+    (send) => send.messageId === messageId && send.groupId === groupId.value && send.threadId === threadId.value && send.status === "failed"
   );
   if (!context?.isWeb || !submission) {
     showToast("This message is no longer available to retry.", "err");
@@ -20977,13 +21003,13 @@ async function retryChatSend(messageId) {
 }
 function updateWebSend(gid, tid, messageId, update) {
   pendingWebSends.value = pendingWebSends.peek().map(
-    (send2) => send2.groupId === gid && send2.threadId === tid && send2.messageId === messageId ? update(send2) : send2
+    (send) => send.groupId === gid && send.threadId === tid && send.messageId === messageId ? update(send) : send
   );
 }
 function confirmedWebSend(gid, tid, messageId) {
   const view = conversationState.peek()?.conversation;
   return pendingWebSends.peek().some(
-    (send2) => send2.groupId === gid && send2.threadId === tid && send2.messageId === messageId && send2.status === "accepted"
+    (send) => send.groupId === gid && send.threadId === tid && send.messageId === messageId && send.status === "accepted"
   ) || groupId.value === gid && threadId.value === tid && !!view && view.threadId === tid && view.messages.some((message2) => message2.direction === "in" && message2.id === messageId);
 }
 async function sendChat(text2, files, options = {}) {
@@ -21037,7 +21063,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
       startsResponse,
       status: "sending"
     };
-    pendingWebSends.value = pendingWebSends.peek().filter((send2) => send2.groupId !== gid || send2.threadId !== tid || send2.messageId !== messageId).concat(submission);
+    pendingWebSends.value = pendingWebSends.peek().filter((send) => send.groupId !== gid || send.threadId !== tid || send.messageId !== messageId).concat(submission);
     if (startsResponse) inheritActivityPanels(submissionTraceOwner(messageId));
   }
   try {
@@ -21072,7 +21098,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
         return contextCurrent();
       }
       if (contextCurrent()) showToast(`Send failed: ${detail}`, "err");
-      updateWebSend(gid, tid, messageId, (send2) => withWebSendState(send2, { status: "failed", error: detail }));
+      updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "failed", error: detail }));
       return false;
     } else if (!isWeb) {
       if (!contextCurrent()) return false;
@@ -21081,7 +21107,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
       } catch {
       }
     }
-    updateWebSend(gid, tid, messageId, (send2) => withWebSendState(send2, { status: "accepted" }));
+    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "accepted" }));
     return contextCurrent();
   } catch (err) {
     console.error("send failed", err);
@@ -21090,7 +21116,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
       return contextCurrent();
     }
     const m6 = err instanceof Error ? err.message : "network error";
-    updateWebSend(gid, tid, messageId, (send2) => withWebSendState(send2, { status: "failed", error: m6 }));
+    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "failed", error: m6 }));
     if (contextCurrent()) showToast(`Send failed: ${m6}`, "err");
     return false;
   }
@@ -21113,9 +21139,9 @@ async function selectGroup(gid, options = {}) {
   if (generation2 !== refs.chatGeneration || groupId.value !== gid) return;
   const latest = threadsFresh && !options.newConversation && threads.value.length > 0 ? threads.value[0] : null;
   if (latest) {
-    openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error("chat open failed", err));
+    openChat2(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error("chat open failed", err));
   } else if (threadsFresh) {
-    openChat(gid, null, null).catch((err) => console.error("auto-start chat failed", err));
+    openChat2(gid, null, null).catch((err) => console.error("auto-start chat failed", err));
   } else {
     showToast("Could not load threads", "err");
   }
@@ -21914,6 +21940,7 @@ function GroupStrip() {
     });
   }
   const pick = (gid) => {
+    if (credentialsOpen.value) openChat();
     if (gid !== groupId.value) selectGroup(gid).catch(console.error);
   };
   return /* @__PURE__ */ u4(
@@ -22065,7 +22092,7 @@ function UserMenu() {
 // src/components/Header.tsx
 function Header() {
   return /* @__PURE__ */ u4("header", { class: "app-header", children: [
-    /* @__PURE__ */ u4(
+    !credentialsOpen.value ? /* @__PURE__ */ u4(
       "button",
       {
         type: "button",
@@ -22077,9 +22104,9 @@ function Header() {
         },
         children: "\u2630"
       }
-    ),
+    ) : null,
     /* @__PURE__ */ u4("span", { class: "brand", children: BRAND.name }),
-    /* @__PURE__ */ u4(
+    !credentialsOpen.value ? /* @__PURE__ */ u4(
       "button",
       {
         type: "button",
@@ -22090,10 +22117,14 @@ function Header() {
         onClick: startNewThread,
         children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
       }
-    ),
+    ) : null,
     /* @__PURE__ */ u4(GroupStrip, {}),
+    /* @__PURE__ */ u4("nav", { class: "primary-navigation", "aria-label": "Primary", children: [
+      /* @__PURE__ */ u4("button", { type: "button", "aria-current": !credentialsOpen.value ? "page" : void 0, onClick: openChat, children: "Chat" }),
+      /* @__PURE__ */ u4("button", { type: "button", "aria-current": credentialsOpen.value ? "page" : void 0, onClick: () => openCredentials(), children: "Credentials" })
+    ] }),
     /* @__PURE__ */ u4(UserMenu, {}),
-    /* @__PURE__ */ u4(
+    !credentialsOpen.value ? /* @__PURE__ */ u4(
       "button",
       {
         type: "button",
@@ -22105,7 +22136,7 @@ function Header() {
         },
         children: "\u{1F4C1}"
       }
-    )
+    ) : null
   ] });
 }
 
@@ -22215,7 +22246,7 @@ function ThreadRow({ t: t4 }) {
   ].filter(Boolean).join(" \xB7 ") : void 0;
   const onOpen = (ev) => {
     if (ev.target.classList.contains("del")) return;
-    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
+    if (groupId.value) openChat2(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
   const onDel = async (ev) => {
@@ -22316,7 +22347,7 @@ function DmRow({ t: t4 }) {
   const meta = channelMeta(ct);
   const active = t4.threadId === threadId.value;
   const onOpen = () => {
-    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
+    if (groupId.value) openChat2(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
   return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
@@ -22402,7 +22433,7 @@ function SearchResultRow({ r: r4 }) {
       }, 100);
     } else {
       highlightMessageId.value = msgId;
-      openChat(groupId.value, tid, opts).catch(console.error);
+      openChat2(groupId.value, tid, opts).catch(console.error);
     }
   };
   const raw = r4.snippet || "";
@@ -22858,7 +22889,7 @@ function ComposerInput({
   inputRef,
   textarea,
   voice: voice2,
-  send: send2,
+  send,
   multiLine,
   listening,
   className = "",
@@ -22878,14 +22909,14 @@ function ComposerInput({
           "button",
           {
             type: "submit",
-            id: send2.id,
-            class: `accent-icon-btn${send2.className ? ` ${send2.className}` : ""}`,
-            "aria-label": send2.label,
-            "aria-busy": send2.busy,
-            title: send2.title,
-            disabled: send2.disabled,
+            id: send.id,
+            class: `accent-icon-btn${send.className ? ` ${send.className}` : ""}`,
+            "aria-label": send.label,
+            "aria-busy": send.busy,
+            title: send.title,
+            disabled: send.disabled,
             onMouseDown: (event) => event.preventDefault(),
-            children: send2.icon ?? "\u2191"
+            children: send.icon ?? "\u2191"
           }
         )
       ]
@@ -24699,7 +24730,7 @@ function BranchDivider({ child }) {
 function openThreadAt(targetThreadId, messageId) {
   if (!groupId.value) return;
   highlightMessageId.value = messageId;
-  openChat(groupId.value, targetThreadId, null).catch(console.error);
+  openChat2(groupId.value, targetThreadId, null).catch(console.error);
 }
 function MessageText({ text: text2, md }) {
   const mdRef = A2(null);
@@ -24737,7 +24768,7 @@ function MessageText({ text: text2, md }) {
                 highlightMessageId.value = msgId || null;
               }, 50);
             } else {
-              openChat(gid, tid, null).catch(console.error);
+              openChat2(gid, tid, null).catch(console.error);
             }
           }
         });
@@ -24791,7 +24822,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const isWebChannel = !channelType.value || channelType.value === "web";
   const suggestedAction = m6.suggestedAction ?? (isFutureWorkMessage(m6.text) ? "continue" : void 0);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
-  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send2) => send2.groupId === groupId.value && send2.threadId === threadId.value && send2.status !== "failed");
+  const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
   return /* @__PURE__ */ u4(
     MessageBubble,
@@ -29728,63 +29759,148 @@ function UserPicker({
   ] });
 }
 
-// src/components/GroupAdminCredentialsApi.ts
-function credPath(gid, sub = "", targetOnly = false) {
-  return apiPath(gid, `/credentials${sub}${targetOnly ? `${sub.includes("?") ? "&" : "?"}target=agent-vault` : ""}`);
+// src/components/CredentialsApi.ts
+function credentialsPath(sub = "") {
+  return `/ui/chat/api/credentials${sub}`;
 }
-var ERROR_GATEWAY_UNREACHABLE = "gateway_unreachable";
-
-// src/components/GroupAdminCredentialsParts.tsx
-var KEY_NAME_RE = /^[A-Z][A-Z0-9_]*$/;
-var SIGN_IN_TIMEOUT_MS = 10 * 60 * 1e3;
-var SIGN_IN_POLL_MS = 2e3;
-function ago(iso) {
-  if (!iso) return "never";
-  const ms = Date.now() - Date.parse(iso);
-  if (Number.isNaN(ms)) return "unknown";
-  const min = 6e4;
-  const hour = 60 * min;
-  const day = 24 * hour;
-  if (ms < min) return "just now";
-  if (ms < hour) return `${Math.floor(ms / min)} min ago`;
-  if (ms < day) return `${Math.floor(ms / hour)} h ago`;
-  if (ms < 30 * day) return `${Math.floor(ms / day)} d ago`;
-  return new Date(iso).toLocaleDateString(void 0, { month: "short", day: "numeric", year: "numeric" });
+function connectionPath(id2, sub = "") {
+  return credentialsPath(`/connections/${encodeURIComponent(id2)}${sub}`);
 }
-function describeInjection(injection, key) {
-  switch (injection.type) {
-    case "bearer":
-      return `Authorization: Bearer ${key}`;
-    case "basic":
-      return `Authorization: Basic ${key}`;
-    case "api-key":
-      return `${injection.name || "Authorization"}: ${injection.prefix ?? ""}${key}`;
-    case "query":
-      return `${injection.name || `__${key}__`} in the URL query \u2192 ${key}`;
-    case "custom":
-      return injection.template || "Custom header";
+function accessPath(gid, connectionId) {
+  return `/ui/chat/api/groups/${encodeURIComponent(gid)}/admin/access${connectionId ? `/${encodeURIComponent(connectionId)}` : ""}`;
+}
+var CredentialsError = class extends Error {
+  constructor(message2, status = 0) {
+    super(message2);
+    this.status = status;
   }
+};
+async function credentialRequest(url, method = "GET", body) {
+  const response = await fetch(url, {
+    method,
+    credentials: "same-origin",
+    headers: body === void 0 ? {} : { "Content-Type": "application/json" },
+    body: body === void 0 ? void 0 : JSON.stringify(body)
+  });
+  const text2 = await response.text();
+  let data;
+  try {
+    data = text2 ? JSON.parse(text2) : null;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    throw new CredentialsError(`The credentials server returned invalid JSON (HTTP ${response.status}).`, response.status);
+  }
+  if (!response.ok) {
+    const message2 = isRecord2(data) && typeof data.error === "string" ? data.error : `HTTP ${response.status}`;
+    throw new CredentialsError(message2, response.status);
+  }
+  return data;
 }
-function SecretInput({
-  id: id2,
-  value,
-  onInput,
-  placeholder = "Paste the value",
-  autoFocus,
-  disabled
-}) {
+function errorMessage(error) {
+  return error instanceof Error ? error.message : "Unexpected credentials error. Please refresh and try again.";
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var KEY = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+function parseServices(text2) {
+  const parsed = JSON.parse(text2);
+  if (!Array.isArray(parsed) || !parsed.length) throw new CredentialsError("Provide at least one service in a JSON array.");
+  const names = /* @__PURE__ */ new Set();
+  for (const service of parsed) {
+    if (!isRecord2(service) || typeof service.name !== "string" || !service.name.trim() || typeof service.host !== "string" || !service.host.trim() || !isRecord2(service.auth) || typeof service.auth.type !== "string") throw new CredentialsError("Every service needs a name, host and auth.type.");
+    if (names.has(service.name)) throw new CredentialsError(`Duplicate service name: ${service.name}`);
+    names.add(service.name);
+    if (service.path !== void 0 && typeof service.path !== "string")
+      throw new CredentialsError("Service path must be a string.");
+    for (const field of ["enabled", "https_only"]) {
+      if (service[field] !== void 0 && typeof service[field] !== "boolean")
+        throw new CredentialsError(`${field} must be true or false.`);
+    }
+    for (const field of ["header", "prefix"]) {
+      if (service.auth[field] !== void 0 && typeof service.auth[field] !== "string")
+        throw new CredentialsError(`auth.${field} must be a string.`);
+    }
+    for (const field of ["token", "username", "password", "key"]) {
+      const ref = service.auth[field];
+      if (ref !== void 0 && (typeof ref !== "string" || !KEY.test(ref)))
+        throw new CredentialsError(`auth.${field} must be a key NAME, not a value or template.`);
+    }
+    if (service.auth.headers !== void 0 && (!isRecord2(service.auth.headers) || Object.values(service.auth.headers).some((ref) => typeof ref !== "string" || !/\{\{\s*[\w.-]+\s*\}\}/.test(ref))))
+      throw new CredentialsError("auth.headers values must be templates referencing key names, for example Bearer {{ API_TOKEN }}.");
+    if (service.substitutions !== void 0 && (!Array.isArray(service.substitutions) || service.substitutions.some((sub) => !isRecord2(sub) || typeof sub.key !== "string" || !KEY.test(sub.key) || typeof sub.placeholder !== "string" || !sub.placeholder || sub.in !== void 0 && (!Array.isArray(sub.in) || sub.in.some((value) => typeof value !== "string")))))
+      throw new CredentialsError("Every substitution needs a key NAME and placeholder.");
+  }
+  return parsed;
+}
+function serviceKeys(services) {
+  return [...new Set(services.flatMap((service) => [
+    service.auth.token,
+    service.auth.username,
+    service.auth.password,
+    service.auth.key,
+    ...Object.values(service.auth.headers ?? {}).flatMap((template) => [...template.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)].map((match2) => match2[1])),
+    ...(service.substitutions ?? []).map((sub) => sub.key)
+  ]).filter((value) => !!value))];
+}
+function providedValues(values, names) {
+  return Object.fromEntries(names.filter((name) => values[name] !== void 0 && values[name] !== "").map((name) => [name, values[name]]));
+}
+var SERVICE_PRESETS = [
+  { label: "Bearer token", services: [{ name: "api", host: "api.example.com", https_only: true, auth: { type: "bearer", token: "API_TOKEN" } }] },
+  { label: "Named API key header", services: [{ name: "api", host: "api.example.com", https_only: true, auth: { type: "api-key", header: "X-Api-Key", key: "API_KEY" } }] },
+  { label: "Basic username + password", services: [{ name: "api", host: "api.example.com", https_only: true, auth: { type: "basic", username: "USERNAME", password: "PASSWORD" } }] },
+  { label: "Multiple headers", services: [{ name: "api", host: "api.example.com", https_only: true, auth: { type: "custom", headers: { "X-Api-Key": "{{ API_KEY }}", "X-Api-Secret": "{{ API_SECRET }}" } } }] },
+  { label: "Query placeholder", services: [{ name: "api", host: "api.example.com", https_only: true, auth: { type: "passthrough" }, substitutions: [{ key: "API_KEY", placeholder: "__API_KEY__", in: ["query"] }] }] }
+];
+function appConfiguration(app) {
+  return {
+    label: app.label,
+    issuer: app.issuer,
+    client_id: app.client_id,
+    authorization_endpoint: app.authorization_endpoint,
+    token_endpoint: app.token_endpoint,
+    token_endpoint_auth_method: app.token_endpoint_auth_method,
+    api_hosts: app.api_hosts,
+    default_scopes: app.default_scopes,
+    authorization_params: app.authorization_params,
+    revocation_endpoint: app.revocation_endpoint,
+    identity: app.identity,
+    jwks_uri: app.jwks_uri,
+    token_scope_separator: app.token_scope_separator
+  };
+}
+function parseAppConfiguration(text2) {
+  const config = JSON.parse(text2);
+  if (!isRecord2(config) || typeof config.label !== "string" || !config.label.trim() || typeof config.client_id !== "string" || !config.client_id.trim() || typeof config.issuer !== "string" || !config.issuer.trim() || !Array.isArray(config.api_hosts) || !config.api_hosts.length || config.api_hosts.some((v5) => typeof v5 !== "string") || !Array.isArray(config.default_scopes) || config.default_scopes.some((v5) => typeof v5 !== "string"))
+    throw new CredentialsError("App JSON needs label, issuer, client_id, api_hosts and default_scopes.");
+  if (!["none", "client_secret_post", "client_secret_basic"].includes(String(config.token_endpoint_auth_method)) || !["none", "oidc", "google", "github"].includes(String(config.identity)) || !["space", "comma"].includes(String(config.token_scope_separator)))
+    throw new CredentialsError("App JSON needs a supported token_endpoint_auth_method, identity and token_scope_separator.");
+  for (const field of ["authorization_endpoint", "token_endpoint", "revocation_endpoint", "jwks_uri"]) {
+    if (config[field] !== void 0 && typeof config[field] !== "string")
+      throw new CredentialsError(`${field} must be a URL string.`);
+  }
+  if (config.authorization_params !== void 0 && (!isRecord2(config.authorization_params) || Object.values(config.authorization_params).some((value) => typeof value !== "string")))
+    throw new CredentialsError("authorization_params must map parameter names to string values.");
+  const secretFields = (value) => isRecord2(value) && Object.entries(value).some(([key, child]) => /secret|password|access_token|refresh_token/i.test(key) || secretFields(child));
+  if (secretFields(config))
+    throw new CredentialsError("Put the client secret only in the separate password field.");
+  return config;
+}
+
+// src/components/CredentialsParts.tsx
+function SecretInput({ value, onInput, placeholder = "New value", disabled, label }) {
   const [shown, setShown] = h2(false);
   return /* @__PURE__ */ u4("div", { class: "ga-cred-secret", children: [
     /* @__PURE__ */ u4(
       "input",
       {
-        id: id2,
         type: shown ? "text" : "password",
+        "aria-label": label,
         value,
-        placeholder,
         autocomplete: "new-password",
         spellcheck: false,
-        autoFocus,
+        placeholder,
         disabled,
         onInput: (event) => onInput(event.currentTarget.value)
       }
@@ -29793,10 +29909,9 @@ function SecretInput({
       "button",
       {
         type: "button",
-        class: "ga-cred-secret-toggle",
+        disabled,
         "aria-pressed": shown,
         "aria-label": shown ? "Hide value" : "Show value",
-        disabled,
         onClick: () => setShown(!shown),
         children: shown ? "Hide" : "Show"
       }
@@ -29805,89 +29920,212 @@ function SecretInput({
 }
 function useEscapeClose(onClose, busy = false) {
   y2(() => {
-    function onKey(event) {
+    const onKey = (event) => {
       if (event.key !== "Escape") return;
       event.stopImmediatePropagation();
       event.preventDefault();
       if (!busy) onClose();
-    }
+    };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose, busy]);
 }
-function openSignInWindow(url) {
-  return window.open(url, "nanoclaw-oauth", "popup,width=520,height=720") !== null;
+function CredentialDialog({ title, children, onClose, busy, footer }) {
+  useEscapeClose(onClose, busy);
+  return /* @__PURE__ */ u4(MobileDialog, { title, onClose, maxWidth: "760px", className: "ga-cred-dialog", closeDisabled: busy, children: [
+    /* @__PURE__ */ u4("div", { class: "settings-body ga-cred ga-cred-dialog-body", children }),
+    /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-cred-foot", children: footer })
+  ] });
 }
-function useSignIn(gid, onFinished, targetOnly = false) {
-  const [waiting, setWaiting] = h2(null);
-  async function start(input) {
-    const r4 = await call(credPath(gid, "/accounts/start", targetOnly), "POST", input);
-    if (!r4.ok) {
-      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-      return false;
+function Impact({ connection: connection2, groups: groups2 }) {
+  return /* @__PURE__ */ u4("div", { class: "ga-cred-callout ga-cred-impact", children: [
+    /* @__PURE__ */ u4("strong", { children: [
+      "Available to \xB7 ",
+      connection2.grants.length,
+      " agent groups"
+    ] }),
+    connection2.grants.length ? /* @__PURE__ */ u4("ul", { children: connection2.grants.map((grant) => /* @__PURE__ */ u4("li", { children: [
+      groups2.find((group) => group.id === grant.vault)?.name ?? grant.vault,
+      " \xB7 ",
+      grant.services.join(", "),
+      " \xB7 ",
+      grant.status
+    ] }, grant.vault)) }) : /* @__PURE__ */ u4("p", { children: "No agents currently have access." }),
+    /* @__PURE__ */ u4("p", { children: "These are access grants, not a usage history. Every receiving agent uses the same upstream identity, permissions and quotas. Detaching an agent does not disconnect upstream." })
+  ] });
+}
+function Review({ checked, onChange, children }) {
+  return /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+    /* @__PURE__ */ u4("input", { type: "checkbox", checked, onChange: (event) => onChange(event.currentTarget.checked) }),
+    /* @__PURE__ */ u4("span", { children })
+  ] });
+}
+function ErrorNotice({ message: message2 }) {
+  return message2 ? /* @__PURE__ */ u4("p", { class: "ga-cred-error", role: "alert", children: message2 }) : null;
+}
+function useCredentialResource(url) {
+  const [data, setData] = h2(null);
+  const [error, setError] = h2("");
+  const [loading, setLoading] = h2(true);
+  const sequence = A2(0);
+  async function refresh() {
+    const request = ++sequence.current;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await credentialRequest(url);
+      if (request === sequence.current) setData(result);
+    } catch (error2) {
+      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+      if (request === sequence.current) setError(errorMessage(error2));
+    } finally {
+      if (request === sequence.current) setLoading(false);
     }
-    setWaiting({ state: r4.data.state, label: r4.data.label, url: r4.data.authorizeUrl });
-    if (!openSignInWindow(r4.data.authorizeUrl)) {
-      showToast('Your browser blocked the sign-in window. Use "Open sign-in window".', "err");
-    }
-    return true;
   }
   y2(() => {
-    if (!waiting) return void 0;
-    let settled = false;
-    const progressUrl = credPath(gid, `/accounts/start/${encodeURIComponent(waiting.state)}`, targetOnly);
-    async function poll() {
-      const r4 = await call(progressUrl);
-      if (settled || !r4.ok || r4.data.status === "pending") return;
-      settled = true;
+    setData(null);
+    void refresh();
+    return () => {
+      sequence.current++;
+    };
+  }, [url]);
+  return { data, error, loading, refresh };
+}
+function ConfirmCredentialAction({ title, label, children, onClose, onConfirm }) {
+  const [busy, setBusy] = h2(false);
+  const [error, setError] = h2("");
+  const [reviewed, setReviewed] = h2(false);
+  async function confirm2() {
+    setBusy(true);
+    setError("");
+    try {
+      await onConfirm();
+      onClose();
+    } catch (error2) {
+      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+      setError(errorMessage(error2));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /* @__PURE__ */ u4(CredentialDialog, { title, onClose, busy, footer: /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
+    /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled: busy || !reviewed, onClick: () => void confirm2(), children: busy ? "Working\u2026" : label })
+  ] }), children: [
+    children,
+    /* @__PURE__ */ u4(Review, { checked: reviewed, onChange: setReviewed, children: "I reviewed the affected agents and the connection-wide impact." }),
+    /* @__PURE__ */ u4(ErrorNotice, { message: error })
+  ] });
+}
+function useConnectionSignIn(onFinished) {
+  const [waiting, setWaiting] = h2(null);
+  const popup = A2(null);
+  const pending4 = A2(false);
+  const currentState = A2(null);
+  const finished = A2(onFinished);
+  finished.current = onFinished;
+  const closePopup = () => {
+    popup.current?.close();
+    popup.current = null;
+  };
+  const openPopup = (url) => {
+    popup.current = window.open(url, "nanoclaw-oauth", "popup,width=520,height=720");
+    if (!popup.current) showToast("Sign-in popup blocked. Use \u201COpen sign-in window\u201D.", "err");
+  };
+  async function start(id2, input) {
+    if (pending4.current) throw new CredentialsError("Finish or stop waiting for the current sign-in first.");
+    pending4.current = true;
+    popup.current = window.open("about:blank", "nanoclaw-oauth", "popup,width=520,height=720");
+    try {
+      const result = await credentialRequest(connectionPath(id2, "/start"), "POST", input);
+      const url = new URL(result.authorizeUrl, location.origin);
+      if (url.protocol !== "https:" && url.protocol !== "http:") throw new CredentialsError("Invalid OAuth authorization URL.");
+      setWaiting(result);
+      currentState.current = result.state;
+      if (popup.current && !popup.current.closed) popup.current.location.href = url.href;
+      else showToast("Sign-in popup blocked. Use \u201COpen sign-in window\u201D.", "err");
+    } catch (error) {
+      pending4.current = false;
+      closePopup();
+      throw error;
+    }
+  }
+  y2(() => {
+    if (!waiting) return;
+    let active = true;
+    let polling = false;
+    let timer2;
+    const settle = () => {
+      active = false;
+      currentState.current = null;
+      pending4.current = false;
+      closePopup();
       setWaiting(null);
-      if (r4.data.status === "connected") showToast(r4.data.account ? `Connected ${r4.data.account}` : `Connected ${waiting.label}`);
-      else showToast(r4.data.error ?? "Sign-in failed", "err");
-      onFinished();
+      finished.current();
+    };
+    async function poll() {
+      if (!active || polling || currentState.current !== waiting.state) return;
+      polling = true;
+      try {
+        const progress = await credentialRequest(credentialsPath(`/sign-ins/${encodeURIComponent(waiting.state)}`));
+        if (!active || currentState.current !== waiting.state) return;
+        if (progress.status === "connected") {
+          showToast(progress.account ? `Connected ${progress.account}` : "Account connected");
+          settle();
+        } else if (progress.status === "failed") {
+          showToast(progress.error ?? "Sign-in failed. Reconnect to try again.", "err");
+          settle();
+        }
+      } catch (error) {
+        if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
+        if (active && currentState.current === waiting.state) {
+          showToast(`Cannot check sign-in: ${errorMessage(error)}. Refresh connections before starting again.`, "err");
+          settle();
+        }
+      } finally {
+        polling = false;
+        if (active) timer2 = setTimeout(() => void poll(), 2e3);
+      }
     }
     function onMessage(event) {
       const message2 = event.data;
-      if (event.origin !== location.origin || message2?.type !== "nanoclaw-oauth-complete") return;
-      if (message2.state === waiting.state) void poll();
+      if (event.origin !== location.origin || message2?.type !== "nanoclaw-oauth-complete" || message2.state !== waiting.state || popup.current && event.source !== popup.current) return;
+      clearTimeout(timer2);
+      void poll();
     }
     window.addEventListener("message", onMessage);
-    const timer2 = setInterval(() => void poll(), SIGN_IN_POLL_MS);
+    void poll();
     const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      setWaiting(null);
-      showToast("Stopped waiting for sign-in. Refresh credentials to check whether authorization completed before signing in again.", "err");
-      onFinished();
-    }, SIGN_IN_TIMEOUT_MS);
+      if (!active) return;
+      showToast("Stopped waiting after ten minutes. Refresh connections before signing in again.", "err");
+      settle();
+    }, 10 * 60 * 1e3);
     return () => {
-      settled = true;
-      window.removeEventListener("message", onMessage);
-      clearInterval(timer2);
+      active = false;
+      clearTimeout(timer2);
       clearTimeout(timeout);
+      window.removeEventListener("message", onMessage);
     };
-  }, [waiting?.state, gid, targetOnly]);
+  }, [waiting?.state]);
+  y2(() => () => {
+    pending4.current = false;
+    closePopup();
+  }, []);
   return {
     waiting,
     start,
     reopen: () => {
-      if (waiting && !openSignInWindow(waiting.url)) showToast("Your browser blocked the sign-in window.", "err");
+      if (waiting) openPopup(waiting.authorizeUrl);
     },
-    cancel: () => setWaiting(null)
+    stop: () => {
+      currentState.current = null;
+      pending4.current = false;
+      closePopup();
+      setWaiting(null);
+      showToast("Stopped waiting locally; this does not revoke or cancel upstream authorization. Refresh to check completion.");
+      finished.current();
+    }
   };
-}
-function SignInBanner({ waiting, onReopen, onCancel }) {
-  return /* @__PURE__ */ u4("div", { class: "ga-cred-banner", role: "status", "aria-live": "polite", children: [
-    /* @__PURE__ */ u4("span", { class: "ga-cred-spinner", "aria-hidden": "true" }),
-    /* @__PURE__ */ u4("span", { class: "ga-cred-banner-text", children: [
-      "Finish signing in to ",
-      waiting.label,
-      " in the window that opened."
-    ] }),
-    /* @__PURE__ */ u4("span", { class: "ga-cred-banner-actions", children: [
-      /* @__PURE__ */ u4("button", { type: "button", onClick: onReopen, children: "Open sign-in window" }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: onCancel, children: "Cancel" })
-    ] })
-  ] });
 }
 
 // src/components/GroupAdminField.tsx
@@ -29905,1113 +30143,602 @@ function GroupAdminField({
   ] });
 }
 
-// src/components/GroupAdminCredentialsDialogs.tsx
-var INJECTION_LABELS = {
-  bearer: "Bearer token (Authorization header)",
-  basic: "Basic auth, key as username (Authorization header)",
-  "api-key": "Named header",
-  query: "Replace a placeholder in the URL query",
-  custom: "Header template"
-};
-function toKeyName(label) {
-  const base = label.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  if (!base) return "";
-  const name = /^[A-Z]/.test(base) ? base : `KEY_${base}`;
-  return name.endsWith("_KEY") || name.endsWith("_TOKEN") ? name : `${name}_KEY`;
+// src/components/CredentialsDialogs.tsx
+function ConnectionEditor({ id: id2, groups: groups2, onClose, onSaved }) {
+  return id2 ? /* @__PURE__ */ u4(ExistingConnectionEditor, { id: id2, groups: groups2, onClose, onSaved }) : /* @__PURE__ */ u4(ConnectionForm, { groups: groups2, onClose, onSaved });
 }
-async function send(url, method, body, success) {
-  const r4 = await call(url, method, body);
-  if (!r4.ok) {
-    showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-    return false;
-  }
-  showToast(success);
-  return true;
+function ExistingConnectionEditor({ id: id2, groups: groups2, onClose, onSaved }) {
+  const { data, error, loading, refresh } = useCredentialResource(connectionPath(id2));
+  if (loading || error || !data) return /* @__PURE__ */ u4(CredentialDialog, { title: "Load connection", onClose, children: loading ? /* @__PURE__ */ u4("p", { children: "Loading latest connection metadata\u2026" }) : /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4(ErrorNotice, { message: error }),
+    /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Retry" })
+  ] }) });
+  return /* @__PURE__ */ u4(ConnectionForm, { connection: data, groups: groups2, onClose, onSaved }, `${data.id}:${data.revision}`);
 }
-function Footer({ children }) {
-  return /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot ga-cred-foot", children });
-}
-function KeySetDialog({ gid, targetOnly = false, name, onClose, onSaved }) {
-  const [info, setInfo] = h2(null);
-  const [loadError, setLoadError] = h2("");
-  const [stale, setStale] = h2(false);
-  const [busy, setBusy] = h2(false);
-  const [confirmDelete, setConfirmDelete] = h2(false);
-  const [names, setNames] = h2("KEY_ONE, KEY_TWO");
+function ConnectionForm({ connection: connection2, groups: groups2, onClose, onSaved }) {
+  const [label, setLabel] = h2(connection2?.label ?? "");
+  const [text2, setText] = h2(JSON.stringify(connection2?.services ?? SERVICE_PRESETS[0].services, null, 2));
   const [values, setValues] = h2({});
-  const [text2, setText] = h2(JSON.stringify({
-    name: "new-service",
-    host: "api.example.com",
-    auth: { type: "custom", headers: { Authorization: "Bearer {{ KEY_ONE }}", "x-api-key": "{{ KEY_TWO }}" } }
-  }, null, 2));
-  useEscapeClose(onClose, busy);
-  y2(() => {
-    if (!name) return;
-    let active = true;
-    void (async () => {
-      const r4 = await call(credPath(gid, `/key-sets/${encodeURIComponent(name)}`, targetOnly));
-      if (!active) return;
-      if (!r4.ok) setLoadError(errMsg2(r4.data, `HTTP ${r4.status}`));
-      else {
-        setInfo(r4.data);
-        setText(JSON.stringify(r4.data.service, null, 2));
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [gid, name, targetOnly]);
-  const keys = info?.keys ?? [...new Set(names.split(/[\s,]+/).filter(Boolean))];
-  const ready = !busy && !loadError && !stale && (!name || !!info);
-  const canSave = ready && keys.length > 0 && keys.length <= 64 && (!!name || keys.every((key) => !!values[key]));
-  const path = credPath(gid, name ? `/key-sets/${encodeURIComponent(name)}` : "/key-sets", targetOnly);
-  async function change(method, body) {
-    setBusy(true);
-    const r4 = await call(path, method, body);
-    setBusy(false);
-    if (!r4.ok) {
-      if (r4.status === 412) setStale(true);
-      showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-      return;
-    }
-    showToast(method === "DELETE" ? "Deleted the entire key set" : "Saved key set atomically");
-    onSaved();
-    onClose();
+  const [busy, setBusy] = h2(false);
+  const [error, setError] = h2("");
+  const [reviewed, setReviewed] = h2(false);
+  const [stale, setStale] = h2(false);
+  let services = [];
+  let jsonError = "";
+  try {
+    services = parseServices(text2);
+  } catch (error2) {
+    if (!(error2 instanceof SyntaxError || error2 instanceof CredentialsError)) throw error2;
+    jsonError = errorMessage(error2);
   }
+  const isStatic = !connection2 || connection2.kind === "static";
+  const keys = isStatic ? [.../* @__PURE__ */ new Set([...connection2?.credentials ?? [], ...serviceKeys(services)])] : [];
+  const supplied = providedValues(values, keys);
+  const canSave = !busy && !stale && !!label.trim() && !jsonError && (connection2 ? reviewed : keys.length > 0 && keys.every((key) => !!supplied[key]));
   async function save(event) {
     event.preventDefault();
     if (!canSave) return;
-    let service;
+    setBusy(true);
+    setError("");
     try {
-      service = JSON.parse(text2);
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-      showToast("Provide valid service JSON. Put values only in the separate password fields.", "err");
-      return;
-    }
-    await change(name ? "PUT" : "POST", {
-      service,
-      revision: info?.revision,
-      values: Object.fromEntries(keys.filter((key) => !!values[key]).map((key) => [key, values[key]]))
-    });
-  }
-  return /* @__PURE__ */ u4(MobileDialog, { title: name ? `Manage ${name}` : "Create atomic key set", onClose, maxWidth: "680px", className: "ga-cred-dialog", closeDisabled: busy, children: [
-    /* @__PURE__ */ u4("form", { id: "ga-cred-set", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "One service and its exclusive keys are saved or deleted together. Values remain write-only. Existing keys or services are never overwritten by creation." }),
-      loadError ? /* @__PURE__ */ u4("p", { role: "alert", children: loadError }) : null,
-      stale ? /* @__PURE__ */ u4("p", { role: "alert", children: "This set changed elsewhere. Close and reopen it to review the current routing before trying again." }) : null,
-      name && !info && !loadError ? /* @__PURE__ */ u4("p", { children: "Loading metadata..." }) : null,
-      !name ? /* @__PURE__ */ u4(GroupAdminField, { label: "Referenced key names", info: "Comma-separated names. They must match the service's credential references.", children: /* @__PURE__ */ u4("input", { value: names, disabled: busy, onInput: (e4) => setNames(e4.currentTarget.value) }) }) : null,
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Service routing JSON", info: "Safe configuration only, never credential values. Set membership and name cannot be changed by an edit.", children: /* @__PURE__ */ u4("textarea", { class: "ga-cred-mono", rows: 12, value: text2, disabled: !ready, spellcheck: false, onInput: (e4) => setText(e4.currentTarget.value) }) }),
-      keys.map((key) => /* @__PURE__ */ u4(GroupAdminField, { label: key, info: name ? "Leave blank to preserve its current value." : "Required for creation.", children: /* @__PURE__ */ u4(SecretInput, { value: values[key] ?? "", disabled: !ready, placeholder: name ? "Keep current value" : "New value", onInput: (value) => setValues((old) => ({ ...old, [key]: value })) }) }, key)),
-      confirmDelete ? /* @__PURE__ */ u4("p", { role: "alert", children: [
-        "Delete this service and all ",
-        keys.length,
-        " keys? This cannot be undone."
-      ] }) : null
-    ] }),
-    /* @__PURE__ */ u4(Footer, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-      name ? /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled: !ready, onClick: async () => {
-        if (!confirmDelete) {
-          setConfirmDelete(true);
-          return;
-        }
-        await change("DELETE", { revision: info.revision });
-      }, children: confirmDelete ? "Confirm delete entire set" : "Delete entire set" }) : null,
-      /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-set", class: "primary", disabled: !canSave, children: busy ? "Saving..." : name ? "Save atomically" : "Create only" })
-    ] })
-  ] });
-}
-function ConfirmDialog({
-  title,
-  children,
-  confirmLabel,
-  danger,
-  onConfirm,
-  onClose
-}) {
-  const [busy, setBusy] = h2(false);
-  useEscapeClose(onClose, busy);
-  return /* @__PURE__ */ u4(MobileDialog, { title, onClose, maxWidth: "440px", className: "ga-confirm-modal", closeDisabled: busy, children: [
-    /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children }),
-    /* @__PURE__ */ u4(Footer, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ u4(
-        "button",
+      await credentialRequest(
+        connection2 ? connectionPath(connection2.id) : credentialsPath("/connections"),
+        connection2 ? "PUT" : "POST",
         {
-          type: "button",
-          class: danger ? "danger" : "primary",
-          disabled: busy,
-          onClick: async () => {
-            setBusy(true);
-            const ok = await onConfirm();
-            setBusy(false);
-            if (ok) onClose();
-          },
-          children: confirmLabel
+          label: label.trim(),
+          services,
+          ...isStatic && Object.keys(supplied).length ? { values: supplied } : {},
+          ...connection2 ? { revision: connection2.revision } : { kind: "static" }
         }
-      )
+      );
+      setValues({});
+      showToast(connection2 ? "Connection updated. Review suspended grants before reapproving access." : "Personal connection created");
+      onSaved();
+      onClose();
+    } catch (error2) {
+      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+      setError(errorMessage(error2));
+      if (error2 instanceof Error && "status" in error2 && (error2.status === 412 || error2.status === 409)) setStale(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /* @__PURE__ */ u4(CredentialDialog, { title: connection2 ? `Manage ${connection2.label}` : "Create key connection", onClose, busy, footer: /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
+    /* @__PURE__ */ u4("button", { type: "submit", form: "personal-connection", class: "primary", disabled: !canSave, children: busy ? "Saving\u2026" : connection2 ? "Save reviewed changes" : "Create connection" })
+  ] }), children: [
+    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Owned by you, stored once. Add one or more services and complementary keys. Only key names and routing appear below; saved secret values are never returned." }),
+    /* @__PURE__ */ u4("form", { id: "personal-connection", onSubmit: save, children: [
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Connection label", children: /* @__PURE__ */ u4("input", { type: "text", "aria-label": "Connection label", value: label, disabled: busy, onInput: (event) => setLabel(event.currentTarget.value) }) }),
+      !connection2 ? /* @__PURE__ */ u4(GroupAdminField, { label: "Service preset", children: /* @__PURE__ */ u4("select", { "aria-label": "Service preset", disabled: busy, onChange: (event) => {
+        setText(JSON.stringify(SERVICE_PRESETS[Number(event.currentTarget.value)].services, null, 2));
+        setValues({});
+      }, children: SERVICE_PRESETS.map((preset, index) => /* @__PURE__ */ u4("option", { value: index, children: preset.label }, preset.label)) }) }) : null,
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Service routing JSON", children: /* @__PURE__ */ u4(
+        "textarea",
+        {
+          class: "ga-cred-mono",
+          "aria-label": "Service routing JSON",
+          rows: 12,
+          value: text2,
+          disabled: busy,
+          spellcheck: false,
+          onInput: (event) => {
+            setText(event.currentTarget.value);
+            setReviewed(false);
+          }
+        }
+      ) }),
+      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+        "Use host[:port] and optional path patterns to restrict destinations. auth.token, username, password and key reference key NAMES. Custom auth.headers use templates such as",
+        " ",
+        /* @__PURE__ */ u4("code", { children: "Bearer {{ API_TOKEN }}" }),
+        ". Substitutions reference a key name and placeholder. Never paste a secret into JSON. Basic pairs and multi-header values are saved together."
+      ] }),
+      /* @__PURE__ */ u4(ErrorNotice, { message: jsonError }),
+      keys.map((key) => /* @__PURE__ */ u4(GroupAdminField, { label: key, info: connection2 ? "Blank preserves the current value; enter only a new value to rotate." : "Required to create this connection.", children: /* @__PURE__ */ u4(
+        SecretInput,
+        {
+          label: key,
+          value: values[key] ?? "",
+          disabled: busy,
+          placeholder: connection2 ? "Keep current value" : "New value",
+          onInput: (value) => {
+            setValues((old) => ({ ...old, [key]: value }));
+            setReviewed(false);
+          }
+        }
+      ) }, key)),
+      connection2 ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4(Impact, { connection: connection2, groups: groups2 }),
+        /* @__PURE__ */ u4("p", { children: "Rotation affects every agent above. Routing, authority and authentication changes can suspend their grants until explicitly reapproved. Review new destinations and all selected services before saving." }),
+        /* @__PURE__ */ u4(Review, { checked: reviewed, onChange: setReviewed, children: "I reviewed the routing, rotation and affected-agent impact." })
+      ] }) : null,
+      /* @__PURE__ */ u4(ErrorNotice, { message: error }),
+      stale ? /* @__PURE__ */ u4("p", { role: "alert", children: "This connection changed or the operation conflicts. Close and reopen it to load the latest revision; your changes were not blindly overwritten." }) : null
     ] })
   ] });
 }
-function DestinationFields({
-  keyName,
-  value,
-  onChange
-}) {
-  const injection = value.injection;
-  const setInjection = (next) => onChange({ ...value, injection: next });
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Send it to", info: "Host, optionally with a port and a path pattern, e.g. api.example.com/v1/*. The key is only ever sent to matching requests.", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: value.match, spellcheck: false, placeholder: "api.example.com", onInput: (event) => onChange({ ...value, match: event.currentTarget.value }) }) }),
-    /* @__PURE__ */ u4(GroupAdminField, { label: "How it's sent", info: "How the gateway attaches the key to matching requests. Whatever the agent puts in this slot is replaced.", children: /* @__PURE__ */ u4(
-      "select",
+function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2, resourceUrl, onStart, onClose, onSaved }) {
+  const [kind, setKind] = h2(connection2?.kind === "oauth_app" ? "oauth_app" : "mcp_oauth");
+  const [label, setLabel] = h2(connection2?.label ?? "");
+  const [resource, setResource] = h2(connection2?.resource_url ?? resourceUrl ?? "");
+  const [app, setApp] = h2(connection2?.app_id ?? "");
+  const [scopes, setScopes] = h2((connection2?.requested_scopes ?? []).join("\n"));
+  const [busy, setBusy] = h2(false);
+  const [error, setError] = h2("");
+  const [reviewed, setReviewed] = h2(false);
+  const [draft, setDraft] = h2(null);
+  const canStart = !busy && !!label.trim() && (kind === "mcp_oauth" ? !!resource.trim() : !!app) && reviewed;
+  async function start(event) {
+    event.preventDefault();
+    if (!canStart) return;
+    setBusy(true);
+    setError("");
+    try {
+      const input = {
+        ...kind === "mcp_oauth" ? { resource_url: resource.trim() } : {},
+        ...app ? { app_id: app } : {},
+        scopes: scopes.split(/[\s,]+/).filter(Boolean)
+      };
+      let target = connection2 ?? draft;
+      if (!target) {
+        target = await credentialRequest(credentialsPath("/connections"), "POST", { label: label.trim(), kind, ...input });
+        setDraft(target);
+        onSaved();
+      }
+      await onStart(target.id, input);
+      onSaved();
+      onClose();
+    } catch (error2) {
+      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+      setError(errorMessage(error2));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /* @__PURE__ */ u4(CredentialDialog, { title: connection2 ? `Reconnect ${connection2.label}` : "Connect an account", onClose, busy, footer: /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
+    /* @__PURE__ */ u4("button", { type: "submit", form: "personal-oauth", class: "primary", disabled: !canStart, children: busy ? "Starting\u2026" : draft ? "Retry sign-in" : "Start sign-in" })
+  ] }), children: /* @__PURE__ */ u4("form", { id: "personal-oauth", onSubmit: start, children: [
+    !connection2 && !draft ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Connection label", children: /* @__PURE__ */ u4("input", { type: "text", "aria-label": "Connection label", value: label, disabled: busy, onInput: (event) => setLabel(event.currentTarget.value) }) }),
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Connection type", children: /* @__PURE__ */ u4("select", { value: kind, "aria-label": "Connection type", disabled: busy, onChange: (event) => {
+        setKind(event.currentTarget.value);
+        setReviewed(false);
+      }, children: [
+        /* @__PURE__ */ u4("option", { value: "mcp_oauth", children: "MCP server OAuth" }),
+        /* @__PURE__ */ u4("option", { value: "oauth_app", children: "Configured OAuth app" })
+      ] }) })
+    ] }) : null,
+    kind === "mcp_oauth" ? /* @__PURE__ */ u4(GroupAdminField, { label: "MCP resource URL", children: /* @__PURE__ */ u4(
+      "input",
       {
-        value: injection.type,
-        onChange: (event) => {
-          const next = event.currentTarget.value;
-          setInjection({
-            type: next,
-            name: next === "api-key" ? injection.name || "X-API-Key" : next === "query" ? injection.name || `__${keyName || "KEY"}__` : void 0,
-            template: next === "custom" ? injection.template || `Basic {{ ${keyName || "KEY"} }}` : void 0
-          });
-        },
-        children: Object.keys(INJECTION_LABELS).map((t4) => /* @__PURE__ */ u4("option", { value: t4, children: INJECTION_LABELS[t4] }, t4))
+        type: "url",
+        "aria-label": "MCP resource URL",
+        value: resource,
+        disabled: busy,
+        placeholder: "https://mcp.example.com/mcp",
+        onInput: (event) => {
+          setResource(event.currentTarget.value);
+          setReviewed(false);
+        }
+      }
+    ) }) : null,
+    /* @__PURE__ */ u4(GroupAdminField, { label: "OAuth app", children: /* @__PURE__ */ u4("select", { "aria-label": "OAuth app", value: app, disabled: busy, onChange: (event) => {
+      setApp(event.currentTarget.value);
+      setScopes((apps.find((item) => item.id === event.currentTarget.value)?.default_scopes ?? []).join("\n"));
+      setReviewed(false);
+    }, children: [
+      /* @__PURE__ */ u4("option", { value: "", children: kind === "mcp_oauth" ? "Automatic discovery / dynamic registration" : "Select a configured app" }),
+      apps.map((item) => /* @__PURE__ */ u4("option", { value: item.id, children: [
+        item.label,
+        " \xB7 ",
+        item.source === "user" ? "Personal" : "Install"
+      ] }, `${item.source}:${item.id}`))
+    ] }) }),
+    kind === "oauth_app" && !apps.length ? /* @__PURE__ */ u4("p", { children: "Configure a personal OAuth app below Connected accounts first." }) : null,
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Requested scopes", children: /* @__PURE__ */ u4(
+      "textarea",
+      {
+        "aria-label": "Requested scopes",
+        rows: 4,
+        value: scopes,
+        disabled: busy,
+        placeholder: "One scope per line",
+        onInput: (event) => {
+          setScopes(event.currentTarget.value);
+          setReviewed(false);
+        }
       }
     ) }),
-    injection.type === "api-key" || injection.type === "query" ? /* @__PURE__ */ u4(
-      GroupAdminField,
-      {
-        label: injection.type === "query" ? "Placeholder" : "Header",
-        info: injection.type === "query" ? "The agent or MCP server URL uses this text where the key goes, e.g. ?apiKey=__MY_KEY__; the gateway swaps in the real key." : void 0,
-        children: /* @__PURE__ */ u4("input", { type: "text", value: injection.name ?? "", spellcheck: false, onInput: (event) => setInjection({ ...injection, name: event.currentTarget.value }) })
-      }
-    ) : null,
-    injection.type === "api-key" ? /* @__PURE__ */ u4(GroupAdminField, { label: "Prefix", info: "Text placed before the key, e.g. \u201CToken \u201D.", children: /* @__PURE__ */ u4("input", { type: "text", value: injection.prefix ?? "", spellcheck: false, placeholder: "none", onInput: (event) => setInjection({ ...injection, prefix: event.currentTarget.value }) }) }) : null,
-    injection.type === "custom" ? /* @__PURE__ */ u4(GroupAdminField, { label: "Header", info: "Write the full Authorization header; {{ KEY_NAME }} is replaced by the key.", children: /* @__PURE__ */ u4("input", { type: "text", value: injection.template ?? "", spellcheck: false, onInput: (event) => setInjection({ ...injection, template: event.currentTarget.value }) }) }) : null
-  ] });
-}
-function destinationValid(value) {
-  const i5 = value.injection;
-  if (!value.match.trim()) return false;
-  if ((i5.type === "api-key" || i5.type === "query") && !i5.name?.trim()) return false;
-  return i5.type !== "custom" || !!i5.template?.includes("{{");
-}
-function AddKeyDialog({
-  gid,
-  targetOnly = false,
-  presets,
-  existingKeys,
-  initialMatch,
-  onExisting,
-  onClose,
-  onSaved
-}) {
-  const [preset, setPreset] = h2(null);
-  const [label, setLabel] = h2("");
-  const [key, setKey] = h2("");
-  const [keyTouched, setKeyTouched] = h2(false);
-  const [value, setValue] = h2("");
-  const [destination, setDestination] = h2({ match: "", injection: { type: "bearer" } });
-  const [busy, setBusy] = h2(false);
-  useEscapeClose(onClose, busy);
-  function pick(next) {
-    setPreset(next);
-    setLabel(next === "custom" ? "" : next.label);
-    setKey(next === "custom" ? "" : next.key);
-    setDestination(next === "custom" ? { match: "", injection: { type: "bearer" } } : next.destination);
-    setKeyTouched(false);
-  }
-  y2(() => {
-    if (!initialMatch) return;
-    const host = initialMatch.split("/")[0];
-    const match2 = presets.find((p5) => p5.destination.match.split("/")[0] === host && !existingKeys.includes(p5.key));
-    pick(match2 ?? "custom");
-    if (!match2) setDestination({ match: initialMatch, injection: { type: "bearer" } });
-  }, []);
-  if (!preset) {
-    return /* @__PURE__ */ u4(MobileDialog, { title: "Add a key", onClose, maxWidth: "520px", className: "ga-cred-dialog", children: [
-      /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Pick the service the key is for. The agent will be able to use it but never read it." }) }),
-      /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: [
-        presets.map((p5) => existingKeys.includes(p5.key) ? /* @__PURE__ */ u4(MobileDialogItem, { label: p5.label, sublabel: `Already added (${p5.key}) \xB7 replace its value`, chevron: true, onClick: () => onExisting(p5.key) }, p5.id) : /* @__PURE__ */ u4(MobileDialogItem, { label: p5.label, sublabel: p5.destination.match, chevron: true, onClick: () => pick(p5) }, p5.id)),
-        /* @__PURE__ */ u4(MobileDialogItem, { label: "Another service", sublabel: "Any host; choose how the key is sent", chevron: true, onClick: () => pick("custom") })
-      ] })
-    ] });
-  }
-  const keyInvalid = key !== "" && !KEY_NAME_RE.test(key);
-  const keyDuplicate = existingKeys.includes(key);
-  const canSave = !busy && label.trim() !== "" && key !== "" && !keyInvalid && !keyDuplicate && value !== "" && destinationValid(destination);
-  async function save(event) {
-    event.preventDefault();
-    if (!canSave) return;
-    setBusy(true);
-    const ok = await send(credPath(gid, "/keys", targetOnly), "POST", { key, label: label.trim(), value, destination: { ...destination, match: destination.match.trim() } }, `Saved ${label.trim()}`);
-    setBusy(false);
-    if (ok) {
-      onSaved();
-      onClose();
-    }
-  }
-  const obtain = preset !== "custom" ? preset : null;
-  return /* @__PURE__ */ u4(
-    MobileDialog,
-    {
-      title: preset === "custom" ? "Add a key" : `Add ${preset.label} key`,
-      onClose,
-      onBack: () => setPreset(null),
-      backLabel: "Back to services",
-      maxWidth: "560px",
-      className: "ga-cred-dialog",
-      closeDisabled: busy,
-      children: [
-        /* @__PURE__ */ u4("form", { id: "ga-cred-add-key", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
-          obtain?.obtainUrl || obtain?.hint ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-            obtain.hint ? `${obtain.hint} ` : null,
-            obtain.obtainUrl ? /* @__PURE__ */ u4("a", { href: obtain.obtainUrl, target: "_blank", rel: "noopener noreferrer", children: "Get a key \u2197" }) : null
-          ] }) : null,
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Name", children: /* @__PURE__ */ u4("input", { type: "text", value: label, placeholder: "e.g. Weather API", onInput: (event) => {
-            const next = event.currentTarget.value;
-            setLabel(next);
-            if (!keyTouched && preset === "custom") setKey(toKeyName(next));
-          } }) }),
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Key name", info: "How this key is referred to, e.g. in header templates. Upper case, digits and underscores.", children: /* @__PURE__ */ u4("input", { type: "text", class: "ga-cred-mono", value: key, spellcheck: false, onInput: (event) => {
-            setKeyTouched(true);
-            setKey(event.currentTarget.value.toUpperCase());
-          } }) }),
-          keyInvalid ? /* @__PURE__ */ u4("p", { class: "ga-cred-error", children: "Use upper case letters, digits and underscores, starting with a letter." }) : null,
-          keyDuplicate ? /* @__PURE__ */ u4("p", { class: "ga-cred-error", children: [
-            "This group already has ",
-            key,
-            ". Use Replace on that key instead."
-          ] }) : null,
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Value", children: /* @__PURE__ */ u4(SecretInput, { value, onInput: setValue, autoFocus: preset !== "custom" }) }),
-          /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: "Stored encrypted by the credential gateway. Nobody can view it after saving; you can only replace it." }),
-          /* @__PURE__ */ u4(DestinationFields, { keyName: key, value: destination, onChange: setDestination })
-        ] }),
-        /* @__PURE__ */ u4(Footer, { children: [
-          /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-          /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-add-key", class: "primary", disabled: !canSave, children: busy ? "Saving\u2026" : "Save key" })
-        ] })
-      ]
-    }
-  );
-}
-function ReplaceKeyDialog({
-  gid,
-  targetOnly = false,
-  item,
-  onClose,
-  onSaved
-}) {
-  const [value, setValue] = h2("");
-  const [busy, setBusy] = h2(false);
-  useEscapeClose(onClose, busy);
-  const verb = item.status === "needs_value" ? "Set" : "Replace";
-  async function save(event) {
-    event.preventDefault();
-    if (!value) return;
-    setBusy(true);
-    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`, targetOnly), "PUT", { value }, `Updated ${item.label}`);
-    setBusy(false);
-    if (ok) {
-      onSaved();
-      onClose();
-    }
-  }
-  return /* @__PURE__ */ u4(MobileDialog, { title: `${verb} ${item.label}`, onClose, maxWidth: "480px", className: "ga-cred-dialog", closeDisabled: busy, children: [
-    /* @__PURE__ */ u4("form", { id: "ga-cred-replace", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-        /* @__PURE__ */ u4("code", { children: item.key }),
-        item.status === "set" && item.updatedAt ? ` \xB7 current value set ${ago(item.updatedAt)}` : ""
-      ] }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "New value", children: /* @__PURE__ */ u4(SecretInput, { value, onInput: setValue, autoFocus: true }) })
+    connection2 ? /* @__PURE__ */ u4(Impact, { connection: connection2, groups: groups2 }) : null,
+    /* @__PURE__ */ u4("p", { children: "All receiving agents share this upstream account and its actual permissions. Selecting services does not downscope a token or make it read-only. Requested scopes are not a guarantee of provider-granted scopes. A different account, issuer, resource or scope policy needs explicit review; scope expansion may suspend existing grants until reapproved. Use a separate connection for a different identity or scope profile." }),
+    /* @__PURE__ */ u4(Review, { checked: reviewed, onChange: setReviewed, children: [
+      "I reviewed the upstream identity, resource, app, requested scopes and ",
+      connection2 ? "affected agents" : "shared-connection implications",
+      "."
     ] }),
-    /* @__PURE__ */ u4(Footer, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-replace", class: "primary", disabled: busy || !value, children: busy ? "Saving\u2026" : verb })
-    ] })
-  ] });
+    draft ? /* @__PURE__ */ u4("p", { children: "A draft connection was saved. Retrying uses that same connection; it does not duplicate authorization." }) : null,
+    /* @__PURE__ */ u4(ErrorNotice, { message: error })
+  ] }) });
 }
-function EditKeyDialog({
-  gid,
-  targetOnly = false,
-  item,
-  onClose,
-  onSaved
-}) {
-  const [label, setLabel] = h2(item.label);
-  const [destination, setDestination] = h2(item.destination);
-  const [busy, setBusy] = h2(false);
-  useEscapeClose(onClose, busy);
-  const dirty = label.trim() !== item.label || JSON.stringify(destination) !== JSON.stringify(item.destination);
-  const canSave = !busy && dirty && label.trim() !== "" && destinationValid(destination);
-  async function save(event) {
-    event.preventDefault();
-    if (!canSave) return;
-    setBusy(true);
-    const ok = await send(credPath(gid, `/keys/${encodeURIComponent(item.key)}`, targetOnly), "PUT", {
-      label: label.trim(),
-      destination: { ...destination, match: destination.match.trim() }
-    }, `Updated ${label.trim()}`);
-    setBusy(false);
-    if (ok) {
-      onSaved();
-      onClose();
-    }
-  }
-  return /* @__PURE__ */ u4(MobileDialog, { title: `Edit ${item.label}`, onClose, maxWidth: "560px", className: "ga-cred-dialog", closeDisabled: busy, children: [
-    /* @__PURE__ */ u4("form", { id: "ga-cred-edit", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-        /* @__PURE__ */ u4("code", { children: item.key }),
-        " \xB7 the value stays as it is."
-      ] }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Name", children: /* @__PURE__ */ u4("input", { type: "text", value: label, onInput: (event) => setLabel(event.currentTarget.value) }) }),
-      /* @__PURE__ */ u4(DestinationFields, { keyName: item.key, value: destination, onChange: setDestination })
-    ] }),
-    /* @__PURE__ */ u4(Footer, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-edit", class: "primary", disabled: !canSave, children: busy ? "Saving\u2026" : "Save" })
-    ] })
-  ] });
-}
-function OAuthAppDialog({
-  gid,
-  targetOnly = false,
-  app,
-  scope: fixedScope,
-  canEditInstall,
-  redirectUri,
-  issuer,
-  onClose,
-  onSaved
-}) {
-  const [scope, setScope] = h2(fixedScope ?? (canEditInstall && !app.install ? "install" : "group"));
-  const existing = scope === "install" ? app.install : app.group;
-  const [appId, setAppId] = h2(app.id);
-  const initialConfig = () => JSON.stringify(existing?.config ?? (app.install ?? app.group)?.config ?? {
-    label: app.label === "New app" ? "" : app.label,
-    issuer: issuer ?? (app.install ?? app.group)?.config.issuer ?? "",
-    client_id: "",
-    token_endpoint_auth_method: "client_secret_post",
-    authorization_endpoint: "",
-    token_endpoint: "",
-    api_hosts: [],
-    default_scopes: [],
-    authorization_params: {},
-    identity: "none",
-    token_scope_separator: "space"
-  }, null, 2);
-  const [configText, setConfigText] = h2(initialConfig);
-  const [secret, setSecret] = h2("");
-  const [busy, setBusy] = h2(false);
-  useEscapeClose(onClose, busy);
-  y2(() => {
-    setConfigText(initialConfig());
-    setSecret("");
-  }, [scope]);
-  let config;
-  let configError = "";
-  try {
-    config = JSON.parse(configText);
-    if (!config || typeof config !== "object" || Array.isArray(config)) configError = "Configuration must be a JSON object.";
-    else if ("client_secret" in config) configError = "Use the separate client-secret field, not the configuration JSON.";
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
-    configError = "Configuration must be valid JSON.";
-  }
-  const id2 = appId.trim();
-  const canSave = !busy && !configError && /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(id2);
-  const choosing = fixedScope === void 0 && canEditInstall && !app.install && !app.group;
-  async function save(event) {
-    event.preventDefault();
-    if (!canSave) return;
-    setBusy(true);
-    const ok = await send(
-      credPath(gid, `/oauth-apps/${encodeURIComponent(id2)}`, targetOnly),
-      "PUT",
-      secret ? { scope, config, clientSecret: secret } : { scope, config },
-      `Saved the ${app.label} app`
+function ConnectionActionDialog({ connection: connection2, groups: groups2, action, onClose, onSaved }) {
+  const latest = useCredentialResource(connectionPath(connection2.id));
+  if (!latest.data || latest.loading || latest.error) return /* @__PURE__ */ u4(CredentialDialog, { title: "Review connection impact", onClose, children: latest.loading ? /* @__PURE__ */ u4("p", { children: "Loading latest impact\u2026" }) : /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4(ErrorNotice, { message: latest.error }),
+    /* @__PURE__ */ u4("button", { type: "button", onClick: () => void latest.refresh(), children: "Retry" })
+  ] }) });
+  const current = latest.data;
+  const deleting = action === "delete";
+  const title = deleting ? current.kind === "static" ? "Delete connection everywhere" : "Disconnect everywhere" : action === "disable" ? "Disable connection everywhere" : "Enable connection";
+  return /* @__PURE__ */ u4(ConfirmCredentialAction, { title: `${title} \xB7 ${current.label}`, label: title, onClose, onConfirm: async () => {
+    await credentialRequest(
+      connectionPath(current.id),
+      deleting ? "DELETE" : "PUT",
+      { revision: current.revision, ...deleting ? {} : { enabled: action === "enable" } }
     );
-    setBusy(false);
-    if (ok) onSaved();
-  }
-  function copy() {
-    navigator.clipboard.writeText(redirectUri).then(
-      () => showToast("Copied the redirect URI"),
-      () => showToast("Couldn\u2019t copy; select the URI and copy it", "err")
-    );
-  }
-  const title = existing ? `${app.label} app \xB7 ${scope === "install" ? "all groups" : "this group"}` : scope === "group" && app.install ? `Use a different ${app.label} app here` : `Set up ${app.label}`;
-  return /* @__PURE__ */ u4(MobileDialog, { title, onClose, maxWidth: "560px", className: "ga-cred-dialog", closeDisabled: busy, children: [
-    /* @__PURE__ */ u4("form", { id: "ga-cred-oauth-app", class: "settings-body ga-cred-dialog-body", onSubmit: save, children: [
-      existing ? null : /* @__PURE__ */ u4("ol", { class: "ga-cred-steps group-admin-help", children: [
-        /* @__PURE__ */ u4("li", { children: "Create an OAuth client with your authorization server." }),
-        /* @__PURE__ */ u4("li", { children: "Add the redirect URI below as an authorized redirect URI." }),
-        /* @__PURE__ */ u4("li", { children: "Paste the client ID and secret here." })
-      ] }),
-      choosing ? /* @__PURE__ */ u4("fieldset", { class: "ga-cred-scope", children: [
-        /* @__PURE__ */ u4("legend", { children: "Use it in" }),
-        /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-          /* @__PURE__ */ u4("input", { type: "radio", name: "ga-cred-app-scope", checked: scope === "install", onChange: () => setScope("install") }),
-          /* @__PURE__ */ u4("span", { children: [
-            "All groups ",
-            /* @__PURE__ */ u4("span", { class: "ga-cred-choice-note", children: "Recommended. Each group connects its own accounts; tokens stay in each group." })
-          ] })
-        ] }),
-        /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-          /* @__PURE__ */ u4("input", { type: "radio", name: "ga-cred-app-scope", checked: scope === "group", onChange: () => setScope("group") }),
-          /* @__PURE__ */ u4("span", { children: "Only this group" })
-        ] })
-      ] }) : null,
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Redirect URI", children: /* @__PURE__ */ u4("div", { class: "ga-cred-copy", children: [
-        /* @__PURE__ */ u4("code", { children: redirectUri }),
-        /* @__PURE__ */ u4("button", { type: "button", onClick: copy, children: "Copy" })
-      ] }) }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "App ID", children: /* @__PURE__ */ u4("input", { type: "text", "aria-label": "App ID", class: "ga-cred-mono", value: appId, disabled: Boolean(app.id), spellcheck: false, autoFocus: !app.id, onInput: (event) => setAppId(event.currentTarget.value) }) }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "OAuth configuration (JSON)", children: /* @__PURE__ */ u4("textarea", { "aria-label": "OAuth configuration (JSON)", class: "ga-cred-mono", rows: 16, value: configText, spellcheck: false, onInput: (event) => setConfigText(event.currentTarget.value) }) }),
-      configError ? /* @__PURE__ */ u4("p", { role: "alert", class: "ga-cred-error", children: configError }) : null,
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: 'Configure issuer, client_id, authorization_endpoint, token_endpoint, exact api_hosts and default_scopes. MCP-only apps can omit OAuth endpoints and API hosts. Optional fields include authorization_params, revocation_endpoint, identity (none, oidc, google or github), jwks_uri and token_scope_separator (space or comma). Public clients use token_endpoint_auth_method: "none"; confidential clients use client_secret_post or client_secret_basic.' }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Client secret", children: /* @__PURE__ */ u4(SecretInput, { value: secret, onInput: setSecret, placeholder: existing ? "Leave empty to keep the current secret" : "Paste the secret" }) }),
-      /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-field-help", children: [
-        scope === "install" ? "Every group without its own app uses this client. " : app.install ? "Only this group uses this client, instead of the install-wide app. " : "Only this group uses this client. ",
-        "The secret is stored in the gateway and can't be viewed again.",
-        existing ? ` Current client set ${ago(existing.updatedAt)}.` : "",
-        existing ? " Changing the issuer, client ID, OAuth endpoints or token-auth method disconnects accounts issued by this app source and requires a supplied confidential-client secret. Other configuration changes apply to new sign-ins." : ""
-      ] })
-    ] }),
-    /* @__PURE__ */ u4(Footer, { children: [
-      /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ u4("button", { type: "submit", form: "ga-cred-oauth-app", class: "primary", disabled: !canSave, children: busy ? "Saving\u2026" : "Save" })
-    ] })
+    onSaved();
+    showToast(deleting ? "Connection deleted everywhere" : `Connection ${action === "enable" ? "enabled" : "disabled"}`);
+  }, children: [
+    /* @__PURE__ */ u4(Impact, { connection: current, groups: groups2 }),
+    /* @__PURE__ */ u4("p", { children: deleting ? current.kind === "static" ? "Permanently remove this connection and its keys. Every receiving agent loses access." : "Delete this connection and disconnect the upstream authorization, affecting every receiving agent. Provider-side revocation may also affect other grants; failed remote cleanup is reported." : action === "disable" ? "Stop every receiving agent from using this connection without deleting its saved state." : "Allow active, approved grants to use this connection again. Suspended grants still need review." })
   ] });
 }
-function appReady(app) {
-  return Boolean(app.group ?? app.install);
-}
-function ConnectAccountDialog({
-  apps,
-  mcp,
-  canEdit,
-  provider,
-  reconnect,
-  onSetUp,
-  onStart,
-  onClose
-}) {
-  const initial = reconnect?.provider ?? provider;
-  const [app, setApp] = h2(() => initial ? apps.find((a4) => a4.id === initial) ?? null : null);
-  const [scopes, setScopes] = h2(() => (reconnect?.scopes ?? (app?.group ?? app?.install)?.config.default_scopes ?? []).join("\n"));
-  const [mcpChoice, setMcpChoice] = h2(null);
+function ConnectionGrantsDialog({ connection: connection2, groups: groups2, onClose, onSaved, onlyGroup }) {
+  const latest = useCredentialResource(connectionPath(connection2.id));
   const [busy, setBusy] = h2(false);
-  useEscapeClose(onClose, busy);
-  const mcpSignIns = mcp.filter((m6) => m6.auth === "oauth");
-  if (mcpChoice) {
-    const candidates = apps.filter((a4) => !mcpChoice.issuer || (a4.group ?? a4.install)?.config.issuer === mcpChoice.issuer);
-    return /* @__PURE__ */ u4(MobileDialog, { title: `Choose an app for ${mcpChoice.server}`, onClose, onBack: () => setMcpChoice(null), children: /* @__PURE__ */ u4(MobileDialogList, { children: candidates.map((a4) => /* @__PURE__ */ u4(MobileDialogItem, { label: a4.label, sublabel: a4.id, onClick: () => void begin({ mcpServer: mcpChoice.server, appId: a4.id }) }, a4.id)) }) });
-  }
-  async function begin(input) {
-    setBusy(true);
-    const ok = await onStart(input);
-    setBusy(false);
-    if (ok) onClose();
-  }
-  if (!app) {
-    return /* @__PURE__ */ u4(MobileDialog, { title: "Connect an account", onClose, maxWidth: "520px", className: "ga-cred-dialog", children: [
-      /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "You'll sign in with the provider in a new window. The agent can then use the account through the gateway, without seeing its tokens." }) }),
-      /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: apps.filter((a4) => {
-        const c4 = (a4.group ?? a4.install)?.config;
-        return c4?.authorization_endpoint && c4.token_endpoint && c4.api_hosts.length;
-      }).map((a4) => /* @__PURE__ */ u4(
-        MobileDialogItem,
+  const [error, setError] = h2("");
+  const [stale, setStale] = h2(false);
+  const destinations = onlyGroup ? groups2.filter((group) => group.id === onlyGroup) : [
+    ...groups2,
+    ...(latest.data?.grants ?? []).filter((grant) => !groups2.some((group) => group.id === grant.vault)).map((grant) => ({ id: grant.vault, name: grant.vault, canAdmin: false }))
+  ];
+  return /* @__PURE__ */ u4(CredentialDialog, { title: `Agent access \xB7 ${connection2.label}`, onClose, busy, footer: /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Done" }), children: [
+    /* @__PURE__ */ u4("p", { children: "You may attach your own connection only to an agent group you administer. Service selection shares the same upstream principal; it does not reduce token scopes or create read-only access." }),
+    latest.loading ? /* @__PURE__ */ u4("p", { children: "Loading latest grants\u2026" }) : null,
+    /* @__PURE__ */ u4(ErrorNotice, { message: latest.error || error }),
+    stale ? /* @__PURE__ */ u4("p", { role: "alert", children: "The connection changed. Close and reopen to review the current revision before reapproving." }) : null,
+    latest.data && !latest.loading && !latest.error ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(Impact, { connection: latest.data, groups: groups2 }),
+      destinations.filter((group) => group.canAdmin || latest.data.grants.some((grant) => grant.vault === group.id)).map((group) => /* @__PURE__ */ u4(
+        ServiceGrantForm,
         {
-          label: a4.label,
-          sublabel: (a4.group ?? a4.install)?.config.issuer,
-          chevron: appReady(a4) || canEdit,
-          onClick: () => {
-            setApp(a4);
-            setScopes((a4.group ?? a4.install).config.default_scopes.join("\n"));
+          connection: latest.data,
+          group,
+          busy: busy || stale,
+          onChange: async (services) => {
+            setBusy(true);
+            setError("");
+            try {
+              await credentialRequest(
+                connectionPath(connection2.id, `/grants/${encodeURIComponent(group.id)}`),
+                services ? "PUT" : "DELETE",
+                services ? { services, revision: latest.data.revision } : void 0
+              );
+              onSaved();
+              await latest.refresh();
+              showToast(services ? "Agent access approved" : "Detached agent; upstream connection unchanged");
+            } catch (error2) {
+              if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+              setError(errorMessage(error2));
+              if (error2 instanceof Error && "status" in error2 && (error2.status === 412 || error2.status === 409)) setStale(true);
+            } finally {
+              setBusy(false);
+            }
           }
         },
-        a4.id
-      )) }),
-      mcpSignIns.length ? /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body ga-cred-dialog-subhead", children: /* @__PURE__ */ u4("h4", { children: "MCP servers" }) }),
-        /* @__PURE__ */ u4(MobileDialogList, { className: "ga-cred-preset-list", children: mcpSignIns.map((m6) => {
-          return /* @__PURE__ */ u4(
-            MobileDialogItem,
-            {
-              label: m6.server,
-              sublabel: m6.needsApp ? `Needs an OAuth app for ${m6.issuer ?? "the discovered issuer"}` : m6.ambiguousApp ? "Choose a configured OAuth app" : m6.status === "ok" ? `Signed in${m6.account ? ` as ${m6.account}` : ""} \u2014 sign in again` : m6.url,
-              chevron: true,
-              onClick: busy ? void 0 : m6.needsApp ? () => onSetUp({ id: "", label: "New app", install: null, group: null, overridesInstall: false }, m6.issuer) : m6.ambiguousApp ? () => setMcpChoice(m6) : () => void begin({ mcpServer: m6.server })
-            },
-            m6.server
-          );
-        }) })
-      ] }) : null
-    ] });
-  }
-  return /* @__PURE__ */ u4(
-    MobileDialog,
-    {
-      title: reconnect ? `Reconnect ${app.label}` : `Connect ${app.label}`,
-      onClose,
-      onBack: reconnect || provider ? void 0 : () => setApp(null),
-      backLabel: "Back to providers",
-      maxWidth: "520px",
-      className: "ga-cred-dialog",
-      closeDisabled: busy,
-      children: [
-        /* @__PURE__ */ u4("div", { class: "settings-body ga-cred-dialog-body", children: [
-          /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Request OAuth scopes, one per line or separated by spaces. An empty field explicitly requests no scopes." }),
-          /* @__PURE__ */ u4(GroupAdminField, { label: "Requested OAuth scopes", children: /* @__PURE__ */ u4("textarea", { "aria-label": "Requested OAuth scopes", class: "ga-cred-mono", rows: 6, value: scopes, onInput: (event) => setScopes(event.currentTarget.value) }) }),
-          /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-            "The provider decides the effective grant and may retain earlier permissions. Requesting fewer scopes does not revoke them. The agent can use all provider-permitted operations on ",
-            (app.group ?? app.install)?.config.api_hosts.join(", "),
-            "."
-          ] })
-        ] }),
-        /* @__PURE__ */ u4(Footer, { children: [
-          /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "primary",
-              disabled: busy,
-              onClick: () => void begin({ appId: app.id, scopes: scopes.trim() ? scopes.trim().split(/\s+/) : [], replaceKey: reconnect?.key }),
-              children: busy ? "Opening\u2026" : `Continue to ${app.label}`
-            }
-          )
-        ] })
-      ]
-    }
-  );
-}
-
-// src/components/GroupAdminCredentials.tsx
-var credentialsFocus = y3(null);
-async function mutate(url, method, body, success) {
-  const r4 = await call(url, method, body);
-  if (!r4.ok) {
-    showToast(errMsg2(r4.data, `HTTP ${r4.status}`), "err");
-    return false;
-  }
-  showToast(success);
-  return true;
-}
-function useOverview(gid, targetOnly = false) {
-  const [load, setLoad] = h2({ state: "loading" });
-  const context = `${gid}:${targetOnly}`;
-  const currentContext = A2(context);
-  const requestId = A2(0);
-  currentContext.current = context;
-  async function refresh() {
-    if (currentContext.current !== context) return;
-    const request = ++requestId.current;
-    const r4 = await call(credPath(gid, "", targetOnly));
-    if (currentContext.current !== context || request !== requestId.current) return;
-    if (r4.ok) setLoad({ state: "ready", data: r4.data });
-    else if (r4.status === 503 && errMsg2(r4.data, "") === ERROR_GATEWAY_UNREACHABLE) setLoad({ state: "down" });
-    else if (r4.status === 409 && errMsg2(r4.data, "") === "inactive_gateway_target") setLoad({ state: "inactive-target" });
-    else setLoad({ state: "error", message: errMsg2(r4.data, `HTTP ${r4.status}`) });
-  }
-  y2(() => {
-    setLoad({ state: "loading" });
-    void refresh();
-    return () => {
-      requestId.current++;
-    };
-  }, [gid, targetOnly]);
-  return { load, refresh };
-}
-function CredentialsTab({ gid }) {
-  const [targetGroup, setTargetGroup] = h2(null);
-  const targetOnly = targetGroup === gid;
-  const [preparing, setPreparing] = h2(false);
-  const { load, refresh } = useOverview(gid, targetOnly);
-  const [view, setView] = h2("keys");
-  const [dialog, setDialog] = h2(null);
-  const signIn = useSignIn(gid, () => void refresh(), targetOnly);
-  y2(() => {
-    setView("keys");
-    setTargetGroup(null);
-    setDialog(null);
-  }, [gid]);
-  y2(() => {
-    if (load.state !== "ready") return;
-    const focus = credentialsFocus.peek();
-    if (!focus) return;
-    credentialsFocus.value = null;
-    setView(focus.view);
-    const item = focus.key ? load.data.keys.find((k4) => k4.key === focus.key) : void 0;
-    const keysEditable = load.data.canEdit && load.data.keysEditable !== false;
-    if (focus.action === "set" && item && keysEditable) setDialog(item.sharedService ? { kind: "key-set", name: item.sharedService } : { kind: "replace", item });
-    if (focus.action === "add" && keysEditable) setDialog({ kind: "add-key", match: focus.match });
-    const app = focus.setupApp ? load.data.oauthApps.find((a4) => a4.id === focus.setupApp) : void 0;
-    if (app && load.data.canEdit) setDialog({ kind: "oauth-app", app });
-    if (focus.setupIssuer && load.data.canEdit) setDialog({
-      kind: "oauth-app",
-      app: { id: "", label: "New app", install: null, group: null, overridesInstall: false },
-      issuer: focus.setupIssuer
-    });
-  }, [load.state]);
-  if (load.state === "loading") return /* @__PURE__ */ u4("p", { class: "muted", children: "Loading\u2026" });
-  if (load.state === "inactive-target") return /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
-    /* @__PURE__ */ u4("p", { children: "This group still uses OneCLI. Prepare or open its inactive Agent Vault target to stage credentials and consent. This does not switch the backend or change OneCLI grants." }),
-    /* @__PURE__ */ u4("button", { type: "button", disabled: preparing, onClick: async () => {
-      setPreparing(true);
-      const ok = await mutate(credPath(gid, "/target"), "POST", {}, "Agent Vault target prepared; OneCLI remains active");
-      setPreparing(false);
-      if (ok) setTargetGroup(gid);
-    }, children: preparing ? "Preparing\u2026" : "Prepare / open Agent Vault target" })
+        `${group.id}:${latest.data.revision}:${JSON.stringify(latest.data.grants)}`
+      )),
+      !destinations.some((group) => group.canAdmin) ? /* @__PURE__ */ u4("p", { children: "No destination groups available for you to administer." }) : null
+    ] }) : null
   ] });
-  if (load.state === "down") return /* @__PURE__ */ u4(GatewayDown, { onRetry: () => void refresh() });
-  if (load.state === "error") {
-    return /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
-      /* @__PURE__ */ u4("p", { class: "ga-cred-error", children: [
-        "Couldn't load credentials: ",
-        load.message
-      ] }),
-      /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Try again" })
-    ] });
-  }
-  const data = load.data;
-  const close = () => setDialog(null);
-  const done = () => void refresh();
-  const keyNames = data.keys.map((k4) => k4.key);
-  const pendingMcp = data.mcp.filter((m6) => m6.auth === "oauth" && m6.status === "needs_sign_in").length;
-  const segments = [
-    { id: "keys", label: "Keys", count: data.keys.length, alert: data.keys.some((k4) => k4.status === "needs_value") },
-    {
-      id: "accounts",
-      label: "Accounts",
-      count: data.accounts.length + pendingMcp,
-      alert: data.accounts.some((a4) => a4.status === "needs_reconnect") || pendingMcp > 0
-    }
-  ];
-  return /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
-    /* @__PURE__ */ u4("p", { class: "group-admin-help ga-cred-intro", children: "The agent uses these keys and accounts through the credential gateway, which adds them to matching requests. The agent never sees them, and nobody can view a key after it's saved." }),
-    data.targetOnly ? /* @__PURE__ */ u4("div", { class: "ga-cred-callout warn", role: "status", children: [
-      /* @__PURE__ */ u4("strong", { children: "Inactive Agent Vault target" }),
-      /* @__PURE__ */ u4("p", { children: "OneCLI remains active. These credentials are staged only; saving keys or signing in does not cut this group over." })
+}
+function ServiceGrantForm({ connection: connection2, group, busy, onChange }) {
+  const grant = connection2.grants.find((item) => item.vault === group.id);
+  const [selected, setSelected] = h2((grant?.services ?? []).filter((name) => connection2.services.some((service) => service.name === name && service.enabled !== false)));
+  const [reviewed, setReviewed] = h2(false);
+  const [detaching, setDetaching] = h2(false);
+  return /* @__PURE__ */ u4("section", { class: "ga-cred-grant", children: [
+    /* @__PURE__ */ u4("strong", { children: group.name }),
+    grant ? /* @__PURE__ */ u4("span", { children: [
+      " \xB7 ",
+      grant.status
     ] }) : null,
-    /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => void refresh(), children: "Refresh credentials" }),
-    signIn.waiting ? /* @__PURE__ */ u4(SignInBanner, { waiting: signIn.waiting, onReopen: signIn.reopen, onCancel: signIn.cancel }) : null,
-    /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: segments.map((s5) => /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: view === s5.id ? "active" : "",
-        "aria-current": view === s5.id ? "page" : void 0,
-        onClick: () => {
-          setView(s5.id);
-          void refresh();
-        },
-        children: [
-          s5.label,
-          s5.count !== void 0 ? /* @__PURE__ */ u4("span", { class: `ga-cred-count${s5.alert ? " alert" : ""}`, children: s5.count }) : null
-        ]
-      },
-      s5.id
-    )) }),
-    !data.canEdit ? /* @__PURE__ */ u4("p", { class: "ga-cred-note", children: "You can see this group's credentials but not change them." }) : null,
-    view === "keys" ? /* @__PURE__ */ u4(KeysView, { data, onDialog: setDialog }) : null,
-    view === "accounts" ? /* @__PURE__ */ u4(AccountsView, { data, onDialog: setDialog, onSignIn: signIn.start }) : null,
-    dialog?.kind === "add-key" ? /* @__PURE__ */ u4(
-      AddKeyDialog,
-      {
-        gid,
-        targetOnly,
-        presets: data.presets,
-        existingKeys: keyNames,
-        initialMatch: dialog.match,
-        onExisting: (key) => {
-          const item = data.keys.find((k4) => k4.key === key);
-          setDialog(item ? item.sharedService ? { kind: "key-set", name: item.sharedService } : { kind: "replace", item } : null);
-        },
-        onClose: close,
-        onSaved: done
+    /* @__PURE__ */ u4("fieldset", { disabled: busy, class: "ga-cred-scope", children: [
+      /* @__PURE__ */ u4("legend", { children: "Services available to this agent" }),
+      /* @__PURE__ */ u4("div", { class: "ga-cred-grant-services", children: connection2.services.map((service) => /* @__PURE__ */ u4("label", { children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "checkbox",
+            checked: selected.includes(service.name),
+            disabled: !group.canAdmin || service.enabled === false,
+            onChange: (event) => {
+              setSelected(event.currentTarget.checked ? [...selected, service.name] : selected.filter((name) => name !== service.name));
+              setReviewed(false);
+            }
+          }
+        ),
+        " ",
+        service.name,
+        " \xB7 ",
+        service.host,
+        service.path ?? ""
+      ] }, service.name)) }),
+      group.canAdmin ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4(Review, { checked: reviewed, onChange: setReviewed, children: [
+          "Approve these services and the current connection policy for ",
+          group.name,
+          " and its members."
+        ] }),
+        /* @__PURE__ */ u4("button", { type: "button", disabled: !reviewed || !selected.length || connection2.status !== "ready", onClick: () => void onChange(selected), children: grant ? "Approve selected services" : "Grant selected services" }),
+        connection2.status !== "ready" ? /* @__PURE__ */ u4("p", { class: "muted", children: "The owner must finish connecting or enable this connection before granting access." }) : null
+      ] }) : /* @__PURE__ */ u4("p", { class: "muted", children: "You no longer administer this group. You can revoke its grant but cannot reapprove it." }),
+      grant ? /* @__PURE__ */ u4("button", { type: "button", class: "danger", onClick: () => {
+        if (!detaching) {
+          setDetaching(true);
+          return;
+        }
+        void onChange(null);
+      }, children: detaching ? `Confirm detach ${group.name} only` : "Detach agent access" }) : null,
+      detaching ? /* @__PURE__ */ u4("p", { children: [
+        "Only ",
+        group.name,
+        " loses access. Other agents and upstream authorization remain unchanged."
+      ] }) : null
+    ] })
+  ] });
+}
+var EMPTY_APP = {
+  label: "",
+  issuer: "https://accounts.example.com",
+  client_id: "",
+  token_endpoint_auth_method: "none",
+  api_hosts: ["api.example.com"],
+  default_scopes: [],
+  identity: "none",
+  token_scope_separator: "space"
+};
+function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onClose, onSaved }) {
+  const [id2, setId] = h2(app?.id ?? "");
+  const [scope, setScope] = h2(app?.source ?? "user");
+  const [text2, setText] = h2(JSON.stringify(app ? appConfiguration(app) : EMPTY_APP, null, 2));
+  const [secret, setSecret] = h2("");
+  const [busy, setBusy] = h2(false);
+  const [error, setError] = h2("");
+  const [reviewed, setReviewed] = h2(false);
+  const [deleting, setDeleting] = h2(false);
+  const affected = connections.filter((connection2) => connection2.app_id === (app?.id ?? id2));
+  const canSave = !busy && reviewed && !!id2.trim() && (scope !== "install" || canEditInstall);
+  async function save(remove) {
+    if (!canSave) return;
+    setBusy(true);
+    setError("");
+    try {
+      const body = remove ? void 0 : { config: parseAppConfiguration(text2), ...secret ? { clientSecret: secret } : {} };
+      await credentialRequest(credentialsPath(`/oauth-apps/${encodeURIComponent(id2.trim())}?scope=${scope}`), remove ? "DELETE" : "PUT", body);
+      setSecret("");
+      onSaved();
+      onClose();
+      showToast(remove ? "OAuth app removed" : "OAuth app saved");
+    } catch (error2) {
+      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError || error2 instanceof SyntaxError)) throw error2;
+      setError(errorMessage(error2));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /* @__PURE__ */ u4(CredentialDialog, { title: app ? `Manage OAuth app \xB7 ${app.label}` : "Configure OAuth app", onClose, busy, footer: /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
+    app ? /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled: !canSave, onClick: () => {
+      if (!deleting) {
+        setDeleting(true);
+        return;
       }
-    ) : null,
-    dialog?.kind === "replace" ? /* @__PURE__ */ u4(ReplaceKeyDialog, { gid, targetOnly, item: dialog.item, onClose: close, onSaved: done }) : null,
-    dialog?.kind === "edit" ? /* @__PURE__ */ u4(EditKeyDialog, { gid, targetOnly, item: dialog.item, onClose: close, onSaved: done }) : null,
-    dialog?.kind === "key-set" ? /* @__PURE__ */ u4(KeySetDialog, { gid, targetOnly, name: dialog.name, onClose: close, onSaved: done }) : null,
-    dialog?.kind === "connect" ? /* @__PURE__ */ u4(
-      ConnectAccountDialog,
+      void save(true);
+    }, children: deleting ? "Confirm delete app" : "Delete app" }) : null,
+    /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: !canSave || deleting, onClick: () => void save(false), children: busy ? "Saving\u2026" : "Save app" })
+  ] }), children: [
+    /* @__PURE__ */ u4(GroupAdminField, { label: "App ID", children: /* @__PURE__ */ u4("input", { type: "text", "aria-label": "App ID", disabled: busy || !!app, value: id2, onInput: (event) => {
+      setId(event.currentTarget.value);
+      setReviewed(false);
+    } }) }),
+    /* @__PURE__ */ u4(GroupAdminField, { label: "App ownership", children: /* @__PURE__ */ u4("select", { "aria-label": "App ownership", value: scope, disabled: busy || !!app, onChange: (event) => {
+      setScope(event.currentTarget.value);
+      setReviewed(false);
+    }, children: [
+      /* @__PURE__ */ u4("option", { value: "user", children: "Personal app" }),
+      canEditInstall ? /* @__PURE__ */ u4("option", { value: "install", children: "Install-wide app" }) : null
+    ] }) }),
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Generic app config JSON", children: /* @__PURE__ */ u4(
+      "textarea",
       {
-        apps: data.oauthApps,
-        mcp: data.mcp,
-        canEdit: data.canEdit,
-        provider: dialog.provider,
-        reconnect: dialog.reconnect,
-        onSetUp: (app, issuer) => setDialog({ kind: "oauth-app", app, issuer, thenConnect: true }),
-        onStart: signIn.start,
-        onClose: close
-      }
-    ) : null,
-    dialog?.kind === "oauth-app" ? /* @__PURE__ */ u4(
-      OAuthAppDialog,
-      {
-        gid,
-        targetOnly,
-        app: dialog.app,
-        scope: dialog.scope,
-        canEditInstall: data.canEditInstall,
-        redirectUri: data.oauthRedirectUri,
-        issuer: dialog.issuer,
-        onClose: close,
-        onSaved: () => {
-          done();
-          setDialog(dialog.thenConnect ? { kind: "connect", provider: dialog.app.id } : null);
+        "aria-label": "Generic app config JSON",
+        class: "ga-cred-mono",
+        rows: 15,
+        value: text2,
+        disabled: busy,
+        spellcheck: false,
+        onInput: (event) => {
+          setText(event.currentTarget.value);
+          setReviewed(false);
         }
       }
-    ) : null,
-    dialog?.kind === "remove-app" ? /* @__PURE__ */ u4(
-      ConfirmDialog,
+    ) }),
+    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+      "Configure issuer or explicit authorization_endpoint / token_endpoint, approved api_hosts, default_scopes, authorization_params and identity discovery. Enter the NanoClaw callback URI",
+      " ",
+      /* @__PURE__ */ u4("code", { children: `${location.origin}/oauth/callback` }),
+      " in your provider console. This is a generic app, not a provider permission catalog."
+    ] }),
+    /* @__PURE__ */ u4(GroupAdminField, { label: "Client secret", info: app?.client_secret_set ? "A secret is configured. Blank preserves it." : "Required only for confidential clients; never returned after saving.", children: /* @__PURE__ */ u4(
+      SecretInput,
       {
-        title: dialog.scope === "install" ? `Remove the install-wide ${dialog.app.label} app?` : `Remove this group's ${dialog.app.label} app?`,
-        confirmLabel: "Remove",
-        danger: true,
-        onClose: close,
-        onConfirm: async () => {
-          const url = credPath(gid, `/oauth-apps/${encodeURIComponent(dialog.app.id)}?scope=${dialog.scope}`, targetOnly);
-          const ok = await mutate(url, "DELETE", void 0, `Removed the ${dialog.app.label} app`);
-          if (ok) done();
-          return ok;
-        },
-        children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: removeAppText(dialog.app, dialog.scope) })
+        label: "Client secret",
+        value: secret,
+        disabled: busy,
+        placeholder: app?.client_secret_set ? "Keep current secret" : "New client secret",
+        onInput: (value) => {
+          setSecret(value);
+          setReviewed(false);
+        }
       }
-    ) : null,
-    dialog?.kind === "delete-key" ? /* @__PURE__ */ u4(
-      ConfirmDialog,
+    ) }),
+    /* @__PURE__ */ u4("div", { class: "ga-cred-callout", children: [
+      /* @__PURE__ */ u4("strong", { children: [
+        "Affected personal connections \xB7 ",
+        affected.length
+      ] }),
+      affected.map((connection2) => /* @__PURE__ */ u4("div", { children: [
+        /* @__PURE__ */ u4("p", { children: [
+          connection2.label,
+          " \xB7 ",
+          connection2.status
+        ] }),
+        /* @__PURE__ */ u4(Impact, { connection: connection2, groups: groups2 })
+      ] }, connection2.id)),
+      scope === "install" ? /* @__PURE__ */ u4("p", { children: "Install-wide changes can also affect other users and agents not visible here." }) : null,
+      /* @__PURE__ */ u4("p", { children: "Connections pin their issuing client. Saving a different client, issuer, host or scope policy does not automatically rebind existing connections. Secret rotation or deletion can prevent refresh and require reconnect. Review every affected connection before replacing or deleting an app." })
+    ] }),
+    /* @__PURE__ */ u4(Review, { checked: reviewed, onChange: setReviewed, children: "I reviewed the app policy, secret lifecycle and affected connections." }),
+    deleting ? /* @__PURE__ */ u4("p", { role: "alert", children: "Delete this app configuration? Existing client bindings may stop refreshing; this does not detach one agent." }) : null,
+    /* @__PURE__ */ u4(ErrorNotice, { message: error })
+  ] });
+}
+
+// src/components/GroupCredentialAccess.tsx
+function GroupCredentialAccess({ gid }) {
+  const { data, loading, error, refresh } = useCredentialResource(accessPath(gid));
+  const [attach, setAttach] = h2(false);
+  const [detach, setDetach] = h2(null);
+  return /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
+    /* @__PURE__ */ u4("div", { class: "ga-cred-head", children: [
+      /* @__PURE__ */ u4("h3", { children: "Access" }),
+      /* @__PURE__ */ u4("button", { type: "button", disabled: loading, onClick: () => void refresh(), children: "Refresh access" })
+    ] }),
+    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Services explicitly shared with this agent. Owners manage keys and authorization in their personal Credentials. Removing access detaches only this agent; it never disconnects the upstream account." }),
+    loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading granted services\u2026" }) : null,
+    /* @__PURE__ */ u4(ErrorNotice, { message: error }),
+    error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Try again" }) : null,
+    data && !error ? data.grants.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.grants.map((grant) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
+      /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
+        /* @__PURE__ */ u4("strong", { children: grant.label }),
+        /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
+          /* @__PURE__ */ u4("span", { children: [
+            "Owner: ",
+            grant.owner.label ?? grant.owner.id
+          ] }),
+          /* @__PURE__ */ u4("span", { children: [
+            "Status: ",
+            grant.status
+          ] })
+        ] }),
+        /* @__PURE__ */ u4("div", { class: "ga-cred-chips", children: grant.services.map((service) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip", children: [
+          service.name,
+          " \xB7 ",
+          service.host,
+          service.path ?? ""
+        ] }, service.name)) })
+      ] }),
+      /* @__PURE__ */ u4("button", { type: "button", disabled: loading, onClick: () => setDetach(grant), children: "Detach this agent" })
+    ] }, grant.connection_id)) }) : /* @__PURE__ */ u4("p", { children: "No services have been granted to this agent." }) : null,
+    /* @__PURE__ */ u4("div", { class: "ga-cred-head-actions", children: [
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => setAttach(true), children: "Use existing connection" }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Open personal Credentials" })
+    ] }),
+    attach ? /* @__PURE__ */ u4(AttachExistingConnection, { gid, onClose: () => setAttach(false), onSaved: () => void refresh() }) : null,
+    detach ? /* @__PURE__ */ u4(
+      ConfirmCredentialAction,
       {
-        title: `Delete ${dialog.item.label}?`,
-        confirmLabel: "Delete key",
-        danger: true,
-        onClose: close,
+        title: `Detach ${detach.label} from this agent`,
+        label: "Detach this agent only",
+        onClose: () => setDetach(null),
         onConfirm: async () => {
-          const ok = await mutate(credPath(gid, `/keys/${encodeURIComponent(dialog.item.key)}`, targetOnly), "DELETE", void 0, `Deleted ${dialog.item.label}`);
-          if (ok) done();
-          return ok;
+          await credentialRequest(accessPath(gid, detach.connection_id), "DELETE");
+          showToast("Agent access detached. Other agents and upstream authorization are unchanged.");
+          await refresh();
         },
-        children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-          "The value is erased from this group's vault, and requests to ",
-          /* @__PURE__ */ u4("code", { children: dialog.item.destination.match }),
-          " stop getting it. This can't be undone."
-        ] })
-      }
-    ) : null,
-    dialog?.kind === "disconnect" ? /* @__PURE__ */ u4(
-      ConfirmDialog,
-      {
-        title: `Disconnect ${dialog.account.account ?? dialog.account.providerLabel}?`,
-        confirmLabel: "Disconnect",
-        danger: true,
-        onClose: close,
-        onConfirm: async () => {
-          const ok = await mutate(credPath(gid, `/accounts/${encodeURIComponent(dialog.account.key)}`, targetOnly), "DELETE", void 0, "Account disconnected");
-          if (ok) done();
-          return ok;
-        },
-        children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-          "The agent loses access to ",
-          dialog.account.providerLabel,
-          " in this group, and the gateway revokes its tokens. Other groups connected to the same account keep their own access."
+        children: /* @__PURE__ */ u4("p", { children: [
+          "This agent and its members will lose access to ",
+          detach.services.map((service) => service.name).join(", "),
+          ". The connection remains owned by ",
+          detach.owner.label ?? detach.owner.id,
+          ". Other grants and the upstream account are unchanged."
         ] })
       }
     ) : null
   ] });
 }
-function GatewayDown({ onRetry }) {
-  return /* @__PURE__ */ u4("section", { class: "ga-cred", children: /* @__PURE__ */ u4("div", { class: "ga-cred-callout warn", role: "alert", children: [
-    /* @__PURE__ */ u4("strong", { children: "The credential gateway isn't responding." }),
-    /* @__PURE__ */ u4("p", { children: "Keys and accounts can't be viewed or changed right now, and agents can't start new sessions until it's back. Running agents keep working only for services that don't need a key." }),
-    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      "Operator: check ",
-      /* @__PURE__ */ u4("code", { children: "systemctl --user status nanoclaw-gateway" }),
-      " and its log."
-    ] }),
-    /* @__PURE__ */ u4("button", { type: "button", onClick: onRetry, children: "Try again" })
-  ] }) });
-}
-function StatusPill({ tone: tone2, children }) {
-  return /* @__PURE__ */ u4("span", { class: `ga-cred-pill ${tone2}`, children });
-}
-function SectionHead({ help, children }) {
-  return /* @__PURE__ */ u4("div", { class: "ga-cred-head", children: [
-    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: help }),
-    children ? /* @__PURE__ */ u4("div", { class: "ga-cred-head-actions", children }) : null
-  ] });
-}
-function KeysView({ data, onDialog }) {
-  const edit = data.canEdit && data.keysEditable !== false;
-  return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
-    data.canEdit && data.keysEditable === false ? /* @__PURE__ */ u4("p", { class: "ga-cred-note", children: "Keys can be viewed here; adding and changing them arrives in a later update." }) : null,
-    /* @__PURE__ */ u4(SectionHead, { help: "API keys and tokens the agent can use, and where each one is sent.", children: [
-      edit ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "key-set" }), children: "Create atomic key set" }) : null,
-      edit ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "add-key" }), children: "Add key" }) : null
-    ] }),
-    data.keys.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
-      /* @__PURE__ */ u4("p", { children: "No keys yet." }),
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Add a key for a service; it's only ever sent to the host you choose." })
-    ] }) : /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.keys.map((k4) => /* @__PURE__ */ u4("li", { class: `ga-cred-item${k4.status === "needs_value" ? " attention" : ""}`, children: [
-      /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
-        /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
-          /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: k4.label }),
-          /* @__PURE__ */ u4("code", { class: "ga-cred-code-muted", children: k4.key }),
-          k4.mcpServer ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: [
-            "MCP \xB7 ",
-            k4.mcpServer
-          ] }) : null,
-          k4.status === "needs_value" ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs a value" }) : null
-        ] }),
-        /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
-          /* @__PURE__ */ u4("span", { children: [
-            "Sent to ",
-            /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: k4.destination.match })
-          ] }),
-          /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: describeInjection(k4.destination.injection, k4.key) })
-        ] }),
-        k4.status === "set" ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
-          /* @__PURE__ */ u4("span", { children: [
-            "Last used ",
-            ago(k4.lastUsedAt)
-          ] }),
-          k4.updatedAt ? /* @__PURE__ */ u4("span", { children: [
-            "Set ",
-            ago(k4.updatedAt)
-          ] }) : null
-        ] }) : null
-      ] }),
-      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: k4.sharedService ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "key-set", name: k4.sharedService }), children: "Manage key set" }) : /* @__PURE__ */ u4(k, { children: [
-        /* @__PURE__ */ u4("button", { type: "button", class: k4.status === "needs_value" ? "primary" : "", onClick: () => onDialog({ kind: "replace", item: k4 }), children: k4.status === "needs_value" ? "Set value" : "Replace" }),
-        /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "edit", item: k4 }), children: "Edit" }),
-        /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Delete ${k4.label}`, title: "Delete", onClick: () => onDialog({ kind: "delete-key", item: k4 }), children: "\u2715" })
-      ] }) }) : null
-    ] }, k4.key)) })
-  ] });
-}
-function AccountsView({
-  data,
-  onDialog,
-  onSignIn
-}) {
-  const edit = data.canEdit;
-  const pendingMcp = data.mcp.filter((m6) => m6.auth === "oauth" && m6.status === "needs_sign_in");
-  return /* @__PURE__ */ u4("div", { class: "ga-cred-view", children: [
-    /* @__PURE__ */ u4(SectionHead, { help: "Accounts you signed in to for this group. The gateway keeps their tokens fresh.", children: edit ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "connect" }), children: "Connect account" }) : null }),
-    pendingMcp.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: pendingMcp.map((m6) => /* @__PURE__ */ u4("li", { class: "ga-cred-item attention", children: [
-      /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
-        /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
-          /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: m6.server }),
-          /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: "MCP server" }),
-          /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs sign-in" })
-        ] }),
-        /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: m6.url }) }),
-        m6.needsApp || m6.ambiguousApp ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: m6.ambiguousApp ? "Multiple OAuth apps match; choose one." : `Configure an OAuth app for ${m6.issuer ?? "the discovered issuer"}.` }) }) : null
-      ] }),
-      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: m6.needsApp ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "oauth-app", app: { id: "", label: "New app", install: null, group: null, overridesInstall: false }, issuer: m6.issuer }), children: "Set up app" }) : m6.ambiguousApp ? /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => onDialog({ kind: "connect" }), children: "Choose app" }) : /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => void onSignIn({ mcpServer: m6.server }), children: "Sign in" }) }) : null
-    ] }, m6.server)) }) : null,
-    data.accounts.length === 0 && pendingMcp.length === 0 ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
-      /* @__PURE__ */ u4("p", { children: "No accounts connected." }),
-      /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Connect Google and similar services by signing in. MCP servers that need sign-in also appear here." })
-    ] }) : /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.accounts.map((a4) => /* @__PURE__ */ u4("li", { class: `ga-cred-item${a4.status === "needs_reconnect" ? " attention" : ""}`, children: [
-      /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
-        /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
-          /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: a4.account ?? a4.providerLabel }),
-          /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: a4.kind === "mcp_oauth" ? `MCP \xB7 ${a4.mcpServer}` : a4.providerLabel }),
-          a4.client === "registered" ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", title: "The gateway registered its own OAuth client with this server for this group only", children: "Own client" }) : null,
-          a4.client === "app" ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", title: "Signed in through an OAuth app set up under OAuth apps", children: "OAuth app" }) : null,
-          a4.status === "needs_reconnect" ? /* @__PURE__ */ u4(StatusPill, { tone: "warn", children: "Needs reconnecting" }) : null
-        ] }),
-        a4.scopes.length ? /* @__PURE__ */ u4("div", { class: "ga-cred-chips", children: a4.scopes.map((s5) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip", children: s5.label }, s5.id)) }) : null,
-        a4.kind === "oauth_app" ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
-          /* @__PURE__ */ u4("span", { children: [
-            "Scope metadata: ",
-            a4.scopeSource ?? "unknown",
-            a4.grantedScopes === null ? " (provider grant not reported)" : ""
-          ] }),
-          /* @__PURE__ */ u4("span", { children: [
-            "API hosts: ",
-            a4.apiHosts?.join(", ") || "none"
-          ] }),
-          /* @__PURE__ */ u4("span", { children: [
-            "App source: ",
-            a4.appSource ?? "unknown"
-          ] })
-        ] }) : null,
-        /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
-          a4.status === "needs_reconnect" ? /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
-            a4.providerLabel,
-            " stopped accepting the saved sign-in. Reconnect to restore access."
-          ] }) : /* @__PURE__ */ u4("span", { children: [
-            "Last used ",
-            ago(a4.lastUsedAt)
-          ] }),
-          a4.connectedAt ? /* @__PURE__ */ u4("span", { children: [
-            "Connected ",
-            ago(a4.connectedAt)
-          ] }) : null
-        ] })
-      ] }),
-      edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: [
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: a4.status === "needs_reconnect" ? "primary" : "",
-            onClick: () => a4.kind === "mcp_oauth" && a4.mcpServer ? void onSignIn({ mcpServer: a4.mcpServer }) : onDialog({ kind: "connect", reconnect: { provider: a4.provider, key: a4.key, scopes: a4.scopeSource !== "legacy" && a4.requestedScopes !== null && a4.requestedScopes !== void 0 ? a4.requestedScopes : a4.scopes.map((s5) => s5.id) } }),
-            children: a4.status === "needs_reconnect" ? "Reconnect" : "Reauthorize"
-          }
-        ),
-        /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Disconnect ${a4.account ?? a4.providerLabel}`, title: "Disconnect", onClick: () => onDialog({ kind: "disconnect", account: a4 }), children: "\u2715" })
-      ] }) : null
-    ] }, a4.key)) }),
-    /* @__PURE__ */ u4(OAuthAppsSection, { data, onDialog })
-  ] });
-}
-function countAccounts(n3) {
-  return n3 === 1 ? "1 account" : `${n3} accounts`;
-}
-function removeAppText(app, scope) {
-  if (scope === "install") {
-    const all = app.install?.accountsAllGroups ?? app.install?.accounts ?? 0;
-    const others = app.group ? " This group keeps its own app." : "";
-    return all > 0 ? `Groups without their own ${app.label} app can no longer connect accounts. ${countAccounts(all)} across all groups (${app.install?.accounts ?? 0} here) are disconnected, and their tokens are revoked.${others}` : `Groups without their own ${app.label} app can no longer connect accounts.${others}`;
-  }
-  const n3 = app.group?.accounts ?? 0;
-  const fallback = app.install || app.overridesInstall ? `This group goes back to the install-wide app.` : `New ${app.label} accounts can't be connected here until an app is set up again.`;
-  return n3 > 0 ? `${fallback} This group's ${countAccounts(n3)} connected through its own app are disconnected, and their tokens are revoked.` : fallback;
-}
-function OAuthAppsSection({ data, onDialog }) {
-  const edit = data.canEdit;
-  const inst = data.canEditInstall;
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("h4", { class: "ga-cred-subhead", children: "OAuth apps" }),
-    edit ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app: { id: "", label: "New app", install: null, group: null, overridesInstall: false } }), children: "Add OAuth app" }) : null,
-    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Providers that don't register clients themselves, like Google and GitHub, need an OAuth client created in their console. An install-wide app is shared by every group; a group can use its own instead. Tokens always stay in each group." }),
-    /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.oauthApps.map((app) => {
-      const client = app.group ?? app.install;
-      return /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
+function AttachExistingConnection({ gid, onClose, onSaved }) {
+  const overview = useCredentialResource(credentialsPath());
+  const [connection2, setConnection] = h2(null);
+  const group = overview.data?.groups.find((item) => item.id === gid);
+  if (connection2 && overview.data) return /* @__PURE__ */ u4(
+    ConnectionGrantsDialog,
+    {
+      connection: connection2,
+      groups: overview.data.groups,
+      onlyGroup: gid,
+      onClose,
+      onSaved
+    }
+  );
+  return /* @__PURE__ */ u4(CredentialDialog, { title: "Use an existing personal connection", onClose, children: [
+    /* @__PURE__ */ u4("p", { children: "Only connections you own can be shared, and you must administer this destination agent. Receiving access to someone else's connection does not let you reshare it." }),
+    overview.loading ? /* @__PURE__ */ u4("p", { children: "Loading your connections\u2026" }) : null,
+    /* @__PURE__ */ u4(ErrorNotice, { message: overview.error }),
+    overview.error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void overview.refresh(), children: "Retry" }) : null,
+    overview.data && !overview.error ? group?.canAdmin ? /* @__PURE__ */ u4(k, { children: [
+      overview.data.connections.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: overview.data.connections.map((item) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
         /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
-          /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
-            /* @__PURE__ */ u4("span", { class: "ga-cred-name", children: app.label }),
-            app.group ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: "This group" }) : app.install ? /* @__PURE__ */ u4("span", { class: "ga-cred-tag", children: "All groups" }) : /* @__PURE__ */ u4(StatusPill, { tone: "muted", children: "Not set up" })
-          ] }),
-          client ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
-            /* @__PURE__ */ u4("span", { children: [
-              "Client ",
-              /* @__PURE__ */ u4("span", { class: "ga-cred-mono", children: client.clientId })
-            ] }),
-            /* @__PURE__ */ u4("span", { children: [
-              "Set ",
-              ago(client.updatedAt)
-            ] }),
-            /* @__PURE__ */ u4("span", { children: [
-              countAccounts(client.accounts),
-              " here",
-              !app.group && app.install?.accountsAllGroups !== void 0 ? `, ${app.install.accountsAllGroups} in all groups` : ""
-            ] })
-          ] }) : null,
-          app.group && app.overridesInstall ? /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: /* @__PURE__ */ u4("span", { children: [
-            "Used instead of the install-wide app",
-            app.install ? ` (${app.install.clientId})` : ""
-          ] }) }) : null,
-          /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
-            /* @__PURE__ */ u4("span", { children: client?.config.issuer }),
-            /* @__PURE__ */ u4("span", { children: client?.config.api_hosts.join(", ") || "MCP-only app" })
+          /* @__PURE__ */ u4("strong", { children: item.label }),
+          /* @__PURE__ */ u4("span", { children: [
+            item.status,
+            " \xB7 ",
+            item.services.map((service) => service.name).join(", ")
           ] })
         ] }),
-        edit ? /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: app.group ? /* @__PURE__ */ u4(k, { children: [
-          /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app, scope: "group" }), children: "Edit" }),
-          /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove this group's ${app.label} app`, title: "Remove this group's app", onClick: () => onDialog({ kind: "remove-app", app, scope: "group" }), children: "\u2715" }),
-          inst && app.install ? /* @__PURE__ */ u4(k, { children: [
-            /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app, scope: "install" }), children: "Edit install-wide" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove the install-wide ${app.label} app`, onClick: () => onDialog({ kind: "remove-app", app, scope: "install" }), children: "\u2715" })
-          ] }) : null
-        ] }) : app.install ? /* @__PURE__ */ u4(k, { children: [
-          inst ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app, scope: "install" }), children: "Edit" }) : null,
-          /* @__PURE__ */ u4("button", { type: "button", title: "Use a different OAuth app in this group only", onClick: () => onDialog({ kind: "oauth-app", app, scope: "group" }), children: "Use own app" }),
-          inst ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-icon danger", "aria-label": `Remove the install-wide ${app.label} app`, title: "Remove the install-wide app", onClick: () => onDialog({ kind: "remove-app", app, scope: "install" }), children: "\u2715" }) : null
-        ] }) : /* @__PURE__ */ u4("button", { type: "button", onClick: () => onDialog({ kind: "oauth-app", app }), children: "Set up" }) }) : null
-      ] }, app.id);
-    }) })
+        /* @__PURE__ */ u4("button", { type: "button", onClick: () => setConnection(item), children: "Select services" })
+      ] }, item.id)) }) : /* @__PURE__ */ u4("p", { children: "You have no personal connections to share." }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Create a connection in personal Credentials" })
+    ] }) : /* @__PURE__ */ u4("p", { role: "alert", children: "You do not administer this destination agent." }) : null
   ] });
 }
-function mcpMatch(url) {
-  if (!URL.canParse(url)) return "";
-  const u5 = new URL(url);
-  const dir = u5.pathname.replace(/[^/]*$/, "");
-  return `${u5.host}${dir.length > 1 ? `${dir}*` : ""}`;
-}
-function McpServerAuth({
-  gid,
-  server,
-  onOpenCredentials
-}) {
-  const { load, refresh } = useOverview(gid);
-  const signIn = useSignIn(gid, () => void refresh());
-  const entry = load.state === "ready" ? load.data.mcp.find((m6) => m6.server === server) : void 0;
-  const open = (focus) => {
-    credentialsFocus.value = focus;
-    onOpenCredentials();
-  };
-  let body;
-  if (load.state === "loading") body = /* @__PURE__ */ u4("span", { class: "muted", children: "Checking\u2026" });
-  else if (load.state === "down") body = /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: "The credential gateway isn't responding." });
-  else if (load.state === "error") body = /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
-    "Couldn't check sign-in: ",
-    load.message
-  ] });
-  else if (load.state === "inactive-target") body = /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("span", { class: "muted", children: "OneCLI remains active. Agent Vault credentials can be staged separately." }),
-    /* @__PURE__ */ u4("button", { type: "button", onClick: () => open({ view: "accounts" }), children: "Open target setup" })
-  ] });
-  else if (!entry) body = /* @__PURE__ */ u4("span", { class: "muted", children: "Save the server to check whether it needs a key or sign-in." });
-  else if (entry.auth === "oauth" && (entry.needsApp || entry.ambiguousApp)) {
-    body = /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: entry.ambiguousApp ? "Choose a configured OAuth app for this server." : `Configure an OAuth app for ${entry.issuer ?? "the discovered issuer"}.` }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => open({ view: "accounts", setupIssuer: entry.needsApp ? entry.issuer : void 0 }), children: "Manage in Credentials" })
-    ] });
-  } else if (entry.auth === "oauth") {
-    body = entry.status === "ok" ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { children: [
-        "Signed in",
-        entry.account ? ` as ${entry.account}` : "",
-        "."
-      ] }),
-      /* @__PURE__ */ u4("button", { type: "button", onClick: () => void signIn.start({ mcpServer: server }), children: "Sign in again" })
-    ] }) : /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: entry.status === "needs_reconnect" ? "The sign-in expired." : "This server asks you to sign in before the agent can use it." }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => void signIn.start({ mcpServer: server }), children: "Sign in" })
-    ] });
-  } else if (entry.auth === "key") {
-    body = entry.status === "needs_value" ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: [
-        "Uses ",
-        /* @__PURE__ */ u4("code", { children: entry.key }),
-        ", which has no value yet."
-      ] }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "primary", onClick: () => open({ view: "keys", key: entry.key, action: "set" }), children: "Set it in Credentials" })
-    ] }) : /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { children: [
-        "Uses ",
-        /* @__PURE__ */ u4("code", { children: entry.key }),
-        " from Credentials."
-      ] }),
-      /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => open({ view: "keys", key: entry.key }), children: "Manage" })
-    ] });
-  } else {
-    body = /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("span", { class: "muted", children: "No key or sign-in." }),
-      load.data.keysEditable !== false ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => open({ view: "keys", action: "add", match: mcpMatch(entry.url) }), children: "Add a key" }) : null
-    ] });
+function serviceMatchesResource(service, resourceUrl) {
+  let url;
+  try {
+    url = new URL(resourceUrl);
+  } catch (error) {
+    if (error instanceof TypeError) return false;
+    throw error;
   }
+  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`, "i").test(value);
+  const slash = service.host.indexOf("/");
+  const host = slash < 0 ? service.host : service.host.slice(0, slash);
+  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
+  return glob(host, url.host) && (!path || glob(path, url.pathname)) && (!service.https_only || url.protocol === "https:");
+}
+function McpConnectionAccess({ gid, resourceUrl, onOpenCredentials }) {
+  const { data, error, loading, refresh } = useCredentialResource(accessPath(gid));
+  const matches2 = data?.grants.flatMap((grant) => grant.services.filter((service) => serviceMatchesResource(service, resourceUrl)).map((service) => ({ grant, service }))) ?? [];
   return /* @__PURE__ */ u4("div", { class: "ga-cred-mcp-auth", children: [
-    /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Sign-in" }),
-    /* @__PURE__ */ u4("div", { class: "ga-cred-mcp-auth-body", children: body }),
-    signIn.waiting ? /* @__PURE__ */ u4(SignInBanner, { waiting: signIn.waiting, onReopen: signIn.reopen, onCancel: signIn.cancel }) : null
+    /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Connection access" }),
+    loading ? /* @__PURE__ */ u4("span", { class: "muted", children: "Loading granted bindings\u2026" }) : null,
+    /* @__PURE__ */ u4(ErrorNotice, { message: error }),
+    error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Retry access" }) : null,
+    !loading && !error ? matches2.length ? /* @__PURE__ */ u4("ul", { children: matches2.map(({ grant, service }) => /* @__PURE__ */ u4("li", { children: [
+      grant.label,
+      " / ",
+      service.name,
+      " \xB7 ",
+      grant.status,
+      " \xB7 Owner: ",
+      grant.owner.label ?? grant.owner.id,
+      service.enabled === false ? " \xB7 service disabled" : ""
+    ] }, `${grant.connection_id}:${service.name}`)) }) : /* @__PURE__ */ u4("span", { class: "muted", children: "No matching granted service. Public servers may not need authentication." }) : null,
+    /* @__PURE__ */ u4("button", { type: "button", disabled: loading || !!error, onClick: () => onOpenCredentials(!matches2.length, matches2.length === 1 ? matches2[0].grant.connection_id : void 0), children: matches2.length ? "Manage personal connections" : "Connect in personal Credentials" }),
+    /* @__PURE__ */ u4("span", { class: "muted", children: "Connect once as yourself, then grant services in Agent Settings \u2192 Access. No group-owned sign-in is created here." })
   ] });
 }
 
@@ -31333,13 +31060,15 @@ function McpServersSection({
       onRemove: () => removeServer(selectedName),
       onTest: () => onTest(selectedName, selectedValue),
       auth: credentialsGid && mcpServerType(selectedValue) !== "stdio" ? JSON.stringify(savedServers?.[selectedName]) === JSON.stringify(selectedValue) ? /* @__PURE__ */ u4(
-        McpServerAuth,
+        McpConnectionAccess,
         {
           gid: credentialsGid,
-          server: selectedName,
-          onOpenCredentials: () => {
-            groupAdminTabRequest.value = "credentials";
-          }
+          resourceUrl: selectedValue.url,
+          onOpenCredentials: (create, connectionId) => openCredentials({
+            create,
+            connectionId,
+            resourceUrl: selectedValue.url
+          })
         }
       ) : /* @__PURE__ */ u4("div", { class: "ga-cred-mcp-auth", children: [
         /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Sign-in" }),
@@ -32651,7 +32380,7 @@ function SkillCatalogSection({
       requestId.current += 1;
     };
   }, [gid, reloadKey]);
-  async function mutate2(url, method, body, okMessage) {
+  async function mutate(url, method, body, okMessage) {
     setBusy(true);
     try {
       const r4 = await call(url, method, body);
@@ -32734,7 +32463,7 @@ function SkillCatalogSection({
           type: "button",
           disabled: busy || repo.trim() === "",
           onClick: async () => {
-            await mutate2(`${SKILLS_API3}/catalogs`, "POST", { repo: repo.trim(), ref: ref.trim() }, "Catalog added.");
+            await mutate(`${SKILLS_API3}/catalogs`, "POST", { repo: repo.trim(), ref: ref.trim() }, "Catalog added.");
             setRepo("");
             setRef("");
           },
@@ -32772,7 +32501,7 @@ function SkillCatalogSection({
                 type: "button",
                 class: "ga-catalog-remove",
                 disabled: busy || refreshing,
-                onClick: () => mutate2(
+                onClick: () => mutate(
                   `${SKILLS_API3}/catalogs/${encodeURIComponent(catalog.id)}`,
                   "DELETE",
                   void 0,
@@ -33110,7 +32839,7 @@ var TAB_ITEMS = [
   { id: "packages", label: "Packages", sublabel: "apt / npm / pip in the image" },
   { id: "mcp", label: "MCP servers", sublabel: "External tools wired to the agent" },
   { id: "skills", label: "Skills", sublabel: "Container skills mounted at runtime" },
-  { id: "credentials", label: "Credentials", sublabel: "Keys and accounts the agent can use" },
+  { id: "access", label: "Access", sublabel: "Services shared with this agent" },
   { id: "members", label: "Members", sublabel: "Who can use this group" },
   { id: "roles", label: "Admins", sublabel: "Admins for this group" },
   { id: "destinations", label: "Destinations", sublabel: "Where this group can send messages" }
@@ -33169,7 +32898,7 @@ function GroupAdmin() {
     }
     setTab(requestedTab);
   }, [open, requestedTab]);
-  const tabItems = TAB_ITEMS.map((item) => item.id === "credentials" && !credentialsUiFor(gid) ? { ...item, sublabel: "Stage an Agent Vault target; OneCLI stays active" } : item);
+  const tabItems = TAB_ITEMS;
   if (!open || !gid) return null;
   const group = groups.value.find((g8) => g8.id === gid);
   const title = group ? `Agent Settings \xB7 ${group.name}` : "Agent Settings";
@@ -33239,7 +32968,7 @@ function GroupAdmin() {
               onActions: setActions
             }
           ) : null,
-          activeTab === "credentials" ? /* @__PURE__ */ u4(CredentialsTab, { gid }) : null,
+          activeTab === "access" ? /* @__PURE__ */ u4(GroupCredentialAccess, { gid }) : null,
           activeTab === "members" ? /* @__PURE__ */ u4(MembersTab, { gid }) : null,
           activeTab === "roles" ? /* @__PURE__ */ u4(RolesTab, { gid }) : null,
           activeTab === "destinations" ? /* @__PURE__ */ u4(DestinationsTab, { gid }) : null
@@ -34082,6 +33811,211 @@ function SettingsTab({
   ] });
 }
 
+// src/components/CredentialsPage.tsx
+function CredentialsPage() {
+  const { data, error, loading, refresh } = useCredentialResource(credentialsPath());
+  const [view, setView] = h2("keys");
+  const [dialog, setDialog] = h2(null);
+  const signIn = useConnectionSignIn(() => void refresh());
+  const intent = credentialsIntent.value;
+  y2(() => {
+    if (!intent || !data) return;
+    setView("accounts");
+    if (intent.create) setDialog({ kind: "connect", resourceUrl: intent.resourceUrl });
+    else if (intent.connectionId) {
+      const connection2 = data.connections.find((item) => item.id === intent.connectionId);
+      if (connection2) {
+        setView(connection2.kind === "static" ? "keys" : "accounts");
+        setDialog({ kind: "edit", id: connection2.id });
+      } else {
+        showToast("This connection belongs to another owner. Ask its owner to manage it; this agent can only detach its access.");
+      }
+    }
+    credentialsIntent.value = null;
+  }, [intent, data]);
+  const connections = data?.connections.filter((connection2) => view === "keys" ? connection2.kind === "static" : connection2.kind !== "static") ?? [];
+  const close = () => setDialog(null);
+  const saved = () => {
+    void refresh();
+  };
+  return /* @__PURE__ */ u4("main", { class: "credentials-page settings-body", id: "credentials-page", "aria-label": "Personal credentials", children: /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
+    /* @__PURE__ */ u4("div", { class: "ga-cred-head", children: [
+      /* @__PURE__ */ u4("h1", { children: "Credentials" }),
+      /* @__PURE__ */ u4("button", { type: "button", disabled: loading, onClick: () => void refresh(), children: "Refresh connections" })
+    ] }),
+    /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Your personal keys and connected accounts, stored once and shared by reference. Agent Settings \u2192 Access controls which agents may use selected services. Secret values are write-only." }),
+    /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: view === "keys" ? "active" : "",
+          "aria-current": view === "keys" ? "page" : void 0,
+          onClick: () => setView("keys"),
+          children: "Keys"
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: view === "accounts" ? "active" : "",
+          "aria-current": view === "accounts" ? "page" : void 0,
+          onClick: () => setView("accounts"),
+          children: "Connected accounts"
+        }
+      )
+    ] }),
+    signIn.waiting ? /* @__PURE__ */ u4("div", { class: "ga-cred-banner", role: "status", "aria-live": "polite", children: [
+      /* @__PURE__ */ u4("span", { class: "ga-cred-spinner", "aria-hidden": "true" }),
+      /* @__PURE__ */ u4("span", { class: "ga-cred-banner-text", children: [
+        "Finish signing in to ",
+        signIn.waiting.label,
+        " in the provider window."
+      ] }),
+      /* @__PURE__ */ u4("div", { class: "ga-cred-banner-actions", children: [
+        /* @__PURE__ */ u4("button", { type: "button", onClick: signIn.reopen, children: "Open sign-in window" }),
+        /* @__PURE__ */ u4("button", { type: "button", onClick: signIn.stop, children: "Stop waiting" })
+      ] })
+    ] }) : null,
+    loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading personal connections\u2026" }) : null,
+    /* @__PURE__ */ u4(ErrorNotice, { message: error ? `Couldn't load credentials: ${error}` : "" }),
+    error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Try again" }) : null,
+    data && !error ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4("div", { class: "ga-cred-head", children: [
+        /* @__PURE__ */ u4("p", { class: "group-admin-help", children: view === "keys" ? "A connection can hold a Basic pair, multiple headers and more than one approved service. Rotate once for every authorized agent." : "Authorize a provider or MCP server once. Agents share the upstream identity and its real permissions; services do not downscope OAuth tokens." }),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "primary",
+            disabled: loading || !!signIn.waiting,
+            onClick: () => setDialog(view === "keys" ? { kind: "edit" } : { kind: "connect" }),
+            children: view === "keys" ? "Create key connection" : "Connect an account"
+          }
+        )
+      ] }),
+      connections.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: connections.map((connection2) => /* @__PURE__ */ u4("li", { class: `ga-cred-item${connection2.status === "needs_reconnect" ? " attention" : ""}`, children: [
+        /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
+          /* @__PURE__ */ u4("div", { class: "ga-cred-item-title", children: [
+            /* @__PURE__ */ u4("strong", { class: "ga-cred-name", children: connection2.label }),
+            /* @__PURE__ */ u4("span", { class: `ga-cred-pill ${connection2.status === "ready" ? "ok" : connection2.status === "disabled" ? "muted" : "warn"}`, children: connection2.status.replaceAll("_", " ") })
+          ] }),
+          /* @__PURE__ */ u4("div", { class: "ga-cred-meta", children: [
+            /* @__PURE__ */ u4("span", { children: [
+              "Owner: ",
+              connection2.owner.label ?? "You"
+            ] }),
+            /* @__PURE__ */ u4("span", { children: connection2.kind.replaceAll("_", " ") }),
+            connection2.account ? /* @__PURE__ */ u4("span", { children: connection2.account }) : null
+          ] }),
+          /* @__PURE__ */ u4("div", { class: "ga-cred-chips", children: connection2.services.map((service) => /* @__PURE__ */ u4("span", { class: "ga-cred-chip", children: [
+            service.name,
+            " \xB7 ",
+            service.host,
+            service.path ?? "",
+            service.enabled === false ? " \xB7 disabled" : ""
+          ] }, service.name)) }),
+          /* @__PURE__ */ u4("details", { children: [
+            /* @__PURE__ */ u4("summary", { children: [
+              "Available to \xB7 ",
+              connection2.grants.length,
+              " agents"
+            ] }),
+            /* @__PURE__ */ u4(Impact, { connection: connection2, groups: data.groups })
+          ] }),
+          connection2.kind !== "static" ? /* @__PURE__ */ u4("details", { children: [
+            /* @__PURE__ */ u4("summary", { children: "OAuth permission details" }),
+            /* @__PURE__ */ u4("p", { children: [
+              "Resource: ",
+              connection2.resource_url ?? "Configured app",
+              " \xB7 App: ",
+              connection2.app_id ?? "Discovered client"
+            ] }),
+            /* @__PURE__ */ u4("p", { children: [
+              "Requested scopes: ",
+              connection2.requested_scopes?.join(", ") || "Not specified"
+            ] }),
+            /* @__PURE__ */ u4("p", { children: [
+              "Provider-granted scopes: ",
+              connection2.granted_scopes?.join(", ") || "Not reported"
+            ] }),
+            /* @__PURE__ */ u4("p", { children: [
+              "Scope provenance: ",
+              connection2.scope_source ?? "Unknown",
+              ". Service grants do not reduce these permissions."
+            ] })
+          ] }) : /* @__PURE__ */ u4("span", { class: "muted", children: [
+            connection2.credentials.length,
+            " write-only keys"
+          ] })
+        ] }),
+        /* @__PURE__ */ u4("div", { class: "ga-cred-item-actions", children: [
+          /* @__PURE__ */ u4("button", { type: "button", disabled: loading, onClick: () => setDialog({ kind: "edit", id: connection2.id }), children: connection2.kind === "static" ? "Manage / rotate" : "Manage services" }),
+          connection2.kind !== "static" ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              disabled: loading || !!signIn.waiting || connection2.status === "disabled",
+              onClick: () => setDialog({ kind: "connect", connection: connection2 }),
+              children: connection2.status === "draft" ? "Finish sign-in" : "Reconnect"
+            }
+          ) : null,
+          /* @__PURE__ */ u4("button", { type: "button", disabled: loading, onClick: () => setDialog({ kind: "grants", connection: connection2 }), children: "Agent access" }),
+          /* @__PURE__ */ u4("button", { type: "button", disabled: loading, onClick: () => setDialog({ kind: "action", connection: connection2, action: connection2.status === "disabled" ? "enable" : "disable" }), children: connection2.status === "disabled" ? "Enable" : "Disable" }),
+          /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled: loading, onClick: () => setDialog({ kind: "action", connection: connection2, action: "delete" }), children: connection2.kind === "static" ? "Delete" : "Disconnect everywhere" })
+        ] })
+      ] }, connection2.id)) }) : !loading ? /* @__PURE__ */ u4("div", { class: "ga-cred-empty", children: [
+        /* @__PURE__ */ u4("p", { children: [
+          "No ",
+          view === "keys" ? "key connections" : "connected accounts",
+          " yet."
+        ] }),
+        /* @__PURE__ */ u4("span", { children: "Create your personal connection, then grant access to agents." })
+      ] }) : null,
+      view === "accounts" ? /* @__PURE__ */ u4("section", { class: "ga-cred-view", children: [
+        /* @__PURE__ */ u4("div", { class: "ga-cred-head", children: [
+          /* @__PURE__ */ u4("h2", { children: "OAuth apps" }),
+          /* @__PURE__ */ u4("button", { type: "button", disabled: loading, onClick: () => setDialog({ kind: "app" }), children: "Configure OAuth app" })
+        ] }),
+        /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Generic OAuth clients for providers without dynamic registration. Personal apps belong to you; only authorized install administrators can manage install-wide apps." }),
+        data.apps.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.apps.map((app) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
+          /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
+            /* @__PURE__ */ u4("strong", { children: app.label }),
+            /* @__PURE__ */ u4("span", { children: [
+              app.source === "user" ? "Personal" : "Install-wide",
+              " \xB7 ",
+              app.id
+            ] }),
+            /* @__PURE__ */ u4("span", { class: "muted", children: [
+              app.issuer,
+              " \xB7 ",
+              app.client_secret_set ? "Client secret configured" : "No client secret"
+            ] })
+          ] }),
+          app.source === "user" || data.canEditInstall ? /* @__PURE__ */ u4("button", { type: "button", disabled: loading, onClick: () => setDialog({ kind: "app", app }), children: "Manage app" }) : /* @__PURE__ */ u4("span", { class: "muted", children: "Install administrator manages this app" })
+        ] }, `${app.source}:${app.id}`)) }) : /* @__PURE__ */ u4("p", { class: "muted", children: "No configured OAuth apps." })
+      ] }) : null
+    ] }) : null,
+    dialog?.kind === "edit" && data ? /* @__PURE__ */ u4(ConnectionEditor, { id: dialog.id, groups: data.groups, onClose: close, onSaved: saved }) : null,
+    dialog?.kind === "connect" && data ? dialog.connection ? /* @__PURE__ */ u4(ReconnectLatest, { id: dialog.connection.id, apps: data.apps, groups: data.groups, onStart: signIn.start, onClose: close, onSaved: saved }) : /* @__PURE__ */ u4(OAuthConnectionDialog, { apps: data.apps, groups: data.groups, resourceUrl: dialog.resourceUrl, onStart: signIn.start, onClose: close, onSaved: saved }) : null,
+    dialog?.kind === "action" && data ? /* @__PURE__ */ u4(ConnectionActionDialog, { connection: dialog.connection, groups: data.groups, action: dialog.action, onClose: close, onSaved: saved }) : null,
+    dialog?.kind === "grants" && data ? /* @__PURE__ */ u4(ConnectionGrantsDialog, { connection: dialog.connection, groups: data.groups, onClose: close, onSaved: saved }) : null,
+    dialog?.kind === "app" && data ? /* @__PURE__ */ u4(OAuthAppDialog, { app: dialog.app, canEditInstall: data.canEditInstall, connections: data.connections, groups: data.groups, onClose: close, onSaved: saved }) : null
+  ] }) });
+}
+function ReconnectLatest(props) {
+  const { data, error, loading, refresh } = useCredentialResource(connectionPath(props.id));
+  if (!data || loading || error) return /* @__PURE__ */ u4("div", { class: "ga-cred-callout", role: "status", children: [
+    loading ? /* @__PURE__ */ u4("p", { children: "Loading latest reconnect impact\u2026" }) : /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(ErrorNotice, { message: error }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Retry" })
+    ] }),
+    /* @__PURE__ */ u4("button", { type: "button", onClick: props.onClose, children: "Cancel reconnect" })
+  ] });
+  return /* @__PURE__ */ u4(OAuthConnectionDialog, { ...props, connection: data });
+}
+
 // src/panels.ts
 function applyPanelClasses() {
   const mobile = MOBILE_MQ.matches;
@@ -34099,7 +34033,7 @@ function applyPanelClasses() {
 var router = {
   selectGroup,
   loadThreads,
-  openChat,
+  openChat: openChat2,
   clearChat,
   loadTree,
   selectFile,
@@ -34148,18 +34082,19 @@ function App() {
     fileQuery
   ]);
   const mainCls = (threadsOpen ? "" : " threads-collapsed") + (filesOpen ? "" : " files-collapsed");
-  const backdropShown = mobile && (threadsDrawerOpen || filesDrawerOpen);
+  const backdropShown = !credentialsOpen.value && mobile && (threadsDrawerOpen || filesDrawerOpen);
   const onBackdrop = () => {
     drawerOpen.threads.value = false;
     drawerOpen.files.value = false;
   };
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(Header, {}),
-    /* @__PURE__ */ u4("main", { id: "main", class: mainCls.trim(), children: [
+    /* @__PURE__ */ u4("main", { id: "main", class: mainCls.trim(), style: credentialsOpen.value ? "display:none" : void 0, children: groups.value.length ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4(ThreadsRail, {}),
       /* @__PURE__ */ u4(ChatMain, {}),
       /* @__PURE__ */ u4(FilesPane, {})
-    ] }),
+    ] }) : /* @__PURE__ */ u4("p", { class: "settings-body", children: "No accessible groups. Your personal connections remain available in Credentials." }) }),
+    credentialsOpen.value ? /* @__PURE__ */ u4(CredentialsPage, {}) : null,
     /* @__PURE__ */ u4("div", { class: "backdrop" + (backdropShown ? " show" : ""), id: "backdrop", onClick: onBackdrop }),
     /* @__PURE__ */ u4(Settings, {}),
     /* @__PURE__ */ u4(ShareLinkModal, {}),
@@ -34305,10 +34240,6 @@ async function init() {
     isElevatedUser.value = meRes.isElevated === true;
     groups.value = sortGroups(groupsRes.groups);
   });
-  if (groups.value.length === 0) {
-    D(/* @__PURE__ */ u4("div", { class: "startup-screen", children: "No accessible groups." }), app);
-    return;
-  }
   const parsed = parseHash();
   if (parsed && parsed.groupId) chatLoading.value = true;
   D(/* @__PURE__ */ u4(App, {}), app);

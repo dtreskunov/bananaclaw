@@ -3,6 +3,7 @@ import { useEffect } from 'preact/hooks';
 import {
   paneOpen, drawerOpen, isMobile, MOBILE_MQ, refs,
   fileSearchOpen, fileSearchRoot, fileSearchQuery,
+  credentialsOpen, groups,
 } from '../state';
 import { Header } from './Header';
 import { ThreadsRail } from './ThreadsRail';
@@ -16,6 +17,7 @@ import { Toast } from './Toast';
 import { GroupPickerModal } from './GroupPicker';
 import { CreateGroupModal } from './CreateGroupModal';
 import { GroupAdmin } from './GroupAdmin';
+import { CredentialsPage } from './CredentialsPage';
 import { applyPanelClasses } from '../panels';
 import { applyHash, writeHash } from '../hash';
 import { router } from '../router';
@@ -51,16 +53,16 @@ export function App() {
   const mainCls = ''
     + (threadsOpen ? '' : ' threads-collapsed')
     + (filesOpen ? '' : ' files-collapsed');
-  const backdropShown = mobile && (threadsDrawerOpen || filesDrawerOpen);
+  const backdropShown = !credentialsOpen.value && mobile && (threadsDrawerOpen || filesDrawerOpen);
   const onBackdrop = (): void => { drawerOpen.threads.value = false; drawerOpen.files.value = false; };
   return (
     <>
       <Header />
-      <main id="main" class={mainCls.trim()}>
-        <ThreadsRail />
-        <ChatMain />
-        <FilesPane />
+      <main id="main" class={mainCls.trim()} style={credentialsOpen.value ? 'display:none' : undefined}>
+        {groups.value.length ? <><ThreadsRail /><ChatMain /><FilesPane /></>
+          : <p class="settings-body">No accessible groups. Your personal connections remain available in Credentials.</p>}
       </main>
+      {credentialsOpen.value ? <CredentialsPage /> : null}
       <div class={'backdrop' + (backdropShown ? ' show' : '')} id="backdrop" onClick={onBackdrop}></div>
       <Settings />
       <ShareLinkModal />

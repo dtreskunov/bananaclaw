@@ -17,9 +17,11 @@ import http from 'http';
 
 import { log } from '../../log.js';
 import { AgentVaultError, gatewayMessage } from '../../modules/credentials/agent-vault-client.js';
-import { clientMetadata, completeOAuth, forgetProbes } from '../../modules/credentials/gateway-credentials.js';
+import { clientMetadata, completeOAuth } from '../../modules/credentials/gateway-credentials.js';
 import { finishSignIn, getSignIn } from '../../modules/credentials/sign-ins.js';
 import { authenticate, recordAccess } from './auth.js';
+import { synchronizeManagedUser } from '../../modules/credentials/managed-users.js';
+import { ConnectionInputError, getConnection } from '../../modules/credentials/shared-connections.js';
 
 export const OAUTH_CALLBACK_PATH = '/ui/oauth/callback';
 export const CLIENT_METADATA_PATH = '/oauth/client-metadata.json';
@@ -86,7 +88,7 @@ export async function handleOAuthCallback(req: http.IncomingMessage, res: http.S
   if (!signIn || signIn.userId !== session.userId) {
     recordAccess({
       userId: session.userId,
-      groupId: signIn?.agentGroupId ?? null,
+      groupId: null,
       path: null,
       action: 'oauth.callback_rejected',
       req,
@@ -94,8 +96,7 @@ export async function handleOAuthCallback(req: http.IncomingMessage, res: http.S
     renderResult(res, 400, {
       ok: false,
       title: 'Sign-in not completed',
-      detail:
-        'This sign-in has expired or was started by someone else. Start it again from Agent Settings → Credentials.',
+      detail: 'This sign-in has expired or was started by someone else. Start it again from Credentials.',
     });
     return;
   }
@@ -120,8 +121,12 @@ export async function handleOAuthCallback(req: http.IncomingMessage, res: http.S
   }
 
   try {
-    const result = await completeOAuth({ state, code, iss, error });
-    const ok = result.status === 'connected';
+    const managedUser = await synchronizeManagedUser(session.userId);
+    if (managedUser.id !== signIn.managedUserId)
+      throw new ConnectionInputError('Credential ownership changed; start sign-in again', 403);
+    await getConnection(session.userId, signIn.connectionId);
+    const result = await completeOAuth({ state, user_id: signIn.managedUserId, code, iss, error });
+    const ok = result.status === 'connected' && result.connection_id === signIn.connectionId;
     const detail = ok
       ? `${signIn.label} is connected. You can close this window.`
       : error === 'access_denied'
@@ -129,20 +134,24 @@ export async function handleOAuthCallback(req: http.IncomingMessage, res: http.S
         : (result.error ?? 'The provider did not accept the sign-in.');
     finishSignIn(state, {
       status: ok ? 'connected' : 'failed',
-      key: ok ? result.key : undefined,
+      connection_id: ok ? result.connection_id : undefined,
       account: result.account ?? null,
       error: ok ? undefined : detail,
     });
-    forgetProbes(signIn.agentGroupId);
     recordAccess({
       userId: session.userId,
-      groupId: signIn.agentGroupId,
+      groupId: null,
       path: null,
       action: ok ? 'oauth.connected' : 'oauth.failed',
       req,
     });
     renderResult(res, 200, { state, ok, title: ok ? 'Signed in' : 'Sign-in failed', detail });
   } catch (err) {
+    if (err instanceof ConnectionInputError) {
+      finishSignIn(state, { status: 'failed', error: err.message });
+      renderResult(res, err.status, { state, ok: false, title: 'Sign-in failed', detail: err.message });
+      return;
+    }
     if (!(err instanceof AgentVaultError)) throw err;
     const detail = err.unreachable
       ? "The credential gateway isn't responding. Try again in a moment."
@@ -150,7 +159,7 @@ export async function handleOAuthCallback(req: http.IncomingMessage, res: http.S
         ? "The provider's response didn't match the server you started signing in to."
         : gatewayMessage(err);
     log.warn('OAuth completion failed', {
-      gid: signIn.agentGroupId,
+      connectionId: signIn.connectionId,
       code: err.code,
       status: err.status,
       err: err.message,

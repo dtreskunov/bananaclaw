@@ -5,7 +5,7 @@ import './GroupAdmin.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 
-import { credentialsUiFor, groupAdminOpen, groupAdminTabRequest, groupId, groups, isMobile } from '../state';
+import { groupAdminOpen, groupAdminTabRequest, groupId, groups, isMobile } from '../state';
 import { returnToUserMenu, selectGroup } from '../actions';
 import { Combobox, type ComboboxOption } from './Combobox';
 import { ModelPickerDialog } from './ModelPickerDialog';
@@ -15,7 +15,7 @@ import { useBackButtonCloses } from '../modalBackButton';
 import { TabBar, type TabItem } from './TabBar';
 import { MobileDialog, MobileDialogFooter, MobileDialogItem, MobileDialogList } from './MobileDialog';
 import { MembersTab, RolesTab } from './GroupAdminAccess';
-import { CredentialsTab } from './GroupAdminCredentials';
+import { GroupCredentialAccess } from './GroupCredentialAccess';
 import { apiPath, call, errMsg } from './GroupAdminApi';
 import { DestinationsTab } from './GroupAdminDestinations';
 import { GroupAdminField as Field } from './GroupAdminField';
@@ -24,7 +24,7 @@ import { ModelParamsEditor } from './GroupAdminModelParams';
 import { PackagesSection } from './GroupAdminPackages';
 import { SkillsSection, type AvailableSkillDto } from './GroupAdminSkills';
 
-type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'credentials' | 'members' | 'roles' | 'destinations';
+type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'access' | 'members' | 'roles' | 'destinations';
 
 const SETTINGS_SECTIONS = new Set<Tab>(['models', 'settings', 'packages', 'mcp', 'skills']);
 
@@ -34,7 +34,7 @@ const TAB_ITEMS: TabItem[] = [
   { id: 'packages', label: 'Packages', sublabel: 'apt / npm / pip in the image' },
   { id: 'mcp', label: 'MCP servers', sublabel: 'External tools wired to the agent' },
   { id: 'skills', label: 'Skills', sublabel: 'Container skills mounted at runtime' },
-  { id: 'credentials', label: 'Credentials', sublabel: 'Keys and accounts the agent can use' },
+  { id: 'access', label: 'Access', sublabel: 'Services shared with this agent' },
   { id: 'members', label: 'Members', sublabel: 'Who can use this group' },
   { id: 'roles', label: 'Admins', sublabel: 'Admins for this group' },
   { id: 'destinations', label: 'Destinations', sublabel: 'Where this group can send messages' },
@@ -174,9 +174,7 @@ export function GroupAdmin(): JSX.Element | null {
     }
     setTab(requestedTab as Tab);
   }, [open, requestedTab]);
-  const tabItems = TAB_ITEMS.map((item) => item.id === 'credentials' && !credentialsUiFor(gid)
-    ? { ...item, sublabel: 'Stage an Agent Vault target; OneCLI stays active' }
-    : item);
+  const tabItems = TAB_ITEMS;
 
   if (!open || !gid) return null;
   const group = groups.value.find((g) => g.id === gid);
@@ -255,7 +253,7 @@ export function GroupAdmin(): JSX.Element | null {
               onActions={setActions}
             />
           ) : null}
-          {activeTab === 'credentials' ? <CredentialsTab gid={gid} /> : null}
+          {activeTab === 'access' ? <GroupCredentialAccess gid={gid} /> : null}
           {activeTab === 'members' ? <MembersTab gid={gid} /> : null}
           {activeTab === 'roles' ? <RolesTab gid={gid} /> : null}
           {activeTab === 'destinations' ? <DestinationsTab gid={gid} /> : null}

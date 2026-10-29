@@ -1,14 +1,18 @@
-// Credentials UI fixture: the real Agent Settings dialog with an in-page mock
-// of the credential gateway routes. Open with `?consent=…` to act as the fake
+// Credentials UI fixture: personal connections, agent Access and MCP references
+// on canonical mocked host routes. Open with `?consent=…` to act as the fake
 // OAuth provider window.
 import { render } from 'preact';
+import { signal } from '@preact/signals';
 import { useEffect, useState } from 'preact/hooks';
 import { GroupAdmin } from '../src/components/GroupAdmin';
+import { CredentialsPage } from '../src/components/CredentialsPage';
+import { Header } from '../src/components/Header';
+import { openCredentials } from '../src/credentials-navigation';
 import { Toast } from '../src/components/Toast';
 import { initAppearance } from '../src/appearance-state';
-import type { OAuthCompleteMessage } from '../src/components/GroupAdminCredentialsApi';
+import type { OAuthCompleteMessage } from '../src/components/CredentialsApi';
 import {
-  credentialsUiEnabled,
+  credentialsOpen,
   currentUserId,
   groupAdminOpen,
   groupAdminTabRequest,
@@ -36,6 +40,7 @@ interface FixtureConsentMessage {
   state: string;
   allow: boolean;
 }
+const fixtureRevision = signal(0);
 
 function Consent({ state, provider, scopes }: { state: string; provider: string; scopes: string[] }): preact.JSX.Element {
   const [done, setDone] = useState<string | null>(null);
@@ -76,7 +81,7 @@ function useMockVersion(): number {
   return version;
 }
 
-function reopen(tab = 'credentials'): void {
+function reopen(tab = 'access'): void {
   const show = (): void => {
     groupAdminTabRequest.value = tab;
     groupAdminOpen.value = true;
@@ -94,7 +99,10 @@ function Controls(): preact.JSX.Element {
   const [popupBlocked, setPopupBlocked] = useState(false);
   const set = (next: Partial<FixtureOptions>, reload = true): void => {
     setOptions(next);
-    if (reload) reopen();
+    if (reload) {
+      if (groupAdminOpen.value) reopen('access');
+      fixtureRevision.value++;
+    }
   };
   return (
     <details class="cred-fixture-controls" open>
@@ -103,8 +111,8 @@ function Controls(): preact.JSX.Element {
         <label>
           Data
           <select value={options.scenario} onChange={(e) => set({ scenario: e.currentTarget.value as FixtureOptions['scenario'] })}>
-            <option value="typical">Typical group</option>
-            <option value="empty">New group</option>
+            <option value="typical">Typical personal library</option>
+            <option value="empty">Empty personal library</option>
           </select>
         </label>
         <label>
@@ -116,8 +124,8 @@ function Controls(): preact.JSX.Element {
           </select>
         </label>
         <label><input type="checkbox" checked={options.gatewayDown} onChange={(e) => set({ gatewayDown: e.currentTarget.checked })} /> Gateway down</label>
-        <label><input type="checkbox" checked={options.viewOnly} onChange={(e) => set({ viewOnly: e.currentTarget.checked })} /> View only</label>
-        <label><input type="checkbox" checked={!options.owner} onChange={(e) => set({ owner: !e.currentTarget.checked })} /> Group admin, not owner</label>
+        <label><input type="checkbox" checked={!options.canAdmin} onChange={(e) => set({ canAdmin: !e.currentTarget.checked })} /> No destination admin authority</label>
+        <label><input type="checkbox" checked={!options.owner} onChange={(e) => set({ owner: !e.currentTarget.checked })} /> No install app authority</label>
         <label><input type="checkbox" checked={options.failNextWrite} onChange={(e) => set({ failNextWrite: e.currentTarget.checked }, false)} /> Fail next change</label>
         <label>
           <input type="checkbox" checked={popupBlocked} onChange={(e) => {
@@ -126,9 +134,10 @@ function Controls(): preact.JSX.Element {
           }} /> Block sign-in popup
         </label>
         <div class="cred-fixture-buttons">
-          <button type="button" onClick={() => reopen('credentials')}>Credentials</button>
+          <button type="button" onClick={() => openCredentials()}>Personal Credentials</button>
+          <button type="button" onClick={() => reopen('access')}>Agent Access</button>
           <button type="button" onClick={() => reopen('mcp')}>MCP servers</button>
-          <button type="button" onClick={() => { resetState(); reopen(); }}>Reset</button>
+          <button type="button" onClick={() => { resetState(); fixtureRevision.value++; if (groupAdminOpen.value) reopen('access'); }}>Reset</button>
         </div>
         <details class="cred-fixture-log">
           <summary>API calls ({callLog.length})</summary>
@@ -136,12 +145,11 @@ function Controls(): preact.JSX.Element {
             {callLog.map((c) => (
               <li key={`${c.at}-${c.method}-${c.path}`} class={c.status >= 400 ? 'err' : ''}>
                 <code>{c.status} {c.method} {c.path}</code>
-                {c.body ? <code class="cred-fixture-log-body">{c.body}</code> : null}
               </li>
             ))}
           </ol>
         </details>
-        <p>Mocked gateway; nothing leaves the page. Values are shown as ••• in the log.</p>
+        <p>Mocked gateway; no secret values are stored or logged.</p>
       </div>
     </details>
   );
@@ -150,10 +158,11 @@ function Controls(): preact.JSX.Element {
 function Fixture(): preact.JSX.Element {
   return (
     <>
-      <main class="cred-fixture-page">
-        <p>Agent Settings is closed.</p>
+      <Header />
+      {credentialsOpen.value ? <CredentialsPage key={fixtureRevision.value} /> : <main class="cred-fixture-page">
+        <p>Chat fixture. Use personal Credentials or Agent Settings → Access.</p>
         <button type="button" onClick={() => reopen()}>Open Agent Settings</button>
-      </main>
+      </main>}
       <GroupAdmin />
       <Toast />
       <Controls />
@@ -186,8 +195,12 @@ if (consentState) {
   currentUserId.value = 'fixture-alex';
   groups.value = [{ id: FIXTURE_GROUP.id, name: FIXTURE_GROUP.name, isAdmin: true, hasContent: true }];
   groupId.value = FIXTURE_GROUP.id;
-  credentialsUiEnabled.value = true;
-  groupAdminTabRequest.value = params.get('tab') ?? 'credentials';
-  groupAdminOpen.value = true;
+  credentialsOpen.value = true;
+  location.hash = '#credentials';
+  window.addEventListener('hashchange', () => { credentialsOpen.value = location.hash === '#credentials'; });
+  if (params.get('tab')) {
+    groupAdminTabRequest.value = params.get('tab');
+    groupAdminOpen.value = true;
+  }
   render(<Fixture />, root);
 }

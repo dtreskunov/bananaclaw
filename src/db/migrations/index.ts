@@ -43,6 +43,7 @@ import { moduleContainerConfigsSmallModel } from './module-container-configs-sma
 import { moduleContainerConfigsUpstreamProvider } from './module-container-configs-upstream-provider.js';
 import { moduleContainerConfigsCredentialBackend } from './module-container-configs-credential-backend.js';
 import { moduleResendThreadRoots } from './module-resend-thread-roots.js';
+import { moduleCredentialConnections } from './module-credential-connections.js';
 
 export interface Migration {
   version: number;
@@ -102,6 +103,7 @@ export const migrations: Migration[] = [
   migration034,
   migration035,
   moduleContainerConfigsCredentialBackend,
+  moduleCredentialConnections,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a

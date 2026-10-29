@@ -1,6 +1,6 @@
 /**
- * Read-only inventory, private review bundles, and explicit create-only target
- * provisioning. Never exports values/tokens or changes the active backend.
+ * Read-only inventory and private review bundles.
+ * Never exports values/tokens or changes credentials or the active backend.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,11 +9,8 @@ import { OneCLI } from '@onecli-sh/sdk';
 import Database from 'better-sqlite3';
 
 import { DATA_DIR, ONECLI_API_KEY, ONECLI_URL } from '../src/config.js';
-import { readEnvFile } from '../src/env.js';
 import { gatewayJson } from '../src/modules/credentials/agent-vault-client.js';
 import { listCredentials, listServices } from '../src/modules/credentials/gateway-credentials.js';
-import { parseSetValues } from '../src/modules/credentials/key-sets.js';
-import { ProvisioningError, provisionMigrationPlan } from '../src/modules/credentials/onecli-provisioning.js';
 import {
   collectMigrationInventory,
   parseSecretMetadata,
@@ -29,19 +26,14 @@ const HELP = `Usage:
   pnpm exec tsx scripts/migrate-from-onecli.ts --prepare --group <id> \\
     --confirm-group <same-id> --expect-digest <reviewed-plan-digest> \\
     --out <new-absolute-directory>
-  pnpm exec tsx scripts/migrate-from-onecli.ts --provision --group <id> \\
-    --confirm-group <same-id> --expect-digest <reviewed-plan-digest> \\
-    --ack-source-policy [--ack-composite-routing] [--services <comma-separated-names>] \\
-    --values-stdin < /secure/operator-supplied-values.json
 
 Default: JSON metadata inventory on stdout; no writes.
 Includes client-rewiring hints and agent-specific project app-tool policy.
 Those are not verified OAuth grants or proof of complete policy parity.
 Prepare: re-read current metadata, require the reviewed group's digest, then
 write a mode-0600 bundle.json in a NEW mode-0700 directory. Its parent must exist.
-Prepare stages a review bundle ONLY. Provision creates atomic key sets in the
-inactive target using operator-supplied target-key/value JSON on stdin.
-Existing names/keys/recipients fail; failures report a partial receipt.
+Prepare stages a review bundle ONLY. Vault-local provisioning was removed;
+create user-owned connections once and grant selected agents access instead.
 Neither mode connects accounts, changes backends/grants/client configs,
 or restarts/retires OneCLI. Values never appear in output.
 `;
@@ -52,21 +44,15 @@ export interface MigrationArgs {
   confirmation?: string;
   digest?: string;
   out?: string;
-  provision?: boolean;
-  valuesStdin?: boolean;
-  sourcePolicyReviewed?: boolean;
-  compositeRoutingReviewed?: boolean;
-  services?: string;
 }
 
 export function parseArgs(argv: string[]): MigrationArgs {
   const args: MigrationArgs = { prepare: false };
-  const flags = new Map<string, 'group' | 'confirmation' | 'digest' | 'out' | 'services'>([
+  const flags = new Map<string, 'group' | 'confirmation' | 'digest' | 'out'>([
     ['--group', 'group'],
     ['--confirm-group', 'confirmation'],
     ['--expect-digest', 'digest'],
     ['--out', 'out'],
-    ['--services', 'services'],
   ]);
   const seen = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
@@ -77,26 +63,14 @@ export function parseArgs(argv: string[]): MigrationArgs {
       args.prepare = true;
       continue;
     }
-    const bools = new Map<string, 'provision' | 'valuesStdin' | 'sourcePolicyReviewed' | 'compositeRoutingReviewed'>([
-      ['--provision', 'provision'],
-      ['--values-stdin', 'valuesStdin'],
-      ['--ack-source-policy', 'sourcePolicyReviewed'],
-      ['--ack-composite-routing', 'compositeRoutingReviewed'],
-    ]);
-    const bool = bools.get(flag);
-    if (bool) {
-      args[bool] = true;
-      continue;
-    }
     const field = flags.get(flag);
     if (!field) throw new Error(`Unknown option: ${flag}`);
     const value = argv[++i];
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}`);
     args[field] = value;
   }
-  if (args.prepare && args.provision) throw new Error('Choose preparation or provisioning, not both');
-  if (args.prepare || args.provision) {
-    if (!args.group || args.confirmation !== args.group || !args.digest || (args.prepare && !args.out)) {
+  if (args.prepare) {
+    if (!args.group || args.confirmation !== args.group || !args.digest || !args.out) {
       throw new Error(
         'Write modes require --group, matching --confirm-group, --expect-digest, and --out for preparation',
       );
@@ -106,13 +80,6 @@ export function parseArgs(argv: string[]): MigrationArgs {
   } else if (args.confirmation || args.digest || args.out) {
     throw new Error('Confirmation/output options require --prepare');
   }
-  if (args.provision) {
-    if (args.out || !args.valuesStdin || !args.sourcePolicyReviewed)
-      throw new Error('Provisioning requires --values-stdin and --ack-source-policy, without --out');
-    if (args.services !== undefined && args.services.split(',').some((name) => !name.trim()))
-      throw new Error('--services requires nonempty comma-separated service names');
-  } else if (args.valuesStdin || args.sourcePolicyReviewed || args.compositeRoutingReviewed || args.services)
-    throw new Error('Provisioning options require --provision');
   return args;
 }
 
@@ -133,16 +100,6 @@ export function readGroups(dbPath: string, selected?: string): MigrationGroup[] 
       mcp_servers: string | null;
     }[];
     if (selected && !rows.some((g) => g.id === selected)) throw new Error('Selected group does not exist');
-    const legacy = new Set(
-      (
-        process.env.NANOCLAW_AGENT_VAULT_GROUPS ??
-        readEnvFile(['NANOCLAW_AGENT_VAULT_GROUPS']).NANOCLAW_AGENT_VAULT_GROUPS ??
-        ''
-      )
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-    );
     return rows
       .filter((g) => !selected || g.id === selected)
       .map((g) => {
@@ -154,7 +111,7 @@ export function readGroups(dbPath: string, selected?: string): MigrationGroup[] 
         return {
           id: g.id,
           name: g.name,
-          backend: legacy.has(g.id) || g.backend === 'agent-vault' ? 'agent-vault' : 'onecli',
+          backend: g.backend === 'agent-vault' ? 'agent-vault' : 'onecli',
           provider: g.provider,
           mcpServerCount: Object.keys(servers).length,
           mcpClients: summarizeMcpClients(servers),
@@ -209,31 +166,7 @@ export async function main(argv: string[]): Promise<void> {
     return { exists: true, credentialKeys: credentials.map((c) => c.key).sort(), services };
   };
   const inventory = await collectMigrationInventory(groups, source, readTarget, ONECLI_URL);
-  if (args.provision) {
-    if (process.stdin.isTTY)
-      throw new Error('Redirect operator-supplied JSON to stdin or use the write-only Credentials UI');
-    process.stdin.setEncoding('utf8');
-    let input = '';
-    for await (const chunk of process.stdin) {
-      input += String(chunk);
-      if (Buffer.byteLength(input) > 8 << 20) throw new Error('Credential stdin exceeds 8 MiB');
-    }
-    const plan = inventory.groups.find((entry) => entry.group.id === args.group);
-    if (!plan) throw new Error('Selected group is absent from the current inventory');
-    const receipt = await provisionMigrationPlan(
-      plan,
-      {
-        group: args.group!,
-        confirmation: args.confirmation!,
-        digest: args.digest!,
-        sourcePolicyReviewed: args.sourcePolicyReviewed === true,
-        compositeRoutingReviewed: args.compositeRoutingReviewed === true,
-        ...(args.services === undefined ? {} : { serviceNames: args.services.split(',').map((name) => name.trim()) }),
-      },
-      parseSetValues(input),
-    );
-    console.log(JSON.stringify(receipt, null, 2));
-  } else if (!args.prepare) console.log(JSON.stringify(inventory, null, 2));
+  if (!args.prepare) console.log(JSON.stringify(inventory, null, 2));
   else {
     const manifest = prepareMigrationBundle(inventory, args.group!, args.confirmation!, args.digest!, args.out!);
     console.log(JSON.stringify({ manifest, liveChanges: false, readyToCutover: false }, null, 2));
@@ -242,7 +175,6 @@ export async function main(argv: string[]): Promise<void> {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch((error: unknown) => {
-    if (error instanceof ProvisioningError) console.log(JSON.stringify(error.receipt, null, 2));
     console.error(error instanceof Error ? error.message : 'Migration preparation failed');
     process.exitCode = 1;
   });

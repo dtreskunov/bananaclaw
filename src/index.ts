@@ -24,6 +24,11 @@ import { routeInbound } from './router.js';
 import { initSearchDb, closeSearchDb } from './search-index.js';
 import { log } from './log.js';
 import { enforceUpgradeTripwire } from './upgrade-state.js';
+import {
+  flushManagedUsers,
+  startManagedUserSynchronization,
+  stopManagedUserSynchronization,
+} from './modules/credentials/managed-users.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
 // circular import cycle: src/index.ts imports src/modules/index.js for side
@@ -79,6 +84,8 @@ async function main(): Promise<void> {
   const db = initDb(dbPath);
   runMigrations(db);
   log.info('Central DB ready', { path: dbPath });
+  await flushManagedUsers();
+  startManagedUserSynchronization();
 
   // 1a. Ensure VAPID keys exist for Web Push (PWA notifications). First
   // boot generates them and persists to .env; idempotent thereafter.
@@ -207,6 +214,7 @@ async function shutdown(signal: string): Promise<void> {
   }
   stopDeliveryPolls();
   stopHostSweep();
+  stopManagedUserSynchronization();
   await stopAllSessionSignalServers();
   closeSearchDb();
   await stopCliServer();

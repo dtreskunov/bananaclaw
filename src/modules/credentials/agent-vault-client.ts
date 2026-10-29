@@ -60,25 +60,13 @@ export function gatewaySettings(): GatewaySettings {
   };
 }
 
-/** Groups listed in the spike-era NANOCLAW_AGENT_VAULT_GROUPS env var (still honoured). */
-function envAgentVaultGroups(): Set<string> {
-  return new Set(
-    (env('NANOCLAW_AGENT_VAULT_GROUPS') || '')
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean),
-  );
-}
-
-/** Agent group IDs on the Agent Vault gateway: `credential_backend = 'agent-vault'`, plus the legacy env list. */
+/** Agent group IDs explicitly configured to use the AgentVault gateway. */
 export function agentVaultGroups(): Set<string> {
-  return new Set([...envAgentVaultGroups(), ...agentVaultBackendGroups()]);
+  return new Set(agentVaultBackendGroups());
 }
 
 export function usesAgentVault(agentGroupId: string): boolean {
-  return (
-    envAgentVaultGroups().has(agentGroupId) || getContainerConfig(agentGroupId)?.credential_backend === 'agent-vault'
-  );
+  return getContainerConfig(agentGroupId)?.credential_backend === 'agent-vault';
 }
 
 /** Each agent group has exactly one vault, named after the group. */
@@ -169,9 +157,12 @@ export async function gatewayJson<T>(
   const res = await gatewayFetch(method, route, opts);
   if (!res.ok) throw await gatewayFailure(res, what);
   if (res.status === 204) return null as T;
-  const body = (await res.json().catch(() => undefined)) as T | undefined;
-  if (body === undefined) throw new AgentVaultError(`Agent Vault ${what} response is not JSON`, res.status);
-  return body;
+  try {
+    return (await res.json()) as T;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    throw new AgentVaultError(`Agent Vault ${what} response is not JSON`, 502, 'invalid_gateway_response');
+  }
 }
 
 /** The user-facing part of an AgentVaultError, without the "Agent Vault … failed: HTTP n" prefix. */

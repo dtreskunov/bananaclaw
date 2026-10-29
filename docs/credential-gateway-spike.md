@@ -1,9 +1,12 @@
 # Credential gateway spike: work split and contract
 
-**Status:** fork and NanoClaw sides built and tested; canary pending.
+**Status:** historical spike contract and subsequent dated acceptance evidence.
 **Date:** 2026-10-20, results 2026-10-21. This is the go/no-go spike from
-[§9 of the Agent Vault fork proposal](credential-gateway-agent-vault-fork-proposal.md#9-plan).
-The pass criteria are listed there.
+[§9 of the Agent Vault fork plan](credential-gateway-agent-vault-fork-proposal.md#9-plan-and-acceptance-gates).
+Revision 7 of that plan now specifies native managed users, shared user-owned
+static/OAuth connections and top-level Credentials. The vault-local contracts
+and results below describe their dated implementations; they are not a second
+plan of record or evidence that the new shared-reference contract is deployed.
 
 ## Work split
 
@@ -12,8 +15,9 @@ The pass criteria are listed there.
 | **Fork**     | `dtreskunov/agent-vault`, branch `bananaclaw` (local clone `~/agent-vault`) | F10 headless and bootstrap, F1 socket sessions, F2 blind tunnels, build, upstream tests, fork-surface and latency measurements |
 | **NanoClaw** | `dtreskunov/bananaclaw`, branch `credential-gateway`                        | Spawn integration behind a per-group switch, in-container egress relay, canary setup                                           |
 
-The two sides only meet at the contract below. Change it here first, then in
-code.
+The two sides met at the historical contract below. Define new target contracts
+in the plan of record; keep these results intact as evidence rather than
+rewriting past acceptance to imply new behavior.
 
 ## Toolchain
 
@@ -466,12 +470,12 @@ image rebuild, host restart or other group's configuration change was needed.
 socket, the gateway CA and inherited proxy env. No host token or real account
 credentials were mounted or passed into a container.
 
-| Server | Discovered tools | Approved read-only tool | Result |
-| --- | ---: | --- | --- |
-| GitHub 2.0.3 | 41 | `list_branches` (one result maximum, this repository) | 1 branch |
-| Calendar 2.7.0 | 13 | `list-calendars` | 14 calendars |
-| Drive 2.13.0 | 130 | `search` (root file metadata, one result maximum) | 1 file |
-| Gmail package 1.1.11 | 19 | `list_email_labels` | 57 labels |
+| Server               | Discovered tools | Approved read-only tool                               | Result       |
+| -------------------- | ---------------: | ----------------------------------------------------- | ------------ |
+| GitHub 2.0.3         |               41 | `list_branches` (one result maximum, this repository) | 1 branch     |
+| Calendar 2.7.0       |               13 | `list-calendars`                                      | 14 calendars |
+| Drive 2.13.0         |              130 | `search` (root file metadata, one result maximum)     | 1 file       |
+| Gmail package 1.1.11 |               19 | `list_email_labels`                                   | 57 labels    |
 
 Only counts were reported; names, IDs, response bodies and contents were not
 printed. No mail messages, calendar events, Drive file contents or repository

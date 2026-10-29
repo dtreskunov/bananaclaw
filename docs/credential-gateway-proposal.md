@@ -1,10 +1,16 @@
 # Native credential gateway: retire OneCLI
 
-**Status:** proposal. **Date:** 2026-10-15. **Revision 2:** the gateway runs
+**Status:** historical native alternative, not the current plan of record.
+**Date:** 2026-10-15. **Revision 2:** the gateway runs
 as its own service rather than inside the host process (see
-[§2.1](#21-deployment-topology)). **Alternative:**
-[credential-gateway-agent-vault-fork-proposal.md](credential-gateway-agent-vault-fork-proposal.md)
-reaches the same goals by forking Infisical Agent Vault.
+[§2.1](#21-deployment-topology)).
+
+The [Agent Vault fork plan of record](credential-gateway-agent-vault-fork-proposal.md)
+revision 7 governs ownership, sharing, UI and rollout: native managed users,
+user-owned static/OAuth connections, explicit group references, top-level
+Credentials and a clean break from superseded fork code. This document retains
+the native proxy alternative and its analysis; its group-owned credential UI,
+schema and migration descriptions are not requirements for that target.
 
 Replace the external OneCLI gateway with a native credential gateway,
 `nanoclaw-gateway`. It lives in this repo but runs as a separate service. It

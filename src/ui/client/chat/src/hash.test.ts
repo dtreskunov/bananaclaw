@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyHash, buildHash, parseHash } from './hash';
+import { applyHash, buildHash, parseHash, writeHash } from './hash';
 import {
   drawerOpen,
   filePath,
@@ -13,6 +13,7 @@ import {
   threadId,
   threads,
   treePath,
+  credentialsOpen,
 } from './state';
 import type { RouterApi } from './types';
 
@@ -28,6 +29,7 @@ vi.hoisted(() => {
 
 afterEach(() => {
   groupId.value = null;
+  credentialsOpen.value = false;
   groups.value = [];
   threadId.value = null;
   threads.value = [];
@@ -47,6 +49,26 @@ afterEach(() => {
 });
 
 describe('file search hash state', () => {
+  it('routes personal Credentials without selecting a group or opening chat', async () => {
+    location.hash = '#credentials';
+    const router = { selectGroup: vi.fn(), openChat: vi.fn() } as unknown as RouterApi;
+    await applyHash(router);
+    expect(credentialsOpen.value).toBe(true);
+    expect(buildHash()).toBe('#credentials');
+    expect(router.selectGroup).not.toHaveBeenCalled();
+    expect(router.openChat).not.toHaveBeenCalled();
+  });
+
+  it('does not let background chat hash writes replace the Credentials route', () => {
+    credentialsOpen.value = true;
+    location.hash = '#credentials';
+    groupId.value = 'agent';
+    threadId.value = 'saved-thread';
+    writeHash(true);
+    expect(location.hash).toBe('#credentials');
+    credentialsOpen.value = false;
+    expect(buildHash()).toBe('#g/agent/t/saved-thread');
+  });
   it('round-trips the search mode, query, and scoped root', () => {
     groupId.value = 'agent';
     treePath.value = 'docs';

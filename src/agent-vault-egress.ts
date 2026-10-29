@@ -1,7 +1,7 @@
 /**
  * Agent Vault egress (credential gateway spike).
  *
- * Groups listed in NANOCLAW_AGENT_VAULT_GROUPS get their egress from the
+ * Groups configured with the AgentVault credential backend get egress from the
  * headless Agent Vault fork instead of OneCLI. Each container gets its own
  * gateway socket session: the gateway binds `egress.sock` in a fresh
  * directory under AGENT_VAULT_SOCKET_ROOT, NanoClaw mounts that directory, and

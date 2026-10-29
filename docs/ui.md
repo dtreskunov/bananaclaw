@@ -754,9 +754,31 @@ advance the same turn into a reply to verify trace ownership and frozen elapsed
 time across settlement. Generated fixture assets are ignored and rebuilt from
 `src/ui/client/chat/fixtures/`.
 
-A second fixture renders the production Agent Settings dialog with the proposed
-**Credentials** tab (R1 scope in
-[credential-gateway-agent-vault-fork-proposal.md](credential-gateway-agent-vault-fork-proposal.md)):
+**Credential UI target (plan of record, revision 7):** **Credentials** becomes a
+top-level user-scoped tab, not a section of Agent Settings. Keys and Connected
+accounts are owned by the user's mapped native AgentVault user; the gateway
+stays headless and does not provide another login. The user enters/connects
+once, manages owner-defined service destinations, and grants selected agents
+access. **Available to** shows authorization; **Used by** reports actual use.
+Rotate/reconnect/disable and **Disconnect everywhere** operate on the shared
+connection with an affected-agent preview.
+
+Agent Settings → **Access** shows granted service references, owner/status and
+authorized attach/detach actions. It must not duplicate credential-entry,
+rotation, OAuth reconnect or upstream-disconnect forms. MCP Connect/Manage
+opens the user's connection flow; group administration does not confer
+ownership of another user's credential. F12 copying is removed.
+
+Replace the old group-owned credential fixture/routes/DTOs in the coordinated
+release, not behind a permanent compatibility flag. New fixtures must cover
+owner-vs-recipient permissions, native managed-user/non-login behavior,
+cross-group grant denial, shared OAuth status, one-group detach vs global
+disconnect, scope/identity-change review and gateway failures. See the
+[plan of record](credential-gateway-agent-vault-fork-proposal.md#61-top-level-credentials-and-agent-access)
+for the target; this is not yet a statement about deployed navigation.
+
+A second, **deployed vault-local** fixture renders the production Agent Settings
+dialog's earlier **Credentials** tab:
 **Keys** (each with one destination) and **Accounts** (MCP sign-ins, OAuth
 accounts, and OAuth apps that are install-wide or the group's own), plus the
 sign-in row in the MCP server editor. The tab is hidden in

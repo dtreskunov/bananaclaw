@@ -126,10 +126,6 @@ async function init(): Promise<void> {
     isElevatedUser.value = meRes.isElevated === true;
     groups.value = sortGroups(groupsRes.groups);
   });
-  if (groups.value.length === 0) {
-    render(<div class="startup-screen">No accessible groups.</div>, app);
-    return;
-  }
   const parsed = parseHash();
   if (parsed && parsed.groupId) chatLoading.value = true;
   render(<App />, app);

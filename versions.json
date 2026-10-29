@@ -1,5 +1,5 @@
 {
-  "agent-vault-gateway": "gw-v0.1.1",
+  "agent-vault-gateway": "gw-v0.2.0",
   "onecli-gateway": "1.45.0",
   "onecli-cli": "2.11.0"
 }

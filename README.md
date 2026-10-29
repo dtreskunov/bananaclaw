@@ -112,9 +112,30 @@ Upstream docs apply unchanged:
 
 BananaClaw-specific:
 
+- [Credential gateway plan of record](docs/credential-gateway-agent-vault-fork-proposal.md) — user-owned credentials, shared static/OAuth connections and native managed AgentVault users
 - [docs/ui.md](docs/ui.md) — web UI server, auth shell, apps
 - [docs/pages.md](docs/pages.md) — per-group public static websites
 - [docs/ollama.md](docs/ollama.md) — local model providers
+
+## Shared credentials: coordinated release
+
+The shared-connection implementation uses a top-level **Credentials** tab for
+your API keys and OAuth accounts. Enter or connect once, then explicitly grant
+selected services to the agents you administer. Agent Settings shows **Access**
+references, not another copy of the credential. Rotation and reconnect happen
+once; removing one agent's access does not disconnect the account everywhere.
+
+NanoClaw maps its stable user identities to native AgentVault managed users
+with personal library vaults. These users cannot log in to the gateway.
+Containers retain group-scoped proxy sockets and never receive real tokens.
+
+NanoClaw **2.5.0** requires the pinned gateway **`gw-v0.2.0`**. This is a
+breaking host/gateway contract: do not deploy the host or UI alone. The gateway must
+support `/v1/managed-users` and connection/grant APIs, and existing credentials
+require reviewed offline ownership/state adoption before the coordinated
+release is activated. There is no old-API fallback or automatic conversion of
+live vaults. See [migration and retirement](docs/agent-vault-migration.md) and
+[release requirements](docs/agent-vault-upgrades.md).
 
 ## Contributing
 

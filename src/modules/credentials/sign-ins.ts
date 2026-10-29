@@ -1,5 +1,5 @@
 /**
- * Pending OAuth sign-ins started from group settings, keyed by the gateway's
+ * Pending user-owned OAuth sign-ins, keyed by the gateway's
  * `state`. The host keeps who started each one so the public callback only
  * completes for that same signed-in user, and so the settings tab can poll
  * for the result. In memory only: a host restart just means signing in again.
@@ -9,14 +9,14 @@ export const SIGN_IN_TTL_MS = 10 * 60_000;
 export interface SignIn {
   state: string;
   userId: string;
-  agentGroupId: string;
+  managedUserId: string;
+  connectionId: string;
   /** What the UI shows, e.g. the MCP server name. */
   label: string;
-  mcpServer?: string;
   createdAt: number;
   status: 'pending' | 'connected' | 'failed';
-  /** Authoritative completion key; reconnecting may reuse an existing account. */
-  key?: string;
+  /** Authoritative completed connection, checked against the initiating draft. */
+  connection_id?: string;
   account?: string | null;
   error?: string;
 }
@@ -42,7 +42,7 @@ export function getSignIn(state: string, now = Date.now()): SignIn | undefined {
 
 export function finishSignIn(
   state: string,
-  result: { status: 'connected' | 'failed'; key?: string; account?: string | null; error?: string },
+  result: { status: 'connected' | 'failed'; connection_id?: string; account?: string | null; error?: string },
 ): SignIn | undefined {
   const signIn = signIns.get(state);
   if (!signIn) return undefined;

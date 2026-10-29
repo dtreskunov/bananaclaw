@@ -60,27 +60,9 @@ describe('migration CLI gates', () => {
     });
   });
 
-  it('requires reviewed write-only provisioning and keeps it distinct from preparation', () => {
+  it('does not retain the obsolete vault-local provisioning mode', () => {
     const args = ['--provision', '--group', 'ag-1', '--confirm-group', 'ag-1', '--expect-digest', 'a'.repeat(64)];
-    expect(() => parseArgs(args)).toThrow('--values-stdin');
-    expect(() => parseArgs([...args, '--values-stdin'])).toThrow('--ack-source-policy');
-    expect(
-      parseArgs([
-        ...args,
-        '--values-stdin',
-        '--ack-source-policy',
-        '--ack-composite-routing',
-        '--services',
-        'first,second',
-      ]),
-    ).toMatchObject({
-      prepare: false,
-      provision: true,
-      valuesStdin: true,
-      sourcePolicyReviewed: true,
-      compositeRoutingReviewed: true,
-      services: 'first,second',
-    });
+    expect(() => parseArgs(args)).toThrow('Unknown option: --provision');
     expect(() => parseArgs([...args, '--values-stdin', '--ack-source-policy', '--out', '/tmp/output'])).toThrow();
   });
 });
@@ -125,8 +107,8 @@ describe('local inventory is readonly', () => {
     expect(() => readGroups(file, 'unknown')).toThrow('does not exist');
   });
 
-  it('honors the legacy env override when reporting the effective backend', () => {
+  it('does not retain the removed spike environment override', () => {
     vi.stubEnv('NANOCLAW_AGENT_VAULT_GROUPS', 'ag-1');
-    expect(readGroups(fixture(), 'ag-1')[0]!.backend).toBe('agent-vault');
+    expect(readGroups(fixture(), 'ag-1')[0]!.backend).toBe('onecli');
   });
 });

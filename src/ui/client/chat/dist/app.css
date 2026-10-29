@@ -892,6 +892,15 @@ header {
 .app-header {
   position: relative;
 }
+.primary-navigation {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.primary-navigation [aria-current=page] {
+  color: var(--primary);
+  border-color: var(--primary);
+}
 .app-header::after {
   content: "";
   position: absolute;
@@ -911,6 +920,14 @@ header .mobile-only {
 .desktop-only {
 }
 @media (max-width: 720px) {
+  .app-header {
+    flex-wrap: wrap;
+  }
+  .primary-navigation {
+    order: 2;
+    width: 100%;
+    justify-content: flex-end;
+  }
   header {
     padding: max(8px, env(safe-area-inset-top)) 10px 8px;
     padding-left: max(10px, env(safe-area-inset-left));
@@ -6359,7 +6376,51 @@ body.private-web-page,
   font-size: var(--font-sm);
 }
 
-/* src/components/GroupAdminCredentials.css */
+/* src/components/Credentials.css */
+.credentials-page {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
+.credentials-page > .ga-cred {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+.credentials-page h1 {
+  margin: 0;
+}
+.ga-cred-item-actions {
+  flex-wrap: wrap;
+}
+.ga-cred-dialog textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+}
+.ga-cred-dialog .group-admin-check {
+  margin: 12px 0;
+  align-items: flex-start;
+}
+.ga-cred-grant {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.ga-cred-grant-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 0;
+}
+.ga-cred-impact {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .credentials-page {
+    padding: 16px 10px;
+  }
+}
 .ga-cred {
   display: flex;
   flex-direction: column;
@@ -6658,7 +6719,9 @@ body.private-web-page,
 .ga-cred-secret input,
 .ga-cred select,
 .ga-cred-dialog select,
-.ga-cred-dialog input[type=text] {
+.ga-cred-dialog input[type=text],
+.ga-cred-dialog input[type=url],
+.ga-cred-dialog textarea {
   min-width: 0;
   font: inherit;
   padding: var(--control-padding-block) var(--control-padding-inline);
@@ -6673,6 +6736,12 @@ body.private-web-page,
 }
 .ga-cred-dialog input.ga-cred-mono {
   font-family: var(--font-mono, monospace);
+}
+.ga-cred-dialog textarea.ga-cred-mono {
+  font-family: var(--font-mono, monospace);
+}
+.ga-cred-dialog input[type=url] {
+  flex: 1;
 }
 .ga-cred-secret-toggle {
   flex: none;

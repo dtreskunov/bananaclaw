@@ -4,6 +4,23 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-29
+
+- **[BREAKING] User-owned shared credentials and OAuth connections.** A
+  top-level Credentials tab replaces agent-owned credential management.
+  Native managed AgentVault users own personal libraries; agents receive
+  explicit service grants, never copied values. Rotation/reconnect is
+  connection-wide, while detaching an agent leaves other agents connected.
+  OAuth refresh is coordinated per connection and real tokens never reach
+  containers.
+- **Coordinated gateway release `gw-v0.2.0`.** Requires reviewed offline
+  adoption of existing credentials/OAuth state and matching host/UI assets;
+  no old-fork API, schema or lookup fallback is provided. F12 copying,
+  vault-local provisioning and the spike environment override are removed.
+  See [release and adoption requirements](docs/agent-vault-upgrades.md).
+
+### Earlier development included in this release
+
 - **OneCLI migration inventory, private preparation and create-only provisioning.**
   `scripts/migrate-from-onecli.ts` reports per-group effective credential
   requirements without exporting values. Explicit group/digest confirmation

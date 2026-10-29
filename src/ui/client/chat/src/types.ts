@@ -27,8 +27,6 @@ export interface Group {
   name: string;
   siteUrl?: string | null;
   isAdmin?: boolean;
-  /** The group uses the credential gateway, so admins get group settings → Credentials. */
-  credentialGateway?: boolean;
   /** True when access depends solely on owner/global-admin privileges. */
   elevatedOnly?: boolean;
   /**

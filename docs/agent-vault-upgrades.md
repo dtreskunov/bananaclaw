@@ -1,5 +1,115 @@
 # Agent Vault gateway releases and upgrades
 
+## Coordinated release: NanoClaw 2.5.0 and gateway gw-v0.2.0
+
+[Revision 7 of the plan of record](credential-gateway-agent-vault-fork-proposal.md)
+supersedes the published release's group-owned credential-management model.
+It is a coordinated host/gateway/runner/schema release. The reviewed gateway
+pin is `gw-v0.2.0`, source `9a99f613d54bec30cc3709351277d39de2f3fe6e`.
+The former `gw-v0.1.1` binary does not implement this contract.
+
+The release introduces native AgentVault managed users and personal libraries,
+user-owned static/OAuth connections, connection-scoped OAuth refresh/client
+lifecycle, explicit group grants and a top-level Credentials tab. Native users
+remain non-login authorization principals; the host transport agent and
+effective user are separately authorized/audited. Group proxy sessions must
+not bind personal libraries or inherit the host's owner permissions.
+
+Do not ship compatibility adapters for earlier fork iterations: remove the
+old group-owned management routes/DTOs, vault-local ownership/refresh/cleanup
+paths, obsolete catalog/scope translations and runtime schema/key aliases.
+F12 copying and fan-out rotation are cut, not fallback upgrade mechanisms.
+
+Preserve deployed state through a reviewed, bounded **offline** conversion and
+explicit owner/recipient mapping. Move existing authorizations without
+exporting/cloning tokens or changing their issuing client/scopes; update F8
+bindings with the same deployment. The converter is not a permanent startup
+migration, runtime fallback or retained maintenance feature. Remove it from the
+shipped surface after acceptance; retain protected backups and safe receipts.
+
+Require native-user/non-login tests, effective-user authorization, cross-group
+reference denial, concurrent shared refresh, independent grant revocation,
+group deletion without upstream disconnect, scope-change review and real
+provider/MCP acceptance. Rollback restores matching stopped-service databases,
+binaries and affected assets/configuration together, never a binary-only
+downgrade. Do not change live services merely because this plan was updated.
+
+The remaining sections describe the published contract and its verified
+historical rollout; they are not the target revision-7 management API.
+
+### Canonical host API and CLI
+
+The revision-7 host exposes `/ui/chat/api/credentials` for the signed-in user's
+connections, accessible groups and configured OAuth apps. Connection CRUD and
+OAuth start/progress live below `/credentials/connections` and
+`/credentials/sign-ins`; group settings use `/groups/:gid/admin/access`.
+The former group-owned `/admin/credentials/*` management routes are removed,
+not aliases to the new API.
+
+The host provisions native managed users through `/v1/managed-users` using a
+database-persisted installation UUID and stable NanoClaw user subject. Role,
+membership and deletion changes enter a durable synchronization queue;
+startup reconciliation precedes container adoption and subsequent updates
+retry explicitly. A gateway without the canonical API is a contract mismatch,
+not a reason to fall back to group-local writes.
+
+Host-only CLI operations select an existing NanoClaw user explicitly:
+
+```bash
+ncl credentials list --user <user-id>
+ncl credentials create --user <user-id> --label Search --kind static \
+  --services '[{"name":"search","host":"api.example.com/search","auth":{"type":"bearer","token":"SEARCH_KEY"}}]' \
+  --values-stdin < /secure/search-values.json
+ncl credentials grant --user <user-id> --id <connection-id> --group <group-id> \
+  --services '["search"]'
+ncl credentials revoke --user <user-id> --id <connection-id> --group <group-id>
+ncl credentials start --user <user-id> --id <oauth-connection-id>
+```
+
+The values file is a private key/value JSON object; do not put values in
+arguments, audit records or examples. Update/delete operations require the
+connection's exact `--revision`. OAuth completion is bound to the initiating
+user, mapped native user and authoritative connection ID; a successful callback
+does not grant an agent access automatically.
+
+The old `credentials set`, vault-local key-set/provision commands and spike-era
+`NANOCLAW_AGENT_VAULT_GROUPS` override are not supported by this contract. Backend
+cutover remains an explicit operator action until OneCLI retirement is complete.
+
+### Real host-to-gateway contract check
+
+The gateway's opt-in Go bridge starts an ephemeral server with fresh test state
+and a mode-0600 synthetic host-token file. It launches the actual NanoClaw
+client modules against that server, covering managed users, two-group sharing,
+revision-checked rotation, recipient detach, strict ownership, private/install
+apps and role/deletion synchronization:
+
+```bash
+# Run in the AgentVault source checkout, using a private existing TMPDIR.
+AGENT_VAULT_NODE_INTEGRATION_SCRIPT=/path/to/nanoclaw/scripts/test-shared-gateway.ts \
+AGENT_VAULT_NODE_INTEGRATION_RUNNER=/path/to/nanoclaw/node_modules/.bin/tsx \
+go test -race ./internal/server -run '^TestManagedGatewayNodeBridge$' \
+  -count=1 -timeout=120s
+```
+
+The Node harness rejects live default ports and token files outside its test
+temporary root. It does not read the deployed bootstrap token, modify the
+central live DB or start/restart a service. This check is not a substitute for
+reviewed offline adoption, release provenance or operator-approved provider
+acceptance. PostgreSQL runtime acceptance remains a separate release check.
+
+### Reviewed release checksums
+
+| Target      | SHA-256                                                            |
+| ----------- | ------------------------------------------------------------------ |
+| Linux amd64 | `45d49615f380f5b7b0b4e7cec4e4bafbca5a514ccdb594e33b6cb55fd0949633` |
+| Linux arm64 | `187097aed926dae42335112e0b55f3d1f9c3b77a37cccebf7f96e7bbb668df05` |
+| macOS arm64 | `295a0624f52f8df49a68e70746707683aa6f41b0d83d46e680f32f65c3cbe047` |
+
+`versions.json` and the setup verifier pin these exact assets. Verify the
+published tag-bound provenance before installing. The prior release details
+below are historical and do not override the current source/hash pin.
+
 ## Catalog-free OAuth breaking update
 
 This checkout requires the generic OAuth app/account contract. There is no
@@ -79,10 +189,10 @@ behalf. A release being published does not mean the live canary was upgraded.
 source `32f233b2ebc53786ab4e74b28fc4ef6d75e674e9`, platform assets and reviewed
 SHA-256 hashes:
 
-| Platform | Asset | SHA-256 |
-| --- | --- | --- |
-| Linux amd64 | `agent-vault_gw-v0.1.1_linux_amd64` | `474b807a88bb227901d5fa03c9cc1ec90a2f69573ce46af4d476fd14f906c9e6` |
-| Linux arm64 | `agent-vault_gw-v0.1.1_linux_arm64` | `70d619482c0a931b1cd5f33f8d8b0b616017f811f7e9bc788616c6eb35d04c79` |
+| Platform    | Asset                                | SHA-256                                                            |
+| ----------- | ------------------------------------ | ------------------------------------------------------------------ |
+| Linux amd64 | `agent-vault_gw-v0.1.1_linux_amd64`  | `474b807a88bb227901d5fa03c9cc1ec90a2f69573ce46af4d476fd14f906c9e6` |
+| Linux arm64 | `agent-vault_gw-v0.1.1_linux_arm64`  | `70d619482c0a931b1cd5f33f8d8b0b616017f811f7e9bc788616c6eb35d04c79` |
 | macOS arm64 | `agent-vault_gw-v0.1.1_darwin_arm64` | `c1db265b207574459126a3d438de4e86cab727ef96620bdbb56587e7de08c7a1` |
 
 These are standalone binaries, not archives. Other platforms fail explicitly.
@@ -218,8 +328,11 @@ the keys in that reloaded overview.
 
 The existing canary completed real Google/GitHub consent and F8 stdio acceptance
 using `av-refresh:<key>` / `av-access:<key>`. Preserve those keys and files.
-New target vaults still require their own credential entry, authorization and
-workload acceptance; release verification does not establish those outcomes.
+Under that published contract, new target vaults still require their own
+credential entry, authorization and workload acceptance; release verification
+does not establish those outcomes. Revision 7 replaces repeated entry and
+authorization with explicit grants to owned connections, while retaining
+per-group workload acceptance.
 
 ### F8 stdio wiring
 
@@ -232,11 +345,11 @@ Do not pass the host bootstrap token into a server or container.
 
 Google token schemas differ by client:
 
-| Client | Token record | Placeholder fields |
-| --- | --- | --- |
-| Gmail autoauth | Flat object | `access_token`, `refresh_token`, `expiry_date` |
-| Cocal Calendar | Account map, e.g. `normal` | `access_token`, `refresh_token`, `expiry_date` inside that account |
-| Piotr Agier Drive v2 | `accounts.<alias>` plus `defaultAccount` | `accessToken`, `refreshToken`, `expiryDate` inside that account |
+| Client               | Token record                             | Placeholder fields                                                 |
+| -------------------- | ---------------------------------------- | ------------------------------------------------------------------ |
+| Gmail autoauth       | Flat object                              | `access_token`, `refresh_token`, `expiry_date`                     |
+| Cocal Calendar       | Account map, e.g. `normal`               | `access_token`, `refresh_token`, `expiry_date` inside that account |
+| Piotr Agier Drive v2 | `accounts.<alias>` plus `defaultAccount` | `accessToken`, `refreshToken`, `expiryDate` inside that account    |
 
 Set access to `av-access:<key>` and refresh to `av-refresh:<key>`. For initial
 refresh acceptance, set expiry to a positive expired timestamp such as `1`.

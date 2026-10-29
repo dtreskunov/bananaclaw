@@ -15,6 +15,7 @@ import {
   fileSearchOpen,
   fileSearchRoot,
   fileSearchQuery,
+  credentialsOpen,
 } from './state';
 import { parentPath } from './utils';
 import type { Thread, ThreadCtx, RouterApi } from './types';
@@ -71,6 +72,7 @@ export function parseHash(): ParsedHash | null {
 }
 
 export function buildHash(): string {
+  if (credentialsOpen.value) return '#credentials';
   if (!groupId.value) return '';
   const hasThread = !!threadId.value;
   const path = filePath.value || treePath.value;
@@ -129,6 +131,8 @@ export function threadCtx(t: Thread | null | undefined): ThreadCtx | null {
 }
 
 export async function applyHash(router: RouterApi, options: { newConversation?: boolean } = {}): Promise<void> {
+  credentialsOpen.value = location.hash === '#credentials';
+  if (credentialsOpen.value) return;
   const parsed = parseHash();
   const blank: { groupId: string; thread: Thread } | undefined = history.state?.blankConversation;
   if (!parsed) {

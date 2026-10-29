@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VNode } from 'preact';
-import { groupId } from '../state';
+import { credentialsOpen, groupId } from '../state';
 import { startNewThread } from '../actions';
 import { GroupStrip } from './GroupPicker';
 import { Header } from './Header';
@@ -22,10 +22,23 @@ function newThreadButton() {
 
 afterEach(() => {
   groupId.value = null;
+  credentialsOpen.value = false;
   vi.clearAllMocks();
 });
 
 describe('mobile header new thread', () => {
+  it('always provides user-scoped Credentials navigation independently of an agent gateway flag', () => {
+    const nav = Header().props.children.find(
+      (child: VNode<{ 'aria-label'?: string }>) => child?.props['aria-label'] === 'Primary',
+    );
+    expect(nav.props.children.map((child: VNode) => child.props.children)).toEqual(['Chat', 'Credentials']);
+    credentialsOpen.value = true;
+    expect(
+      Header().props.children.find(
+        (child: VNode<{ 'aria-label'?: string }>) => child?.props['aria-label'] === 'Primary',
+      ).props.children[1].props['aria-current'],
+    ).toBe('page');
+  });
   it('places a mobile-only plus button immediately before the agent selector', () => {
     groupId.value = 'agent';
     const children = Header().props.children;

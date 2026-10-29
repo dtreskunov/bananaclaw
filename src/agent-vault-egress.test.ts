@@ -111,8 +111,8 @@ function envOf(args: string[]): Record<string, string> {
 }
 
 describe('agent vault egress', () => {
-  it('switches only the listed groups', () => {
-    expect(usesAgentVault('ag-two')).toBe(true);
+  it('does not retain the spike-era environment override', () => {
+    expect(usesAgentVault('ag-two')).toBe(false);
     expect(usesAgentVault('ag-three')).toBe(false);
   });
 

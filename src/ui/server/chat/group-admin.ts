@@ -71,7 +71,6 @@ import type { McpServerConfig } from '../../../container-config.js';
 import { providerProvidesAgentSurfaces } from '../../../providers/provider-container-registry.js';
 import { SELECTABLE_AGENT_PROVIDERS, VALID_AGENT_PROVIDERS } from './agent-providers.js';
 import { recordAdminAction } from './audit.js';
-import { handleCredentialsRoute } from './credentials-admin.js';
 import { listImages } from './image-catalog.js';
 import { bareIdForResponse, dbValueFromBareId, getModelDetails, listModelsForProvider } from './models-catalog.js';
 import { resolveUpstreamForWireId } from './models-dev-catalog.js';
@@ -218,20 +217,6 @@ async function dispatch(
 
   if (rest === '/models' && method === 'GET') return handleListModels(req, res);
   if (rest === '/images' && method === 'GET') return handleListImages(res);
-
-  if (rest === '/credentials' || rest.startsWith('/credentials/')) {
-    return handleCredentialsRoute({
-      req,
-      res,
-      method,
-      sub: rest.slice('/credentials'.length),
-      actorUserId,
-      gid,
-      mcpServers: parseMcpServers(getContainerConfig(gid)?.mcp_servers),
-      readJsonBody: (r) => readJsonBody(r),
-      writeJson,
-    });
-  }
 
   writeJson(res, 404, { error: 'not_found' });
 }

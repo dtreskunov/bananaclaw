@@ -9,12 +9,12 @@ import { readVersionPin } from './lib/version-pins.js';
 const REPO = 'dtreskunov/agent-vault';
 const WORKFLOW = `${REPO}/.github/workflows/gateway-release.yml`;
 const RELEASES: Record<string, { commit: string; hashes: Record<string, string> }> = {
-  'gw-v0.1.1': {
-    commit: '32f233b2ebc53786ab4e74b28fc4ef6d75e674e9',
+  'gw-v0.2.0': {
+    commit: '9a99f613d54bec30cc3709351277d39de2f3fe6e',
     hashes: {
-      linux_amd64: '474b807a88bb227901d5fa03c9cc1ec90a2f69573ce46af4d476fd14f906c9e6',
-      linux_arm64: '70d619482c0a931b1cd5f33f8d8b0b616017f811f7e9bc788616c6eb35d04c79',
-      darwin_arm64: 'c1db265b207574459126a3d438de4e86cab727ef96620bdbb56587e7de08c7a1',
+      linux_amd64: '45d49615f380f5b7b0b4e7cec4e4bafbca5a514ccdb594e33b6cb55fd0949633',
+      linux_arm64: '187097aed926dae42335112e0b55f3d1f9c3b77a37cccebf7f96e7bbb668df05',
+      darwin_arm64: '295a0624f52f8df49a68e70746707683aa6f41b0d83d46e680f32f65c3cbe047',
     },
   },
 };

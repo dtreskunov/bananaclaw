@@ -51,6 +51,7 @@ import {
 } from './chat.js';
 import type { ThreadSummary } from './chat.js';
 import { handleGroupAdminRequest } from './group-admin.js';
+import { handleCredentialsRequest } from './credentials-admin.js';
 import { usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';
 import {
   addCatalog,
@@ -116,6 +117,7 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
     // dispatch. Try them before returning 404.
     const session = authenticate(req);
     if (!session) return json(ctx, 401, { error: 'unauthorized' });
+    if (await handleCredentialsRequest(req, res, pathname, session.userId)) return;
     if (await handleGroupAdminRequest(req, res, pathname)) return;
     if (await handleChatRequest(req, res, pathname, session.userId)) return;
     if (await handleWriteRequest(req, res, url, pathname, session.userId)) return;
@@ -481,7 +483,7 @@ function handleGroups(ctx: Ctx, userId: string): void {
     folder: g.folder,
     siteUrl: g.site_enabled ? siteUrl(g) : null,
     isAdmin: hasAdminPrivilege(userId, g.id),
-    // Admins get group settings → Credentials for groups on the credential gateway.
+    // Backend status is independent of the user's personal credential library.
     credentialGateway: hasAdminPrivilege(userId, g.id) && usesAgentVault(g.id),
     elevatedOnly: !hasDirectAgentGroupAccess(userId, g.id),
     // Whether this viewer has any messaging context (web mg, or a non-web
