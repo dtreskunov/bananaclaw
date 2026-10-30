@@ -59,6 +59,18 @@ describe('personal credential wire contract', () => {
     await expect(credentialRequest(credentialsPath())).rejects.toThrow('Network unavailable');
     await expect(credentialRequest(credentialsPath())).rejects.toThrow('invalid JSON');
   });
+
+  it.each([
+    [502, '<html>Bad Gateway</html>'],
+    [503, 'Service unavailable'],
+    [400, '{"error":'],
+  ])('reports non-JSON HTTP %s failures without blaming JSON or displaying proxy content', async (status, body) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status })));
+    await expect(credentialRequest(connectionPath('x'), 'DELETE', { revision: '"original"' })).rejects.toMatchObject({
+      status,
+      message: `The credentials request failed (HTTP ${status}). Refresh and try again.`,
+    });
+  });
 });
 
 describe('safe service and app editors', () => {

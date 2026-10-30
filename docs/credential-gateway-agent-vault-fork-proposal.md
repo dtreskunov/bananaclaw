@@ -386,7 +386,10 @@ discovery but cannot administer them.
   unshared connection remains in its owner's Credentials library.
 - Connection deletion first disables all grants; upstream revocation/client
   cleanup is connection-scoped and reports failures explicitly. Detaching a
-  group never invokes upstream disconnect.
+  group never invokes upstream disconnect. An OAuth revocation response of
+  HTTP 400 with `invalid_token` means the token is already revoked, not a
+  cleanup failure. Non-JSON HTTP error pages in the UI report the failed
+  request's status rather than masking it as a JSON parsing problem.
 
 Audit connection ID, native owner/effective actor, authenticated host actor,
 recipient group, service/grant revision,

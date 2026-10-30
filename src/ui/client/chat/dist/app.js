@@ -29811,7 +29811,7 @@ async function credentialRequest(url, method = "GET", body, signal) {
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
     throw new CredentialsError(
-      `The credentials server returned invalid JSON (HTTP ${response.status}).`,
+      response.ok ? `The credentials server returned invalid JSON (HTTP ${response.status}).` : `The credentials request failed (HTTP ${response.status}). Refresh and try again.`,
       response.status
     );
   }
