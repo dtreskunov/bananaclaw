@@ -30285,6 +30285,7 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
     setPreview(null);
     setConfirmed(false);
     setConfigureMcp(false);
+    if (request.data?.status !== "pending") return;
     setError("");
     if (!selected) return;
     const controller = new AbortController();
@@ -30300,7 +30301,7 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
       setError(errorMessage(error2));
     });
     return () => controller.abort();
-  }, [path, selected, connectionVersion]);
+  }, [path, selected, connectionVersion, request.data?.revision, request.data?.status]);
   async function apply2() {
     if (!preview || !confirmed || busy) return;
     setBusy(true);
@@ -30324,6 +30325,7 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
       setPreview(null);
       setConfirmed(false);
       await request.refresh();
+      onSaved();
     } finally {
       setBusy(false);
     }
@@ -30336,6 +30338,25 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
       await request.refresh();
     } catch (error2) {
       setError(errorMessage(error2));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function retry() {
+    if (!request.data || busy) return;
+    setBusy(true);
+    setError("");
+    setPreview(null);
+    setConfirmed(false);
+    try {
+      await credentialRequest(path + "/retry", "POST", { request_revision: request.data.revision });
+      setSelected("");
+      onSaved();
+      await request.refresh();
+    } catch (error2) {
+      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+      setError(errorMessage(error2));
+      await request.refresh();
     } finally {
       setBusy(false);
     }
@@ -30369,7 +30390,18 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
         "Suggested scopes (not automatically granted): ",
         request.data.scopes.join(" ")
       ] }) : null,
-      request.data.status !== "pending" ? /* @__PURE__ */ u4("p", { role: "status", children: request.data.result?.message ?? request.data.status }) : /* @__PURE__ */ u4(k, { children: [
+      request.data.status !== "pending" ? /* @__PURE__ */ u4("div", { children: [
+        /* @__PURE__ */ u4("p", { role: "status", children: request.data.result?.message ?? request.data.status }),
+        request.data.status === "failed" ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            disabled: busy || signingIn,
+            onClick: () => void retry(),
+            children: "Review and retry"
+          }
+        ) : null
+      ] }) : /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4("label", { children: [
           "Personal connection",
           /* @__PURE__ */ u4(

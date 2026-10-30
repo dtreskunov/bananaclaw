@@ -335,6 +335,40 @@ describe('assisted credential approval UI', () => {
     expect(onRespond).toHaveBeenCalledWith('approve');
   });
 
+  it('reopens failed requests for review without granting access or retaining confirmation', async () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      status: 'failed',
+      revision: 3,
+      resource_url: 'https://api.example.com/',
+      reason: 'Read the report',
+      result: { message: 'Grant may already exist.' },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')));
+    const onSaved = vi.fn();
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [original],
+      onCreate: vi.fn(),
+      onManage: vi.fn(),
+      onSaved,
+    }) as TestNode;
+    hooks.slots[0] = original.id;
+    hooks.slots[4] = true;
+    const retry = descendants(node).find(
+      (child) => child.type === 'button' && child.props.children === 'Review and retry',
+    )!;
+    await retry.props.onClick();
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+    const [url, options] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe('/ui/chat/api/credentials/access-requests/access-one/retry');
+    expect(JSON.parse(String(options?.body))).toEqual({ request_revision: 3 });
+    expect(hooks.resource.refresh).toHaveBeenCalled();
+    expect(hooks.slots[0]).toBe('');
+    expect(hooks.slots[4]).toBe(false);
+  });
+
   it('requires explicit selection and breadth confirmation before granting access', async () => {
     const request = {
       request_id: 'access-one',

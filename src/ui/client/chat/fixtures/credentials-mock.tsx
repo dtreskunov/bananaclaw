@@ -39,11 +39,15 @@ const detachedForeign = new Set<string>();
 const signIns = new Map<string, SignInProgress & { connection_id: string; input: SignInInput }>();
 let mcpServers: Record<string, McpServerConfigDto>;
 let accessStage = 'pending';
+let accessRevision = 1;
+let accessFailedOnce = false;
 function connection(input: Partial<Connection> & Pick<Connection, 'id' | 'label' | 'kind'>): Connection {
   return { owner, revision: `r${++seq}`, status: 'ready', services: [], credentials: [], grants: [], ...input };
 }
 export function resetState(): void {
   accessStage = 'pending';
+  accessRevision = 1;
+  accessFailedOnce = false;
   seq = 0;
   connections = options.scenario === 'empty' ? [] : [
     connection({ id: 'basic-pair', label: 'Nextcloud pair', kind: 'static', services: [basic], credentials: ['USERNAME', 'PASSWORD'],
@@ -61,6 +65,8 @@ export function resetState(): void {
       grants: [{ vault: 'research', services: ['documents'], status: 'suspended' }] }),
   ];
   apps = [structuredClone(app)];
+  if (new URLSearchParams(location.search).has('fail_access_once'))
+    for (const item of connections) item.grants = item.grants.filter(grant => grant.vault !== FIXTURE_GROUP.id);
   signIns.clear();
   detachedForeign.clear();
   mcpServers = {
@@ -113,7 +119,7 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
     throw new HttpError(502, 'The gateway rejected this change (simulated)');
   }
   if (path === '/ui/chat/api/credentials' && method === 'GET') return overview();
-  const access = /^\/ui\/chat\/api\/credentials\/access-requests\/fixture-access(?:\/(preview|apply))?$/.exec(path);
+  const access = /^\/ui\/chat\/api\/credentials\/access-requests\/fixture-access(?:\/(preview|apply|retry))?$/.exec(path);
   if (access) {
     const params = new URLSearchParams(location.search);
     const resource = params.get('request_resource') || 'https://nextcloud.example.org/mcp/tools';
@@ -121,11 +127,18 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
     const scopes: string[] | undefined = params.has('request_scopes') ? JSON.parse(params.get('request_scopes')!) : undefined;
     const request = { request_id: 'fixture-access', status: accessStage, resource_url: resource,
       authentication, scopes, mcp_server: params.get('request_server') || undefined,
-      reason: 'Finish the requested report.', revision: 1, agent_group_id: FIXTURE_GROUP.id, agent_group_name: FIXTURE_GROUP.name,
-      result: accessStage === 'completed' ? { message: 'Access granted. The agent will safely verify the original operation.' } : null };
+      reason: 'Finish the requested report.', revision: accessRevision, agent_group_id: FIXTURE_GROUP.id, agent_group_name: FIXTURE_GROUP.name,
+      result: accessStage === 'completed' ? { message: 'Access granted. The agent will safely verify the original operation.' } :
+        accessStage === 'failed' ? { message: 'Access approval failed during grant verification. Some changes may have applied. Review and retry.' } : null };
     if (!access[1] && method === 'GET') return request;
     const input = body<{ connection_id: string; connection_revision?: string; request_revision?: number;
       configure_mcp?: boolean; mcp_server?: string; account_alias?: string }>(init);
+    if (access[1] === 'retry' && method === 'POST') {
+      if (accessStage !== 'failed' || input.request_revision !== accessRevision) throw new HttpError(409, 'Review the current failed request.');
+      accessStage = 'pending';
+      accessRevision++;
+      return { ...request, status: accessStage, revision: accessRevision, result: null };
+    }
     const item = current(input.connection_id);
     const names = Object.entries(mcpServers).filter(([, server]) => 'url' in server && server.url === resource).map(([name]) => name);
     if (access[1] === 'preview' && method === 'POST') return {
@@ -136,10 +149,20 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
         [name, 'authentication' in mcpServers[name] ? mcpServers[name].authentication : undefined])) },
     };
     if (access[1] === 'apply' && method === 'POST') {
-      if (accessStage !== 'pending' || input.connection_revision !== item.revision || input.request_revision !== 1)
+      if (accessStage !== 'pending' || input.connection_revision !== item.revision || input.request_revision !== accessRevision)
         throw new HttpError(409, 'Review the current request and connection.');
       if (item.status !== 'ready' || !connectionMatchesAccess(item, request))
         throw new HttpError(409, 'Connect a compatible credential first.');
+      if (!item.grants.some(grant => grant.vault === FIXTURE_GROUP.id && grant.status === 'active')) {
+        item.grants.push({ vault: FIXTURE_GROUP.id, services: item.services.map(service => service.name), status: 'active' });
+        bump(item);
+      }
+      if (params.has('fail_access_once') && !accessFailedOnce) {
+        accessFailedOnce = true;
+        accessStage = 'failed';
+        accessRevision += 2;
+        throw new HttpError(409, 'Simulated failure after the grant succeeded; MCP configuration was not saved.');
+      }
       if (input.configure_mcp) {
         if (!input.mcp_server || !input.account_alias || !names.includes(input.mcp_server)) throw new HttpError(409, 'Choose one named server.');
         const server = mcpServers[input.mcp_server];
@@ -147,7 +170,8 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
           authentication: { connection_id: item.id, account_alias: input.account_alias } };
       }
       accessStage = 'completed';
-      return { ...request, status: accessStage };
+      accessRevision += 2;
+      return { ...request, status: accessStage, revision: accessRevision };
     }
     throw new HttpError(405, 'Method not allowed');
   }

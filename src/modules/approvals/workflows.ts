@@ -58,14 +58,66 @@ export function createApprovalWorkflow(id: string, key: string, origin: Record<s
 }
 
 export function claimApprovalWorkflow(id: string, revision: number, data: Record<string, unknown>): boolean {
+  const previous = getApprovalWorkflow(id);
+  const stored = previous ? (JSON.parse(previous.data_json) as Record<string, unknown>) : {};
   return (
     getDb()
       .prepare(
         `UPDATE approval_workflows SET stage='applying',revision=revision+1,data_json=?,updated_at=?
     WHERE approval_id=? AND stage='pending' AND revision=?`,
       )
-      .run(JSON.stringify(data), new Date().toISOString(), id, revision).changes === 1
+      .run(
+        JSON.stringify({ ...data, ...(stored.attempt_history ? { attempt_history: stored.attempt_history } : {}) }),
+        new Date().toISOString(),
+        id,
+        revision,
+      ).changes === 1
   );
+}
+
+export function updateApprovalWorkflowData(id: string, data: Record<string, unknown>): void {
+  const workflow = getApprovalWorkflow(id);
+  if (!workflow || workflow.stage !== 'applying') throw new Error('Approval is not being applied');
+  const stored = JSON.parse(workflow.data_json) as Record<string, unknown>;
+  getDb()
+    .prepare("UPDATE approval_workflows SET data_json=?,updated_at=? WHERE approval_id=? AND stage='applying'")
+    .run(JSON.stringify({ ...stored, ...data }), new Date().toISOString(), workflow.approval_id);
+}
+
+export function retryApprovalWorkflow(id: string, revision: number, userId: string): boolean {
+  return getDb().transaction(() => {
+    const workflow = getApprovalWorkflow(id);
+    if (
+      !workflow ||
+      workflow.stage !== 'failed' ||
+      workflow.revision !== revision ||
+      pendingWorkflow(workflow.dedupe_key)
+    )
+      return false;
+    const { attempt_history, ...selection } = JSON.parse(workflow.data_json) as Record<string, unknown>;
+    const history = Array.isArray(attempt_history) ? attempt_history : [];
+    const data = {
+      attempt_history: [
+        ...history,
+        {
+          stage: workflow.stage,
+          selection,
+          result: workflow.result_json ? (JSON.parse(workflow.result_json) as unknown) : null,
+          finished_at: workflow.updated_at,
+          reopened_by: userId,
+        },
+      ],
+    };
+    const changed = getDb()
+      .prepare(
+        `UPDATE approval_workflows SET stage='pending',revision=revision+1,
+      data_json=?,result_json=NULL,notified=0,updated_at=? WHERE approval_id=? AND stage='failed' AND revision=?`,
+      )
+      .run(JSON.stringify(data), new Date().toISOString(), workflow.approval_id, revision).changes;
+    if (!changed) return false;
+    getDb().prepare("UPDATE pending_approvals SET status='pending' WHERE approval_id=?").run(workflow.approval_id);
+    return true;
+  })();
 }
 
 export function finishApprovalWorkflow(
@@ -75,12 +127,16 @@ export function finishApprovalWorkflow(
   restart = false,
 ): void {
   getDb().transaction(() => {
+    const workflow = getApprovalWorkflow(id);
+    if (!workflow || !['pending', 'applying'].includes(workflow.stage)) return;
+    id = workflow.approval_id;
+    const notificationId = `approval-result-${id}-r${workflow.revision + 1}`;
     const updated = getDb()
       .prepare(
         `UPDATE approval_workflows SET stage=?,revision=revision+1,result_json=?,updated_at=?
       WHERE approval_id=? AND stage IN ('pending','applying')`,
       )
-      .run(stage, JSON.stringify({ message, restart }), new Date().toISOString(), id);
+      .run(stage, JSON.stringify({ message, restart, notification_id: notificationId }), new Date().toISOString(), id);
     if (!updated.changes) return;
     getDb()
       .prepare('UPDATE pending_approvals SET status=? WHERE approval_id=?')
@@ -91,12 +147,12 @@ export function finishApprovalWorkflow(
 export async function notifyApprovalWorkflow(id: string): Promise<void> {
   const workflow = getApprovalWorkflow(id);
   if (!workflow || workflow.notified || !workflow.result_json) return;
-  const approval = getPendingApproval(id);
+  const approval = getPendingApproval(workflow.approval_id);
   const session = approval?.session_id ? getSession(approval.session_id) : undefined;
   if (!session) return;
-  const result = JSON.parse(workflow.result_json) as { message: string; restart?: boolean };
+  const result = JSON.parse(workflow.result_json) as { message: string; restart?: boolean; notification_id?: string };
   writeSessionMessage(session.agent_group_id, session.id, {
-    id: `approval-result-${id}`,
+    id: result.notification_id ?? `approval-result-${workflow.approval_id}`,
     idempotent: true,
     kind: 'chat',
     timestamp: workflow.updated_at,
@@ -115,5 +171,7 @@ export async function notifyApprovalWorkflow(id: string): Promise<void> {
   } else {
     await wakeContainer(session);
   }
-  getDb().prepare('UPDATE approval_workflows SET notified=1 WHERE approval_id=?').run(id);
+  getDb()
+    .prepare('UPDATE approval_workflows SET notified=1 WHERE approval_id=? AND revision=?')
+    .run(workflow.approval_id, workflow.revision);
 }

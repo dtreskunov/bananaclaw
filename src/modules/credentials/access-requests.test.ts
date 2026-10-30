@@ -42,7 +42,12 @@ import { runMigrations } from '../../db/migrations/index.js';
 import { createSession, deleteSession, getPendingApproval } from '../../db/sessions.js';
 import { grantRole } from '../permissions/db/user-roles.js';
 import { getInteractiveApprovalHandler } from '../approvals/primitive.js';
-import { getApprovalWorkflow, claimApprovalWorkflow, notifyApprovalWorkflow } from '../approvals/workflows.js';
+import {
+  getApprovalWorkflow,
+  claimApprovalWorkflow,
+  finishApprovalWorkflow,
+  notifyApprovalWorkflow,
+} from '../approvals/workflows.js';
 import {
   accessRequestInput,
   accessRequestStatus,
@@ -50,6 +55,7 @@ import {
   cancelAccessRequest,
   previewAccessRequest,
   recoverAccessRequests,
+  retryAccessRequest,
   requestAccess,
   reviewAccessRequest,
 } from './access-requests.js';
@@ -118,6 +124,7 @@ beforeEach(() => {
   });
   mocks.grant.mockReset().mockImplementation(async () => {
     connection.grants = [{ vault: session.agent_group_id, services: ['api'], status: 'active' }];
+    connection.revision = `"${'b'.repeat(64)}"`;
     return connection;
   });
   mocks.messages.clear();
@@ -138,6 +145,10 @@ const selection = (revision = 1) => ({
   connection_revision: connection.revision,
   request_revision: revision,
 });
+function resultMessage(id: string) {
+  const result = JSON.parse(getApprovalWorkflow(id)!.result_json!) as { notification_id?: string };
+  return mocks.messages.get(result.notification_id ?? `approval-result-${id}`);
+}
 
 describe('assisted access approvals', () => {
   it('accepts safe authentication JSON through ncl without granting access', async () => {
@@ -277,7 +288,7 @@ describe('assisted access approvals', () => {
       expect(mocks.grant).toHaveBeenCalledWith('alice', connection.id, session.agent_group_id, { revision: rev });
       await notifyApprovalWorkflow(request.request_id);
       expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(1);
-      expect(mocks.messages.get(`approval-result-${request.request_id}`)).toMatchObject({
+      expect(resultMessage(request.request_id)).toMatchObject({
         threadId: session.thread_id,
         idempotent: true,
       });
@@ -369,7 +380,7 @@ describe('assisted access approvals', () => {
         authentication: { connection_id: connection.id, account_alias: 'Personal' },
       },
     });
-    expect(mocks.messages.get(`approval-result-${request.request_id}`)).toMatchObject({ onWake: 1 });
+    expect(resultMessage(request.request_id)).toMatchObject({ onWake: 1 });
     expect(result.result?.message).toContain('Only MCP server "example"');
     expect(result.result?.message).not.toContain('BIND_TESTHANDLE');
   });
@@ -433,6 +444,83 @@ describe('assisted access approvals', () => {
     await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('gateway failed');
     expect(accessRequestStatus(request.request_id).status).toBe('failed');
     expect(accessRequestStatus(request.request_id).result?.message).toContain('Some changes may have applied');
+  });
+  it('persists the returned post-grant ETag separately from the exact reviewed revision', async () => {
+    const request = await seed();
+    const reviewed = selection();
+    await applyAccessRequest('alice', request.request_id, reviewed);
+    expect(connection.revision).not.toBe(reviewed.connection_revision);
+    expect(JSON.parse(getApprovalWorkflow(request.request_id)!.data_json)).toMatchObject({
+      reviewedConnectionRevision: reviewed.connection_revision,
+      connectionRevision: connection.revision,
+      grantApplied: true,
+    });
+  });
+  it('fails closed on a concurrent policy change and permits fresh reviewed retry without replaying the grant', async () => {
+    const request = await seed();
+    mocks.grant.mockImplementationOnce(async () => {
+      connection.grants = [{ vault: session.agent_group_id, services: ['api'], status: 'active' }];
+      const receipt = { ...structuredClone(connection), revision: `"${'b'.repeat(64)}"` };
+      connection.revision = `"${'c'.repeat(64)}"`;
+      return receipt;
+    });
+    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('could not be verified');
+    const failed = accessRequestStatus(request.request_id);
+    expect(failed.status).toBe('failed');
+    expect(failed.result?.message).toContain('grant verification');
+    const retry = retryAccessRequest('alice', request.request_id, { request_revision: failed.revision });
+    expect(retry.status).toBe('pending');
+    expect(retry.result).toBeNull();
+    expect(mocks.grant).toHaveBeenCalledTimes(1);
+    await expect(applyAccessRequest('alice', request.request_id, selection(1))).rejects.toThrow('changed');
+    await applyAccessRequest('alice', request.request_id, selection(retry.revision));
+    expect(accessRequestStatus(request.request_id).status).toBe('completed');
+    expect(mocks.grant).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(getApprovalWorkflow(request.request_id)!.data_json).attempt_history).toHaveLength(1);
+    expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(2);
+    await notifyApprovalWorkflow(request.request_id);
+    expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(2);
+  });
+  it('rejects unauthorized, stale, terminal and expired retries without reopening them', async () => {
+    const request = await seed();
+    expect(() => retryAccessRequest('alice', request.request_id, { request_revision: 1 })).toThrow('failed request');
+    finishApprovalWorkflow(request.request_id, 'failed', 'test failure');
+    const failed = accessRequestStatus(request.request_id);
+    expect(() => retryAccessRequest('member', request.request_id, { request_revision: failed.revision })).toThrow();
+    expect(() => retryAccessRequest('alice', request.request_id, { request_revision: 1 })).toThrow('failed request');
+    getDb()
+      .prepare('UPDATE pending_approvals SET expires_at=? WHERE approval_id=?')
+      .run('2000-01-01', request.request_id);
+    expect(() => retryAccessRequest('alice', request.request_id, { request_revision: failed.revision })).toThrow(
+      'expired',
+    );
+    expect(getApprovalWorkflow(request.request_id)?.stage).toBe('failed');
+    expect(mocks.grant).not.toHaveBeenCalled();
+  });
+  it('does not let an old failure notification acknowledge a newer retry outcome', async () => {
+    const request = await seed();
+    finishApprovalWorkflow(request.request_id, 'failed', 'test failure');
+    mocks.wake.mockImplementationOnce(async () => {
+      const failed = accessRequestStatus(request.request_id);
+      retryAccessRequest('alice', request.request_id, { request_revision: failed.revision });
+      finishApprovalWorkflow(request.request_id, 'completed', 'retry outcome');
+    });
+    await notifyApprovalWorkflow(request.request_id);
+    expect(getApprovalWorkflow(request.request_id)?.notified).toBe(0);
+    await notifyApprovalWorkflow(request.request_id);
+    expect(getApprovalWorkflow(request.request_id)?.notified).toBe(1);
+    expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(2);
+  });
+  it('deduplicates pre-upgrade notification receipts using their legacy message ID', async () => {
+    const request = await seed();
+    finishApprovalWorkflow(request.request_id, 'failed', 'legacy failure');
+    getDb()
+      .prepare('UPDATE approval_workflows SET result_json=? WHERE approval_id=?')
+      .run(JSON.stringify({ message: 'legacy failure' }), request.request_id);
+    await notifyApprovalWorkflow(request.request_id);
+    expect(mocks.messages.has(`approval-result-${request.request_id}`)).toBe(true);
+    await notifyApprovalWorkflow(request.request_id);
+    expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(1);
   });
   it('guards session deletion during application and does not treat resolved workflows as pending', async () => {
     const request = await seed();

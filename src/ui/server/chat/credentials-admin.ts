@@ -26,6 +26,7 @@ import { recordAdminAction } from './audit.js';
 import {
   applyAccessRequest,
   previewAccessRequest,
+  retryAccessRequest,
   reviewAccessRequest,
 } from '../../../modules/credentials/access-requests.js';
 
@@ -89,7 +90,7 @@ export async function handleCredentialsRequest(
       return true;
     }
     const sub = path.slice('/api/credentials'.length);
-    const request = /^\/access-requests\/([^/]+)(?:\/(preview|apply))?$/.exec(sub);
+    const request = /^\/access-requests\/([^/]+)(?:\/(preview|apply|retry))?$/.exec(sub);
     if (request) {
       const requestId = decode(request[1]);
       if (method === 'GET' && !request[2]) {
@@ -102,6 +103,10 @@ export async function handleCredentialsRequest(
       } else if (method === 'POST' && request[2] === 'apply') {
         const result = await applyAccessRequest(userId, requestId, await readBody(req));
         audit(userId, 'credential_access_approved', requestId, { group: result.agent_group_id });
+        json(res, 200, result);
+      } else if (method === 'POST' && request[2] === 'retry') {
+        const result = retryAccessRequest(userId, requestId, await readBody(req));
+        audit(userId, 'credential_access_retry', requestId, { group: result.agent_group_id });
         json(res, 200, result);
       } else throw new ConnectionInputError('Method not allowed', 405);
       return true;

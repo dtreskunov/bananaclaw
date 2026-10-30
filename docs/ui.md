@@ -781,6 +781,13 @@ prefilled for explicit review; advertised scopes are not auto-selected.
 New matching credentials are selected on return, but access is never granted
 merely by creating or signing in. The general library is hidden during request
 review and remains available through **Manage all Credentials**.
+If application fails after a partial change, **Review and retry** reopens the
+same unexpired request for fresh selection and explicit confirmation. Reopening
+does not grant access, reconnect credentials, or change MCP configuration.
+Existing active grants are reused. Failed-attempt receipts are retained privately,
+and each subsequent outcome receives its own idempotent agent notification.
+Grant verification pins the gateway's returned post-grant revision: adding a
+recipient changes the public ETag even when the credential policy is unchanged.
 Optional updates to a named MCP server use stable connection references
 and require explicit consent to restart the requesting session.
 An access request can target `mcp_server` (CLI `--mcp-server`); review selects

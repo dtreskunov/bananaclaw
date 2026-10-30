@@ -28,6 +28,8 @@ import {
   pendingWorkflow,
   latestApprovalWorkflow,
   linkApprovalSubmission,
+  retryApprovalWorkflow,
+  updateApprovalWorkflowData,
   type ApprovalWorkflow,
 } from '../approvals/workflows.js';
 import {
@@ -151,7 +153,9 @@ export function accessRequestStatus(id: string, sessionId?: string) {
     agent_group_id: record.session.agent_group_id,
     expires_at: record.approval.expires_at,
     agent_group_name: getAgentGroup(record.session.agent_group_id)?.name ?? record.session.agent_group_id,
-    result: record.workflow.result_json ? (JSON.parse(record.workflow.result_json) as { message: string }) : null,
+    result: record.workflow.result_json
+      ? { message: (JSON.parse(record.workflow.result_json) as { message: string }).message }
+      : null,
   };
 }
 
@@ -302,6 +306,8 @@ interface ApplySelection {
   userId: string;
   connectionId: string;
   connectionRevision: string;
+  reviewedConnectionRevision?: string;
+  grantApplied?: boolean;
   configureMcp?: boolean;
   configRevision?: string;
   appliedConfigRevision?: string;
@@ -363,6 +369,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
     userId,
     connectionId: body.connection_id,
     connectionRevision: body.connection_revision,
+    reviewedConnectionRevision: body.connection_revision,
     configureMcp: body.configure_mcp === true,
     configRevision: preview.mcp.revision,
     ...(body.configure_mcp ? { mcpServer: String(body.mcp_server), accountAlias: String(body.account_alias) } : {}),
@@ -383,17 +390,26 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
     throw new ConnectionInputError('The approval changed or is already being applied. Refresh before continuing.', 409);
   }
   activeApplications.add(id);
+  let phase = 'grant';
   try {
     const existing = preview.connection.grants.find((grant) => grant.vault === preview.request.agent_group_id);
     if (existing?.status !== 'active') {
-      await grantConnection(userId, body.connection_id, preview.request.agent_group_id, {
+      const granted = await grantConnection(userId, body.connection_id, preview.request.agent_group_id, {
         revision: body.connection_revision,
       });
+      if (granted.id !== selection.connectionId)
+        throw new ConnectionInputError('The gateway returned a different connection after granting access.', 502);
+      // The public ETag includes recipient grants/handles and changes on our own successful mutation.
+      selection.connectionRevision = granted.revision;
+      selection.grantApplied = true;
+      updateApprovalWorkflowData(id, { ...selection });
     }
+    phase = 'grant verification';
     if (!(await selectionGranted(id, selection)))
       throw new ConnectionInputError('Access could not be verified after applying the grant.', 409);
     let runtime: Awaited<ReturnType<typeof runtimeInstructions>> | undefined;
     if (selection.configureMcp) {
+      phase = 'MCP configuration';
       const current = mcpConfiguration(
         preview.request.agent_group_id,
         preview.request.resource_url,
@@ -426,10 +442,9 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
           preview.request.resource_url,
           serverName,
         ).revision;
-        getDb()
-          .prepare('UPDATE approval_workflows SET data_json=? WHERE approval_id=?')
-          .run(JSON.stringify(selection), id);
+        updateApprovalWorkflowData(id, { ...selection });
       })();
+      phase = 'MCP connection resolution';
       const resolved = await resolveMcpAuthentication(preview.request.agent_group_id, {
         [serverName]: servers[serverName],
       });
@@ -452,12 +467,18 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
       selection.configureMcp,
     );
   } catch (error) {
+    const reason =
+      error instanceof ConnectionInputError
+        ? error.message
+        : error instanceof AgentVaultError
+          ? `The credential gateway rejected the operation${error.status ? ` (HTTP ${error.status})` : ''}.`
+          : 'An unexpected host error occurred; see the service logs.';
     finishApprovalWorkflow(
       id,
       'failed',
-      'Applying your access approval failed or could not be verified. Some changes may have applied; review Credentials before trying again.',
+      `Access approval failed during ${phase}. ${reason} Some changes may have applied. Review and retry this request; existing credentials do not need to be recreated.`,
     );
-    log.error('Access approval application failed', { approvalId: id, userId, error });
+    log.error('Access approval application failed', { approvalId: id, userId, phase, err: error });
     await notifyApprovalWorkflow(id);
     throw error;
   } finally {
@@ -466,6 +487,19 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
   }
   await notifyApprovalWorkflow(id);
   return accessRequestStatus(id);
+}
+
+export function retryAccessRequest(userId: string, id: string, raw: unknown) {
+  const request = reviewAccessRequest(userId, id);
+  const body = objectBody(raw);
+  if (Object.keys(body).some((key) => key !== 'request_revision') || !Number.isSafeInteger(body.request_revision))
+    throw new ConnectionInputError('Refresh and supply the reviewed request revision.');
+  if (request.expires_at && request.expires_at <= new Date().toISOString())
+    throw new ConnectionInputError('This request has expired. Ask the agent to create a new request.', 409);
+  if (!retryApprovalWorkflow(request.request_id, Number(body.request_revision), userId))
+    throw new ConnectionInputError('Only a current failed request can be reopened for review.', 409);
+  log.info('Access approval reopened for review', { approvalId: request.request_id, userId });
+  return accessRequestStatus(request.request_id);
 }
 
 export async function cancelAccessRequest(id: string, sessionId: string) {

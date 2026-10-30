@@ -241,7 +241,7 @@ export async function grantConnection(
   connectionId: string,
   groupId: string,
   raw: unknown,
-): Promise<unknown> {
+): Promise<SharedConnection> {
   requireGroupAdmin(userId, groupId);
   const body = objectBody(raw);
   fields(body, ['revision']);

@@ -66,6 +66,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
     setPreview(null);
     setConfirmed(false);
     setConfigureMcp(false);
+    if (request.data?.status !== 'pending') return;
     setError('');
     if (!selected) return;
     const controller = new AbortController();
@@ -83,7 +84,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
         setError(errorMessage(error));
       });
     return () => controller.abort();
-  }, [path, selected, connectionVersion]);
+  }, [path, selected, connectionVersion, request.data?.revision, request.data?.status]);
 
   async function apply(): Promise<void> {
     if (!preview || !confirmed || busy) return;
@@ -106,6 +107,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
       setPreview(null);
       setConfirmed(false);
       await request.refresh();
+      onSaved();
     } finally { setBusy(false); }
   }
 
@@ -117,6 +119,24 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
       await request.refresh();
     } catch (error) {
       setError(errorMessage(error));
+    } finally { setBusy(false); }
+  }
+
+  async function retry(): Promise<void> {
+    if (!request.data || busy) return;
+    setBusy(true);
+    setError('');
+    setPreview(null);
+    setConfirmed(false);
+    try {
+      await credentialRequest(path + '/retry', 'POST', { request_revision: request.data.revision });
+      setSelected('');
+      onSaved();
+      await request.refresh();
+    } catch (error) {
+      if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
+      setError(errorMessage(error));
+      await request.refresh();
     } finally { setBusy(false); }
   }
 
@@ -137,7 +157,11 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
         {request.data.authentication.headers?.length ? ` · Headers: ${request.data.authentication.headers.join(', ')}` : ''}
         . Review these agent suggestions before using them.</p> : null}
       {request.data.scopes?.length ? <p>Suggested scopes (not automatically granted): {request.data.scopes.join(' ')}</p> : null}
-      {request.data.status !== 'pending' ? <p role="status">{request.data.result?.message ?? request.data.status}</p> : <>
+      {request.data.status !== 'pending' ? <div>
+        <p role="status">{request.data.result?.message ?? request.data.status}</p>
+        {request.data.status === 'failed' ? <button type="button" disabled={busy || signingIn}
+          onClick={() => void retry()}>Review and retry</button> : null}
+      </div> : <>
         <label>Personal connection
           <select aria-label="Connection for access request" value={selected} disabled={busy}
             onChange={event => setSelected(event.currentTarget.value)}>

@@ -39,6 +39,7 @@ import { createSession } from '../../../db/sessions.js';
 import { initSessionFolder } from '../../../session-manager.js';
 import { ensureContainerConfig } from '../../../db/container-configs.js';
 import { requestAccess } from '../../../modules/credentials/access-requests.js';
+import { finishApprovalWorkflow, getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
 
 const GROUP = 'ag-shared';
 const REVISION = `"${'a'.repeat(64)}"`;
@@ -64,7 +65,7 @@ function connection(ownerId = 'native-alice') {
     label: 'Search',
     kind: connectionKind,
     status: 'ready',
-    revision: REVISION,
+    revision: workflowGranted ? `"${'b'.repeat(64)}"` : REVISION,
     owner: { id: returnedOwner ?? ownerId },
     services: [service],
     credentials: ['SEARCH_KEY'],
@@ -208,6 +209,52 @@ async function call(method: string, url: string, body?: unknown, headers: Record
 }
 
 describe('user-owned Credentials API', () => {
+  it('reopens partial failures only after authenticated review and reuses an existing grant', async () => {
+    ensureContainerConfig(GROUP);
+    const session = {
+      id: 'sess-access-retry-http',
+      agent_group_id: GROUP,
+      messaging_group_id: null,
+      thread_id: 'access-thread',
+      agent_provider: null,
+      status: 'active' as const,
+      container_status: 'stopped' as const,
+      created_at: 'before',
+      last_active: 'before',
+    };
+    createSession(session);
+    initSessionFolder(GROUP, session.id);
+    const request = await requestAccess(session, {
+      resource_url: 'https://api.example.test/search',
+      reason: 'Read results.',
+    });
+    workflowGranted = true;
+    finishApprovalWorkflow(request.request_id, 'failed', 'Partial application');
+    const revision = getApprovalWorkflow(request.request_id)!.revision;
+    const path = `/ui/chat/api/credentials/access-requests/${request.request_id}`;
+    user = 'member';
+    expect((await call('POST', path + '/retry', { request_revision: revision })).status).toBe(403);
+    user = 'alice';
+    expect(
+      (await call('POST', path + '/retry', { request_revision: revision }, { origin: 'https://evil.example' })).status,
+    ).toBe(403);
+    expect((await call('POST', path + '/retry', {})).status).toBe(400);
+    expect((await call('POST', path + '/retry', { request_revision: 0 })).status).toBe(409);
+    const retry = await call('POST', path + '/retry', { request_revision: revision });
+    expect(retry.status).toBe(200);
+    expect(retry.value).toMatchObject({ status: 'pending', revision: revision + 1, result: null });
+    expect(requests.some((r) => r.method === 'PUT' && r.path.includes('/grants/'))).toBe(false);
+    const applied = await call('POST', path + '/apply', {
+      connection_id: 'connection-one',
+      connection_revision: connection().revision,
+      request_revision: revision + 1,
+    });
+    expect(applied.status).toBe(200);
+    expect(applied.value).toMatchObject({ status: 'completed' });
+    expect(requests.some((r) => r.method === 'PUT' && r.path.includes('/grants/'))).toBe(false);
+    expect((await call('POST', path + '/retry', { request_revision: revision + 1 })).status).toBe(409);
+  });
+
   it('reviews and applies an access approval through the authenticated owner API', async () => {
     ensureContainerConfig(GROUP);
     const session = {
