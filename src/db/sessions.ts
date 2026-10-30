@@ -123,9 +123,14 @@ export function deleteSession(id: string, cancelApprovals = false): number {
   return db.transaction(() => {
     let cancelledApprovals = 0;
     if (hasTable(db, 'pending_approvals')) {
-      const approval = db.prepare('SELECT 1 FROM pending_approvals WHERE session_id = ? LIMIT 1').get(id);
+      const approval = db
+        .prepare("SELECT 1 FROM pending_approvals WHERE session_id = ? AND status='pending' LIMIT 1")
+        .get(id);
       if (approval && !cancelApprovals) throw new SessionApprovalCancellationRequiredError();
-      cancelledApprovals = db.prepare('DELETE FROM pending_approvals WHERE session_id = ?').run(id).changes;
+      cancelledApprovals = db
+        .prepare("DELETE FROM pending_approvals WHERE session_id = ? AND status='pending'")
+        .run(id).changes;
+      db.prepare('DELETE FROM pending_approvals WHERE session_id = ?').run(id);
     }
     db.prepare('DELETE FROM questions WHERE session_id = ?').run(id);
     db.prepare('DELETE FROM sessions WHERE id = ?').run(id);

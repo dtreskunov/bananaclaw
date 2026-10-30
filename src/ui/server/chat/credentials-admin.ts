@@ -23,6 +23,11 @@ import {
 import { getSignIn } from '../../../modules/credentials/sign-ins.js';
 import { uiBaseUrl } from '../server.js';
 import { recordAdminAction } from './audit.js';
+import {
+  applyAccessRequest,
+  previewAccessRequest,
+  reviewAccessRequest,
+} from '../../../modules/credentials/access-requests.js';
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -84,6 +89,23 @@ export async function handleCredentialsRequest(
       return true;
     }
     const sub = path.slice('/api/credentials'.length);
+    const request = /^\/access-requests\/([^/]+)(?:\/(preview|apply))?$/.exec(sub);
+    if (request) {
+      const requestId = decode(request[1]);
+      if (method === 'GET' && !request[2]) {
+        json(res, 200, reviewAccessRequest(userId, requestId));
+      } else if (method === 'POST' && request[2] === 'preview') {
+        const body = await readBody(req);
+        if (typeof body.connection_id !== 'string' || Object.keys(body).some((key) => key !== 'connection_id'))
+          throw new ConnectionInputError('Select a personal connection.');
+        json(res, 200, await previewAccessRequest(userId, requestId, body.connection_id));
+      } else if (method === 'POST' && request[2] === 'apply') {
+        const result = await applyAccessRequest(userId, requestId, await readBody(req));
+        audit(userId, 'credential_access_approved', requestId, { group: result.agent_group_id });
+        json(res, 200, result);
+      } else throw new ConnectionInputError('Method not allowed', 405);
+      return true;
+    }
     if (sub === '/scopes' && method === 'POST') {
       json(res, 200, await discoverConnectionScopes(userId, await readBody(req)));
       return true;

@@ -4,7 +4,11 @@ import { credentialsOpen, drawerOpen, groupAdminOpen, groupId, refs, threadId } 
 
 vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }), addEventListener: vi.fn() });
-  vi.stubGlobal('location', { hash: '#g/agent/t/chat' });
+  vi.stubGlobal('location', {
+    href: 'https://example.test/ui/chat/#g/agent/t/chat',
+    search: '',
+    hash: '#g/agent/t/chat',
+  });
   vi.stubGlobal('history', { state: null, replaceState: vi.fn() });
 });
 afterEach(() => {

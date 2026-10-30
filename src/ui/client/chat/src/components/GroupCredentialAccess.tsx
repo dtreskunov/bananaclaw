@@ -1,7 +1,7 @@
 import './Credentials.css';
 import type { JSX } from 'preact';
 import {
-  accessPath, type AccessGrant, type Service,
+  accessPath, type AccessGrant,
 } from './CredentialsApi';
 import { ErrorNotice, useCredentialResource } from './CredentialsParts';
 import { CredentialsContent } from './CredentialsPage';
@@ -10,17 +10,8 @@ export function GroupCredentials({ gid }: { gid: string }): JSX.Element {
   return <CredentialsContent agent={{ id: gid }} />;
 }
 
-export function serviceMatchesResource(service: Service, resourceUrl: string): boolean {
-  let url: URL;
-  try { url = new URL(resourceUrl); }
-  catch (error) { if (error instanceof TypeError) return false; throw error; }
-  const glob = (pattern: string, value: string): boolean =>
-    new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`, 'i').test(value);
-  const slash = service.host.indexOf('/');
-  const host = slash < 0 ? service.host : service.host.slice(0, slash);
-  const path = service.path ?? (slash < 0 ? undefined : service.host.slice(slash));
-  return glob(host, url.host) && (!path || glob(path, url.pathname)) && (!service.https_only || url.protocol === 'https:');
-}
+import { serviceMatchesResource } from '../../../../shared/credential-matching';
+export { serviceMatchesResource } from '../../../../shared/credential-matching';
 
 /** MCP only displays grant references. Authentication is created in the personal connection flow. */
 export function McpConnectionAccess({ gid, resourceUrl, onOpenCredentials }: {

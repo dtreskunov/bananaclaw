@@ -5,6 +5,7 @@ import './interactive.js';
 import './agents.js';
 import './agent-link.js';
 import './self-mod.js';
+import './access.js';
 import './web-ui.js';
 
 export { invokeRegisteredTool, listRegisteredTools } from './tool-registry.js';

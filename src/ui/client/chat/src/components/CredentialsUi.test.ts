@@ -13,6 +13,8 @@ import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
 import type { OAuthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker } from './OAuthScopePicker';
+import { ApprovalCard } from './ApprovalCard';
+import { AccessRequestReview } from './AccessRequestReview';
 
 const hooks = vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -108,6 +110,7 @@ afterEach(() => {
 });
 
 interface TestProps {
+  class?: string;
   footer: unknown;
   value: unknown;
   type: string;
@@ -139,6 +142,102 @@ function render(node: { type: unknown; props: unknown }): TestNode {
   hooks.effects = [];
   return (node.type as (props: unknown) => TestNode)(node.props);
 }
+
+describe('assisted credential approval UI', () => {
+  it('uses a non-authorizing review action while retaining ordinary approval buttons', () => {
+    const onReview = vi.fn(),
+      onRespond = vi.fn();
+    const approval = {
+      approvalId: 'access-one',
+      action: 'request_access',
+      title: 'Request access',
+      details: 'Read calendar',
+      packages: null,
+      options: [
+        { label: 'Review access', value: 'review', selectedLabel: 'Review' },
+        { label: 'Reject', value: 'reject', selectedLabel: 'Rejected' },
+      ],
+      agentGroupId: 'one',
+      agentGroupName: 'One',
+      createdAt: '2026-01-01',
+      reviewRequired: true,
+      stage: 'pending',
+    };
+    const card = ApprovalCard({ approval, busy: false, onReview, onRespond });
+    const buttons = descendants(card).filter((node) => node.type === 'button');
+    buttons[0].props.onClick();
+    expect(onReview).toHaveBeenCalledOnce();
+    expect(onRespond).not.toHaveBeenCalled();
+    buttons[1].props.onClick();
+    expect(onRespond).toHaveBeenCalledWith('reject');
+    const simple = ApprovalCard({
+      approval: {
+        ...approval,
+        action: 'install_packages',
+        reviewRequired: false,
+        options: [{ label: 'Approve', value: 'approve', selectedLabel: 'Approved' }],
+      },
+      busy: false,
+      onReview,
+      onRespond,
+    });
+    descendants(simple)
+      .find((node) => node.type === 'button')!
+      .props.onClick();
+    expect(onRespond).toHaveBeenCalledWith('approve');
+  });
+
+  it('requires explicit selection and breadth confirmation before granting access', async () => {
+    const request = {
+      request_id: 'access-one',
+      status: 'pending',
+      resource_url: 'https://api.example.com/',
+      reason: 'Read the report',
+      revision: 1,
+      agent_group_id: 'one',
+      result: null,
+    };
+    hooks.resource.data = request;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            request,
+            connection: original,
+            matches: true,
+            grantBreadth: 'All current and future URL patterns.',
+            verification: 'Authenticated operation not verified.',
+          }),
+        ),
+      ),
+    );
+    const props = { id: 'access-one', connections: [original], onCreate: vi.fn(), onManage: vi.fn(), onSaved: vi.fn() };
+    const draw = (): TestNode => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestReview(props) as TestNode;
+    };
+    let node = draw();
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    descendants(node)
+      .find((child) => child.type === 'select')!
+      .props.onChange({ currentTarget: { value: original.id } });
+    node = draw();
+    for (const effect of hooks.effects) effect();
+    await vi.waitFor(() => expect(hooks.slots[1]).toMatchObject({ matches: true }));
+    node = draw();
+    const allow = (): TestNode =>
+      descendants(node).find((child) => child.type === 'button' && child.props.class === 'primary')!;
+    expect(allow().props.disabled).toBe(true);
+    descendants(node)
+      .find((child) => child.type === 'input' && child.props.type === 'checkbox')!
+      .props.onChange({ currentTarget: { checked: true } });
+    node = draw();
+    expect(allow().props.disabled).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.every(([url]) => String(url).endsWith('/preview'))).toBe(true);
+  });
+});
 function descendants(value: unknown): TestNode[] {
   if (Array.isArray(value)) return value.flatMap(descendants);
   if (!value || typeof value !== 'object' || !('type' in value) || !('props' in value)) return [];

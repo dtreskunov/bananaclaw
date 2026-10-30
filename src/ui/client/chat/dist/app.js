@@ -21610,10 +21610,19 @@ async function submitQuestionResponse(questionId, response) {
 
 // src/credentials-navigation.ts
 var credentialsIntent = y3(null);
+var accessApprovalId = y3(
+  typeof location === "undefined" ? null : new URLSearchParams(location.search).get("access_request")
+);
 function openCredentials(intent) {
   drawerOpen.threads.value = false;
   drawerOpen.files.value = false;
   const navigate = () => {
+    if (intent?.approvalId) {
+      accessApprovalId.value = intent.approvalId;
+      const url = new URL(location.href);
+      url.searchParams.set("access_request", intent.approvalId);
+      history.replaceState(history.state, "", url);
+    }
     credentialsIntent.value = intent ?? null;
     credentialsOpen.value = true;
     writeHash();
@@ -21633,6 +21642,10 @@ function openCredentials(intent) {
   }
 }
 function openChat2() {
+  accessApprovalId.value = null;
+  const url = new URL(location.href);
+  url.searchParams.delete("access_request");
+  history.replaceState(history.state, "", url);
   credentialsOpen.value = false;
   writeHash();
   if (location.hash === "#credentials") location.hash = "";
@@ -22615,6 +22628,37 @@ function ThreadsRail() {
       ]
     }
   );
+}
+
+// src/components/ApprovalCard.tsx
+function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
+  return /* @__PURE__ */ u4("div", { class: "approval-row", children: [
+    /* @__PURE__ */ u4("div", { class: "approval-text", children: [
+      /* @__PURE__ */ u4("div", { class: "approval-title", children: a4.title || a4.action }),
+      a4.packages ? /* @__PURE__ */ u4("div", { class: "approval-packages", children: ["apt", "npm", "pip"].map((manager) => a4.packages[manager].length ? /* @__PURE__ */ u4("div", { class: "approval-package-list", children: [
+        /* @__PURE__ */ u4("span", { class: "approval-package-manager", children: manager }),
+        /* @__PURE__ */ u4("span", { children: a4.packages[manager].join(", ") })
+      ] }, manager) : null) }) : null,
+      a4.details ? /* @__PURE__ */ u4("div", { class: "approval-details", children: a4.details }) : null,
+      /* @__PURE__ */ u4("div", { class: "approval-meta", children: [
+        /* @__PURE__ */ u4("span", { class: "approval-group", children: a4.agentGroupName || "Global" }),
+        /* @__PURE__ */ u4("span", { class: "dot", children: "\xB7" }),
+        /* @__PURE__ */ u4(RelativeTime, { ts: a4.createdAt })
+      ] }),
+      a4.stage === "applying" ? /* @__PURE__ */ u4("div", { role: "status", children: "Applying approved access\u2026" }) : null
+    ] }),
+    /* @__PURE__ */ u4("div", { class: "approval-actions", children: !a4.options.length ? /* @__PURE__ */ u4("span", { class: "approval-disabled", children: "no options" }) : a4.options.map((option) => /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "approval-btn approval-" + (option.value === "approve" ? "approve" : option.value === "reject" ? "reject" : "neutral"),
+        disabled: busy || a4.stage === "applying",
+        onClick: () => a4.reviewRequired && option.value === "review" ? onReview() : onRespond(option.value),
+        children: option.label
+      },
+      option.value
+    )) })
+  ] });
 }
 
 // node_modules/preact/compat/dist/compat.module.js
@@ -25091,34 +25135,18 @@ function ApprovalsBanner() {
         ")"
       ] })
     ] }),
-    /* @__PURE__ */ u4("div", { class: "approvals-list", children: list.map((a4) => /* @__PURE__ */ u4("div", { class: "approval-row", children: [
-      /* @__PURE__ */ u4("div", { class: "approval-text", children: [
-        /* @__PURE__ */ u4("div", { class: "approval-title", children: a4.title || a4.action }),
-        a4.packages ? /* @__PURE__ */ u4("div", { class: "approval-packages", children: ["apt", "npm", "pip"].map(
-          (manager) => a4.packages[manager].length > 0 ? /* @__PURE__ */ u4("div", { class: "approval-package-list", children: [
-            /* @__PURE__ */ u4("span", { class: "approval-package-manager", children: manager }),
-            /* @__PURE__ */ u4("span", { children: a4.packages[manager].join(", ") })
-          ] }, manager) : null
-        ) }) : null,
-        a4.details ? /* @__PURE__ */ u4("div", { class: "approval-details", children: a4.details }) : null,
-        /* @__PURE__ */ u4("div", { class: "approval-meta", children: [
-          /* @__PURE__ */ u4("span", { class: "approval-group", children: a4.agentGroupName || "Global" }),
-          /* @__PURE__ */ u4("span", { class: "dot", children: "\xB7" }),
-          /* @__PURE__ */ u4(RelativeTime, { ts: a4.createdAt })
-        ] })
-      ] }),
-      /* @__PURE__ */ u4("div", { class: "approval-actions", children: a4.options.length === 0 ? /* @__PURE__ */ u4("span", { class: "approval-disabled", children: "no options" }) : a4.options.map((o4) => /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "approval-btn approval-" + (o4.value === "approve" ? "approve" : o4.value === "reject" ? "reject" : "neutral"),
-          disabled: busy.has(a4.approvalId),
-          onClick: () => respondApproval(a4.approvalId, o4.value).catch(console.error),
-          children: o4.label
-        },
-        o4.value
-      )) })
-    ] }, a4.approvalId)) })
+    /* @__PURE__ */ u4("div", { class: "approvals-list", children: list.map((a4) => /* @__PURE__ */ u4(
+      ApprovalCard,
+      {
+        approval: a4,
+        busy: busy.has(a4.approvalId),
+        onReview: () => openCredentials({ approvalId: a4.approvalId }),
+        onRespond: (value) => {
+          void respondApproval(a4.approvalId, value).catch(console.error);
+        }
+      },
+      a4.approvalId
+    )) })
   ] });
 }
 function fmtNextShort(iso) {
@@ -30162,6 +30190,175 @@ function useConnectionSignIn(onFinished) {
   };
 }
 
+// src/components/AccessRequestReview.tsx
+function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved }) {
+  const path = credentialsPath(`/access-requests/${encodeURIComponent(id2)}`);
+  const request = useCredentialResource(path);
+  const [selected, setSelected] = h2("");
+  const [preview, setPreview] = h2(null);
+  const [busy, setBusy] = h2(false);
+  const [error, setError] = h2("");
+  const [confirmed, setConfirmed] = h2(false);
+  const [configureMcp, setConfigureMcp] = h2(false);
+  const connectionVersion = JSON.stringify(connections.map((connection2) => [connection2.id, connection2.revision, connection2.status]));
+  y2(() => {
+    setPreview(null);
+    setConfirmed(false);
+    setConfigureMcp(false);
+    setError("");
+    if (!selected) return;
+    const controller = new AbortController();
+    void credentialRequest(path + "/preview", "POST", { connection_id: selected }, controller.signal).then((value) => {
+      if (!controller.signal.aborted) setPreview(value);
+    }).catch((error2) => {
+      if (controller.signal.aborted) return;
+      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+      setError(errorMessage(error2));
+    });
+    return () => controller.abort();
+  }, [path, selected, connectionVersion]);
+  async function apply2() {
+    if (!preview || !confirmed || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await credentialRequest(path + "/apply", "POST", {
+        connection_id: preview.connection.id,
+        connection_revision: preview.connection.revision,
+        request_revision: preview.request.revision,
+        configure_mcp: configureMcp,
+        config_revision: preview.mcp?.revision
+      });
+      setPreview(null);
+      setConfirmed(false);
+      await request.refresh();
+      onSaved();
+    } catch (error2) {
+      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+      setError(errorMessage(error2));
+      setPreview(null);
+      setConfirmed(false);
+      await request.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function reject() {
+    setBusy(true);
+    setError("");
+    try {
+      await respondApproval(id2, "reject");
+      await request.refresh();
+    } catch (error2) {
+      setError(errorMessage(error2));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /* @__PURE__ */ u4("section", { class: "ga-cred access-request-review", "aria-label": "Review access request", children: [
+    /* @__PURE__ */ u4("h3", { children: "Review agent access" }),
+    /* @__PURE__ */ u4(ErrorNotice, { message: request.error || error }),
+    request.loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading access request\u2026" }) : null,
+    request.error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void request.refresh(), children: "Retry" }) : null,
+    request.data ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4("p", { children: request.data.reason }),
+      /* @__PURE__ */ u4("p", { children: /* @__PURE__ */ u4("code", { children: request.data.resource_url }) }),
+      /* @__PURE__ */ u4("p", { children: [
+        "Recipient agent: ",
+        request.data.agent_group_name ?? request.data.agent_group_id
+      ] }),
+      request.data.scopes?.length ? /* @__PURE__ */ u4("p", { children: [
+        "Suggested scopes (not automatically granted): ",
+        request.data.scopes.join(" ")
+      ] }) : null,
+      request.data.status !== "pending" ? /* @__PURE__ */ u4("p", { role: "status", children: request.data.result?.message ?? request.data.status }) : /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("label", { children: [
+          "Personal connection",
+          /* @__PURE__ */ u4(
+            "select",
+            {
+              "aria-label": "Connection for access request",
+              value: selected,
+              disabled: busy,
+              onChange: (event) => setSelected(event.currentTarget.value),
+              children: [
+                /* @__PURE__ */ u4("option", { value: "", children: "Choose from your Credentials" }),
+                connections.map((connection2) => /* @__PURE__ */ u4("option", { value: connection2.id, children: [
+                  connectionName(connection2),
+                  connection2.status === "ready" ? "" : ` (${connection2.status})`
+                ] }, connection2.id))
+              ]
+            }
+          )
+        ] }),
+        /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => onCreate(request.data.resource_url), children: "Add credential" }),
+        /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => void reject(), children: "Reject request" }),
+        preview ? /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("h4", { children: connectionName(preview.connection) }),
+          preview.connection.account ? /* @__PURE__ */ u4("p", { children: preview.connection.account }) : null,
+          /* @__PURE__ */ u4("ul", { children: preview.connection.services.map((service) => /* @__PURE__ */ u4("li", { children: [
+            serviceDestination(service),
+            " \xB7 ",
+            service.auth.type
+          ] }, service.name)) }),
+          preview.connection.kind !== "static" ? /* @__PURE__ */ u4("p", { children: [
+            "Provider-reported scopes: ",
+            preview.connection.granted_scopes?.join(" ") || "Not reported; permissions are not verified."
+          ] }) : null,
+          /* @__PURE__ */ u4("p", { children: preview.grantBreadth }),
+          /* @__PURE__ */ u4("p", { children: preview.verification }),
+          preview.connection.kind !== "static" && preview.mcp?.names.length ? /* @__PURE__ */ u4("label", { children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "checkbox",
+                checked: configureMcp,
+                disabled: busy,
+                onChange: (event) => setConfigureMcp(event.currentTarget.checked)
+              }
+            ),
+            "Configure ",
+            preview.mcp.names.join(", "),
+            " to select this account and restart the requesting session."
+          ] }) : null,
+          !preview.matches ? /* @__PURE__ */ u4("p", { role: "status", children: "This connection does not cover the requested destination. Do not extend OAuth routing just to match a hostname." }) : null,
+          preview.connection.status !== "ready" || !preview.matches ? /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              disabled: busy,
+              onClick: () => onManage(preview.connection),
+              children: "Manage this connection"
+            }
+          ) : null,
+          /* @__PURE__ */ u4("label", { children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "checkbox",
+                checked: confirmed,
+                disabled: busy || !preview.matches || preview.connection.status !== "ready",
+                onChange: (event) => setConfirmed(event.currentTarget.checked)
+              }
+            ),
+            "Allow this agent to use this connection, including its full permissions and current and future URL patterns."
+          ] }),
+          /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              class: "primary",
+              disabled: busy || !confirmed || !preview.matches || preview.connection.status !== "ready" || preview.request.status !== "pending",
+              onClick: () => void apply2(),
+              children: busy ? "Applying\u2026" : "Allow access and continue"
+            }
+          )
+        ] }) : null
+      ] })
+    ] }) : null
+  ] });
+}
+
 // src/components/GroupAdminField.tsx
 function GroupAdminField({
   label,
@@ -31763,87 +31960,102 @@ function CredentialsContent({ agent } = {}) {
         id: agent ? "agent-credentials" : "credentials-page",
         role: "region",
         "aria-label": agent ? "Agent credentials" : "Personal credentials",
-        children: /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
-          !agent ? /* @__PURE__ */ u4("div", { class: "credentials-toolbar", children: [
-            /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: [
-              /* @__PURE__ */ u4(
-                "button",
-                {
-                  type: "button",
-                  class: view === "credentials" ? "active" : "",
-                  "aria-current": view === "credentials" ? "page" : void 0,
-                  onClick: () => setView("credentials"),
-                  children: "Credentials"
-                }
-              ),
-              /* @__PURE__ */ u4(
-                "button",
-                {
-                  type: "button",
-                  class: view === "apps" ? "active" : "",
-                  "aria-current": view === "apps" ? "page" : void 0,
-                  onClick: () => setView("apps"),
-                  children: "OAuth apps"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ u4("div", { class: "credentials-row-actions", children: view === "credentials" ? /* @__PURE__ */ u4(k, { children: /* @__PURE__ */ u4(CredentialAction, { label: "Add credential", disabled: loading || !!signIn.waiting, onClick: () => setDialog({ kind: "edit" }), children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }) }) }) : /* @__PURE__ */ u4(CredentialAction, { label: "Add OAuth app", disabled: loading, onClick: () => setDialog({ kind: "app" }), children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }) }) })
-          ] }) : null,
-          signIn.waiting ? /* @__PURE__ */ u4("div", { class: "ga-cred-banner", role: "status", "aria-live": "polite", children: [
-            /* @__PURE__ */ u4("span", { class: "ga-cred-spinner", "aria-hidden": "true" }),
-            /* @__PURE__ */ u4("span", { class: "ga-cred-banner-text", children: [
-              "Finish signing in to ",
-              signIn.waiting.label,
-              "."
-            ] }),
-            /* @__PURE__ */ u4(CredentialAction, { label: "Open sign-in window", onClick: signIn.reopen, children: /* @__PURE__ */ u4(ExternalLinkIcon, {}) }),
-            /* @__PURE__ */ u4(CredentialAction, { label: "Stop waiting", onClick: signIn.stop, children: /* @__PURE__ */ u4(CloseIcon, {}) })
-          ] }) : null,
-          loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading credentials\u2026" }) : null,
-          /* @__PURE__ */ u4(ErrorNotice, { message: error ? `Couldn't load credentials: ${error}` : "" }),
-          error ? /* @__PURE__ */ u4("button", { type: "button", onClick: reload, children: "Try again" }) : null,
-          data && !error ? /* @__PURE__ */ u4(k, { children: [
-            view === "credentials" ? connections.length ? /* @__PURE__ */ u4(
-              CredentialsTable,
-              {
-                connections,
-                groups: tableGroups,
-                apps: data.apps,
-                onlyGroup: agent?.id,
-                busy: loading || !!signIn.waiting,
-                onEdit: (connection2) => setDialog({ kind: "edit", id: connection2.id }),
-                onConnect: (connection2) => setDialog({ kind: "connect", connection: connection2 }),
-                onAction: (connection2, action) => setDialog({ kind: "action", connection: connection2, action }),
-                onSaved: refresh
-              },
-              tableVersion
-            ) : !loading ? agent ? /* @__PURE__ */ u4("div", { children: [
-              /* @__PURE__ */ u4("p", { children: "No personal credentials yet. Add a connection, then explicitly grant this agent access." }),
-              /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Open personal Credentials" })
-            ] }) : /* @__PURE__ */ u4("p", { children: "No credentials yet." }) : null : null,
-            !agent && view === "apps" ? /* @__PURE__ */ u4("section", { class: "credentials-apps", "aria-label": "OAuth apps", children: data.apps.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.apps.map((app) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
-              /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
-                /* @__PURE__ */ u4("strong", { children: app.label }),
-                /* @__PURE__ */ u4("span", { class: "muted", children: displayDestination(app.issuer) })
+        children: [
+          !agent && accessApprovalId.value && data ? /* @__PURE__ */ u4(
+            AccessRequestReview,
+            {
+              id: accessApprovalId.value,
+              connections,
+              onCreate: (resourceUrl) => setDialog({ kind: "edit", resourceUrl }),
+              onManage: (connection2) => setDialog(connection2.status === "disabled" ? { kind: "action", connection: connection2, action: "enable" } : connection2.kind === "static" ? { kind: "edit", id: connection2.id } : { kind: "connect", connection: connection2 }),
+              onSaved: () => {
+                void refresh();
+              }
+            }
+          ) : null,
+          /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
+            !agent ? /* @__PURE__ */ u4("div", { class: "credentials-toolbar", children: [
+              /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: [
+                /* @__PURE__ */ u4(
+                  "button",
+                  {
+                    type: "button",
+                    class: view === "credentials" ? "active" : "",
+                    "aria-current": view === "credentials" ? "page" : void 0,
+                    onClick: () => setView("credentials"),
+                    children: "Credentials"
+                  }
+                ),
+                /* @__PURE__ */ u4(
+                  "button",
+                  {
+                    type: "button",
+                    class: view === "apps" ? "active" : "",
+                    "aria-current": view === "apps" ? "page" : void 0,
+                    onClick: () => setView("apps"),
+                    children: "OAuth apps"
+                  }
+                )
               ] }),
-              app.source === "user" || data.canEditInstall ? /* @__PURE__ */ u4(
-                CredentialAction,
+              /* @__PURE__ */ u4("div", { class: "credentials-row-actions", children: view === "credentials" ? /* @__PURE__ */ u4(k, { children: /* @__PURE__ */ u4(CredentialAction, { label: "Add credential", disabled: loading || !!signIn.waiting, onClick: () => setDialog({ kind: "edit" }), children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }) }) }) : /* @__PURE__ */ u4(CredentialAction, { label: "Add OAuth app", disabled: loading, onClick: () => setDialog({ kind: "app" }), children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }) }) })
+            ] }) : null,
+            signIn.waiting ? /* @__PURE__ */ u4("div", { class: "ga-cred-banner", role: "status", "aria-live": "polite", children: [
+              /* @__PURE__ */ u4("span", { class: "ga-cred-spinner", "aria-hidden": "true" }),
+              /* @__PURE__ */ u4("span", { class: "ga-cred-banner-text", children: [
+                "Finish signing in to ",
+                signIn.waiting.label,
+                "."
+              ] }),
+              /* @__PURE__ */ u4(CredentialAction, { label: "Open sign-in window", onClick: signIn.reopen, children: /* @__PURE__ */ u4(ExternalLinkIcon, {}) }),
+              /* @__PURE__ */ u4(CredentialAction, { label: "Stop waiting", onClick: signIn.stop, children: /* @__PURE__ */ u4(CloseIcon, {}) })
+            ] }) : null,
+            loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading credentials\u2026" }) : null,
+            /* @__PURE__ */ u4(ErrorNotice, { message: error ? `Couldn't load credentials: ${error}` : "" }),
+            error ? /* @__PURE__ */ u4("button", { type: "button", onClick: reload, children: "Try again" }) : null,
+            data && !error ? /* @__PURE__ */ u4(k, { children: [
+              view === "credentials" ? connections.length ? /* @__PURE__ */ u4(
+                CredentialsTable,
                 {
-                  label: `Edit ${app.label} OAuth app`,
-                  disabled: loading,
-                  onClick: () => setDialog({ kind: "app", app }),
-                  children: /* @__PURE__ */ u4(EditIcon, {})
-                }
-              ) : null
-            ] }, `${app.source}:${app.id}`)) }) : /* @__PURE__ */ u4("p", { children: "No OAuth apps configured." }) }) : null
-          ] }) : null
-        ] })
+                  connections,
+                  groups: tableGroups,
+                  apps: data.apps,
+                  onlyGroup: agent?.id,
+                  busy: loading || !!signIn.waiting,
+                  onEdit: (connection2) => setDialog({ kind: "edit", id: connection2.id }),
+                  onConnect: (connection2) => setDialog({ kind: "connect", connection: connection2 }),
+                  onAction: (connection2, action) => setDialog({ kind: "action", connection: connection2, action }),
+                  onSaved: refresh
+                },
+                tableVersion
+              ) : !loading ? agent ? /* @__PURE__ */ u4("div", { children: [
+                /* @__PURE__ */ u4("p", { children: "No personal credentials yet. Add a connection, then explicitly grant this agent access." }),
+                /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Open personal Credentials" })
+              ] }) : /* @__PURE__ */ u4("p", { children: "No credentials yet." }) : null : null,
+              !agent && view === "apps" ? /* @__PURE__ */ u4("section", { class: "credentials-apps", "aria-label": "OAuth apps", children: data.apps.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.apps.map((app) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
+                /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
+                  /* @__PURE__ */ u4("strong", { children: app.label }),
+                  /* @__PURE__ */ u4("span", { class: "muted", children: displayDestination(app.issuer) })
+                ] }),
+                app.source === "user" || data.canEditInstall ? /* @__PURE__ */ u4(
+                  CredentialAction,
+                  {
+                    label: `Edit ${app.label} OAuth app`,
+                    disabled: loading,
+                    onClick: () => setDialog({ kind: "app", app }),
+                    children: /* @__PURE__ */ u4(EditIcon, {})
+                  }
+                ) : null
+              ] }, `${app.source}:${app.id}`)) }) : /* @__PURE__ */ u4("p", { children: "No OAuth apps configured." }) }) : null
+            ] }) : null
+          ] })
+        ]
       }
     ),
     dialog?.kind === "edit" && data ? /* @__PURE__ */ u4(
       ConnectionEditor,
       {
         id: dialog.id,
+        resourceUrl: dialog.resourceUrl,
         apps: data.apps,
         groups: data.groups,
         onStart: signIn.start,
@@ -31914,23 +32126,25 @@ function ReconnectLatest(props) {
   return /* @__PURE__ */ u4(OAuthConnectionDialog, { ...props, connection: data });
 }
 
+// ../../shared/credential-matching.ts
+function serviceMatchesResource(service, resourceUrl) {
+  const url = URL.parse(resourceUrl);
+  if (!url || service.enabled === false || service.https_only && url.protocol !== "https:") return false;
+  const slash = service.host.indexOf("/");
+  const authority = slash < 0 ? service.host : service.host.slice(0, slash);
+  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
+  const separator = authority.lastIndexOf(":");
+  const explicitPort = separator >= 0 && /^\d+$/.test(authority.slice(separator + 1));
+  const host = explicitPort ? authority.slice(0, separator) : authority;
+  if (explicitPort && authority.slice(separator + 1) !== (url.port || (url.protocol === "https:" ? "443" : "80")))
+    return false;
+  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(value);
+  return glob(host.toLowerCase(), url.hostname.toLowerCase()) && (!path || glob(path, url.pathname));
+}
+
 // src/components/GroupCredentialAccess.tsx
 function GroupCredentials({ gid }) {
   return /* @__PURE__ */ u4(CredentialsContent, { agent: { id: gid } });
-}
-function serviceMatchesResource(service, resourceUrl) {
-  let url;
-  try {
-    url = new URL(resourceUrl);
-  } catch (error) {
-    if (error instanceof TypeError) return false;
-    throw error;
-  }
-  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`, "i").test(value);
-  const slash = service.host.indexOf("/");
-  const host = slash < 0 ? service.host : service.host.slice(0, slash);
-  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
-  return glob(host, url.host) && (!path || glob(path, url.pathname)) && (!service.https_only || url.protocol === "https:");
 }
 function McpConnectionAccess({ gid, resourceUrl, onOpenCredentials }) {
   const { data, error, loading, refresh } = useCredentialResource(accessPath(gid));

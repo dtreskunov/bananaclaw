@@ -28,14 +28,25 @@ Follow this section and do not apply the OneCLI instructions below.
 - A connected API account supplies its token on the exact configured API hosts.
   The provider enforces the token's permissions; there are no gateway OAuth
   scope-set or REST-path permission bundles. Other hosts are not implied.
-- Stdio clients use `av-access:<account-key>` / `av-refresh:<account-key>`.
+- Stdio clients use `av-access:<group-binding-handle>` / `av-refresh:<group-binding-handle>`.
   These are placeholders, not provider tokens or gateway credentials. Keep
   existing stubs and their client-specific schema. Never replace them with
   `onecli-managed`, raw credentials or newly invented account keys.
 - A 401/403 does not by itself prove a disconnected account. Report the exact
   endpoint and error; distinguish provider permissions, reconnect status and
-  routing. Direct the operator to **Agent Settings → Credentials** to inspect
-  the account/app, not the OneCLI dashboard.
+  routing. Use `request_access` with the exact HTTPS destination and a reason
+  to ask the user to select/connect a personal credential and approve this
+  agent's access. It supports OAuth APIs, MCP OAuth and static authentication.
+  Do not include secrets, owner IDs or credential IDs. Scope suggestions need
+  user review and are not automatically granted. `ncl access request
+  --resource-url <url> --reason <purpose>` uses the same approval workflow.
+  Wait for the host's completion message; submission/review is not permission.
+  Do not probe token endpoints, inspect process environments/browser cookies,
+  guess credential placeholders, or create a recurring availability poller.
+  After approval, use the supplied nonsecret binding selector and safely
+  verify the original operation before continuing. Preserve the request's
+  original dates/timezone; never automatically replay writes. Rejecting access
+  ends the request unless the user asks again. `ncl credentials` stays host-only.
 - Scope metadata may be provider-reported, requested, legacy or unknown.
   Do not describe legacy/requested metadata as a newly verified grant.
   Requesting fewer scopes is not a guaranteed provider-side revocation.

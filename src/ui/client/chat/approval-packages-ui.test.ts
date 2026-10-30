@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('pending package approval UI', () => {
   it('renders separate package-manager lists from the approval payload', () => {
-    const source = fs.readFileSync(new URL('./src/components/ChatMain.tsx', import.meta.url), 'utf8');
+    const source = fs.readFileSync(new URL('./src/components/ApprovalCard.tsx', import.meta.url), 'utf8');
     const css = fs.readFileSync(new URL('./src/components/ChatMain.css', import.meta.url), 'utf8');
 
     expect(source).toContain("(['apt', 'npm', 'pip'] as const).map");

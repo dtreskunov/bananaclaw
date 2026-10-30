@@ -4,6 +4,7 @@ import {
   type OAuthAppConfiguration, type SignInInput, type SignInProgress,
 } from '../src/components/CredentialsApi';
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
+import { serviceMatchesResource } from '../src/components/GroupCredentialAccess';
 
 export const FIXTURE_GROUP = { id: 'assistant', name: 'Assistant' };
 export interface FixtureOptions {
@@ -36,10 +37,12 @@ let seq = 0;
 const detachedForeign = new Set<string>();
 const signIns = new Map<string, SignInProgress & { connection_id: string; input: SignInInput }>();
 let mcpServers: Record<string, McpServerConfigDto>;
+let accessStage = 'pending';
 function connection(input: Partial<Connection> & Pick<Connection, 'id' | 'label' | 'kind'>): Connection {
   return { owner, revision: `r${++seq}`, status: 'ready', services: [], credentials: [], grants: [], ...input };
 }
 export function resetState(): void {
+  accessStage = 'pending';
   seq = 0;
   connections = options.scenario === 'empty' ? [] : [
     connection({ id: 'basic-pair', label: 'Nextcloud pair', kind: 'static', services: [basic], credentials: ['USERNAME', 'PASSWORD'],
@@ -105,6 +108,31 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
     throw new HttpError(502, 'The gateway rejected this change (simulated)');
   }
   if (path === '/ui/chat/api/credentials' && method === 'GET') return overview();
+  const access = /^\/ui\/chat\/api\/credentials\/access-requests\/fixture-access(?:\/(preview|apply))?$/.exec(path);
+  if (access) {
+    const resource = new URLSearchParams(location.search).get('request_resource') || 'https://nextcloud.example.org/mcp/tools';
+    const request = { request_id: 'fixture-access', status: accessStage, resource_url: resource,
+      reason: 'Finish the requested report.', revision: 1, agent_group_id: FIXTURE_GROUP.id, agent_group_name: FIXTURE_GROUP.name,
+      result: accessStage === 'completed' ? { message: 'Access granted. The agent will safely verify the original operation.' } : null };
+    if (!access[1] && method === 'GET') return request;
+    const input = body<{ connection_id: string; connection_revision?: string; request_revision?: number }>(init);
+    const item = current(input.connection_id);
+    if (access[1] === 'preview' && method === 'POST') return {
+      request, connection: item, matches: item.services.some(service => serviceMatchesResource(service, resource)),
+      grantBreadth: 'All current and future URL patterns on this connection, not just the requested URL.',
+      verification: 'Grant verification only. The agent must verify the authenticated operation after access is granted.',
+      mcp: { names: [], revision: 'fixture-mcp' },
+    };
+    if (access[1] === 'apply' && method === 'POST') {
+      if (accessStage !== 'pending' || input.connection_revision !== item.revision || input.request_revision !== 1)
+        throw new HttpError(409, 'Review the current request and connection.');
+      if (item.status !== 'ready' || !item.services.some(service => serviceMatchesResource(service, resource)))
+        throw new HttpError(409, 'Connect a compatible credential first.');
+      accessStage = 'completed';
+      return { ...request, status: accessStage };
+    }
+    throw new HttpError(405, 'Method not allowed');
+  }
   if (path === '/ui/chat/api/credentials/scopes' && method === 'POST') {
     const input = body<{ resource_url?: string; issuer?: string; app_id?: string }>(init);
     if (input.resource_url?.includes('no-scopes.example'))

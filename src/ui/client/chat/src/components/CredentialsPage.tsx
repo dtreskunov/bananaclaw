@@ -1,7 +1,8 @@
 import './Credentials.css';
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
-import { credentialsIntent, openChat, openCredentials } from '../credentials-navigation';
+import { accessApprovalId, credentialsIntent, openChat, openCredentials } from '../credentials-navigation';
+import { AccessRequestReview } from './AccessRequestReview';
 import { credentialsOpen, isMobile } from '../state';
 import { returnToUserMenu } from '../actions';
 import { MobileDialog } from './MobileDialog';
@@ -14,7 +15,7 @@ import { showToast } from './Toast';
 import { displayDestination } from './credential-presentation';
 
 type Dialog =
-  | { kind: 'edit'; id?: string }
+  | { kind: 'edit'; id?: string; resourceUrl?: string }
   | { kind: 'connect'; connection?: Connection; resourceUrl?: string }
   | { kind: 'action'; connection: Connection; action: 'disable' | 'enable' | 'delete' }
   | { kind: 'app'; app?: AppInfo };
@@ -63,6 +64,13 @@ export function CredentialsContent({ agent }: {
   const content = <>
     <div class={agent ? 'ga-cred' : 'credentials-page settings-body'} id={agent ? 'agent-credentials' : 'credentials-page'}
       role="region" aria-label={agent ? 'Agent credentials' : 'Personal credentials'}>
+      {!agent && accessApprovalId.value && data ? <AccessRequestReview id={accessApprovalId.value}
+        connections={connections}
+        onCreate={resourceUrl => setDialog({ kind: 'edit', resourceUrl })}
+        onManage={connection => setDialog(connection.status === 'disabled'
+          ? { kind: 'action', connection, action: 'enable' }
+          : connection.kind === 'static' ? { kind: 'edit', id: connection.id } : { kind: 'connect', connection })}
+        onSaved={() => { void refresh(); }} /> : null}
       <section class="ga-cred">
         {!agent ? <div class="credentials-toolbar">
           <nav class="ga-cred-segments" aria-label="Credentials sections">
@@ -111,7 +119,7 @@ export function CredentialsContent({ agent }: {
         </> : null}
       </section>
     </div>
-    {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} apps={data.apps} groups={data.groups}
+    {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} resourceUrl={dialog.resourceUrl} apps={data.apps} groups={data.groups}
       onStart={signIn.start} onClose={close} onSaved={() => void refresh()} /> : null}
     {dialog?.kind === 'connect' && data ? dialog.connection
       ? <ReconnectLatest id={dialog.connection.id} apps={data.apps} groups={data.groups} onStart={signIn.start} onClose={close} onSaved={() => void refresh()} />

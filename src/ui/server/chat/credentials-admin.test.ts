@@ -11,7 +11,7 @@ vi.mock('../../../config.js', async () => ({
   GROUPS_DIR: `${ROOT}/groups`,
 }));
 vi.mock('../../../container-runner.js', () => ({
-  wakeContainer: vi.fn(),
+  wakeContainer: vi.fn().mockResolvedValue(undefined),
   isContainerRunning: vi.fn().mockReturnValue(false),
   getActiveContainerCount: vi.fn().mockReturnValue(0),
   killContainer: vi.fn(),
@@ -34,6 +34,11 @@ import { _resetBrandingCache } from '../branding.js';
 import { dispatch } from '../../../cli/dispatch.js';
 import type { SharedAccessGrant } from '../../../modules/credentials/shared-connections.js';
 import '../../../cli/commands/credentials.js';
+import '../../../cli/commands/access.js';
+import { createSession } from '../../../db/sessions.js';
+import { initSessionFolder } from '../../../session-manager.js';
+import { ensureContainerConfig } from '../../../db/container-configs.js';
+import { requestAccess } from '../../../modules/credentials/access-requests.js';
 
 const GROUP = 'ag-shared';
 const REVISION = `"${'a'.repeat(64)}"`;
@@ -50,6 +55,8 @@ let returnedOwner: string | null = null;
 let extraConnections: ReturnType<typeof connection>[] = [];
 let accessGrants: SharedAccessGrant[] = [];
 let scopeOptions: unknown;
+let workflowGrant = false;
+let workflowGranted = false;
 
 function connection(ownerId = 'native-alice') {
   return {
@@ -61,7 +68,7 @@ function connection(ownerId = 'native-alice') {
     owner: { id: returnedOwner ?? ownerId },
     services: [service],
     credentials: ['SEARCH_KEY'],
-    grants: [],
+    grants: workflowGranted ? [{ vault: GROUP, services: ['search'], status: 'active' }] : [],
   };
 }
 
@@ -109,6 +116,7 @@ beforeAll(async () => {
       res.end();
       return;
     }
+    if (workflowGrant && req.method === 'PUT' && url.pathname.includes('/grants/')) workflowGranted = true;
     send(200, connection(effectiveOwner));
   });
   await new Promise<void>((resolve) => gateway.listen(0, '127.0.0.1', resolve));
@@ -157,6 +165,8 @@ beforeEach(() => {
   extraConnections = [];
   accessGrants = [];
   scopeOptions = { scopes: ['read', 'write'], source: 'resource', oauth: true, issuer: 'https://issuer.example.test' };
+  workflowGrant = false;
+  workflowGranted = false;
 });
 
 async function call(method: string, url: string, body?: unknown, headers: Record<string, string> = {}) {
@@ -198,6 +208,68 @@ async function call(method: string, url: string, body?: unknown, headers: Record
 }
 
 describe('user-owned Credentials API', () => {
+  it('reviews and applies an access approval through the authenticated owner API', async () => {
+    ensureContainerConfig(GROUP);
+    const session = {
+      id: 'sess-access-http',
+      agent_group_id: GROUP,
+      messaging_group_id: null,
+      thread_id: 'access-thread',
+      agent_provider: null,
+      status: 'active' as const,
+      container_status: 'stopped' as const,
+      created_at: 'before',
+      last_active: 'before',
+    };
+    createSession(session);
+    initSessionFolder(GROUP, session.id);
+    const request = await requestAccess(session, {
+      resource_url: 'https://api.example.test/search',
+      reason: 'Read search results.',
+    });
+    const path = `/ui/chat/api/credentials/access-requests/${request.request_id}`;
+    user = 'member';
+    expect((await call('GET', path)).status).toBe(403);
+    user = 'alice';
+    expect((await call('GET', path)).status).toBe(200);
+    const preview = await call('POST', path + '/preview', { connection_id: 'connection-one' });
+    expect(preview.status).toBe(200);
+    expect(preview.value).toMatchObject({ matches: true, connection: { owner: { id: 'native-alice' } } });
+    expect(requests.some((r) => r.method === 'PUT' && r.path.includes('/grants/'))).toBe(false);
+    expect(
+      (
+        await call(
+          'POST',
+          path + '/apply',
+          {
+            connection_id: 'connection-one',
+            connection_revision: REVISION,
+            request_revision: request.revision,
+          },
+          { origin: 'https://evil.example' },
+        )
+      ).status,
+    ).toBe(403);
+    workflowGrant = true;
+    const result = await call('POST', path + '/apply', {
+      connection_id: 'connection-one',
+      connection_revision: REVISION,
+      request_revision: request.revision,
+    });
+    expect(result.status).toBe(200);
+    expect(result.value).toMatchObject({ status: 'completed' });
+    expect(requests.filter((r) => r.method === 'PUT' && r.path.includes('/grants/'))).toHaveLength(1);
+    expect(
+      (
+        await call('POST', path + '/apply', {
+          connection_id: 'connection-one',
+          connection_revision: REVISION,
+          request_revision: request.revision,
+        })
+      ).status,
+    ).toBe(409);
+  });
+
   it('discovers scopes as the signed-in native user without starting OAuth', async () => {
     user = 'bob';
     const response = await call('POST', '/ui/chat/api/credentials/scopes', {

@@ -26,7 +26,7 @@ import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/user-roles.js';
 import { ONECLI_ACTION, resolveOneCLIApproval } from './onecli-approvals.js';
-import { getApprovalHandler, notifyApprovalResolved } from './primitive.js';
+import { getApprovalHandler, getInteractiveApprovalHandler, notifyApprovalResolved } from './primitive.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
   if (payload.responseType === 'skipped') return false;
@@ -40,6 +40,12 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
       userId: payload.userId,
       channelType: payload.channelType,
     });
+    return true;
+  }
+
+  const interactive = getInteractiveApprovalHandler(approval.action);
+  if (interactive) {
+    await interactive(approval, payload, namespacedUserId(payload) ?? '');
     return true;
   }
 

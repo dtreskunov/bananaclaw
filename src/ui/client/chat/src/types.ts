@@ -367,6 +367,8 @@ export interface PendingApprovalDto {
   agentGroupId: string | null;
   agentGroupName: string | null;
   createdAt: string;
+  reviewRequired?: boolean;
+  stage?: string;
 }
 
 export interface PendingQuestionDto {

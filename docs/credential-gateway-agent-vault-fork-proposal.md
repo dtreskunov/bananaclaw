@@ -361,6 +361,33 @@ and effective owner are both audited. Values/client secrets enter through
 stdin, never argv. Agents can inspect their available services through scoped
 discovery but cannot administer them.
 
+Agents may now call `request_access` (or `ncl access request --resource-url
+<https-url> --reason <purpose>`) to enter the existing approvals workflow.
+This does not expose host credential commands or another user's library.
+The host pins the recipient to the requesting session; an authenticated user
+privately selects/creates a connection and explicitly confirms its binary
+grant, including all current and future connection destinations. OAuth consent
+alone never applies that grant. Ownership, destination administration and exact
+revisions are rechecked on apply.
+
+Interactive approvals share queue persistence, delivery, response routing and
+card rendering with ordinary approvals. Their workflow extension persists
+deduplication, application state, interruption receipts and idempotent completion
+messages. Review is not approval. Recovery verifies an interrupted grant rather
+than blindly replaying it. Credential entry and OAuth use the existing forms;
+an OAuth popup interrupted by host restart must be restarted, while its parent
+approval remains pending. Group-bound runtime selectors are delivered only
+after a verified grant. Optional matching MCP Authorization updates and a
+requesting-session restart require explicit review of the configuration hash.
+Completion verifies the group grant, not arbitrary upstream operations; the
+agent must safely validate the original operation before claiming success.
+No automatic scope union, OAuth-app host changes, write replay or polling
+automation is introduced.
+These are configuration/grant approvals, not F3 approval of individual upstream
+HTTP requests. Repeated submissions in the same human-request context reuse the
+same approval, including a rejected outcome; a new human message can initiate a
+new request.
+
 ### 6.2 Authorization and lifecycle
 
 - Connection management requires ownership or a separately authorized,
@@ -536,7 +563,7 @@ reusable foundations, not acceptance of shared references.
 | P4       | Produce a verified coordinated release and rehearse offline adoption against protected copies. Adopt the live canaries without re-entry/re-consent caused solely by the schema change; verify scoped and global lifecycle behavior and matched-state rollback.          |
 | P5       | Finish per-owner OneCLI connection provisioning and explicit group grants; validate policy/workloads, cut over groups deliberately, and complete the seven-day sustained acceptance period.                                                                             |
 | P6       | Remove OneCLI service dependencies, SDK/runtime/provisioning/defaults, approval bridge, old networking, recipes/setup and temporary migration/conversion tools. Fresh/new-group behavior uses AgentVault only. No earlier-fork compatibility implementation remains.    |
-| After R1 | F3, F5, agent requests and activity UI; optional topology B/F7. F12 is not in this backlog.                                                                                                                                                                             |
+| After R1 | F3, F5 and activity UI; optional topology B/F7. Agent-assisted connection requests use the shared approval workflow. F12 is not in this backlog.                                                                                                                          |
 
 R1 includes P1-P6. Existing implementation is reused where it meets the target
 contract; these phases are not instructions to undo its working deployment.

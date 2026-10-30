@@ -45,6 +45,7 @@ import { moduleContainerConfigsCredentialBackend } from './module-container-conf
 import { moduleResendThreadRoots } from './module-resend-thread-roots.js';
 import { moduleCredentialConnections } from './module-credential-connections.js';
 import { migration044 } from './044-agent-vault-default.js';
+import { migration045 } from './045-approval-workflows.js';
 
 export interface Migration {
   version: number;
@@ -106,6 +107,7 @@ export const migrations: Migration[] = [
   moduleContainerConfigsCredentialBackend,
   moduleCredentialConnections,
   migration044,
+  migration045,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a

@@ -1,6 +1,8 @@
 // Chat main: message log, status, context chip, pending tray, readonly
 // banner, composer.
 import './ChatMain.css';
+import { ApprovalCard } from './ApprovalCard';
+import { openCredentials } from '../credentials-navigation';
 import { signal } from '@preact/signals';
 import type { JSX, RefObject } from 'preact';
 import { memo } from 'preact/compat';
@@ -1060,42 +1062,9 @@ function ApprovalsBanner() {
       </div>
       <div class="approvals-list">
         {list.map((a) => (
-          <div class="approval-row" key={a.approvalId}>
-            <div class="approval-text">
-              <div class="approval-title">{a.title || a.action}</div>
-              {a.packages ? (
-                <div class="approval-packages">
-                  {(['apt', 'npm', 'pip'] as const).map((manager) =>
-                    a.packages![manager].length > 0 ? (
-                      <div class="approval-package-list" key={manager}>
-                        <span class="approval-package-manager">{manager}</span>
-                        <span>{a.packages![manager].join(', ')}</span>
-                      </div>
-                    ) : null,
-                  )}
-                </div>
-              ) : null}
-              {a.details ? <div class="approval-details">{a.details}</div> : null}
-              <div class="approval-meta">
-                <span class="approval-group">{a.agentGroupName || 'Global'}</span>
-                <span class="dot">{'\u00b7'}</span>
-                <RelativeTime ts={a.createdAt} />
-              </div>
-            </div>
-            <div class="approval-actions">
-              {a.options.length === 0
-                ? <span class="approval-disabled">no options</span>
-                : a.options.map((o) => (
-                  <button
-                    type="button"
-                    class={'approval-btn approval-' + (o.value === 'approve' ? 'approve' : o.value === 'reject' ? 'reject' : 'neutral')}
-                    disabled={busy.has(a.approvalId)}
-                    onClick={() => respondApproval(a.approvalId, o.value).catch(console.error)}
-                    key={o.value}
-                  >{o.label}</button>
-                ))}
-            </div>
-          </div>
+          <ApprovalCard key={a.approvalId} approval={a} busy={busy.has(a.approvalId)}
+            onReview={() => openCredentials({ approvalId: a.approvalId })}
+            onRespond={value => { void respondApproval(a.approvalId, value).catch(console.error); }} />
         ))}
       </div>
     </div>

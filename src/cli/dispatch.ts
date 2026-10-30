@@ -68,7 +68,7 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
     }
 
     if (cliScope === 'group') {
-      const allowed = new Set(['groups', 'sessions', 'destinations', 'members']);
+      const allowed = new Set(['groups', 'sessions', 'destinations', 'members', 'access']);
       // Only allow whitelisted resources and general commands (no resource, like help)
       if (cmd.resource && !allowed.has(cmd.resource)) {
         return err(req.id, 'forbidden', `CLI access is scoped to this agent group. Cannot access "${cmd.resource}".`);
@@ -118,7 +118,7 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
       if (cmd.resource === 'groups' || cmd.resource === 'destinations') {
         fill.id = req.args.id ?? ctx.agentGroupId;
       }
-      req = { ...req, args: { ...req.args, ...fill } };
+      if (cmd.resource !== 'access') req = { ...req, args: { ...req.args, ...fill } };
 
       // Fail-closed pre-handler check for sessions-get: returns "not found"
       // regardless of whether the UUID exists in another group, preventing an

@@ -32,6 +32,9 @@ import type { MessagingGroup, PendingApproval, Session } from '../../types.js';
 import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners } from '../permissions/db/user-roles.js';
 import { ensureUserDm } from '../permissions/user-dm.js';
 import { getPrimaryIdentityForChannel } from '../permissions/db/identities.js';
+import { getDb } from '../../db/connection.js';
+import { createApprovalWorkflow } from './workflows.js';
+import type { ResponsePayload } from '../../response-registry.js';
 
 /** Two-button approval UI — the only options the primitive supports today. */
 const APPROVAL_OPTIONS: RawOption[] = [
@@ -56,6 +59,22 @@ export interface ApprovalHandlerContext {
 export type ApprovalHandler = (ctx: ApprovalHandlerContext) => Promise<void>;
 
 const approvalHandlers = new Map<string, ApprovalHandler>();
+const interactiveHandlers = new Map<
+  string,
+  (approval: PendingApproval, response: ResponsePayload, userId: string) => Promise<void>
+>();
+
+export function registerInteractiveApprovalHandler(
+  action: string,
+  handler: (approval: PendingApproval, response: ResponsePayload, userId: string) => Promise<void>,
+): void {
+  if (interactiveHandlers.has(action)) throw new Error(`Interactive approval handler already registered: ${action}`);
+  interactiveHandlers.set(action, handler);
+}
+
+export function getInteractiveApprovalHandler(action: string) {
+  return interactiveHandlers.get(action);
+}
 
 export function registerApprovalHandler(action: string, handler: ApprovalHandler): void {
   if (approvalHandlers.has(action)) {
@@ -200,6 +219,11 @@ export interface RequestApprovalOptions {
    * approval — the source agent requests, the target's admins decide).
    */
   approverAgentGroupId?: string;
+  approvalId?: string;
+  workflowKey?: string;
+  workflowOrigin?: Record<string, unknown>;
+  options?: RawOption[];
+  expiresAt?: string;
 }
 
 /**
@@ -208,7 +232,7 @@ export interface RequestApprovalOptions {
  * caller's perspective — the admin's response kicks off the registered
  * approval handler for this action via the response dispatcher.
  */
-export async function requestApproval(opts: RequestApprovalOptions): Promise<void> {
+export async function requestApproval(opts: RequestApprovalOptions): Promise<string | undefined> {
   const { session, action, payload, title, question, agentName } = opts;
 
   const approvers = pickApprover(opts.approverAgentGroupId ?? session.agent_group_id);
@@ -221,24 +245,30 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
     ? (getMessagingGroup(session.messaging_group_id)?.channel_type ?? '')
     : '';
 
+  const approvalId = opts.approvalId ?? `appr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const options = opts.options ?? APPROVAL_OPTIONS;
+  const normalizedOptions = normalizeOptions(options);
+  getDb().transaction(() => {
+    const created = createPendingApproval({
+      approval_id: approvalId,
+      session_id: session.id,
+      request_id: approvalId,
+      action,
+      payload: JSON.stringify(payload),
+      created_at: new Date().toISOString(),
+      title,
+      options_json: JSON.stringify(normalizedOptions),
+      ...(opts.workflowKey ? { agent_group_id: session.agent_group_id } : {}),
+      expires_at: opts.expiresAt ?? null,
+    });
+    if (created && opts.workflowKey) createApprovalWorkflow(approvalId, opts.workflowKey, opts.workflowOrigin);
+  })();
+
   const target = await pickApprovalDelivery(approvers, originChannelType);
   if (!target) {
-    notifyAgent(session, `${action} failed: no DM channel found for any eligible approver.`);
-    return;
+    notifyAgent(session, `${action}: review the pending approval in BananaClaw; no eligible DM channel is available.`);
+    return approvalId;
   }
-
-  const approvalId = `appr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const normalizedOptions = normalizeOptions(APPROVAL_OPTIONS);
-  createPendingApproval({
-    approval_id: approvalId,
-    session_id: session.id,
-    request_id: approvalId,
-    action,
-    payload: JSON.stringify(payload),
-    created_at: new Date().toISOString(),
-    title,
-    options_json: JSON.stringify(normalizedOptions),
-  });
 
   const adapter = getDeliveryAdapter();
   if (adapter) {
@@ -254,15 +284,16 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
           title,
           question,
           responseMode: 'choice',
-          options: APPROVAL_OPTIONS,
+          options,
         }),
       );
     } catch (err) {
       log.error('Failed to deliver approval card', { action, approvalId, err });
       notifyAgent(session, `${action} failed: could not deliver approval request to ${target.userId}.`);
-      return;
+      return approvalId;
     }
   }
 
   log.info('Approval requested', { action, approvalId, agentName, approver: target.userId });
+  return approvalId;
 }

@@ -31,6 +31,7 @@ import type { PendingApproval } from '../../../types.js';
 import type { QuestionResponse } from '../../shared/question-response.js';
 import { isVoiceDiagnostic } from '../../shared/voice.js';
 import { presentApproval, type ApprovalPackageLists } from './approval-presentation.js';
+import { getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
 import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js';
@@ -569,6 +570,8 @@ interface ApprovalDto {
   agentGroupId: string | null;
   agentGroupName: string | null;
   createdAt: string;
+  reviewRequired?: boolean;
+  stage?: string;
 }
 
 function listApprovalsForUser(userId: string): ApprovalDto[] {
@@ -631,6 +634,12 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
       agentGroupId: displayGroupId,
       agentGroupName: groupName,
       createdAt: r.created_at,
+      ...(getApprovalWorkflow(r.approval_id)
+        ? {
+            reviewRequired: true,
+            stage: getApprovalWorkflow(r.approval_id)!.stage,
+          }
+        : {}),
     });
   }
   return visible;

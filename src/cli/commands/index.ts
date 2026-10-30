@@ -6,6 +6,7 @@
  */
 import '../resources/index.js';
 import './credentials.js';
+import './access.js';
 import { registerResourceHelpCommands } from './help.js';
 
 registerResourceHelpCommands();

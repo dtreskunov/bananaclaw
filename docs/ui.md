@@ -756,6 +756,23 @@ time across settlement. Generated fixture assets are ignored and rebuilt from
 
 **Credential UI (plan of record, revision 7):** the account menu includes
 **Credentials** immediately after **My Profile**, opening the user-scoped
+review and management dialog. Agent `request_access` requests appear in the
+existing Pending approvals banner with **Review access / Reject**. Review
+opens this same private Credentials dialog, prefilled with the exact destination
+and purpose. The user chooses an existing connection or uses the unified Add
+credential form (key, MCP OAuth or configured OAuth app), then confirms the
+recipient and full current/future connection access. Scope suggestions are
+shown but never selected automatically. Signing in does not grant access.
+Optional updates to matching MCP Authorization headers use group-bound
+placeholders and require explicit consent to restart the requesting session.
+The durable approval survives reload/restart; interrupted OAuth sign-in must
+be started again. Completion reports verified grant state separately from
+upstream authentication, which the agent must safely check. No recurring
+poller is created. The same flow is available as `ncl access request`,
+`ncl access status --request-id <id>` and `ncl access cancel --request-id <id>`
+from the requesting session; host `ncl credentials` restrictions remain.
+
+The menu entry opens the user-scoped
 `#credentials` dialog, not a section of Agent Settings or a separate header tab.
 It uses the same desktop dialog and mobile full-screen/back-to-menu chrome as
 My Profile. Keys and connected accounts share one **Credentials** table;
