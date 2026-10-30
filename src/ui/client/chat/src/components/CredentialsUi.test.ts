@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppInfo, Connection, CredentialGroup } from './CredentialsApi';
-import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog } from './CredentialsDialogs';
-import { ConfirmCredentialAction, Impact, Review, SecretInput, useConnectionSignIn } from './CredentialsParts';
+import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnectionDialog } from './CredentialsDialogs';
+import { ConfirmCredentialAction, ErrorNotice, Impact, SecretInput, useConnectionSignIn } from './CredentialsParts';
 import { GroupCredentials, McpConnectionAccess, serviceMatchesResource } from './GroupCredentialAccess';
 import { showToast } from './Toast';
 import { CredentialsContent, CredentialsPage } from './CredentialsPage';
@@ -113,6 +113,7 @@ afterEach(() => {
 });
 
 interface TestProps {
+  message?: string;
   'aria-label'?: string;
   open?: boolean;
   class?: string;
@@ -232,7 +233,7 @@ describe('assisted credential approval UI', () => {
     expect(onCreate).toHaveBeenCalledWith(request);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
-  it('prefills researched MCP OAuth settings but requires scope/identity review before consent', () => {
+  it('prefills researched MCP OAuth settings but starts consent only on an explicit action', () => {
     const request = {
       resource_url: 'https://gmailmcp.example.com/mcp/v1',
       mcp_server: 'google-gmail',
@@ -254,7 +255,7 @@ describe('assisted credential approval UI', () => {
     expect(oauth.props.resource).toBe(request.resource_url);
     expect(
       descendants(node).find((child) => child.type === 'button' && child.props.type === 'submit')?.props.disabled,
-    ).toBe(true);
+    ).toBe(false);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
   it('keeps the general credential table out of access-review mode', () => {
@@ -583,7 +584,7 @@ describe('connection UI safety and ownership', () => {
     expect(wrapper).not.toBeNull();
     const dialog = render(wrapper!);
     expect(dialog.type).toBe(MobileDialog);
-    expect(dialog.props.title).toBe('Credentials');
+    expect(dialog.props.title).toBe('My Credentials');
     expect(typeof dialog.props.onBack).toBe(mobile ? 'function' : 'undefined');
     expect(find(dialog, CredentialsTable)).toBeDefined();
     const labels = descendants(dialog)
@@ -636,12 +637,13 @@ describe('connection UI safety and ownership', () => {
         onSaved: vi.fn(),
       }) as TestNode;
     };
-    let node = draw();
+    const node = draw();
     expect(find(node, OAuthAppForm)).toBeDefined();
     expect(find(node, 'textarea')).toBeUndefined();
     expect(find(node, SecretInput).props.value).toBe('');
-    find(node, Review).props.onChange(true);
-    node = draw();
+    expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
+      0,
+    );
     descendants(node)
       .find((item) => item.type === 'button' && item.props.children === 'Save app')!
       .props.onClick();
@@ -650,6 +652,59 @@ describe('connection UI safety and ownership', () => {
     expect(requestBody()).toMatchObject({
       config: { authorization_params: { access_type: 'offline' }, client_id: 'client' },
     });
+  });
+
+  it('keeps new app validation quiet until editing, and rejects secrets for public clients', () => {
+    let node: TestNode = OAuthAppDialog({
+      canEditInstall: false,
+      connections: [],
+      groups,
+      onClose: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(
+      descendants(node)
+        .filter((child) => child.type === ErrorNotice)
+        .every((child) => !child.props.message),
+    ).toBe(true);
+    hooks.slots = [];
+    const app: AppInfo = {
+      id: 'public',
+      label: 'Public app',
+      source: 'user',
+      issuer: 'https://accounts.example.com',
+      client_id: 'client',
+      api_hosts: ['api.example.com'],
+      default_scopes: [],
+      token_endpoint_auth_method: 'none',
+      client_secret_set: false,
+      identity: 'none',
+      token_scope_separator: 'space',
+    };
+    const draw = (): TestNode => {
+      hooks.cursor = 0;
+      return OAuthAppDialog({
+        app,
+        canEditInstall: false,
+        connections: [],
+        groups,
+        onClose: vi.fn(),
+        onSaved: vi.fn(),
+      }) as TestNode;
+    };
+    node = draw();
+    find(node, SecretInput).props.onInput('must-not-be-saved');
+    node = draw();
+    const save = descendants(node).find((child) => child.type === 'button' && child.props.children === 'Save app')!;
+    expect(save.props.disabled).toBe(true);
+    save.props.onClick();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(
+      descendants(node).some(
+        (child) =>
+          child.type === ErrorNotice && child.props.message === 'Public clients must not have a client secret.',
+      ),
+    ).toBe(true);
   });
 
   it('never prefills secrets and omits the values field entirely on blank edits', async () => {
@@ -662,7 +717,9 @@ describe('connection UI safety and ownership', () => {
     ).toEqual(['', '']);
     expect(find(node, Impact).props.connection.grants).toHaveLength(2);
     expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(true);
-    expect(find(node, Review)).toBeUndefined();
+    expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
+      0,
+    );
     nameInput(node).props.oninput({ currentTarget: { value: 'Renamed credential' } });
     node = draw();
     await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
@@ -683,7 +740,9 @@ describe('connection UI safety and ownership', () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/ui/chat/api/credentials/connections/pair');
     expect(requestBody()).toMatchObject({ revision: '"reviewed"', values: { PASSWORD: 'replacement' } });
     expect(requestBody()).not.toHaveProperty('services');
-    expect(find(node, Review)).toBeUndefined();
+    expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
+      0,
+    );
   });
 
   it('uses routing form controls and saves changed destinations without a review checkbox', async () => {
@@ -694,7 +753,9 @@ describe('connection UI safety and ownership', () => {
     node = draw();
     expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(false);
     expect(find(node, 'textarea')).toBeUndefined();
-    expect(find(node, Review)).toBeUndefined();
+    expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
+      0,
+    );
     await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
     expect(requestBody()).toMatchObject({
       services: [{ name: 'basic', host: 'different.example.com/api/*', https_only: true }],
@@ -750,9 +811,7 @@ describe('connection UI safety and ownership', () => {
     hooks.resource.data = { connections: [], groups, apps: [], canEditInstall: false };
     const node = CredentialsContent({ agent: { id: 'one' } });
     expect(
-      descendants(node).some(
-        (child) => child.type === 'button' && child.props.children === 'Open personal Credentials',
-      ),
+      descendants(node).some((child) => child.type === 'button' && child.props.children === 'Open My Credentials'),
     ).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -776,11 +835,10 @@ describe('connection UI safety and ownership', () => {
     )!;
     find(render(fields), OAuthScopePicker).props.onChange('mcp');
     node = draw();
-    const review = descendants(node).find(
-      (child) => typeof child.type === 'function' && child.type.name === 'OAuthReview',
-    )!;
-    find(render(review), Review).props.onChange(true);
-    node = draw();
+    expect(
+      descendants(node).some((child) => typeof child.type === 'function' && child.type.name === 'OAuthReview'),
+    ).toBe(false);
+    expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(false);
     await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
     expect(requestBody()).toMatchObject({
       label: 'My browser',
@@ -792,6 +850,67 @@ describe('connection UI safety and ownership', () => {
     await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
     expect(fetch).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts reconnect with valid fields and no acknowledgement checkbox', async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+    const connection: Connection = {
+      ...original,
+      kind: 'mcp_oauth',
+      resource_url: 'https://mcp.example.com/mcp',
+      requested_scopes: ['read'],
+    };
+    const node = OAuthConnectionDialog({
+      connection,
+      apps: [],
+      groups,
+      onStart: start,
+      onClose: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
+      0,
+    );
+    expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(false);
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(start).toHaveBeenCalledWith(connection.id, {
+      resource_url: connection.resource_url,
+      scopes: ['read'],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps invalid OAuth fields blocked without an acknowledgement step', () => {
+    const node = OAuthConnectionDialog({
+      connection: { ...original, kind: 'mcp_oauth', resource_url: 'http://insecure.example/mcp' },
+      apps: [],
+      groups,
+      onStart: vi.fn(),
+      onClose: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('runs an explicitly selected connection action without an acknowledgement checkbox', async () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const node = ConfirmCredentialAction({
+      title: 'Disable credential',
+      label: 'Disable',
+      children: null,
+      onConfirm,
+      onClose,
+    });
+    expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
+      0,
+    );
+    const action = descendants(node).find((child) => child.type === 'button' && child.props.children === 'Disable')!;
+    expect(action.props.disabled).toBe(false);
+    action.props.onClick();
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onConfirm).toHaveBeenCalledOnce();
   });
 
   it('routes MCP Manage to the existing personal binding instead of a new sign-in', () => {

@@ -76,7 +76,7 @@ export function CredentialsContent({ agent }: {
           ? { kind: 'action', connection, action: 'enable' }
           : connection.kind === 'static' ? { kind: 'edit', id: connection.id } : { kind: 'connect', connection })}
         onSaved={() => { void refresh(); }} />
-        <button type="button" class="ghost" onClick={clearAccessApproval}>Manage all Credentials</button></> : null}
+        <button type="button" class="ghost" onClick={clearAccessApproval}>My Credentials</button></> : null}
       <section class="ga-cred">
         {!agent && !reviewing ? <div class="credentials-toolbar">
           <nav class="ga-cred-segments" aria-label="Credentials sections">
@@ -113,7 +113,7 @@ export function CredentialsContent({ agent }: {
             onSaved={refresh} />
             : !loading ? agent ? <div>
               <p>No personal credentials yet. Add a connection, then explicitly grant this agent access.</p>
-              <button type="button" onClick={() => openCredentials()}>Open personal Credentials</button>
+              <button type="button" onClick={() => openCredentials()}>Open My Credentials</button>
             </div> : <p>No credentials yet.</p> : null : null}
           {!agent && view === 'apps' ? <section class="credentials-apps" aria-label="OAuth apps">
             {data.apps.length ? <ul class="ga-cred-list">{data.apps.map((app) => <li class="ga-cred-item" key={`${app.source}:${app.id}`}>
@@ -139,7 +139,7 @@ export function CredentialsContent({ agent }: {
     {dialog?.kind === 'app' && data ? <OAuthAppDialog app={dialog.app} canEditInstall={data.canEditInstall}
       connections={data.connections} groups={data.groups} onClose={close} onSaved={() => void refresh()} /> : null}
   </>;
-  return agent ? content : <MobileDialog title="Credentials" ariaLabel="Credentials" onClose={openChat}
+  return agent ? content : <MobileDialog title="My Credentials" ariaLabel="My Credentials" onClose={openChat}
     onBack={isMobile.value ? () => { openChat(); returnToUserMenu(credentialsOpen); } : undefined}
     backLabel="Back to account menu" maxWidth="1100px" className="credentials-dialog">{content}</MobileDialog>;
 }

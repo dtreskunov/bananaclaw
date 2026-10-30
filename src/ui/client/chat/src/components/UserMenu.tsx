@@ -62,7 +62,7 @@ export function UserMenu(): JSX.Element {
   };
   const items: MenuItem[] = [
     { label: 'My Profile', action: () => { settingsOpen.value = true; } },
-    { label: 'Credentials', action: () => openCredentials() },
+    { label: 'My Credentials', action: () => openCredentials() },
   ];
   if (admin) items.push({ label: 'Agent Settings', action: () => { groupAdminOpen.value = true; } });
   if (showAllAgents) {

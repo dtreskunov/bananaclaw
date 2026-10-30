@@ -7,7 +7,7 @@ import {
   type OAuthAppScope, type Service, type SignInInput,
 } from './CredentialsApi';
 import {
-  ConfirmCredentialAction, CredentialDialog, ErrorNotice, Impact, Review,
+  ConfirmCredentialAction, CredentialDialog, ErrorNotice, Impact,
   SecretInput, useCredentialResource,
 } from './CredentialsParts';
 import { GroupAdminField as Field } from './GroupAdminField';
@@ -61,7 +61,6 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
   const [appId, setAppId] = useState(defaults?.appId ?? '');
   const [scopes, setScopes] = useState(defaults?.scopes.join('\n') ?? '');
   const [unspecifiedScopes, setUnspecifiedScopes] = useState(false);
-  const [reviewed, setReviewed] = useState(false);
   const [oauthDraft, setOauthDraft] = useState<Connection | null>(null);
   const firstUrl = useRef<HTMLInputElement>(null);
   useEffect(() => { if (!connection) firstUrl.current?.focus(); }, [kind]);
@@ -91,12 +90,11 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
   }
   const renamed = !connection || label.trim() !== connectionName(connection, apps);
   const canSave = !busy && !stale && !!label.trim() && (creatingOAuth
-    ? reviewed && validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resource : !!appId)
+    ? validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resource : !!appId)
     : !routingError && !missingValues && (!connection || renamed || routingChanged || Object.keys(supplied).length > 0));
   const changeRoute = (index: number, route: RouteDraft): void => {
     setRoutes((old) => old.map((item, at) => at === index ? route : item));
     setRoutingChanged(true);
-    setReviewed(false);
     if (index === 0 && automaticName) setLabel(hostnameFromPattern(route.pattern));
   };
 
@@ -149,7 +147,6 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
     </button>
   </>}>
     <form id="personal-connection" onSubmit={save}>
-      {!connection && accessRequest ? <p class="ga-cred-callout">These settings were suggested for the access request. Review the authentication, destination and permissions before saving or signing in. Creation does not grant the agent access.</p> : null}
       <input type="text" class="credential-name-input" aria-label="Credential name" placeholder="Credential name" value={label} disabled={busy || !!oauthDraft}
         onInput={(event) => { setLabel(event.currentTarget.value); setAutomaticName(false); }} />
       {!connection ? <Field label="Credential type"><select aria-label="Credential type" value={kind} disabled={busy || !!oauthDraft}
@@ -159,7 +156,6 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
           setKind(next);
           setScopes((next === 'static' ? [] : accessRequest?.scopes ?? (next === 'oauth_app' ? apps.find(app => app.id === appId)?.default_scopes ?? [] : [])).join('\n'));
           setUnspecifiedScopes(false);
-          setReviewed(false);
           if (automaticName) setLabel(next === 'oauth_app' ? apps.find((app) => app.id === appId)?.label ?? '' : hostnameFromPattern(routes[0].pattern));
         }}>
         <option value="static">Key</option><option value="mcp_oauth">MCP server OAuth</option><option value="oauth_app">OAuth app</option>
@@ -167,16 +163,14 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
       {creatingOAuth ? <>
         <OAuthFields kind={kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth'} apps={apps} appId={appId}
           resource={routes[0].pattern} scopes={scopes} unspecifiedScopes={unspecifiedScopes} busy={busy} firstInput={firstUrl}
-          onUnspecifiedScopes={value => { setUnspecifiedScopes(value); setReviewed(false); }}
+          onUnspecifiedScopes={setUnspecifiedScopes}
           onResource={(pattern) => changeRoute(0, { ...routes[0], pattern })}
           onApp={(id) => {
             setAppId(id);
             setUnspecifiedScopes(false);
             setScopes((accessRequest?.scopes ?? apps.find((app) => app.id === id)?.default_scopes ?? []).join('\n'));
             if (automaticName && kind === 'oauth_app') setLabel(apps.find((app) => app.id === id)?.label ?? '');
-            setReviewed(false);
-          }} onScopes={(value) => { setScopes(value); setReviewed(false); }} />
-        <OAuthReview checked={reviewed} onChange={setReviewed} />
+          }} onScopes={setScopes} />
         <ErrorNotice message={routes[0].pattern ? oauthError : ''} />
         {oauthDraft ? <p>A draft credential was saved. Retrying uses the same connection.</p> : null}
       </> : null}
@@ -241,18 +235,6 @@ function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, b
   </>;
 }
 
-function OAuthReview({ checked, onChange, reconnect = false }: {
-  checked: boolean; onChange: (value: boolean) => void; reconnect?: boolean;
-}): JSX.Element {
-  return <>
-    <p>All receiving agents share this upstream account and its actual permissions, including future URL
-      patterns and permissions approved during sign-in. Requested scopes are not a guarantee of provider-granted
-      scopes. Use a separate connection to keep a different account or permission profile separate.</p>
-    <Review checked={checked} onChange={onChange}>I reviewed the upstream identity, resource, app,
-      requested scopes and {reconnect ? 'affected agents' : 'shared-connection implications'}.</Review>
-  </>;
-}
-
 export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClose, onSaved }: {
   connection: Connection; apps: AppInfo[]; groups: CredentialGroup[];
   onStart: (id: string, input: SignInInput) => Promise<void>; onClose: () => void; onSaved: () => void;
@@ -264,7 +246,6 @@ export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClo
   const [unspecifiedScopes, setUnspecifiedScopes] = useState(!connection.requested_scopes?.length);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [reviewed, setReviewed] = useState(false);
   let resourceUrl = '';
   let resourceError = '';
   if (kind === 'mcp_oauth') {
@@ -274,7 +255,7 @@ export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClo
       resourceError = errorMessage(error);
     }
   }
-  const canStart = !busy && validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resourceUrl : !!app) && reviewed;
+  const canStart = !busy && validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resourceUrl : !!app);
   async function start(event: Event): Promise<void> {
     event.preventDefault();
     if (!canStart) return;
@@ -301,17 +282,15 @@ export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClo
   </>}>
     <form id="personal-oauth" onSubmit={start}>
       <OAuthFields kind={kind} apps={apps} resource={resource} appId={app} scopes={scopes} busy={busy} unspecifiedScopes={unspecifiedScopes}
-        onUnspecifiedScopes={value => { setUnspecifiedScopes(value); setReviewed(false); }}
-        onResource={(value) => { setResource(value); setReviewed(false); }}
+        onUnspecifiedScopes={setUnspecifiedScopes}
+        onResource={setResource}
         onApp={(value) => {
           setApp(value);
           setUnspecifiedScopes(false);
           setScopes((apps.find((item) => item.id === value)?.default_scopes ?? []).join('\n'));
-          setReviewed(false);
-        }} onScopes={(value) => { setScopes(value); setReviewed(false); }} />
+        }} onScopes={setScopes} />
       {resource && resourceError ? <ErrorNotice message={resourceError} /> : null}
       <Impact connection={connection} groups={groups} />
-      <OAuthReview checked={reviewed} onChange={setReviewed} reconnect />
       <ErrorNotice message={error} />
     </form>
   </CredentialDialog>;
@@ -355,7 +334,6 @@ export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClo
   const [secret, setSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [reviewed, setReviewed] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const affected = connections.filter((connection) => connection.app_id === (app?.id ?? id));
   let config: OAuthAppConfiguration | undefined;
@@ -365,9 +343,10 @@ export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClo
     if (!(error instanceof CredentialsError)) throw error;
     validationError = errorMessage(error);
   }
-  const canManage = !busy && reviewed && !!id.trim() && (scope !== 'install' || canEditInstall);
+  const canManage = !busy && !!id.trim() && (scope !== 'install' || canEditInstall);
   const canSave = canManage && !!config &&
     (draft.token_endpoint_auth_method === 'none' ? !secret : !!secret || !!app?.client_secret_set);
+  const showValidation = !!app || [id, draft.label, draft.issuer, draft.client_id, secret].some(value => !!value.trim());
   async function save(remove: boolean): Promise<void> {
     if (remove ? !canManage : !canSave) return;
     setBusy(true);
@@ -393,14 +372,14 @@ export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClo
     }}>{deleting ? 'Confirm delete app' : 'Delete app'}</button> : null}
     <button type="button" class="primary" disabled={!canSave || deleting} onClick={() => void save(false)}>{busy ? 'Saving…' : 'Save app'}</button>
   </>}>
-    <Field label="App ID"><input type="text" aria-label="App ID" disabled={busy || !!app} value={id} onInput={(event) => { setId(event.currentTarget.value); setReviewed(false); }} /></Field>
-    <Field label="App ownership"><select aria-label="App ownership" value={scope} disabled={busy || !!app} onChange={(event) => { setScope(event.currentTarget.value as OAuthAppScope); setReviewed(false); }}>
+    <Field label="App ID"><input type="text" aria-label="App ID" disabled={busy || !!app} value={id} onInput={(event) => setId(event.currentTarget.value)} /></Field>
+    <Field label="App ownership"><select aria-label="App ownership" value={scope} disabled={busy || !!app} onChange={(event) => setScope(event.currentTarget.value as OAuthAppScope)}>
       <option value="user">Personal app</option>{canEditInstall ? <option value="install">Install-wide app</option> : null}
     </select></Field>
-    <OAuthAppForm draft={draft} busy={busy} onChange={(next) => { setDraft(next); setReviewed(false); }} />
+    <OAuthAppForm draft={draft} busy={busy} onChange={setDraft} />
     <Field label="Client secret" info={app?.client_secret_set ? 'A secret is configured. Blank preserves it.' : 'Required only for confidential clients; never returned after saving.'}>
       <SecretInput label="Client secret" value={secret} disabled={busy} placeholder={app?.client_secret_set ? 'Keep current secret' : 'New client secret'}
-        onInput={(value) => { setSecret(value); setReviewed(false); }} />
+        onInput={setSecret} />
     </Field>
     <div class="ga-cred-callout">
       <strong>Affected personal connections · {affected.length}</strong>
@@ -410,8 +389,7 @@ export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClo
         automatically rebind existing connections. Secret rotation or deletion can prevent refresh and require reconnect.
         Review every affected connection before replacing or deleting an app.</p>
     </div>
-    <Review checked={reviewed} onChange={setReviewed}>I reviewed the app policy, secret lifecycle and affected connections.</Review>
-    <ErrorNotice message={reviewed ? validationError ||
+    <ErrorNotice message={showValidation ? validationError ||
       (draft.token_endpoint_auth_method === 'none' && secret ? 'Public clients must not have a client secret.' :
         draft.token_endpoint_auth_method !== 'none' && !secret && !app?.client_secret_set ? 'Enter a client secret.' : '') : ''} />
     {deleting ? <p role="alert">Delete this app configuration? Existing client bindings may stop refreshing; this does not detach one agent.</p> : null}

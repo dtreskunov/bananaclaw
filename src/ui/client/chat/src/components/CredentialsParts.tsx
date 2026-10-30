@@ -58,15 +58,6 @@ export function Impact({ connection, groups }: { connection: Connection; groups:
   </div>;
 }
 
-export function Review({ checked, onChange, children }: {
-  checked: boolean; onChange: (value: boolean) => void; children: ComponentChildren;
-}): JSX.Element {
-  return <label class="group-admin-check">
-    <input type="checkbox" checked={checked} onChange={(event) => onChange(event.currentTarget.checked)} />
-    <span>{children}</span>
-  </label>;
-}
-
 export function ErrorNotice({ message }: { message: string }): JSX.Element | null {
   return message ? <p class="ga-cred-error" role="alert">{message}</p> : null;
 }
@@ -105,7 +96,6 @@ export function ConfirmCredentialAction({ title, label, children, onClose, onCon
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [reviewed, setReviewed] = useState(false);
   async function confirm(): Promise<void> {
     setBusy(true);
     setError('');
@@ -118,10 +108,9 @@ export function ConfirmCredentialAction({ title, label, children, onClose, onCon
   }
   return <CredentialDialog title={title} onClose={onClose} busy={busy} footer={<>
     <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-    <button type="button" class="danger" disabled={busy || !reviewed} onClick={() => void confirm()}>{busy ? 'Working…' : label}</button>
+    <button type="button" class="danger" disabled={busy} onClick={() => void confirm()}>{busy ? 'Working…' : label}</button>
   </>}>
     {children}
-    <Review checked={reviewed} onChange={setReviewed}>I reviewed the affected agents and the connection-wide impact.</Review>
     <ErrorNotice message={error} />
   </CredentialDialog>;
 }

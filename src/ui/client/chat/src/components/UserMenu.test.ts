@@ -46,8 +46,8 @@ describe.each([false, true])('Credentials in the account menu (mobile=%s)', (mob
       : nodes.filter((node) => node.props.role === 'menuitem').map((node) => node.props.children);
     const profile = labels.indexOf('My Profile');
     expect(profile).toBeGreaterThanOrEqual(0);
-    expect(labels[profile + 1]).toBe('Credentials');
-    expect(labels.filter((label) => label === 'Credentials')).toHaveLength(1);
+    expect(labels[profile + 1]).toBe('My Credentials');
+    expect(labels.filter((label) => label === 'My Credentials')).toHaveLength(1);
   });
 
   it('closes the menu before opening the existing personal Credentials page', () => {
@@ -58,8 +58,8 @@ describe.each([false, true])('Credentials in the account menu (mobile=%s)', (mob
     });
     const item = descendants(UserMenu()).find((node) =>
       mobile
-        ? node.type === MobileDialogItem && node.props.label === 'Credentials'
-        : node.props.role === 'menuitem' && node.props.children === 'Credentials',
+        ? node.type === MobileDialogItem && node.props.label === 'My Credentials'
+        : node.props.role === 'menuitem' && node.props.children === 'My Credentials',
     );
     expect(item).toBeDefined();
     item!.props.onClick!();
