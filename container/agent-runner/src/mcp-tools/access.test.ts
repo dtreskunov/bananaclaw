@@ -18,6 +18,11 @@ describe('request_access MCP tool', () => {
       reason: 'Finish the report.',
     });
   });
+  it('carries only the named server target, not a credential or binding selector', async () => {
+    const result = await requestAccess.handler({ resource_url: 'https://api.example.com/mcp', reason: 'Read personal mail.', mcp_server: 'gmail_personal' });
+    expect(result.isError).not.toBe(true);
+    expect(JSON.parse(getUndeliveredMessages()[0].content)).toMatchObject({ mcp_server: 'gmail_personal' });
+  });
   it('rejects owner/secret overrides and unsafe destinations before delivery', async () => {
     for (const raw of [
       { resource_url: 'http://api.example.com/', reason: 'Read' },

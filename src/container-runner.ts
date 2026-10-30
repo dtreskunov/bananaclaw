@@ -19,6 +19,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { materializeContainerJson } from './container-config.js';
+import { materializeMcpAuthentication, resolveMcpAuthentication } from './modules/credentials/mcp-authentication.js';
 import type { McpServerConfig } from './container-config.js';
 import { decideAdmission, estimateAgentGroupMb, memoryBudgetMb, snapshotRunning } from './container-admission.js';
 import { getContainerConfig, updateContainerConfigScalars } from './db/container-configs.js';
@@ -332,6 +333,7 @@ async function spawnContainer(session: Session): Promise<void> {
   // the config object, threaded through provider resolution, buildMounts,
   // and buildContainerArgs so we don't re-read.
   const containerConfig = materializeContainerJson(agentGroup.id);
+  await materializeMcpAuthentication(agentGroup.id, containerConfig);
 
   // Per-group filesystem state lives forever after first creation. Init is
   // idempotent: it only writes paths that don't already exist, so this call
@@ -474,7 +476,15 @@ export async function runMcpProbeContainer(
       probeId,
       'mcp-probe',
     );
-    return await executeMcpProbe(containerName, args, serverConfig);
+    const resolved = await resolveMcpAuthentication(agentGroup.id, { probe: serverConfig });
+    if (!resolved.servers.probe)
+      return {
+        ok: false,
+        latencyMs: 0,
+        phase: 'connect',
+        error: resolved.statuses[0]?.reason ?? 'MCP connection is not authorized.',
+      };
+    return await executeMcpProbe(containerName, args, resolved.servers.probe);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log.warn('MCP probe container failed', { agentGroupId, err: message });

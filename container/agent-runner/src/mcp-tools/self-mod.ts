@@ -100,6 +100,9 @@ export const addMcpServer: McpToolDefinition = {
         env: { type: 'object', description: 'Stdio: environment variables for the server' },
         url: { type: 'string', description: 'Remote: HTTP/SSE endpoint URL' },
         headers: { type: 'object', description: 'Remote: HTTP headers (e.g. Authorization)' },
+        authentication: { type: 'object', description: 'Remote: approved connection reference; never a token or binding handle.',
+          properties: { connection_id: { type: 'string' }, account_alias: { type: 'string' } },
+          required: ['connection_id', 'account_alias'], additionalProperties: false },
         transport: { type: 'string', enum: ['http', 'sse'], description: 'Remote: transport type, default "http"' },
       },
       required: ['name'],
@@ -112,6 +115,7 @@ export const addMcpServer: McpToolDefinition = {
     if (!name) return err('name is required');
     if (!command && !url) return err('either command (stdio) or url (remote) is required');
     if (command && url) return err('provide either command (stdio) or url (remote), not both');
+    if (args.authentication !== undefined && !url) return err('authentication references require HTTP/SSE transport');
 
     const requestId = generateId();
     const payload: Record<string, unknown> = {
@@ -123,6 +127,7 @@ export const addMcpServer: McpToolDefinition = {
       payload.url = url;
       payload.transport = transport;
       if (args.headers) payload.headers = args.headers as Record<string, string>;
+      if (args.authentication) payload.authentication = args.authentication;
     } else {
       payload.command = command;
       payload.args = (args.args as string[]) || [];

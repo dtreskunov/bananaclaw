@@ -30200,6 +30200,8 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
   const [error, setError] = h2("");
   const [confirmed, setConfirmed] = h2(false);
   const [configureMcp, setConfigureMcp] = h2(false);
+  const [mcpServer, setMcpServer] = h2("");
+  const [accountAlias, setAccountAlias] = h2("");
   const connectionVersion = JSON.stringify(connections.map((connection2) => [connection2.id, connection2.revision, connection2.status]));
   y2(() => {
     setPreview(null);
@@ -30209,7 +30211,11 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
     if (!selected) return;
     const controller = new AbortController();
     void credentialRequest(path + "/preview", "POST", { connection_id: selected }, controller.signal).then((value) => {
-      if (!controller.signal.aborted) setPreview(value);
+      if (controller.signal.aborted) return;
+      setPreview(value);
+      const name = value.request.mcp_server ?? (value.mcp?.names.length === 1 ? value.mcp.names[0] : "");
+      setMcpServer(name);
+      setAccountAlias(value.mcp?.configured?.[name]?.account_alias || name);
     }).catch((error2) => {
       if (controller.signal.aborted) return;
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
@@ -30227,7 +30233,8 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
         connection_revision: preview.connection.revision,
         request_revision: preview.request.revision,
         configure_mcp: configureMcp,
-        config_revision: preview.mcp?.revision
+        config_revision: preview.mcp?.revision,
+        ...configureMcp ? { mcp_server: mcpServer, account_alias: accountAlias } : {}
       });
       setPreview(null);
       setConfirmed(false);
@@ -30263,6 +30270,10 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
     request.data ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4("p", { children: request.data.reason }),
       /* @__PURE__ */ u4("p", { children: /* @__PURE__ */ u4("code", { children: request.data.resource_url }) }),
+      request.data.mcp_server ? /* @__PURE__ */ u4("p", { children: [
+        "MCP server: ",
+        request.data.mcp_server
+      ] }) : null,
       /* @__PURE__ */ u4("p", { children: [
         "Recipient agent: ",
         request.data.agent_group_name ?? request.data.agent_group_id
@@ -30307,19 +30318,59 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
           ] }) : null,
           /* @__PURE__ */ u4("p", { children: preview.grantBreadth }),
           /* @__PURE__ */ u4("p", { children: preview.verification }),
-          preview.connection.kind !== "static" && preview.mcp?.names.length ? /* @__PURE__ */ u4("label", { children: [
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "checkbox",
-                checked: configureMcp,
-                disabled: busy,
-                onChange: (event) => setConfigureMcp(event.currentTarget.checked)
-              }
-            ),
-            "Configure ",
-            preview.mcp.names.join(", "),
-            " to select this account and restart the requesting session."
+          preview.mcp?.names.length ? /* @__PURE__ */ u4("div", { children: [
+            /* @__PURE__ */ u4("label", { children: [
+              /* @__PURE__ */ u4(
+                "input",
+                {
+                  type: "checkbox",
+                  checked: configureMcp,
+                  disabled: busy,
+                  onChange: (event) => setConfigureMcp(event.currentTarget.checked)
+                }
+              ),
+              "Pin this connection to one named MCP server and restart the requesting session."
+            ] }),
+            configureMcp ? /* @__PURE__ */ u4(k, { children: [
+              /* @__PURE__ */ u4("label", { children: [
+                "MCP server",
+                /* @__PURE__ */ u4(
+                  "select",
+                  {
+                    "aria-label": "MCP server for access request",
+                    value: mcpServer,
+                    disabled: busy || !!preview.request.mcp_server,
+                    onChange: (event) => {
+                      const name = event.currentTarget.value;
+                      setMcpServer(name);
+                      setAccountAlias(preview.mcp?.configured?.[name]?.account_alias || name);
+                    },
+                    children: [
+                      /* @__PURE__ */ u4("option", { value: "", children: "Choose one server" }),
+                      preview.mcp.names.map((name) => /* @__PURE__ */ u4("option", { value: name, children: name }, name))
+                    ]
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ u4("label", { children: [
+                "Account alias",
+                /* @__PURE__ */ u4(
+                  "input",
+                  {
+                    "aria-label": "MCP account alias",
+                    value: accountAlias,
+                    maxLength: 80,
+                    disabled: busy,
+                    onInput: (event) => setAccountAlias(event.currentTarget.value)
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ u4("p", { children: [
+                "Only ",
+                mcpServer || "the selected server",
+                " will change. Other servers using the same URL keep their own accounts. Manual Authorization is replaced by the host-managed connection."
+              ] })
+            ] }) : null
           ] }) : null,
           !preview.matches ? /* @__PURE__ */ u4("p", { role: "status", children: "This connection does not cover the requested destination. Do not extend OAuth routing just to match a hostname." }) : null,
           preview.connection.status !== "ready" || !preview.matches ? /* @__PURE__ */ u4(
@@ -30348,7 +30399,7 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
             {
               type: "button",
               class: "primary",
-              disabled: busy || !confirmed || !preview.matches || preview.connection.status !== "ready" || preview.request.status !== "pending",
+              disabled: busy || !confirmed || !preview.matches || preview.connection.status !== "ready" || preview.request.status !== "pending" || configureMcp && (!mcpServer || !accountAlias.trim()),
               onClick: () => void apply2(),
               children: busy ? "Applying\u2026" : "Allow access and continue"
             }
@@ -32146,13 +32197,58 @@ function serviceMatchesResource(service, resourceUrl) {
 function GroupCredentials({ gid }) {
   return /* @__PURE__ */ u4(CredentialsContent, { agent: { id: gid } });
 }
-function McpConnectionAccess({ gid, resourceUrl, onOpenCredentials }) {
+function McpConnectionAccess({ gid, resourceUrl, onOpenCredentials, authentication: authentication2, onAuthenticationChange, serverName, disabled }) {
   const { data, error, loading, refresh } = useCredentialResource(accessPath(gid));
   const matches2 = data?.grants.flatMap((grant) => grant.services.filter((service) => serviceMatchesResource(service, resourceUrl)).map((service) => ({ grant, service }))) ?? [];
+  const choices = [...new Map(matches2.map((item) => [item.grant.connection_id, item.grant])).values()];
   return /* @__PURE__ */ u4("div", { class: "ga-cred-mcp-auth", children: [
     /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Connection access" }),
     loading ? /* @__PURE__ */ u4("span", { class: "muted", children: "Loading granted bindings\u2026" }) : null,
     /* @__PURE__ */ u4(ErrorNotice, { message: error }),
+    onAuthenticationChange && !loading && !error ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4("label", { children: [
+        "Credential connection",
+        /* @__PURE__ */ u4(
+          "select",
+          {
+            class: "ga-mcp-input",
+            disabled,
+            "aria-label": `Credential connection for ${serverName ?? "MCP server"}`,
+            value: authentication2?.connection_id ?? "",
+            onChange: (event) => {
+              const selected = choices.find((choice) => choice.connection_id === event.currentTarget.value);
+              onAuthenticationChange(selected ? {
+                connection_id: selected.connection_id,
+                account_alias: authentication2?.account_alias || serverName || "Account"
+              } : void 0);
+            },
+            children: [
+              /* @__PURE__ */ u4("option", { value: "", children: "Automatic destination matching (no pinned account)" }),
+              authentication2 && !choices.some((choice) => choice.connection_id === authentication2.connection_id) ? /* @__PURE__ */ u4("option", { value: authentication2.connection_id, children: "Configured connection \u2014 unavailable in your personal grants" }) : null,
+              choices.map((choice) => /* @__PURE__ */ u4("option", { value: choice.connection_id, disabled: choice.status !== "active", children: [
+                choice.label,
+                choice.status === "active" ? "" : ` (${choice.status})`
+              ] }, choice.connection_id))
+            ]
+          }
+        )
+      ] }),
+      authentication2 ? /* @__PURE__ */ u4("label", { children: [
+        "Account alias",
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            class: "ga-mcp-input",
+            disabled,
+            "aria-label": `Account alias for ${serverName ?? "MCP server"}`,
+            value: authentication2.account_alias,
+            maxLength: 80,
+            onInput: (event) => onAuthenticationChange({ ...authentication2, account_alias: event.currentTarget.value })
+          }
+        ),
+        /* @__PURE__ */ u4("span", { class: "muted", children: "Shown to the agent to distinguish accounts. The host manages the binding header; this reference does not grant access." })
+      ] }) : null
+    ] }) : null,
     error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Retry access" }) : null,
     !loading && !error ? matches2.length ? /* @__PURE__ */ u4("ul", { children: matches2.map(({ grant, service }) => /* @__PURE__ */ u4("li", { children: [
       grant.label,
@@ -32386,6 +32482,28 @@ function AddDestinationForm({ gid, onCancel, onDone }) {
   ] });
 }
 
+// ../../shared/mcp-authentication.ts
+var McpAuthenticationError = class extends Error {
+};
+function parseMcpAuthentication(value, resourceUrl) {
+  if (value === void 0 || value === null) return void 0;
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new McpAuthenticationError("MCP authentication must be a connection reference.");
+  const record = value;
+  if (resourceUrl !== void 0) {
+    const url = URL.parse(resourceUrl);
+    if (!url || url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
+      throw new McpAuthenticationError(
+        "MCP connection references require an exact HTTPS URL without embedded credentials, query or fragment."
+      );
+  }
+  if (Object.keys(record).some((key) => key !== "connection_id" && key !== "account_alias") || typeof record.connection_id !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(record.connection_id) || typeof record.account_alias !== "string" || !record.account_alias.trim() || record.account_alias.length > 80 || [...record.account_alias].some((char) => char.charCodeAt(0) < 32))
+    throw new McpAuthenticationError(
+      "Choose a connection and a nonempty account alias (at most 80 characters). Never supply tokens or binding handles."
+    );
+  return { connection_id: record.connection_id, account_alias: record.account_alias.trim() };
+}
+
 // src/components/GroupAdminMcp.tsx
 var MCP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 function McpServersSection({
@@ -32393,8 +32511,7 @@ function McpServersSection({
   busy,
   onChange,
   onTest,
-  credentialsGid,
-  savedServers
+  credentialsGid
 }) {
   const mobile = isMobile.value;
   const names = Object.keys(value);
@@ -32486,21 +32603,22 @@ function McpServersSection({
       onChange: (next) => updateServer(selectedName, next),
       onRemove: () => removeServer(selectedName),
       onTest: () => onTest(selectedName, selectedValue),
-      auth: credentialsGid && mcpServerType(selectedValue) !== "stdio" ? JSON.stringify(savedServers?.[selectedName]) === JSON.stringify(selectedValue) ? /* @__PURE__ */ u4(
+      auth: credentialsGid && mcpServerType(selectedValue) !== "stdio" ? /* @__PURE__ */ u4(
         McpConnectionAccess,
         {
           gid: credentialsGid,
           resourceUrl: selectedValue.url,
+          serverName: selectedName,
+          disabled: busy,
+          authentication: selectedValue.authentication,
+          onAuthenticationChange: (authentication2) => updateServer(selectedName, { ...selectedValue, authentication: authentication2 }),
           onOpenCredentials: (create, connectionId) => openCredentials({
             create,
             connectionId,
             resourceUrl: selectedValue.url
           })
         }
-      ) : /* @__PURE__ */ u4("div", { class: "ga-cred-mcp-auth", children: [
-        /* @__PURE__ */ u4("span", { class: "ga-mcp-row-label", children: "Sign-in" }),
-        /* @__PURE__ */ u4("span", { class: "muted", children: "Save your changes to check whether this server needs a key or sign-in." })
-      ] }) : null
+      ) : null
     },
     selectedName
   ) : null;
@@ -32569,6 +32687,12 @@ function mcpServerIssue(value) {
     const url = value.url.trim();
     if (!url) return "URL required";
     if (!/^https?:\/\//.test(url)) return "Invalid URL";
+    try {
+      parseMcpAuthentication(value.authentication, url);
+    } catch (error) {
+      if (!(error instanceof McpAuthenticationError)) throw error;
+      return error.message;
+    }
   }
   if (value.timeout != null && (value.timeout < 1e3 || value.timeout > 6e5)) return "Invalid timeout";
   return null;
@@ -32740,6 +32864,7 @@ function McpServerEditor({
         type: next,
         url: http.url ?? "",
         ...http.headers ? { headers: http.headers } : {},
+        ...http.authentication ? { authentication: http.authentication } : {},
         ...value.instructions ? { instructions: value.instructions } : {},
         ...value.timeout ? { timeout: value.timeout } : {}
       });

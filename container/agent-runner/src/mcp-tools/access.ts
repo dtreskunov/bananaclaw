@@ -13,6 +13,7 @@ export const requestAccess: McpToolDefinition = {
         resource_url: { type: 'string', description: 'Exact HTTPS destination without credentials, query, fragment or wildcards.' },
         reason: { type: 'string', description: 'Why access is needed for the current request. Never include secret values.' },
         scopes: { type: 'array', items: { type: 'string' }, description: 'Optional scope suggestions, not automatically selected or granted.' },
+        mcp_server: { type: 'string', description: 'Exact configured MCP server name when requesting its account connection. Never select all servers by URL.' },
       },
       required: ['resource_url', 'reason'],
       additionalProperties: false,
@@ -22,7 +23,7 @@ export const requestAccess: McpToolDefinition = {
     const url = typeof args.resource_url === 'string' ? URL.parse(args.resource_url) : null;
     if (!url || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||
       typeof args.reason !== 'string' || !args.reason.trim() || args.reason.length > 1000 ||
-      Object.keys(args).some(key => !['resource_url', 'reason', 'scopes'].includes(key))) {
+      Object.keys(args).some(key => !['resource_url', 'reason', 'scopes', 'mcp_server'].includes(key))) {
       return { isError: true, content: [{ type: 'text', text: 'Provide an exact HTTPS destination and reason; never include secrets or owner/credential identifiers.' }] };
     }
     const requestId = `appr-access-${randomUUID()}`;

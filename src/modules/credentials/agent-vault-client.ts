@@ -86,6 +86,8 @@ export interface GatewayRequestOptions {
   timeoutMs?: number;
   ifMatch?: string;
   ifNoneMatch?: '*';
+  /** Host-selected runtime scope; never copied from agent request headers. */
+  vault?: string;
 }
 
 /** Raw gateway call. Throws AgentVaultError only when the gateway can't be reached. */
@@ -114,6 +116,7 @@ export async function gatewayFetch(
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (opts.ifMatch !== undefined) headers['If-Match'] = opts.ifMatch;
   if (opts.ifNoneMatch !== undefined) headers['If-None-Match'] = opts.ifNoneMatch;
+  if (opts.vault !== undefined) headers['X-Vault'] = opts.vault;
   try {
     return await fetch(`${s.url}${route}`, {
       method,

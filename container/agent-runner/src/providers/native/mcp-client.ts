@@ -293,7 +293,8 @@ export class NativeMcpManager {
       for (const definition of definitions) {
         const exposedName = `${mcpToolPrefix(serverName)}${sanitizeMcpName(definition.name)}`;
         if (entries.has(exposedName)) throw new Error(`MCP tool name collision in ${serverName}: ${exposedName}`);
-        const description = definition.description ?? `${definition.name} from ${serverName}`;
+        const description = [definition.description ?? `${definition.name} from ${serverName}`,
+          'instructions' in config ? config.instructions : undefined].filter(Boolean).join('\n');
         const tool = dynamicTool({
           description,
           inputSchema: jsonSchema(definition.inputSchema as JSONSchema7),

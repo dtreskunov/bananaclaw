@@ -763,8 +763,22 @@ and purpose. The user chooses an existing connection or uses the unified Add
 credential form (key, MCP OAuth or configured OAuth app), then confirms the
 recipient and full current/future connection access. Scope suggestions are
 shown but never selected automatically. Signing in does not grant access.
-Optional updates to matching MCP Authorization headers use group-bound
-placeholders and require explicit consent to restart the requesting session.
+Optional updates to a named MCP server use stable connection references
+and require explicit consent to restart the requesting session.
+An access request can target `mcp_server` (CLI `--mcp-server`); review selects
+exactly one named server and a user-defined account alias, never every server
+sharing its URL. The MCP editor also selects from the user's granted personal
+connections. Persisted HTTP/SSE configuration stores
+`authentication: {connection_id, account_alias}`; it does not store generated
+group-binding headers. The host resolves current authorized bindings at spawn
+and for MCP tests. Missing/revoked/mismatched references disable only the
+affected server and surface a named access-recovery instruction, rather than
+falling back to another account. Account aliases appear in runtime guidance
+and native tool descriptions. They are user labels, not verified identities.
+Two accounts on the same endpoint use distinct server names and references.
+Connection grants still authorize the agent group; the named reference selects
+the intended account for that transport and does not create a separate MCP-only
+authorization boundary. Existing servers are not assigned accounts automatically.
 The durable approval survives reload/restart; interrupted OAuth sign-in must
 be started again. Completion reports verified grant state separately from
 upstream authentication, which the agent must safely check. No recurring

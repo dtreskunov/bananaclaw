@@ -10,7 +10,7 @@ for (const verb of ['request', 'status', 'cancel'] as const) {
     access: 'open',
     description:
       verb === 'request'
-        ? 'Request user-assisted credential access. --resource-url <exact-https-url> --reason <purpose>. Never provide secrets. Wait for user review; do not poll.'
+        ? 'Request user-assisted credential access. --resource-url <exact-https-url> --reason <purpose> [--mcp-server <exact-name>]. Never provide secrets. Wait for user review; do not poll.'
         : `${verb === 'status' ? 'Read' : 'Cancel'} an access request from this session. --request-id <id>.`,
     parseArgs: (raw) => raw,
     handler: async (args, ctx) => {
@@ -19,7 +19,7 @@ for (const verb of ['request', 'status', 'cancel'] as const) {
       const session = getSession(ctx.sessionId);
       if (!session || session.agent_group_id !== ctx.agentGroupId)
         throw new ConnectionInputError('Session not found.', 404);
-      const allowed = verb === 'request' ? ['resource-url', 'reason', 'scopes'] : ['request-id'];
+      const allowed = verb === 'request' ? ['resource-url', 'reason', 'scopes', 'mcp-server'] : ['request-id'];
       if (Object.keys(args).some((key) => !allowed.includes(key)))
         throw new ConnectionInputError('Unsupported access request field.');
       if (verb === 'request') {
@@ -31,6 +31,7 @@ for (const verb of ['request', 'status', 'cancel'] as const) {
         return requestAccess(session, {
           resource_url: args['resource-url'],
           reason: args.reason,
+          ...(args['mcp-server'] === undefined ? {} : { mcp_server: args['mcp-server'] }),
           ...(scopes === undefined ? {} : { scopes }),
         });
       }

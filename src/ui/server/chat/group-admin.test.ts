@@ -327,6 +327,26 @@ describe('PATCH /api/groups/:gid/admin/packages', () => {
 });
 
 describe('PATCH /api/groups/:gid/admin/mcp-servers', () => {
+  it('preserves explicit remote references and refuses secrets in authentication metadata', async () => {
+    seedOwnedGroup('ag-auth-ref', 'auth-ref');
+    const path = '/ui/chat/api/groups/ag-auth-ref/admin/mcp-servers';
+    const reference = { connection_id: 'conn-personal', account_alias: 'Personal' };
+    const accepted = await call('PATCH', path, {
+      servers: { gmail_personal: { type: 'http', url: 'https://gmail.example.test/mcp', authentication: reference } },
+    });
+    expect(accepted.status()).toBe(200);
+    expect(getJsonCol('ag-auth-ref', 'mcp_servers')).toMatchObject({ gmail_personal: { authentication: reference } });
+    const rejected = await call('PATCH', path, {
+      servers: {
+        gmail_personal: {
+          type: 'http',
+          url: 'https://gmail.example.test/mcp',
+          authentication: { ...reference, token: 'not-allowed' },
+        },
+      },
+    });
+    expect(rejected.status()).toBe(400);
+  });
   it('accepts a stdio server with args/env and a http server with headers', async () => {
     seedOwnedGroup('ag-mcp', 'mcp-grp');
 

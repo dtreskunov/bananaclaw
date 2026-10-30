@@ -76,6 +76,7 @@ import { bareIdForResponse, dbValueFromBareId, getModelDetails, listModelsForPro
 import { resolveUpstreamForWireId } from './models-dev-catalog.js';
 import { listAvailableSkills, type AvailableSkill } from './skill-catalog.js';
 import { groupSkillRoots } from '../../../skills/registry.js';
+import { McpAuthenticationError, parseMcpAuthentication } from '../../shared/mcp-authentication.js';
 import { defaultVoiceInputBackend, resolveVoiceInputConfig, type VoiceInputConfig } from './voice-input-config.js';
 import { allocateSiteSlug, isValidSlug, pagesBaseDomain, pagesEnabled, siteFqdn, siteUrl } from '../pages/site.js';
 
@@ -880,6 +881,13 @@ function cleanMcpServers(raw: unknown): Record<string, McpServerConfig> {
 }
 
 function cleanOneMcpServer(name: string, cfg: Record<string, unknown>): McpServerConfig {
+  let authentication;
+  try {
+    authentication = parseMcpAuthentication(cfg.authentication, typeof cfg.url === 'string' ? cfg.url : undefined);
+  } catch (error) {
+    if (!(error instanceof McpAuthenticationError)) throw error;
+    throw new BadRequest(`MCP server "${name}": ${error.message}`);
+  }
   const typeRaw = cfg.type;
   const type = typeof typeRaw === 'string' ? typeRaw : 'stdio';
   if (type !== 'stdio' && type !== 'http' && type !== 'sse') {
@@ -901,6 +909,9 @@ function cleanOneMcpServer(name: string, cfg: Record<string, unknown>): McpServe
     }
     const headers = cleanStringStringMap(`MCP server "${name}" headers`, cfg.headers);
     const out: McpServerConfig = { type, url };
+    if (authentication) {
+      out.authentication = authentication;
+    }
     if (Object.keys(headers).length > 0) out.headers = headers;
     if (instructions !== undefined) out.instructions = instructions;
     if (timeout !== undefined) out.timeout = timeout;
@@ -908,6 +919,7 @@ function cleanOneMcpServer(name: string, cfg: Record<string, unknown>): McpServe
   }
 
   // stdio
+  if (authentication) throw new BadRequest('MCP connection references are supported only for HTTP/SSE servers.');
   if (typeof cfg.command !== 'string' || cfg.command.trim() === '') {
     throw new BadRequest(`MCP server "${name}": command is required for stdio transport`);
   }

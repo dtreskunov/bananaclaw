@@ -127,6 +127,10 @@ async function main(): Promise<void> {
     [
       buildSystemPromptAddendum(config.assistantName || undefined, { structuredReplies: provider.structuredReplies }),
       provider.mcpToolGuidance,
+      config.mcpAccess?.length ? '## MCP account routing (user-configured aliases)\n' + config.mcpAccess.map(access =>
+        `- Server ${JSON.stringify(access.server)}, account alias ${JSON.stringify(access.account_alias)}: ${access.status}. ` +
+        (access.status === 'ready' ? 'Use only this named server for this account; the host manages authentication headers.'
+          : `${access.reason} Request access with mcp_server=${JSON.stringify(access.server)} and resource_url=${JSON.stringify(access.resource_url)}; do not substitute another account.`)).join('\n') : undefined,
       threadTitleInstruction(),
     ]
       .filter((part): part is string => Boolean(part))

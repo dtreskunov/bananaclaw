@@ -38,7 +38,8 @@ export function presentApproval(action: string, payloadJson: string): ApprovalPr
   if (action === 'request_access') {
     const url = typeof payload.resource_url === 'string' ? payload.resource_url : '';
     const reason = typeof payload.reason === 'string' ? payload.reason : '';
-    return { details: `${reason}\n${url}`, packages: null };
+    const server = typeof payload.mcp_server === 'string' ? `\nMCP server: ${payload.mcp_server}` : '';
+    return { details: `${reason}\n${url}${server}`, packages: null };
   }
 
   if (action === 'add_mcp_server') {

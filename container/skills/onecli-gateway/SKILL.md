@@ -47,6 +47,13 @@ Follow this section and do not apply the OneCLI instructions below.
   verify the original operation before continuing. Preserve the request's
   original dates/timezone; never automatically replay writes. Rejecting access
   ends the request unless the user asks again. `ncl credentials` stays host-only.
+- For a configured remote MCP server, include its exact `mcp_server` name in
+  `request_access` (CLI: `--mcp-server`). The user can pin a connection and account
+  alias to that one server. Two accounts on the same endpoint require distinct
+  named MCP instances, such as `gmail_personal` and `gmail_work`. Use the named
+  tools matching the user's intended account; ask when ambiguous. The host
+  resolves current group handles and transport headers. Do not copy binding
+  headers into configuration or switch to another account when one is blocked.
 - Scope metadata may be provider-reported, requested, legacy or unknown.
   Do not describe legacy/requested metadata as a newly verified grant.
   Requesting fewer scopes is not a guaranteed provider-side revocation.

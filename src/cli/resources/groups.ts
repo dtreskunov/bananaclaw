@@ -7,6 +7,7 @@ import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import { archiveAgentGroup } from '../../modules/archive/archive-group.js';
+import { parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
 import { deleteVault, usesAgentVault } from '../../modules/credentials/agent-vault-client.js';
 import { restoreAgentGroup } from '../../modules/archive/restore-group.js';
 import { createGroup, GroupCreateError } from '../../modules/groups/create.js';
@@ -314,7 +315,7 @@ registerResource({
         '[--args <json-array>] [--env <json-object>], or --type http|sse --url <url> ' +
         '[--headers <json-object>]. --transport is an alias for --type. ' +
         '[--instructions <text>] [--timeout <milliseconds>] apply to either transport. ' +
-        'Timeout must be 1000–600000 ms. Use credential placeholders, never raw secrets.',
+        'Timeout must be 1000–600000 ms. Remote: --connection <id> --account-alias <label> pins a granted connection. Use credential placeholders, never raw secrets.',
       handler: async (args) => {
         const id = args.id as string;
         if (!id) throw new Error('--id is required');
@@ -356,6 +357,19 @@ registerResource({
             throw new Error('--url must be an HTTP(S) URL without credentials or a fragment');
           }
           const keep = previous && 'url' in previous ? previous : undefined;
+          const connection = args.connection === undefined ? keep?.authentication?.connection_id : args.connection;
+          if (connection === undefined && args.account_alias !== undefined)
+            throw new Error('--account-alias requires --connection or an existing pinned connection.');
+          const authentication =
+            connection === '' || connection === undefined
+              ? undefined
+              : parseMcpAuthentication(
+                  {
+                    connection_id: connection,
+                    account_alias: args.account_alias ?? keep?.authentication?.account_alias,
+                  },
+                  url,
+                );
           // Do not carry credential headers to a newly selected endpoint.
           const headers =
             args.headers === undefined
@@ -363,8 +377,10 @@ registerResource({
                 ? keep.headers
                 : undefined
               : parseMcpStringMap(args.headers, '--headers');
-          servers[name] = { ...keep, type, url, headers, ...metadata };
+          servers[name] = { ...keep, type, url, headers, authentication, ...metadata };
         } else {
+          if (args.connection !== undefined || args.account_alias !== undefined)
+            throw new Error('--connection and --account-alias require HTTP/SSE transport.');
           if (args.url !== undefined || args.headers !== undefined) {
             throw new Error('--url and --headers require --type http or sse');
           }

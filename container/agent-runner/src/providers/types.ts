@@ -214,6 +214,7 @@ export type McpHttpServerConfig = {
   type: 'http' | 'sse';
   url: string;
   headers?: Record<string, string>;
+  instructions?: string;
   /** Per-server request timeout (ms). Overrides the shared MCP_TOOL_TIMEOUT default. */
   timeout?: number;
 };

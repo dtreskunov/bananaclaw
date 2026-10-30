@@ -10,6 +10,7 @@ interface AccessRequest {
   resource_url: string;
   reason: string;
   scopes?: string[];
+  mcp_server?: string;
   revision: number;
   agent_group_id: string;
   agent_group_name?: string;
@@ -21,7 +22,7 @@ interface AccessPreview {
   matches: boolean;
   grantBreadth: string;
   verification: string;
-  mcp?: { names: string[]; revision: string };
+  mcp?: { names: string[]; revision: string; configured?: Record<string, { connection_id: string; account_alias: string } | undefined> };
 }
 
 export function AccessRequestReview({ id, connections, onCreate, onManage, onSaved }: {
@@ -39,6 +40,8 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
   const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [configureMcp, setConfigureMcp] = useState(false);
+  const [mcpServer, setMcpServer] = useState('');
+  const [accountAlias, setAccountAlias] = useState('');
   const connectionVersion = JSON.stringify(connections.map(connection => [connection.id, connection.revision, connection.status]));
   useEffect(() => {
     setPreview(null);
@@ -48,7 +51,13 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
     if (!selected) return;
     const controller = new AbortController();
     void credentialRequest<AccessPreview>(path + '/preview', 'POST', { connection_id: selected }, controller.signal)
-      .then(value => { if (!controller.signal.aborted) setPreview(value); })
+      .then(value => {
+        if (controller.signal.aborted) return;
+        setPreview(value);
+        const name = value.request.mcp_server ?? (value.mcp?.names.length === 1 ? value.mcp.names[0] : '');
+        setMcpServer(name);
+        setAccountAlias(value.mcp?.configured?.[name]?.account_alias || name);
+      })
       .catch(error => {
         if (controller.signal.aborted) return;
         if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
@@ -66,6 +75,7 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
         connection_id: preview.connection.id, connection_revision: preview.connection.revision,
         request_revision: preview.request.revision,
         configure_mcp: configureMcp, config_revision: preview.mcp?.revision,
+        ...(configureMcp ? { mcp_server: mcpServer, account_alias: accountAlias } : {}),
       });
       setPreview(null);
       setConfirmed(false);
@@ -99,6 +109,7 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
     {request.data ? <>
       <p>{request.data.reason}</p>
       <p><code>{request.data.resource_url}</code></p>
+      {request.data.mcp_server ? <p>MCP server: {request.data.mcp_server}</p> : null}
       <p>Recipient agent: {request.data.agent_group_name ?? request.data.agent_group_id}</p>
       {request.data.scopes?.length ? <p>Suggested scopes (not automatically granted): {request.data.scopes.join(' ')}</p> : null}
       {request.data.status !== 'pending' ? <p role="status">{request.data.result?.message ?? request.data.status}</p> : <>
@@ -122,11 +133,24 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
           {preview.connection.kind !== 'static' ? <p>Provider-reported scopes: {preview.connection.granted_scopes?.join(' ') || 'Not reported; permissions are not verified.'}</p> : null}
           <p>{preview.grantBreadth}</p>
           <p>{preview.verification}</p>
-          {preview.connection.kind !== 'static' && preview.mcp?.names.length ? <label>
+          {preview.mcp?.names.length ? <div><label>
             <input type="checkbox" checked={configureMcp} disabled={busy}
               onChange={event => setConfigureMcp(event.currentTarget.checked)} />
-            Configure {preview.mcp.names.join(', ')} to select this account and restart the requesting session.
-          </label> : null}
+            Pin this connection to one named MCP server and restart the requesting session.
+          </label>
+          {configureMcp ? <>
+            <label>MCP server<select aria-label="MCP server for access request" value={mcpServer} disabled={busy || !!preview.request.mcp_server}
+              onChange={event => {
+                const name = event.currentTarget.value;
+                setMcpServer(name); setAccountAlias(preview.mcp?.configured?.[name]?.account_alias || name);
+              }}>
+              <option value="">Choose one server</option>
+              {preview.mcp.names.map(name => <option key={name} value={name}>{name}</option>)}
+            </select></label>
+            <label>Account alias<input aria-label="MCP account alias" value={accountAlias} maxLength={80} disabled={busy}
+              onInput={event => setAccountAlias(event.currentTarget.value)} /></label>
+            <p>Only {mcpServer || 'the selected server'} will change. Other servers using the same URL keep their own accounts. Manual Authorization is replaced by the host-managed connection.</p>
+          </> : null}</div> : null}
           {!preview.matches ? <p role="status">This connection does not cover the requested destination. Do not extend OAuth routing just to match a hostname.</p> : null}
           {preview.connection.status !== 'ready' || !preview.matches ? <button type="button" disabled={busy}
             onClick={() => onManage(preview.connection)}>Manage this connection</button> : null}
@@ -134,7 +158,7 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
             onChange={event => setConfirmed(event.currentTarget.checked)} />
             Allow this agent to use this connection, including its full permissions and current and future URL patterns.
           </label>
-          <button type="button" class="primary" disabled={busy || !confirmed || !preview.matches || preview.connection.status !== 'ready' || preview.request.status !== 'pending'}
+          <button type="button" class="primary" disabled={busy || !confirmed || !preview.matches || preview.connection.status !== 'ready' || preview.request.status !== 'pending' || (configureMcp && (!mcpServer || !accountAlias.trim()))}
             onClick={() => void apply()}>{busy ? 'Applying…' : 'Allow access and continue'}</button>
         </> : null}
       </>}

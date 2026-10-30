@@ -48,6 +48,37 @@ async function execute(
 }
 
 describe('NativeMcpManager', () => {
+  it('keeps headers and aliases separate for two accounts on the same endpoint', async () => {
+    const seen: string[] = [];
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const binding = request.headers.get('X-AgentVault-Binding') || '';
+        const instance = server();
+        instance.setRequestHandler(CallToolRequestSchema, async () => {
+          seen.push(binding);
+          return { content: [{ type: 'text', text: binding }] };
+        });
+        const transport = new WebStandardStreamableHTTPServerTransport();
+        await instance.connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    bunServers.push(web);
+    const url = `http://127.0.0.1:${web.port}/mcp`;
+    const manager = new NativeMcpManager({
+      gmail_personal: { type: 'http', url, headers: { 'X-AgentVault-Binding': 'BIND_PERSONAL' }, instructions: 'Account alias: Personal' },
+      gmail_work: { type: 'http', url, headers: { 'X-AgentVault-Binding': 'BIND_WORK' }, instructions: 'Account alias: Work' },
+    });
+    managers.push(manager);
+    const entries = await manager.entries(undefined, undefined, true);
+    expect(entries.find(entry => entry.server === 'gmail_personal')?.description).toContain('Personal');
+    expect(entries.find(entry => entry.server === 'gmail_work')?.description).toContain('Work');
+    const tools = Object.fromEntries(entries.map(entry => [entry.name, entry.tool]));
+    await execute(tools, 'mcp__gmail_personal__remote_echo', {});
+    await execute(tools, 'mcp__gmail_work__remote_echo', {});
+    expect(seen).toEqual(['BIND_PERSONAL', 'BIND_WORK']);
+  });
   it('coalesces concurrent discovery per server and leaves unrelated servers untouched', async () => {
     let initializations = 0;
     const web = Bun.serve({

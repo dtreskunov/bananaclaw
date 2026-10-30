@@ -27,6 +27,12 @@ vi.mock('./shared-connections.js', async (importOriginal) => ({
     { connection_id: 'private-connection', status: 'active', services: [{ auth: { token: 'BIND_TESTHANDLE' } }] },
   ],
 }));
+vi.mock('./mcp-authentication.js', () => ({
+  resolveMcpAuthentication: async (_group: string, servers: Record<string, unknown>) => ({
+    servers,
+    statuses: Object.keys(servers).map((server) => ({ server, status: 'ready' })),
+  }),
+}));
 vi.mock('../approvals/primitive.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../approvals/primitive.js')>()),
   pickApprovalDelivery: vi.fn().mockResolvedValue(null),
@@ -292,18 +298,25 @@ describe('assisted access approvals', () => {
     connection.kind = 'mcp_oauth';
     const servers = {
       example: { type: 'http', url: input.resource_url, headers: { 'X-Keep': 'unchanged' } },
-      other: { type: 'http', url: 'https://other.example.com/mcp' },
+      other: {
+        type: 'http',
+        url: input.resource_url,
+        authentication: { connection_id: 'other-account', account_alias: 'Work' },
+        headers: { Authorization: 'Bearer av-access:BIND_OTHER' },
+      },
     };
     getDb()
       .prepare('UPDATE container_configs SET mcp_servers=? WHERE agent_group_id=?')
       .run(JSON.stringify(servers), session.agent_group_id);
     const request = await seed();
     const preview = await previewAccessRequest('alice', request.request_id, connection.id);
-    expect(preview.mcp.names).toEqual(['example']);
+    expect(preview.mcp.names).toEqual(['example', 'other']);
     const result = await applyAccessRequest('alice', request.request_id, {
       ...selection(),
       configure_mcp: true,
       config_revision: preview.mcp.revision,
+      mcp_server: 'example',
+      account_alias: 'Personal',
     });
     expect(result.status).toBe('completed');
     const config = getDb()
@@ -313,11 +326,13 @@ describe('assisted access approvals', () => {
       ...servers,
       example: {
         ...servers.example,
-        headers: { 'X-Keep': 'unchanged', Authorization: 'Bearer av-access:BIND_TESTHANDLE' },
+        headers: { 'X-Keep': 'unchanged' },
+        authentication: { connection_id: connection.id, account_alias: 'Personal' },
       },
     });
     expect(mocks.messages.get(`approval-result-${request.request_id}`)).toMatchObject({ onWake: 1 });
-    expect(result.result?.message).toContain('av-access:BIND_TESTHANDLE');
+    expect(result.result?.message).toContain('Only MCP server "example"');
+    expect(result.result?.message).not.toContain('BIND_TESTHANDLE');
   });
   it('rejects stale MCP configuration before granting or restarting', async () => {
     connection.kind = 'mcp_oauth';
@@ -331,7 +346,37 @@ describe('assisted access approvals', () => {
         configure_mcp: true,
         config_revision: 'stale',
       }),
-    ).rejects.toThrow('Review the matching');
+    ).rejects.toThrow('Review one named');
+    expect(mocks.grant).not.toHaveBeenCalled();
+  });
+  it('pins an access request to its named server and refuses an all-URL or different-server update', async () => {
+    const servers = {
+      personal: { type: 'http', url: input.resource_url },
+      work: { type: 'http', url: input.resource_url },
+    };
+    getDb()
+      .prepare('UPDATE container_configs SET mcp_servers=? WHERE agent_group_id=?')
+      .run(JSON.stringify(servers), session.agent_group_id);
+    const request = await requestAccess(session, { ...input, mcp_server: 'personal' });
+    const preview = await previewAccessRequest('alice', request.request_id, connection.id);
+    expect(preview.mcp.names).toEqual(['personal']);
+    await expect(
+      applyAccessRequest('alice', request.request_id, {
+        ...selection(),
+        configure_mcp: true,
+        config_revision: preview.mcp.revision,
+        mcp_server: 'work',
+        account_alias: 'Work',
+      }),
+    ).rejects.toThrow('Review one named');
+    await expect(
+      applyAccessRequest('alice', request.request_id, {
+        ...selection(),
+        configure_mcp: true,
+        config_revision: preview.mcp.revision,
+      }),
+    ).rejects.toThrow('Review one named');
+    await expect(requestAccess(session, { ...input, mcp_server: 'missing' })).rejects.toThrow('no longer matches');
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('keeps duplicate apply requests from executing concurrently', async () => {

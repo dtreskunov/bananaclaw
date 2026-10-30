@@ -6,6 +6,7 @@ import { isMobile } from '../state';
 import { McpConnectionAccess } from './GroupCredentialAccess';
 import { openCredentials } from '../credentials-navigation';
 import { MobileDialog, MobileDialogFooter } from './MobileDialog';
+import { McpAuthenticationError, parseMcpAuthentication, type McpAuthentication } from '../../../../shared/mcp-authentication';
 
 interface McpStdioServerDto {
   type?: 'stdio';
@@ -22,6 +23,7 @@ interface McpHttpServerDto {
   headers?: Record<string, string>;
   instructions?: string;
   timeout?: number;
+  authentication?: McpAuthentication;
 }
 
 export type McpServerConfigDto = McpStdioServerDto | McpHttpServerDto;
@@ -43,7 +45,6 @@ export function McpServersSection({
   onChange,
   onTest,
   credentialsGid,
-  savedServers,
 }: {
   value: Record<string, McpServerConfigDto>;
   busy: boolean;
@@ -161,20 +162,17 @@ export function McpServersSection({
       onRemove={() => removeServer(selectedName)}
       onTest={() => onTest(selectedName, selectedValue)}
       auth={credentialsGid && mcpServerType(selectedValue) !== 'stdio' ? (
-        JSON.stringify(savedServers?.[selectedName]) === JSON.stringify(selectedValue) ? (
           <McpConnectionAccess
             gid={credentialsGid}
             resourceUrl={(selectedValue as McpHttpServerDto).url}
+            serverName={selectedName}
+            disabled={busy}
+            authentication={(selectedValue as McpHttpServerDto).authentication}
+            onAuthenticationChange={authentication => updateServer(selectedName, { ...selectedValue as McpHttpServerDto, authentication })}
             onOpenCredentials={(create, connectionId) => openCredentials({
               create, connectionId, resourceUrl: (selectedValue as McpHttpServerDto).url,
             })}
           />
-        ) : (
-          <div class="ga-cred-mcp-auth">
-            <span class="ga-mcp-row-label">Sign-in</span>
-            <span class="muted">Save your changes to check whether this server needs a key or sign-in.</span>
-          </div>
-        )
       ) : null}
     />
   ) : null;
@@ -261,6 +259,10 @@ function mcpServerIssue(value: McpServerConfigDto): string | null {
     const url = (value as McpHttpServerDto).url.trim();
     if (!url) return 'URL required';
     if (!/^https?:\/\//.test(url)) return 'Invalid URL';
+    try {
+      parseMcpAuthentication((value as McpHttpServerDto).authentication, url);
+    }
+    catch (error) { if (!(error instanceof McpAuthenticationError)) throw error; return error.message; }
   }
   if (value.timeout != null && (value.timeout < 1000 || value.timeout > 600000)) return 'Invalid timeout';
   return null;
@@ -472,6 +474,7 @@ function McpServerEditor({
         type: next,
         url: http.url ?? '',
         ...(http.headers ? { headers: http.headers } : {}),
+        ...(http.authentication ? { authentication: http.authentication } : {}),
         ...(value.instructions ? { instructions: value.instructions } : {}),
         ...(value.timeout ? { timeout: value.timeout } : {}),
       });

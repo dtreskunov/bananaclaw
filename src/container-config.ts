@@ -16,6 +16,7 @@ import { getContainerConfig } from './db/container-configs.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { readEnvFile, resolveDefaultModel } from './env.js';
 import type { AgentGroup, ContainerConfigRow } from './types.js';
+import type { McpAuthentication, McpAccessStatus } from './ui/shared/mcp-authentication.js';
 
 export interface McpStdioServerConfig {
   type?: 'stdio';
@@ -32,6 +33,7 @@ export interface McpHttpServerConfig {
   headers?: Record<string, string>;
   instructions?: string;
   timeout?: number;
+  authentication?: McpAuthentication;
 }
 
 export type McpServerConfig = McpStdioServerConfig | McpHttpServerConfig;
@@ -45,6 +47,7 @@ export interface AdditionalMountConfig {
 /** Shape of the materialized `container.json` file read by the container runner. */
 export interface ContainerConfig {
   mcpServers: Record<string, McpServerConfig>;
+  mcpAccess?: McpAccessStatus[];
   packages: { apt: string[]; npm: string[]; pip: string[] };
   imageTag?: string;
   additionalMounts: AdditionalMountConfig[];

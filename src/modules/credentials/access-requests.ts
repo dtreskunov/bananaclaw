@@ -11,6 +11,8 @@ import { uiBaseUrl } from '../../ui/server/server.js';
 import { openInboundDb } from '../../session-manager.js';
 import type { PendingApproval, Session } from '../../types.js';
 import { isOAuthScope } from '../../ui/shared/oauth-app.js';
+import { McpAuthenticationError, parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
+import { resolveMcpAuthentication } from './mcp-authentication.js';
 import { serviceMatchesResource } from '../../ui/shared/credential-matching.js';
 import { requestApproval, registerInteractiveApprovalHandler, notifyAgent } from '../approvals/primitive.js';
 import {
@@ -43,15 +45,21 @@ export interface AccessRequestInput {
   resource_url: string;
   reason: string;
   scopes?: string[];
+  mcp_server?: string;
 }
 
 export function accessRequestInput(raw: unknown): AccessRequestInput {
   const body = objectBody(raw);
-  if (Object.keys(body).some((key) => !['resource_url', 'reason', 'scopes'].includes(key)))
+  if (Object.keys(body).some((key) => !['resource_url', 'reason', 'scopes', 'mcp_server'].includes(key)))
     throw new ConnectionInputError(
-      'Access requests accept only resource_url, reason and optional scopes. Never supply secrets.',
+      'Access requests accept only resource_url, reason, optional scopes and an optional mcp_server name. Never supply secrets.',
     );
   const url = typeof body.resource_url === 'string' ? URL.parse(body.resource_url) : null;
+  if (
+    body.mcp_server !== undefined &&
+    (typeof body.mcp_server !== 'string' || !/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(body.mcp_server))
+  )
+    throw new ConnectionInputError('Select an existing named MCP server.');
   if (
     !url ||
     url.protocol !== 'https:' ||
@@ -82,6 +90,7 @@ export function accessRequestInput(raw: unknown): AccessRequestInput {
   return {
     resource_url: url.href,
     reason: body.reason.trim(),
+    ...(body.mcp_server === undefined ? {} : { mcp_server: body.mcp_server as string }),
     ...(body.scopes === undefined ? {} : { scopes: [...new Set(body.scopes as string[])].sort() }),
   };
 }
@@ -116,6 +125,7 @@ export function accessRequestStatus(id: string, sessionId?: string) {
     status: record.workflow.stage,
     resource_url: record.input.resource_url,
     reason: record.input.reason,
+    mcp_server: record.input.mcp_server,
     scopes: record.input.scopes,
     revision: record.workflow.revision,
     agent_group_id: record.session.agent_group_id,
@@ -131,6 +141,7 @@ export async function requestAccess(session: Session, raw: unknown, requestId?: 
   if (getContainerConfig(session.agent_group_id)?.cli_scope === 'disabled')
     throw new ConnectionInputError('Access requests are disabled for this agent.', 403);
   const input = accessRequestInput(raw);
+  if (input.mcp_server) mcpConfiguration(session.agent_group_id, input.resource_url, input.mcp_server);
   const inbound = openInboundDb(session.agent_group_id, session.id);
   let origin: { id: string; sender_user_id: string } | undefined;
   try {
@@ -146,7 +157,15 @@ export async function requestAccess(session: Session, raw: unknown, requestId?: 
     throw new ConnectionInputError('Invalid access request identifier');
   if (requestId && getApprovalWorkflow(requestId)) return accessRequestStatus(requestId, session.id);
   const key = createHash('sha256')
-    .update(JSON.stringify([session.id, origin?.id ?? null, input.resource_url, input.scopes ?? []]))
+    .update(
+      JSON.stringify([
+        session.id,
+        origin?.id ?? null,
+        input.resource_url,
+        input.scopes ?? [],
+        ...(input.mcp_server ? [input.mcp_server] : []),
+      ]),
+    )
     .digest('hex');
   const existing = pendingWorkflow(key);
   if (existing) {
@@ -202,22 +221,31 @@ export async function previewAccessRequest(userId: string, id: string, connectio
     matches: connection.services.some((service) => serviceMatchesResource(service, request.resource_url)),
     grantBreadth: 'All current and future URL patterns on this connection, not just the requested URL.',
     verification: 'Grant verification only. The agent must verify the authenticated operation after access is granted.',
-    mcp: mcpConfiguration(request.agent_group_id, request.resource_url),
+    mcp: mcpConfiguration(request.agent_group_id, request.resource_url, request.mcp_server),
   };
 }
 
-function mcpConfiguration(groupId: string, resource: string) {
+function mcpConfiguration(groupId: string, resource: string, target?: string) {
   const row = getContainerConfig(groupId);
   if (!row) throw new ConnectionInputError('Agent configuration no longer exists.', 409);
   const servers = JSON.parse(row.mcp_servers) as Record<string, McpServerConfig>;
   const names = Object.entries(servers)
-    .filter(([, server]) => {
+    .filter(([name, server]) => {
+      if (target && name !== target) return false;
       if (!('url' in server)) return false;
       const url = URL.parse(server.url);
       return url?.href === resource;
     })
     .map(([name]) => name);
-  return { names, revision: createHash('sha256').update(row.mcp_servers).digest('hex') };
+  if (target && !names.includes(target))
+    throw new ConnectionInputError('The named MCP server no longer matches the requested endpoint.', 409);
+  return {
+    names,
+    configured: Object.fromEntries(
+      names.map((name) => [name, 'authentication' in servers[name] ? servers[name].authentication : undefined]),
+    ),
+    revision: createHash('sha256').update(row.mcp_servers).digest('hex'),
+  };
 }
 
 async function runtimeInstructions(userId: string, groupId: string, connection: SharedConnection) {
@@ -256,6 +284,8 @@ interface ApplySelection {
   configureMcp?: boolean;
   configRevision?: string;
   appliedConfigRevision?: string;
+  mcpServer?: string;
+  accountAlias?: string;
 }
 
 async function selectionGranted(id: string, selection: ApplySelection): Promise<boolean> {
@@ -274,7 +304,15 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
   if (
     Object.keys(body).some(
       (key) =>
-        !['connection_id', 'connection_revision', 'request_revision', 'configure_mcp', 'config_revision'].includes(key),
+        ![
+          'connection_id',
+          'connection_revision',
+          'request_revision',
+          'configure_mcp',
+          'config_revision',
+          'mcp_server',
+          'account_alias',
+        ].includes(key),
     ) ||
     typeof body.connection_id !== 'string' ||
     typeof body.connection_revision !== 'string' ||
@@ -294,16 +332,29 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
     throw new ConnectionInputError('The credential changed. Review access again.', 412);
   if (
     body.configure_mcp &&
-    (preview.connection.kind === 'static' || !preview.mcp.names.length || body.config_revision !== preview.mcp.revision)
+    (typeof body.mcp_server !== 'string' ||
+      !preview.mcp.names.includes(body.mcp_server) ||
+      typeof body.account_alias !== 'string' ||
+      body.config_revision !== preview.mcp.revision)
   )
-    throw new ConnectionInputError('Review the matching OAuth MCP configuration before requesting a restart.', 412);
+    throw new ConnectionInputError('Review one named MCP configuration before requesting a restart.', 412);
   const selection: ApplySelection = {
     userId,
     connectionId: body.connection_id,
     connectionRevision: body.connection_revision,
     configureMcp: body.configure_mcp === true,
     configRevision: preview.mcp.revision,
+    ...(body.configure_mcp ? { mcpServer: String(body.mcp_server), accountAlias: String(body.account_alias) } : {}),
   };
+  let authentication;
+  try {
+    authentication = body.configure_mcp
+      ? parseMcpAuthentication({ connection_id: body.connection_id, account_alias: body.account_alias })
+      : undefined;
+  } catch (error) {
+    if (!(error instanceof McpAuthenticationError)) throw error;
+    throw new ConnectionInputError(error.message);
+  }
   if (!beginApprovalExecution(getPendingApproval(id)!))
     throw new ConnectionInputError('This approval is already being applied.', 409);
   if (!claimApprovalWorkflow(id, Number(body.request_revision), { ...selection })) {
@@ -320,10 +371,14 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
     }
     if (!(await selectionGranted(id, selection)))
       throw new ConnectionInputError('Access could not be verified after applying the grant.', 409);
-    const runtime = await runtimeInstructions(userId, preview.request.agent_group_id, preview.connection);
+    let runtime: Awaited<ReturnType<typeof runtimeInstructions>> | undefined;
     if (selection.configureMcp) {
-      const current = mcpConfiguration(preview.request.agent_group_id, preview.request.resource_url);
-      if (current.revision !== selection.configRevision || !runtime.accessPlaceholder)
+      const current = mcpConfiguration(
+        preview.request.agent_group_id,
+        preview.request.resource_url,
+        selection.mcpServer,
+      );
+      if (current.revision !== selection.configRevision)
         throw new ConnectionInputError(
           'MCP configuration changed while applying access; review the resulting grant and configuration.',
           412,
@@ -331,29 +386,48 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
       requireGroupAdmin(userId, preview.request.agent_group_id);
       const config = getContainerConfig(preview.request.agent_group_id)!;
       const servers = JSON.parse(config.mcp_servers) as Record<string, McpServerConfig>;
-      for (const name of current.names) {
-        const server = servers[name];
-        if ('url' in server)
-          servers[name] = {
-            ...server,
-            headers: { ...server.headers, Authorization: `Bearer ${runtime.accessPlaceholder}` },
-          };
-      }
+      const serverName = selection.mcpServer!;
+      const server = servers[serverName];
+      if (!('url' in server)) throw new ConnectionInputError('Named MCP transport changed.', 409);
+      servers[serverName] = {
+        ...server,
+        authentication,
+        headers: Object.fromEntries(
+          Object.entries(server.headers ?? {}).filter(
+            ([key]) => !['authorization', 'x-agentvault-binding'].includes(key.toLowerCase()),
+          ),
+        ),
+      };
       getDb().transaction(() => {
         updateContainerConfigJson(preview.request.agent_group_id, 'mcp_servers', servers);
         selection.appliedConfigRevision = mcpConfiguration(
           preview.request.agent_group_id,
           preview.request.resource_url,
+          serverName,
         ).revision;
         getDb()
           .prepare('UPDATE approval_workflows SET data_json=? WHERE approval_id=?')
           .run(JSON.stringify(selection), id);
       })();
+      const resolved = await resolveMcpAuthentication(preview.request.agent_group_id, {
+        [serverName]: servers[serverName],
+      });
+      if (resolved.statuses[0]?.status !== 'ready')
+        throw new ConnectionInputError(
+          'The selected MCP connection could not be resolved. Review Credentials and the named server.',
+          409,
+        );
+    } else {
+      runtime = await runtimeInstructions(userId, preview.request.agent_group_id, preview.connection);
     }
     finishApprovalWorkflow(
       id,
       'completed',
-      `Access granted for ${preview.request.resource_url}. The group grant was verified; upstream authentication has not yet been verified. Runtime routing: ${JSON.stringify(runtime.instructions)}. Safely verify the original operation, then continue the original request with its original dates, timezone and account choice. Do not automatically replay writes or create a recurring poller.`,
+      `Access granted for ${preview.request.resource_url}. The group grant was verified; upstream authentication has not yet been verified. ${
+        selection.configureMcp
+          ? `Only MCP server ${JSON.stringify(selection.mcpServer)} now uses account alias ${JSON.stringify(selection.accountAlias)}. The host resolves its current binding; do not construct authentication headers.`
+          : `Runtime routing: ${JSON.stringify(runtime!.instructions)}.`
+      } Safely verify the original operation, then continue the original request with its original dates, timezone and account choice. Do not automatically replay writes or create a recurring poller.`,
       selection.configureMcp,
     );
   } catch (error) {
@@ -438,14 +512,34 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
         const request = reviewAccessRequest(selection.userId, row.approval_id);
         const configReady =
           !selection.configureMcp ||
-          selection.appliedConfigRevision === mcpConfiguration(request.agent_group_id, request.resource_url).revision;
+          Boolean(
+            selection.mcpServer &&
+            selection.accountAlias &&
+            selection.appliedConfigRevision ===
+              mcpConfiguration(request.agent_group_id, request.resource_url, selection.mcpServer).revision,
+          );
         if (configReady && (await selectionGranted(row.approval_id, selection))) {
           const connection = await getConnection(selection.userId, selection.connectionId);
-          const runtime = await runtimeInstructions(selection.userId, request.agent_group_id, connection);
+          const runtime = selection.configureMcp
+            ? undefined
+            : await runtimeInstructions(selection.userId, request.agent_group_id, connection);
+          if (selection.configureMcp) {
+            const config = getContainerConfig(request.agent_group_id)!;
+            const servers = JSON.parse(config.mcp_servers) as Record<string, McpServerConfig>;
+            const resolved = await resolveMcpAuthentication(request.agent_group_id, {
+              [selection.mcpServer!]: servers[selection.mcpServer!],
+            });
+            if (resolved.statuses[0]?.status !== 'ready')
+              throw new ConnectionInputError('MCP reference no longer resolves.', 409);
+          }
           finishApprovalWorkflow(
             row.approval_id,
             'completed',
-            `Your approved access grant was recovered and verified after restart. Runtime routing: ${JSON.stringify(runtime.instructions)}. Safely verify upstream access before continuing the original request. Preserve its original dates and timezone; do not replay writes automatically.`,
+            `Your approved access grant was recovered and verified after restart. ${
+              selection.configureMcp
+                ? `Use MCP server ${JSON.stringify(selection.mcpServer)} with account alias ${JSON.stringify(selection.accountAlias)}; the host manages authentication.`
+                : `Runtime routing: ${JSON.stringify(runtime!.instructions)}.`
+            } Safely verify upstream access before continuing the original request. Preserve its original dates and timezone; do not replay writes automatically.`,
             selection.configureMcp,
           );
         } else {

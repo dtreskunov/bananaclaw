@@ -16,6 +16,7 @@ import { getAgentGroup } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { notifyAgent, requestApproval } from '../approvals/index.js';
+import { McpAuthenticationError, parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
 
 export async function handleInstallPackages(content: Record<string, unknown>, session: Session): Promise<void> {
   const agentGroup = getAgentGroup(session.agent_group_id);
@@ -110,6 +111,14 @@ export async function handleAddMcpServer(content: Record<string, unknown>, sessi
       return;
     }
     const transport = (content.transport as string) === 'sse' ? 'sse' : 'http';
+    let authentication;
+    try {
+      authentication = parseMcpAuthentication(content.authentication, url);
+    } catch (error) {
+      if (!(error instanceof McpAuthenticationError)) throw error;
+      notifyAgent(session, `add_mcp_server failed: ${error.message}`);
+      return;
+    }
     await requestApproval({
       session,
       agentName: agentGroup.name,
@@ -119,6 +128,7 @@ export async function handleAddMcpServer(content: Record<string, unknown>, sessi
         url,
         transport,
         headers: (content.headers as Record<string, string>) || {},
+        authentication,
       },
       title: 'Add MCP Request',
       question: `Agent "${agentGroup.name}" is attempting to add a remote MCP server:\n${serverName} (${transport.toUpperCase()} ${url})`,
@@ -126,6 +136,10 @@ export async function handleAddMcpServer(content: Record<string, unknown>, sessi
     return;
   }
 
+  if (content.authentication !== undefined) {
+    notifyAgent(session, 'add_mcp_server failed: connection references require HTTP/SSE transport.');
+    return;
+  }
   await requestApproval({
     session,
     agentName: agentGroup.name,

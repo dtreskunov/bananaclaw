@@ -16,6 +16,7 @@ import { getContainerConfig, updateContainerConfigJson } from '../../db/containe
 import { getSession } from '../../db/sessions.js';
 import type { McpServerConfig } from '../../container-config.js';
 import { log } from '../../log.js';
+import { parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { ApprovalHandler } from '../approvals/index.js';
 
@@ -107,9 +108,15 @@ export const applyAddMcpServer: ApprovalHandler = async ({ session, payload, use
   const servers = JSON.parse(configRow.mcp_servers) as Record<string, McpServerConfig>;
   if (payload.url) {
     const transport = payload.transport === 'sse' ? 'sse' : 'http';
+    const previous = servers[payload.name as string];
+    const reference =
+      payload.authentication === undefined && previous && 'url' in previous
+        ? previous.authentication
+        : payload.authentication;
     servers[payload.name as string] = {
       type: transport,
       url: payload.url as string,
+      authentication: parseMcpAuthentication(reference, payload.url as string),
       ...(payload.headers && Object.keys(payload.headers as Record<string, string>).length > 0
         ? { headers: payload.headers as Record<string, string> }
         : {}),

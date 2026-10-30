@@ -67,6 +67,10 @@ export function resetState(): void {
     nextcloud: { type: 'http', url: 'https://nextcloud.example.org/mcp/tools' },
     new_server: { type: 'http', url: 'https://new.example.com/mcp' },
   };
+  if (new URLSearchParams(location.search).has('dual_accounts')) {
+    mcpServers.browser_work = { type: 'http', url: 'https://mcp.example.com/mcp',
+      authentication: { connection_id: 'other-account', account_alias: 'Work' } };
+  }
   callLog.length = 0;
   emit();
 }
@@ -115,19 +119,28 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
       reason: 'Finish the requested report.', revision: 1, agent_group_id: FIXTURE_GROUP.id, agent_group_name: FIXTURE_GROUP.name,
       result: accessStage === 'completed' ? { message: 'Access granted. The agent will safely verify the original operation.' } : null };
     if (!access[1] && method === 'GET') return request;
-    const input = body<{ connection_id: string; connection_revision?: string; request_revision?: number }>(init);
+    const input = body<{ connection_id: string; connection_revision?: string; request_revision?: number;
+      configure_mcp?: boolean; mcp_server?: string; account_alias?: string }>(init);
     const item = current(input.connection_id);
+    const names = Object.entries(mcpServers).filter(([, server]) => 'url' in server && server.url === resource).map(([name]) => name);
     if (access[1] === 'preview' && method === 'POST') return {
       request, connection: item, matches: item.services.some(service => serviceMatchesResource(service, resource)),
       grantBreadth: 'All current and future URL patterns on this connection, not just the requested URL.',
       verification: 'Grant verification only. The agent must verify the authenticated operation after access is granted.',
-      mcp: { names: [], revision: 'fixture-mcp' },
+      mcp: { names, revision: 'fixture-mcp', configured: Object.fromEntries(names.map(name =>
+        [name, 'authentication' in mcpServers[name] ? mcpServers[name].authentication : undefined])) },
     };
     if (access[1] === 'apply' && method === 'POST') {
       if (accessStage !== 'pending' || input.connection_revision !== item.revision || input.request_revision !== 1)
         throw new HttpError(409, 'Review the current request and connection.');
       if (item.status !== 'ready' || !item.services.some(service => serviceMatchesResource(service, resource)))
         throw new HttpError(409, 'Connect a compatible credential first.');
+      if (input.configure_mcp) {
+        if (!input.mcp_server || !input.account_alias || !names.includes(input.mcp_server)) throw new HttpError(409, 'Choose one named server.');
+        const server = mcpServers[input.mcp_server];
+        if ('url' in server) mcpServers[input.mcp_server] = { ...server,
+          authentication: { connection_id: item.id, account_alias: input.account_alias } };
+      }
       accessStage = 'completed';
       return { ...request, status: accessStage };
     }

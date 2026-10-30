@@ -67,6 +67,21 @@ describe('groups config add-mcp-server transports', () => {
     expect((await add({ type: 'sse', url: 'http://localhost:8000/sse' })).ok).toBe(true);
     expect(servers().bananabrowse).toEqual({ type: 'sse', url: 'http://localhost:8000/sse' });
   });
+  it('pins a stable reference and never silently switches to automatic matching on URL changes', async () => {
+    expect((await add({ type: 'http', url: URL, connection: 'conn-personal', 'account-alias': 'Personal' })).ok).toBe(
+      true,
+    );
+    expect(servers().bananabrowse.authentication).toEqual({
+      connection_id: 'conn-personal',
+      account_alias: 'Personal',
+    });
+    await add({ type: 'http', url: URL, 'account-alias': 'Work' });
+    expect(servers().bananabrowse.authentication.account_alias).toBe('Work');
+    await add({ type: 'http', url: URL + '-changed' });
+    expect(servers().bananabrowse.authentication).toEqual({ connection_id: 'conn-personal', account_alias: 'Work' });
+    await add({ type: 'http', url: URL + '-changed', connection: '' });
+    expect(servers().bananabrowse.authentication).toBeUndefined();
+  });
 
   it('sets long human-wait timeouts without changing other entries or re-add behavior', async () => {
     expect((await add({ type: 'http', url: URL, timeout: '600000' })).ok).toBe(true);
@@ -140,6 +155,11 @@ describe('groups config add-mcp-server transports', () => {
     { type: 'http', url: URL, timeout: '600001' },
     { type: 'http', url: URL, timeout: '1000.5' },
     { type: 'http', url: URL, timeout: 'not-a-number' },
+    { type: 'http', url: URL, connection: 'conn-personal' },
+    { type: 'http', url: URL, 'account-alias': 'Personal' },
+    { type: 'http', url: URL, connection: 'conn-personal', 'account-alias': '' },
+    { type: 'http', url: 'http://example.test/mcp', connection: 'conn-personal', 'account-alias': 'Personal' },
+    { command: 'stdio', connection: 'conn-personal', 'account-alias': 'Personal' },
   ])('rejects invalid or mixed transport arguments without mutation: %j', async (args) => {
     const before = getContainerConfig(GROUP)!.mcp_servers;
     const result = await add(args);

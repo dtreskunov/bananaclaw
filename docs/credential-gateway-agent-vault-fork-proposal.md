@@ -377,8 +377,16 @@ messages. Review is not approval. Recovery verifies an interrupted grant rather
 than blindly replaying it. Credential entry and OAuth use the existing forms;
 an OAuth popup interrupted by host restart must be restarted, while its parent
 approval remains pending. Group-bound runtime selectors are delivered only
-after a verified grant. Optional matching MCP Authorization updates and a
+after a verified grant. Optional named MCP connection updates and a
 requesting-session restart require explicit review of the configuration hash.
+These updates now pin exactly one named HTTP/SSE MCP server through
+`authentication: {connection_id, account_alias}`. Host-side scoped runtime
+discovery resolves the current group handle and materializes an internal
+binding selector; no generated selector is persisted in the source config.
+The gateway strips the internal header, rechecks native authorization on use,
+and never falls through to another account after revocation. Blocked references
+omit only that server and provide an actionable runtime status. Account aliases
+are user-approved labels, not evidence that accounts or owners are equivalent.
 Completion verifies the group grant, not arbitrary upstream operations; the
 agent must safely validate the original operation before claiming success.
 No automatic scope union, OAuth-app host changes, write replay or polling

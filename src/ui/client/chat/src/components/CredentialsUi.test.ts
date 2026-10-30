@@ -144,6 +144,36 @@ function render(node: { type: unknown; props: unknown }): TestNode {
 }
 
 describe('assisted credential approval UI', () => {
+  it('lets the user pin a private granted connection and an account alias without copying headers', () => {
+    hooks.resource.data = {
+      grants: [
+        {
+          connection_id: original.id,
+          label: original.label,
+          owner: original.owner,
+          services: original.services,
+          status: 'active',
+        },
+      ],
+    };
+    const onAuthenticationChange = vi.fn();
+    const node = McpConnectionAccess({
+      gid: 'one',
+      resourceUrl: 'https://api.example.com/mcp',
+      serverName: 'gmail_personal',
+      onAuthenticationChange,
+      onOpenCredentials: vi.fn(),
+    });
+    descendants(node)
+      .find((child) => child.type === 'select')!
+      .props.onChange({ currentTarget: { value: original.id } });
+    expect(onAuthenticationChange).toHaveBeenCalledWith({
+      connection_id: original.id,
+      account_alias: 'gmail_personal',
+    });
+    expect(JSON.stringify(onAuthenticationChange.mock.calls)).not.toContain('Authorization');
+    expect(JSON.stringify(onAuthenticationChange.mock.calls)).not.toContain('BIND_');
+  });
   it('uses a non-authorizing review action while retaining ordinary approval buttons', () => {
     const onReview = vi.fn(),
       onRespond = vi.fn();
