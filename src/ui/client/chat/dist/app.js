@@ -22065,7 +22065,7 @@ function UserMenu() {
     { label: "My Profile", action: () => {
       settingsOpen.value = true;
     } },
-    { label: "Credentials", action: () => openCredentials() }
+    { label: "My Credentials", action: () => openCredentials() }
   ];
   if (admin) items.push({ label: "Agent Settings", action: () => {
     groupAdminOpen.value = true;
@@ -30019,12 +30019,6 @@ function Impact({ connection: connection2, groups: groups2 }) {
     ] }, grant.vault)) }) : /* @__PURE__ */ u4("p", { children: "No agents currently have access." })
   ] });
 }
-function Review({ checked, onChange, children }) {
-  return /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-    /* @__PURE__ */ u4("input", { type: "checkbox", checked, onChange: (event) => onChange(event.currentTarget.checked) }),
-    /* @__PURE__ */ u4("span", { children })
-  ] });
-}
 function ErrorNotice({ message: message2 }) {
   return message2 ? /* @__PURE__ */ u4("p", { class: "ga-cred-error", role: "alert", children: message2 }) : null;
 }
@@ -30059,7 +30053,6 @@ function useCredentialResource(url) {
 function ConfirmCredentialAction({ title, label, children, onClose, onConfirm }) {
   const [busy, setBusy] = h2(false);
   const [error, setError] = h2("");
-  const [reviewed, setReviewed] = h2(false);
   async function confirm2() {
     setBusy(true);
     setError("");
@@ -30075,10 +30068,9 @@ function ConfirmCredentialAction({ title, label, children, onClose, onConfirm })
   }
   return /* @__PURE__ */ u4(CredentialDialog, { title, onClose, busy, footer: /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
-    /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled: busy || !reviewed, onClick: () => void confirm2(), children: busy ? "Working\u2026" : label })
+    /* @__PURE__ */ u4("button", { type: "button", class: "danger", disabled: busy, onClick: () => void confirm2(), children: busy ? "Working\u2026" : label })
   ] }), children: [
     children,
-    /* @__PURE__ */ u4(Review, { checked: reviewed, onChange: setReviewed, children: "I reviewed the affected agents and the connection-wide impact." }),
     /* @__PURE__ */ u4(ErrorNotice, { message: error })
   ] });
 }
@@ -31656,7 +31648,6 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
   const [appId, setAppId] = h2(defaults?.appId ?? "");
   const [scopes, setScopes] = h2(defaults?.scopes.join("\n") ?? "");
   const [unspecifiedScopes, setUnspecifiedScopes] = h2(false);
-  const [reviewed, setReviewed] = h2(false);
   const [oauthDraft, setOauthDraft] = h2(null);
   const firstUrl = A2(null);
   y2(() => {
@@ -31689,11 +31680,10 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
     }
   }
   const renamed = !connection2 || label.trim() !== connectionName(connection2, apps);
-  const canSave = !busy && !stale && !!label.trim() && (creatingOAuth ? reviewed && validScopeSelection(scopes, unspecifiedScopes) && (kind === "mcp_oauth" ? !!resource : !!appId) : !routingError && !missingValues && (!connection2 || renamed || routingChanged || Object.keys(supplied).length > 0));
+  const canSave = !busy && !stale && !!label.trim() && (creatingOAuth ? validScopeSelection(scopes, unspecifiedScopes) && (kind === "mcp_oauth" ? !!resource : !!appId) : !routingError && !missingValues && (!connection2 || renamed || routingChanged || Object.keys(supplied).length > 0));
   const changeRoute = (index, route) => {
     setRoutes((old) => old.map((item, at) => at === index ? route : item));
     setRoutingChanged(true);
-    setReviewed(false);
     if (index === 0 && automaticName) setLabel(hostnameFromPattern(route.pattern));
   };
   async function save(event) {
@@ -31747,7 +31737,6 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
     /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
     /* @__PURE__ */ u4("button", { type: "submit", form: "personal-connection", class: "primary", disabled: !canSave, children: busy ? creatingOAuth ? "Starting\u2026" : "Saving\u2026" : creatingOAuth ? oauthDraft ? "Retry sign-in" : "Start sign-in" : "Save" })
   ] }), children: /* @__PURE__ */ u4("form", { id: "personal-connection", onSubmit: save, children: [
-    !connection2 && accessRequest ? /* @__PURE__ */ u4("p", { class: "ga-cred-callout", children: "These settings were suggested for the access request. Review the authentication, destination and permissions before saving or signing in. Creation does not grant the agent access." }) : null,
     /* @__PURE__ */ u4(
       "input",
       {
@@ -31778,7 +31767,6 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
           setKind(next);
           setScopes((next === "static" ? [] : accessRequest?.scopes ?? (next === "oauth_app" ? apps.find((app) => app.id === appId)?.default_scopes ?? [] : [])).join("\n"));
           setUnspecifiedScopes(false);
-          setReviewed(false);
           if (automaticName) setLabel(next === "oauth_app" ? apps.find((app) => app.id === appId)?.label ?? "" : hostnameFromPattern(routes[0].pattern));
         },
         children: [
@@ -31800,25 +31788,17 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
           unspecifiedScopes,
           busy,
           firstInput: firstUrl,
-          onUnspecifiedScopes: (value) => {
-            setUnspecifiedScopes(value);
-            setReviewed(false);
-          },
+          onUnspecifiedScopes: setUnspecifiedScopes,
           onResource: (pattern) => changeRoute(0, { ...routes[0], pattern }),
           onApp: (id2) => {
             setAppId(id2);
             setUnspecifiedScopes(false);
             setScopes((accessRequest?.scopes ?? apps.find((app) => app.id === id2)?.default_scopes ?? []).join("\n"));
             if (automaticName && kind === "oauth_app") setLabel(apps.find((app) => app.id === id2)?.label ?? "");
-            setReviewed(false);
           },
-          onScopes: (value) => {
-            setScopes(value);
-            setReviewed(false);
-          }
+          onScopes: setScopes
         }
       ),
-      /* @__PURE__ */ u4(OAuthReview, { checked: reviewed, onChange: setReviewed }),
       /* @__PURE__ */ u4(ErrorNotice, { message: routes[0].pattern ? oauthError : "" }),
       oauthDraft ? /* @__PURE__ */ u4("p", { children: "A draft credential was saved. Retrying uses the same connection." }) : null
     ] }) : null,
@@ -31923,16 +31903,6 @@ function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, b
     )
   ] });
 }
-function OAuthReview({ checked, onChange, reconnect = false }) {
-  return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("p", { children: "All receiving agents share this upstream account and its actual permissions, including future URL patterns and permissions approved during sign-in. Requested scopes are not a guarantee of provider-granted scopes. Use a separate connection to keep a different account or permission profile separate." }),
-    /* @__PURE__ */ u4(Review, { checked, onChange, children: [
-      "I reviewed the upstream identity, resource, app, requested scopes and ",
-      reconnect ? "affected agents" : "shared-connection implications",
-      "."
-    ] })
-  ] });
-}
 function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2, onStart, onClose, onSaved }) {
   const kind = connection2.kind === "oauth_app" ? "oauth_app" : "mcp_oauth";
   const [resource, setResource] = h2(connection2.resource_url ?? "");
@@ -31941,7 +31911,6 @@ function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2,
   const [unspecifiedScopes, setUnspecifiedScopes] = h2(!connection2.requested_scopes?.length);
   const [busy, setBusy] = h2(false);
   const [error, setError] = h2("");
-  const [reviewed, setReviewed] = h2(false);
   let resourceUrl = "";
   let resourceError = "";
   if (kind === "mcp_oauth") {
@@ -31952,7 +31921,7 @@ function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2,
       resourceError = errorMessage(error2);
     }
   }
-  const canStart = !busy && validScopeSelection(scopes, unspecifiedScopes) && (kind === "mcp_oauth" ? !!resourceUrl : !!app) && reviewed;
+  const canStart = !busy && validScopeSelection(scopes, unspecifiedScopes) && (kind === "mcp_oauth" ? !!resourceUrl : !!app);
   async function start(event) {
     event.preventDefault();
     if (!canStart) return;
@@ -31988,29 +31957,18 @@ function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2,
         scopes,
         busy,
         unspecifiedScopes,
-        onUnspecifiedScopes: (value) => {
-          setUnspecifiedScopes(value);
-          setReviewed(false);
-        },
-        onResource: (value) => {
-          setResource(value);
-          setReviewed(false);
-        },
+        onUnspecifiedScopes: setUnspecifiedScopes,
+        onResource: setResource,
         onApp: (value) => {
           setApp(value);
           setUnspecifiedScopes(false);
           setScopes((apps.find((item) => item.id === value)?.default_scopes ?? []).join("\n"));
-          setReviewed(false);
         },
-        onScopes: (value) => {
-          setScopes(value);
-          setReviewed(false);
-        }
+        onScopes: setScopes
       }
     ),
     resource && resourceError ? /* @__PURE__ */ u4(ErrorNotice, { message: resourceError }) : null,
     /* @__PURE__ */ u4(Impact, { connection: connection2, groups: groups2 }),
-    /* @__PURE__ */ u4(OAuthReview, { checked: reviewed, onChange: setReviewed, reconnect: true }),
     /* @__PURE__ */ u4(ErrorNotice, { message: error })
   ] }) });
 }
@@ -32043,7 +32001,6 @@ function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onC
   const [secret, setSecret] = h2("");
   const [busy, setBusy] = h2(false);
   const [error, setError] = h2("");
-  const [reviewed, setReviewed] = h2(false);
   const [deleting, setDeleting] = h2(false);
   const affected = connections.filter((connection2) => connection2.app_id === (app?.id ?? id2));
   let config;
@@ -32054,8 +32011,9 @@ function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onC
     if (!(error2 instanceof CredentialsError)) throw error2;
     validationError = errorMessage(error2);
   }
-  const canManage = !busy && reviewed && !!id2.trim() && (scope !== "install" || canEditInstall);
+  const canManage = !busy && !!id2.trim() && (scope !== "install" || canEditInstall);
   const canSave = canManage && !!config && (draft.token_endpoint_auth_method === "none" ? !secret : !!secret || !!app?.client_secret_set);
+  const showValidation = !!app || [id2, draft.label, draft.issuer, draft.client_id, secret].some((value) => !!value.trim());
   async function save(remove) {
     if (remove ? !canManage : !canSave) return;
     setBusy(true);
@@ -32085,21 +32043,12 @@ function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onC
     }, children: deleting ? "Confirm delete app" : "Delete app" }) : null,
     /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: !canSave || deleting, onClick: () => void save(false), children: busy ? "Saving\u2026" : "Save app" })
   ] }), children: [
-    /* @__PURE__ */ u4(GroupAdminField, { label: "App ID", children: /* @__PURE__ */ u4("input", { type: "text", "aria-label": "App ID", disabled: busy || !!app, value: id2, onInput: (event) => {
-      setId(event.currentTarget.value);
-      setReviewed(false);
-    } }) }),
-    /* @__PURE__ */ u4(GroupAdminField, { label: "App ownership", children: /* @__PURE__ */ u4("select", { "aria-label": "App ownership", value: scope, disabled: busy || !!app, onChange: (event) => {
-      setScope(event.currentTarget.value);
-      setReviewed(false);
-    }, children: [
+    /* @__PURE__ */ u4(GroupAdminField, { label: "App ID", children: /* @__PURE__ */ u4("input", { type: "text", "aria-label": "App ID", disabled: busy || !!app, value: id2, onInput: (event) => setId(event.currentTarget.value) }) }),
+    /* @__PURE__ */ u4(GroupAdminField, { label: "App ownership", children: /* @__PURE__ */ u4("select", { "aria-label": "App ownership", value: scope, disabled: busy || !!app, onChange: (event) => setScope(event.currentTarget.value), children: [
       /* @__PURE__ */ u4("option", { value: "user", children: "Personal app" }),
       canEditInstall ? /* @__PURE__ */ u4("option", { value: "install", children: "Install-wide app" }) : null
     ] }) }),
-    /* @__PURE__ */ u4(OAuthAppForm, { draft, busy, onChange: (next) => {
-      setDraft(next);
-      setReviewed(false);
-    } }),
+    /* @__PURE__ */ u4(OAuthAppForm, { draft, busy, onChange: setDraft }),
     /* @__PURE__ */ u4(GroupAdminField, { label: "Client secret", info: app?.client_secret_set ? "A secret is configured. Blank preserves it." : "Required only for confidential clients; never returned after saving.", children: /* @__PURE__ */ u4(
       SecretInput,
       {
@@ -32107,10 +32056,7 @@ function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onC
         value: secret,
         disabled: busy,
         placeholder: app?.client_secret_set ? "Keep current secret" : "New client secret",
-        onInput: (value) => {
-          setSecret(value);
-          setReviewed(false);
-        }
+        onInput: setSecret
       }
     ) }),
     /* @__PURE__ */ u4("div", { class: "ga-cred-callout", children: [
@@ -32129,8 +32075,7 @@ function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onC
       scope === "install" ? /* @__PURE__ */ u4("p", { children: "Install-wide changes can also affect other users and agents not visible here." }) : null,
       /* @__PURE__ */ u4("p", { children: "Connections pin their issuing client. Saving a different client, issuer, host or scope policy does not automatically rebind existing connections. Secret rotation or deletion can prevent refresh and require reconnect. Review every affected connection before replacing or deleting an app." })
     ] }),
-    /* @__PURE__ */ u4(Review, { checked: reviewed, onChange: setReviewed, children: "I reviewed the app policy, secret lifecycle and affected connections." }),
-    /* @__PURE__ */ u4(ErrorNotice, { message: reviewed ? validationError || (draft.token_endpoint_auth_method === "none" && secret ? "Public clients must not have a client secret." : draft.token_endpoint_auth_method !== "none" && !secret && !app?.client_secret_set ? "Enter a client secret." : "") : "" }),
+    /* @__PURE__ */ u4(ErrorNotice, { message: showValidation ? validationError || (draft.token_endpoint_auth_method === "none" && secret ? "Public clients must not have a client secret." : draft.token_endpoint_auth_method !== "none" && !secret && !app?.client_secret_set ? "Enter a client secret." : "") : "" }),
     deleting ? /* @__PURE__ */ u4("p", { role: "alert", children: "Delete this app configuration? Existing client bindings may stop refreshing; this does not detach one agent." }) : null,
     /* @__PURE__ */ u4(ErrorNotice, { message: error })
   ] });
@@ -32204,7 +32149,7 @@ function CredentialsContent({ agent } = {}) {
               },
               accessApprovalId.value
             ),
-            /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: clearAccessApproval, children: "Manage all Credentials" })
+            /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: clearAccessApproval, children: "My Credentials" })
           ] }) : null,
           /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
             !agent && !reviewing ? /* @__PURE__ */ u4("div", { class: "credentials-toolbar", children: [
@@ -32262,7 +32207,7 @@ function CredentialsContent({ agent } = {}) {
                 tableVersion
               ) : !loading ? agent ? /* @__PURE__ */ u4("div", { children: [
                 /* @__PURE__ */ u4("p", { children: "No personal credentials yet. Add a connection, then explicitly grant this agent access." }),
-                /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Open personal Credentials" })
+                /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Open My Credentials" })
               ] }) : /* @__PURE__ */ u4("p", { children: "No credentials yet." }) : null : null,
               !agent && view === "apps" ? /* @__PURE__ */ u4("section", { class: "credentials-apps", "aria-label": "OAuth apps", children: data.apps.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.apps.map((app) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
                 /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
@@ -32338,8 +32283,8 @@ function CredentialsContent({ agent } = {}) {
   return agent ? content : /* @__PURE__ */ u4(
     MobileDialog,
     {
-      title: "Credentials",
-      ariaLabel: "Credentials",
+      title: "My Credentials",
+      ariaLabel: "My Credentials",
       onClose: openChat2,
       onBack: isMobile.value ? () => {
         openChat2();
@@ -33589,7 +33534,7 @@ function PackagesSection({
 }) {
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4("div", { class: "group-admin-toolbar", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
-      "Packages baked into the container image. Changes require an image rebuild \u2014 the Apply dialog suggests rebuild when any list here changes. Mirrors",
+      "Packages baked into the container image. Changes automatically rebuild the image; sessions restart after active responses finish. Mirrors",
       " ",
       /* @__PURE__ */ u4("code", { children: "ncl groups config add-package / remove-package" }),
       "."
@@ -34847,6 +34792,7 @@ function SettingsTab({
   }
   const RESTART_REQUIRING_FIELDS = /* @__PURE__ */ new Set([
     "provider",
+    "upstream_provider",
     "model",
     "small_model",
     "effort",
@@ -34897,13 +34843,12 @@ function SettingsTab({
   const providerChangedWithCustomImage = pending4.has("provider") && draft.image_tag != null;
   const needsRebuild = imageRebuildNeeded || packagesChanged || providerChangedWithCustomImage;
   const [confirmOpen, setConfirmOpen] = h2(false);
-  const [restartChecked, setRestartChecked] = h2(false);
   const [rebuildChecked, setRebuildChecked] = h2(false);
   const [archiveOpen, setArchiveOpen] = h2(false);
   const [archiveConfirm, setArchiveConfirm] = h2("");
   const [archiveBusy, setArchiveBusy] = h2(false);
-  const effectiveRestart = !voiceOnlyChange && (restartChecked || rebuildChecked);
-  const effectiveRebuild = !voiceOnlyChange && rebuildChecked;
+  const effectiveRebuild = !voiceOnlyChange && (needsRebuild || rebuildChecked);
+  const effectiveRestart = needsRestart || effectiveRebuild;
   const canSave = changed;
   y2(() => {
     onActions({ refresh, apply: apply2, busy, canSave });
@@ -34911,8 +34856,7 @@ function SettingsTab({
   }, [busy, canSave, needsRestart, needsRebuild]);
   function apply2() {
     if (!changed) return;
-    setRestartChecked(needsRestart || needsRebuild);
-    setRebuildChecked(needsRebuild);
+    setRebuildChecked(false);
     setConfirmOpen(true);
   }
   async function doApply() {
@@ -34983,6 +34927,12 @@ function SettingsTab({
           return;
         }
       }
+      let restarted;
+      if (effectiveRestart) {
+        const r4 = await runRestart(effectiveRebuild);
+        if (!r4.ok) return;
+        restarted = r4.restarted;
+      }
       const fresh = await call(apiPath(gid, "/settings"));
       if (fresh.ok) {
         setData(fresh.data);
@@ -35004,11 +34954,9 @@ function SettingsTab({
         setDraftDisabledSkills([...fresh.data.disabledSkills ?? []]);
         groups.value = groups.value.map((g8) => g8.id === gid ? { ...g8, name: fresh.data.name } : g8);
       }
-      if (effectiveRebuild || effectiveRestart) {
-        const r4 = await runRestart(effectiveRebuild);
-        if (!r4.ok) return;
+      if (effectiveRestart) {
         showToast(
-          effectiveRebuild ? `Rebuilt image and restarted ${r4.restarted} session${r4.restarted === 1 ? "" : "s"}.` : `Restarted ${r4.restarted} session${r4.restarted === 1 ? "" : "s"}.`
+          `${effectiveRebuild ? "Image rebuilt. " : ""}Saved \u2014 ${restarted === 0 ? "changes apply when the agent next starts." : "changes apply after current responses finish."}`
         );
       } else {
         showToast("Saved.");
@@ -35425,51 +35373,33 @@ function SettingsTab({
               " ",
               /* @__PURE__ */ u4("code", { children: [...pending4].join(", ") })
             ] }),
-            /* @__PURE__ */ u4("div", { class: "ga-confirm-options", children: [
-              /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-                /* @__PURE__ */ u4(
-                  "input",
-                  {
-                    type: "checkbox",
-                    checked: effectiveRestart,
-                    disabled: busy || voiceOnlyChange || rebuildChecked,
-                    onChange: (e4) => setRestartChecked(e4.target.checked)
-                  }
-                ),
-                /* @__PURE__ */ u4("span", { children: "Restart sessions" }),
-                /* @__PURE__ */ u4(
-                  Tooltip,
-                  {
-                    text: "Stop and respawn all running container sessions for this group so they pick up the saved config.\nDefaults on when you change provider, model, effort, image tag, assistant name, or max messages per prompt. CLI scope alone does not need a restart \u2014 it is re-read on every CLI call.\nActive conversations resume on the next user message.",
-                    children: /* @__PURE__ */ u4("span", { class: "info-icon", "aria-label": "More info", children: "i" })
-                  }
-                )
+            effectiveRestart ? /* @__PURE__ */ u4("p", { class: "group-admin-help", role: "status", children: "Changes apply automatically after active responses finish and are committed. Idle sessions restart immediately. No agent reply is generated." }) : null,
+            /* @__PURE__ */ u4("div", { class: "ga-confirm-options", children: /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+              /* @__PURE__ */ u4(
+                "input",
+                {
+                  type: "checkbox",
+                  checked: effectiveRebuild,
+                  disabled: busy || voiceOnlyChange || needsRebuild,
+                  onChange: (e4) => setRebuildChecked(e4.target.checked)
+                }
+              ),
+              /* @__PURE__ */ u4("span", { children: [
+                "Rebuild image",
+                needsRebuild ? " (required)" : ""
               ] }),
-              /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-                /* @__PURE__ */ u4(
-                  "input",
-                  {
-                    type: "checkbox",
-                    checked: effectiveRebuild,
-                    disabled: busy || voiceOnlyChange,
-                    onChange: (e4) => setRebuildChecked(e4.target.checked)
-                  }
-                ),
-                /* @__PURE__ */ u4("span", { children: "Rebuild image" }),
-                /* @__PURE__ */ u4(
-                  Tooltip,
-                  {
-                    text: "Rebuild the container image before restarting.\nDefaults on when the chosen image tag does not exist locally, packages changed, or the provider changed while using a custom image.\nA rebuild always implies a restart and takes minutes, not seconds.",
-                    children: /* @__PURE__ */ u4("span", { class: "info-icon", "aria-label": "More info", children: "i" })
-                  }
-                )
-              ] })
-            ] }),
-            needsRestart && !effectiveRestart ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", children: "These changes won\u2019t take effect until the sessions restart." }) : null
+              /* @__PURE__ */ u4(
+                Tooltip,
+                {
+                  text: "Rebuild the container image before its deferred restart.\nRequired when the chosen image tag does not exist locally, packages changed, or the provider changed while using a custom image. Otherwise optional.\nA rebuild takes minutes, not seconds, and never interrupts an active response.",
+                  children: /* @__PURE__ */ u4("span", { class: "info-icon", "aria-label": "More info", children: "i" })
+                }
+              )
+            ] }) })
           ] }),
           /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
             /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => setConfirmOpen(false), children: "Cancel" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy, onClick: doApply, children: busy ? "Applying\u2026" : effectiveRebuild ? "Save & rebuild" : effectiveRestart ? "Save & restart" : "Save" })
+            /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy, onClick: doApply, children: busy ? "Applying\u2026" : effectiveRebuild ? "Save & rebuild" : "Save" })
           ] })
         ]
       }
