@@ -68,6 +68,7 @@ import {
 import {
   markContainerRunning,
   markContainerStopped,
+  openInboundDb,
   runnerStateDbPath,
   sessionDir,
   writeSessionRouting,
@@ -332,6 +333,13 @@ async function spawnContainer(session: Session): Promise<void> {
   // Materialize container.json from DB — writes fresh file and returns
   // the config object, threaded through provider resolution, buildMounts,
   // and buildContainerArgs so we don't re-read.
+  const inbound = openInboundDb(agentGroup.id, session.id);
+  let bootInboundSeq: number;
+  try {
+    bootInboundSeq = inbound.prepare('SELECT COALESCE(MAX(seq),0) FROM messages_in').pluck().get() as number;
+  } finally {
+    inbound.close();
+  }
   const containerConfig = materializeContainerJson(agentGroup.id);
   await materializeMcpAuthentication(agentGroup.id, containerConfig);
 
@@ -346,6 +354,7 @@ async function spawnContainer(session: Session): Promise<void> {
   // (extra mounts, env passthrough). Computed once and threaded through both
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
+  contribution.env = { ...contribution.env, NANOCLAW_BOOT_INBOUND_SEQ: String(bootInboundSeq) };
 
   await startSessionSignalServer(session.id, agentGroup.id);
   const mounts = buildMounts(agentGroup, session, containerConfig, provider, contribution);
@@ -588,7 +597,25 @@ function attachContainerWatcher(sessionId: string, containerName: string): void 
     activeContainers.delete(sessionId);
     markContainerStopped(sessionId);
     stopTypingRefresh(sessionId);
-    void stopSessionSignalServer(sessionId, true);
+    void stopSessionSignalServer(sessionId, true).then(async () => {
+      if (code !== 0) return;
+      const session = getSession(sessionId);
+      if (!session || session.status !== 'active') return;
+      const db = openInboundDb(session.agent_group_id, sessionId);
+      let restart: boolean;
+      try {
+        restart = !!db.prepare(
+          `SELECT 1 FROM messages_in WHERE status='pending' AND on_wake=1
+           AND (process_after IS NULL OR datetime(process_after) <= datetime('now')) LIMIT 1`,
+        ).get();
+      } finally {
+        db.close();
+      }
+      if (restart) {
+        log.info('Starting replacement after deferred configuration restart', { sessionId });
+        await wakeContainer(session);
+      }
+    }).catch((err) => log.error('Deferred configuration restart failed', { sessionId, err }));
     void releaseEgress(containerName);
     log.info('Container exited', { sessionId, code, containerName });
   });

@@ -216,6 +216,42 @@ it('applies steering to the existing batch without claiming queued or other-conv
   } finally { await h.stop(loop); }
 });
 
+it('steers an approval outcome, finishes the response, and restarts before consuming the verification or queued follow-up', async () => {
+  getInboundDb().exec(
+    "INSERT INTO destinations (name, type, channel_type, platform_id) VALUES ('web-test', 'channel', 'web', 'room')",
+  );
+  insert('initial');
+  const h = harness();
+  const loop = h.start();
+  try {
+    await until(() => h.active !== null);
+    const turnId = h.active!.id;
+    insert('approval-outcome', {
+      text: 'Configuration approved. Finish the current response; restart afterward.',
+      sender: 'system', senderId: 'system', inputHandling: { mode: 'steer' },
+    });
+    await until(() => h.steering.length === 1);
+    expect(h.steering[0].id).toBe('approval-outcome');
+    h.emit({ type: 'steering_applied', id: 'approval-outcome' });
+    await until(() => readInputState('approval-outcome')?.status === 'applied');
+    insert('verification');
+    getInboundDb().prepare("UPDATE messages_in SET on_wake=1 WHERE id='verification'").run();
+    insert('queued-user', { inputHandling: { mode: 'queue' } });
+    await Bun.sleep(20);
+    expect(h.active?.id).toBe(turnId);
+    expect(getOutboundDb().prepare('SELECT phase FROM turns WHERE id=?').get(turnId)).toEqual({ phase: 'running' });
+    expect(h.steering).toHaveLength(1);
+    h.emit({ type: 'result', text: '<message to="web-test">Finished without interruption</message>' });
+    await loop;
+    expect(getOutboundDb().prepare('SELECT phase,outcome FROM turns WHERE id=?').get(turnId))
+      .toEqual({ phase: 'settled', outcome: 'replied' });
+    expect(getOutboundDb().prepare("SELECT message_id FROM processing_ack WHERE message_id IN ('verification','queued-user')").all())
+      .toEqual([]);
+    expect(h.prompts).toHaveLength(1);
+    expect(getPendingMessages(true).map((message) => message.id)).toEqual(['verification', 'queued-user']);
+  } finally { await h.stop(loop); }
+});
+
 it('records and broadcasts a distinct activity for each injected steering message in consumption order', async () => {
   insert('initial');
   const h = harness();

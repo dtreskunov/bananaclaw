@@ -5,8 +5,8 @@
  * immediately. The host processes the request (including admin approval)
  * and notifies the agent via a chat message when complete. Admin approval
  * is approval to apply the change: `install_packages` auto-rebuilds the
- * per-agent image and restarts the container; `add_mcp_server` just
- * updates `container.json` and restarts (bun runs TS directly — no build
+ * per-agent image and restarts after the current response; `add_mcp_server`
+ * just updates `container.json` and defers the restart too (no build
  * step needed for a pure MCP wiring change).
  *
  * Package names are sanitized here at the tool boundary AND re-validated on
@@ -43,7 +43,7 @@ export const installPackages: McpToolDefinition = {
   tool: {
     name: 'install_packages',
     description:
-      'Install apt, npm, and/or pip packages into YOUR per-agent container image. Prefer `pip` for Python CLIs (yt-dlp, etc.) since the apt versions are usually stale. Requires admin approval; fire-and-forget. On approval, the image is rebuilt and the container is restarted automatically.',
+      'Install apt, npm, and/or pip packages into YOUR per-agent container image. Prefer `pip` for Python CLIs (yt-dlp, etc.) since the apt versions are usually stale. Requires admin approval; fire-and-forget. On approval, the image is rebuilt. The container restarts automatically after the current response finishes, then you can verify the new packages.',
     inputSchema: {
       type: 'object' as const,
       properties: {

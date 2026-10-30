@@ -3,21 +3,18 @@
  *
  * The approvals module calls these when an admin clicks Approve on a
  * pending_approvals row whose action matches. Each handler mutates the
- * container config in the DB, rebuilds/kills the container as needed,
- * and writes an on_wake message so the fresh container picks up where
- * the old one left off.
+ * container config in the DB, rebuilds the image as needed, and queues
+ * verification for a replacement container after the active response settles.
  *
- * install_packages: update DB + rebuild image + kill container + on_wake.
- * add_mcp_server: update DB + kill container + on_wake.
+ * install_packages: update DB + rebuild image + deferred restart + on_wake.
+ * add_mcp_server: update DB + deferred restart + on_wake.
  */
-import { buildAgentGroupImage, killContainer, wakeContainer } from '../../container-runner.js';
+import { buildAgentGroupImage } from '../../container-runner.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { getContainerConfig, updateContainerConfigJson } from '../../db/container-configs.js';
-import { getSession } from '../../db/sessions.js';
 import type { McpServerConfig } from '../../container-config.js';
 import { log } from '../../log.js';
 import { parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
-import { writeSessionMessage } from '../../session-manager.js';
 import type { ApprovalHandler } from '../approvals/index.js';
 
 export const applyInstallPackages: ApprovalHandler = async ({ session, payload, userId, notify }) => {
@@ -64,24 +61,13 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
   log.info('Package install approved', { agentGroupId: session.agent_group_id, userId });
   try {
     await buildAgentGroupImage(session.agent_group_id);
-    writeSessionMessage(session.agent_group_id, session.id, {
-      id: `appr-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      kind: 'chat',
-      timestamp: new Date().toISOString(),
-      platformId: session.agent_group_id,
-      channelType: 'agent',
-      threadId: null,
-      content: JSON.stringify({
-        text: `Packages installed (${pkgs}) and container rebuilt. Verify the new packages are available (e.g. run them or check versions) and report the result to the user.`,
-        sender: 'system',
-        senderId: 'system',
-      }),
-      onWake: 1,
-    });
-    killContainer(session.id, 'rebuild applied', () => {
-      const s = getSession(session.id);
-      if (s) wakeContainer(s);
-    });
+    notify(
+      `Packages approved (${pkgs}) and image rebuilt. Finish the current response; the container will restart afterward.`,
+    );
+    notify(
+      `Packages installed (${pkgs}) and container rebuilt. Verify the new packages are available (e.g. run them or check versions) and report the result to the user.`,
+      { afterRestart: true },
+    );
     log.info('Container rebuild completed (bundled with install)', { agentGroupId: session.agent_group_id });
   } catch (e) {
     notify(
@@ -130,23 +116,12 @@ export const applyAddMcpServer: ApprovalHandler = async ({ session, payload, use
   }
   updateContainerConfigJson(agentGroup.id, 'mcp_servers', servers);
 
-  writeSessionMessage(session.agent_group_id, session.id, {
-    id: `appr-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    kind: 'chat',
-    timestamp: new Date().toISOString(),
-    platformId: session.agent_group_id,
-    channelType: 'agent',
-    threadId: null,
-    content: JSON.stringify({
-      text: `MCP server "${payload.name}" added. Verify it's available (e.g. list your tools) and report the result to the user.`,
-      sender: 'system',
-      senderId: 'system',
-    }),
-    onWake: 1,
-  });
-  killContainer(session.id, 'mcp server added', () => {
-    const s = getSession(session.id);
-    if (s) wakeContainer(s);
-  });
+  notify(
+    `MCP server "${payload.name}" approved. Finish the current response; the new server will be available after the automatic restart.`,
+  );
+  notify(
+    `MCP server "${payload.name}" added. Verify it's available (e.g. list your tools) and report the result to the user.`,
+    { afterRestart: true },
+  );
   log.info('MCP server add approved', { agentGroupId: session.agent_group_id, userId });
 };

@@ -37,7 +37,7 @@ import {
 } from './db/index.js';
 import { getDeliveredIds, markDelivered } from './db/session-db.js';
 import { resolveSession, outboundDbPath, openInboundDb } from './session-manager.js';
-import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
+import { deliverSessionMessages, registerDeliveryAction, setDeliveryAdapter } from './delivery.js';
 
 function now(): string {
   return new Date().toISOString();
@@ -105,6 +105,23 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     expect(callCount).toBe(1);
     expect(getDeliveredIds(inbound)).toEqual(new Set(['out-before-adapter']));
     inbound.close();
+  });
+
+  it('passes the originating input to approval actions instead of looking at a successor turn', async () => {
+    seedAgentAndChannel();
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    const action = vi.fn().mockResolvedValue(undefined);
+    registerDeliveryAction('approval-origin-test', action);
+    setDeliveryAdapter({ deliver: vi.fn() });
+    const db = new Database(outboundDbPath('ag-1', session.id));
+    try {
+      db.prepare(`INSERT INTO messages_out(id,timestamp,kind,in_reply_to,content)
+        VALUES('approval-request',datetime('now'),'system','original-input','{"action":"approval-origin-test"}')`).run();
+    } finally { db.close(); }
+    await deliverSessionMessages(session);
+    expect(action).toHaveBeenCalledWith(
+      { action: 'approval-origin-test' }, session, expect.anything(), { originMessageId: 'original-input' },
+    );
   });
 
   it('resolves stable outbound edit targets to platform delivery receipts', async () => {

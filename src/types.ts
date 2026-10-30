@@ -238,6 +238,7 @@ export interface Question {
 
 export interface PendingApproval {
   approval_id: string;
+  origin_message_id?: string | null;
   session_id: string | null;
   request_id: string;
   action: string;

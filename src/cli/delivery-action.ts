@@ -14,7 +14,7 @@ import { dispatch } from './dispatch.js';
 import type { RequestFrame } from './frame.js';
 import type { Session } from '../types.js';
 
-registerDeliveryAction('cli_request', async (content, session, inDb) => {
+registerDeliveryAction('cli_request', async (content, session, inDb, context) => {
   const requestId = content.requestId as string;
   const command = content.command as string;
   const args = (content.args as Record<string, unknown>) ?? {};
@@ -30,6 +30,7 @@ registerDeliveryAction('cli_request', async (content, session, inDb) => {
     sessionId: session.id,
     agentGroupId: session.agent_group_id,
     messagingGroupId: session.messaging_group_id ?? '',
+    originMessageId: context?.originMessageId,
   };
 
   log.info('CLI request from agent', { requestId, command, sessionId: session.id });

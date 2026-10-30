@@ -18,10 +18,16 @@ import type { Session } from '../../types.js';
 import { notifyAgent, requestApproval } from '../approvals/index.js';
 import { McpAuthenticationError, parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
 
-export async function handleInstallPackages(content: Record<string, unknown>, session: Session): Promise<void> {
+export async function handleInstallPackages(
+  content: Record<string, unknown>,
+  session: Session,
+  _inDb?: unknown,
+  context?: { originMessageId: string | null },
+): Promise<void> {
+  const notify = (text: string) => notifyAgent(session, text, context?.originMessageId);
   const agentGroup = getAgentGroup(session.agent_group_id);
   if (!agentGroup) {
-    notifyAgent(session, 'install_packages failed: agent group not found.');
+    notify('install_packages failed: agent group not found.');
     return;
   }
 
@@ -35,28 +41,28 @@ export async function handleInstallPackages(content: Record<string, unknown>, se
   const PIP_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(?:[<>=!~]=?[A-Za-z0-9._*+!-]+(?:,[<>=!~]=?[A-Za-z0-9._*+!-]+)*)?$/;
   const MAX_PACKAGES = 20;
   if (apt.length + npm.length + pip.length === 0) {
-    notifyAgent(session, 'install_packages failed: at least one apt, npm, or pip package is required.');
+    notify('install_packages failed: at least one apt, npm, or pip package is required.');
     return;
   }
   if (apt.length + npm.length + pip.length > MAX_PACKAGES) {
-    notifyAgent(session, `install_packages failed: max ${MAX_PACKAGES} packages per request.`);
+    notify(`install_packages failed: max ${MAX_PACKAGES} packages per request.`);
     return;
   }
   const invalidApt = apt.find((p) => !APT_RE.test(p));
   if (invalidApt) {
-    notifyAgent(session, `install_packages failed: invalid apt package name "${invalidApt}".`);
+    notify(`install_packages failed: invalid apt package name "${invalidApt}".`);
     log.warn('install_packages: invalid apt package rejected', { pkg: invalidApt });
     return;
   }
   const invalidNpm = npm.find((p) => !NPM_RE.test(p));
   if (invalidNpm) {
-    notifyAgent(session, `install_packages failed: invalid npm package name "${invalidNpm}".`);
+    notify(`install_packages failed: invalid npm package name "${invalidNpm}".`);
     log.warn('install_packages: invalid npm package rejected', { pkg: invalidNpm });
     return;
   }
   const invalidPip = pip.find((p) => !PIP_RE.test(p));
   if (invalidPip) {
-    notifyAgent(session, `install_packages failed: invalid pip package name "${invalidPip}".`);
+    notify(`install_packages failed: invalid pip package name "${invalidPip}".`);
     log.warn('install_packages: invalid pip package rejected', { pkg: invalidPip });
     return;
   }
@@ -68,6 +74,7 @@ export async function handleInstallPackages(content: Record<string, unknown>, se
   ].join(', ');
   await requestApproval({
     session,
+    originMessageId: context?.originMessageId,
     agentName: agentGroup.name,
     action: 'install_packages',
     payload: { apt, npm, pip, reason },
@@ -76,25 +83,31 @@ export async function handleInstallPackages(content: Record<string, unknown>, se
   });
 }
 
-export async function handleAddMcpServer(content: Record<string, unknown>, session: Session): Promise<void> {
+export async function handleAddMcpServer(
+  content: Record<string, unknown>,
+  session: Session,
+  _inDb?: unknown,
+  context?: { originMessageId: string | null },
+): Promise<void> {
+  const notify = (text: string) => notifyAgent(session, text, context?.originMessageId);
   const agentGroup = getAgentGroup(session.agent_group_id);
   if (!agentGroup) {
-    notifyAgent(session, 'add_mcp_server failed: agent group not found.');
+    notify('add_mcp_server failed: agent group not found.');
     return;
   }
   const serverName = content.name as string;
   const command = content.command as string | undefined;
   const url = content.url as string | undefined;
   if (!serverName) {
-    notifyAgent(session, 'add_mcp_server failed: name is required.');
+    notify('add_mcp_server failed: name is required.');
     return;
   }
   if (!command && !url) {
-    notifyAgent(session, 'add_mcp_server failed: either command (stdio) or url (remote) is required.');
+    notify('add_mcp_server failed: either command (stdio) or url (remote) is required.');
     return;
   }
   if (command && url) {
-    notifyAgent(session, 'add_mcp_server failed: provide either command (stdio) or url (remote), not both.');
+    notify('add_mcp_server failed: provide either command (stdio) or url (remote), not both.');
     return;
   }
 
@@ -103,11 +116,11 @@ export async function handleAddMcpServer(content: Record<string, unknown>, sessi
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        notifyAgent(session, `add_mcp_server failed: url must be http(s), got "${parsed.protocol}".`);
+        notify(`add_mcp_server failed: url must be http(s), got "${parsed.protocol}".`);
         return;
       }
     } catch {
-      notifyAgent(session, `add_mcp_server failed: invalid url "${url}".`);
+      notify(`add_mcp_server failed: invalid url "${url}".`);
       return;
     }
     const transport = (content.transport as string) === 'sse' ? 'sse' : 'http';
@@ -116,11 +129,12 @@ export async function handleAddMcpServer(content: Record<string, unknown>, sessi
       authentication = parseMcpAuthentication(content.authentication, url);
     } catch (error) {
       if (!(error instanceof McpAuthenticationError)) throw error;
-      notifyAgent(session, `add_mcp_server failed: ${error.message}`);
+      notify(`add_mcp_server failed: ${error.message}`);
       return;
     }
     await requestApproval({
       session,
+      originMessageId: context?.originMessageId,
       agentName: agentGroup.name,
       action: 'add_mcp_server',
       payload: {
@@ -137,11 +151,12 @@ export async function handleAddMcpServer(content: Record<string, unknown>, sessi
   }
 
   if (content.authentication !== undefined) {
-    notifyAgent(session, 'add_mcp_server failed: connection references require HTTP/SSE transport.');
+    notify('add_mcp_server failed: connection references require HTTP/SSE transport.');
     return;
   }
   await requestApproval({
     session,
+    originMessageId: context?.originMessageId,
     agentName: agentGroup.name,
     action: 'add_mcp_server',
     payload: {

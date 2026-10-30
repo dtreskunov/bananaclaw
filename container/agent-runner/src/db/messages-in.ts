@@ -34,6 +34,7 @@ export interface MessageInRow {
   /** Namespaced channel identity retained when canonical attribution is unavailable. */
   sender_identity?: string | null;
   source_session_id?: string | null;
+  on_wake?: number;
 }
 
 // Cap on how many messages reach the agent in one prompt. Read from
@@ -58,7 +59,9 @@ function getMaxMessagesPerPrompt(): number {
  * sees the prior context it missed. Host's countDueMessages gates waking on
  * trigger=1 separately (see src/db/session-db.ts).
  */
-export function getPendingMessages(isFirstPoll = false, options: { uncapped?: boolean } = {}): MessageInRow[] {
+export function getPendingMessages(
+  isFirstPoll = false, options: { uncapped?: boolean; wakeThroughSeq?: number } = {},
+): MessageInRow[] {
   const inbound = openInboundDb();
   const outbound = getOutboundDb();
 
@@ -68,13 +71,14 @@ export function getPendingMessages(isFirstPoll = false, options: { uncapped?: bo
         `SELECT * FROM messages_in
          WHERE status = 'pending'
            AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
-           AND (on_wake = 0 OR ?1 = 1)
+           AND (on_wake = 0 OR (?1 = 1 AND (?3 IS NULL OR seq <= ?3)))
            AND NOT (kind = 'system' AND COALESCE(
              CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END, '') IN ('edit_input', 'cancel_input'))
          ORDER BY seq DESC
          LIMIT ?2`,
       )
-      .all(isFirstPoll ? 1 : 0, options.uncapped ? -1 : getMaxMessagesPerPrompt()) as MessageInRow[];
+      .all(isFirstPoll ? 1 : 0, options.uncapped ? -1 : getMaxMessagesPerPrompt(),
+        options.wakeThroughSeq ?? null) as MessageInRow[];
 
     if (pending.length === 0) return [];
 
@@ -91,7 +95,24 @@ export function getPendingMessages(isFirstPoll = false, options: { uncapped?: bo
   } finally {
     inbound.close();
   }
+}
 
+/** A new-runtime instruction is also a durable request to retire this runner at a turn boundary. */
+export function hasPendingRestart(afterSeq = -1): boolean {
+    const db = openInboundDb();
+    try {
+      const pending = db.prepare(
+        `SELECT id FROM messages_in WHERE status = 'pending' AND on_wake = 1 AND (?1 = -1 OR seq > ?1)
+         AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))`,
+      ).all(afterSeq) as { id: string }[];
+      const acknowledged = new Set(
+        (getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[])
+          .map((row) => row.message_id),
+      );
+      return pending.some((row) => !acknowledged.has(row.id));
+    } finally {
+      db.close();
+    }
 }
 
 /** Control requests bypass the prompt cap and never become model input. */

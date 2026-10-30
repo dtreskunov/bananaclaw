@@ -22,11 +22,11 @@ import {
 } from '../../db/sessions.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
-import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/user-roles.js';
 import { ONECLI_ACTION, resolveOneCLIApproval } from './onecli-approvals.js';
 import { getApprovalHandler, getInteractiveApprovalHandler, notifyApprovalResolved } from './primitive.js';
+import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
   if (payload.responseType === 'skipped') return false;
@@ -86,15 +86,10 @@ async function handleRegisteredApproval(
     return;
   }
 
-  const notify = (text: string): void => {
-    writeSessionMessage(session.agent_group_id, session.id, {
-      id: `appr-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      kind: 'chat',
-      timestamp: new Date().toISOString(),
-      platformId: session.agent_group_id,
-      channelType: 'agent',
-      threadId: null,
-      content: JSON.stringify({ text, sender: 'system', senderId: 'system' }),
+  const notify = (text: string, options?: Pick<ApprovalNotificationOptions, 'afterRestart'>): void => {
+    writeApprovalNotification(session, text, {
+      originMessageId: approval.origin_message_id,
+      ...options,
     });
   };
 
@@ -123,7 +118,7 @@ async function handleRegisteredApproval(
 
   const payload = JSON.parse(approval.payload);
   try {
-    await handler({ session, payload, userId, notify });
+    await handler({ session, payload, userId, notify, originMessageId: approval.origin_message_id });
     log.info('Approval handled', { approvalId: approval.approval_id, action: approval.action, userId });
   } catch (err) {
     log.error('Approval handler threw', { approvalId: approval.approval_id, action: approval.action, err });

@@ -36,7 +36,7 @@ import { loadProvider } from './providers/index.js';
 import { createProvider, type ProviderName } from './providers/factory.js';
 import type { McpServerConfig } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
-import { startSessionSignalClient } from './session-link.js';
+import { drainSessionJournal, startSessionSignalClient } from './session-link.js';
 import { threadTitleInstruction } from './thread-title-request.js';
 
 function log(msg: string): void {
@@ -142,6 +142,9 @@ async function main(): Promise<void> {
     cwd: CWD,
     systemContext: () => ({ instructions: instructions() }),
   });
+  await drainSessionJournal();
+  log('Response committed; exiting for approved configuration restart');
+  process.exit(0);
 }
 
 main().catch((err) => {

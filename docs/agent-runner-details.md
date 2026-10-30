@@ -906,6 +906,25 @@ MCP tools that target a different destination (e.g., `send_to_agent`, `send_mess
 
 An explicit agent destination can still inherit the current batch's `inReplyTo`. The host treats that as an exact reply only when the referenced inbound came from the selected target agent. References to channel messages or other agents do not become return routes; those messages are group-level sends.
 
+Approval requests retain the exact triggering inbound ID, captured from the
+outbound action's `in_reply_to`, rather than the newest input or active turn.
+Approval outcomes return to that conversation as host-authored chat input with
+`inputHandling.mode = "steer"`. The existing steering mechanism applies them to
+an active, matching conversation when supported; otherwise they remain queued
+for a follow-up. Neither a different thread nor an agent-to-agent message can
+bypass the existing steering guards.
+
+Approving a runtime configuration change does not interrupt the active response.
+The outcome can steer that response immediately; a separate `on_wake` verification
+instruction waits for the replacement runtime. The runner settles the response,
+ends its warm query before consuming another batch, commits its journal to the
+host, and exits normally. The host then starts the replacement with the saved
+configuration. The pending instruction survives host or runner failure and the
+normal sweep retries startup if necessary. A boot-time inbound sequence watermark
+(`NANOCLAW_BOOT_INBOUND_SEQ`) prevents an approval arriving during startup from
+being mistaken for configuration already loaded by that runner. Explicit
+operator-requested restarts still retain their immediate-stop behavior.
+
 ### Status Management
 
 The agent-runner manages the `status` and `status_changed` fields on messages_in:

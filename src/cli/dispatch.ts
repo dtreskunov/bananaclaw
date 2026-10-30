@@ -146,6 +146,7 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
 
     await requestApproval({
       session,
+      originMessageId: ctx.originMessageId,
       agentName,
       action: 'cli_command',
       payload: { frame: { id: req.id, command: req.command, args: req.args } },
@@ -209,9 +210,13 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
   }
 }
 
-registerApprovalHandler('cli_command', async ({ session, payload, userId, notify }) => {
+registerApprovalHandler('cli_command', async ({ session, payload, originMessageId, notify }) => {
   const frame = payload.frame as RequestFrame;
-  const response = await dispatch(frame, { caller: 'host' });
+  const response = await dispatch(frame, {
+    caller: 'host',
+    deferRestart: true,
+    restartOrigin: { sessionId: session.id, messageId: originMessageId },
+  });
 
   if (response.ok) {
     const data = typeof response.data === 'string' ? response.data : JSON.stringify(response.data, null, 2);

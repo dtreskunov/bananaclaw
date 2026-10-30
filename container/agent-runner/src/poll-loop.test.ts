@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
-import { getPendingMessages, markCompleted, MAX_TIMER_DELAY_MS, nextPendingDueDelayMs } from './db/messages-in.js';
+import { getPendingMessages, hasPendingRestart, markCompleted, MAX_TIMER_DELAY_MS, nextPendingDueDelayMs } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
 import {
@@ -42,6 +42,26 @@ it.each([
 });
 
 describe('future message timing', () => {
+  it('ignores completed and future restart instructions', () => {
+    insertMessage('wake', 'chat', { text: 'verify' }, { onWake: 1 });
+    getInboundDb().prepare("UPDATE messages_in SET seq=2 WHERE id='wake'").run();
+    expect(hasPendingRestart()).toBe(true);
+    markCompleted(['wake']);
+    expect(hasPendingRestart()).toBe(false);
+    insertMessage('future-wake', 'chat', { text: 'later' }, {
+      onWake: 1, processAfter: new Date(Date.now() + 60_000).toISOString(),
+    });
+    getInboundDb().prepare("UPDATE messages_in SET seq=4 WHERE id='future-wake'").run();
+    expect(hasPendingRestart()).toBe(false);
+  });
+  it('does not consume an approval arriving after the boot configuration snapshot', () => {
+    insertMessage('late-approval', 'chat', { text: 'Verify the new server' }, { onWake: 1 });
+    getInboundDb().prepare("UPDATE messages_in SET seq=4 WHERE id='late-approval'").run();
+    expect(getPendingMessages(true, { wakeThroughSeq: 2 })).toEqual([]);
+    expect(hasPendingRestart(2)).toBe(true);
+    expect(getPendingMessages(true, { wakeThroughSeq: 4 }).map((message) => message.id)).toEqual(['late-approval']);
+    expect(hasPendingRestart(4)).toBe(false);
+  });
   it('caps distant process_after delays below the runtime timeout ceiling', () => {
     const processAfter = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
     insertMessage('future', 'task', { prompt: 'later' }, { processAfter });

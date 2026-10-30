@@ -11,6 +11,7 @@ import { getSession, getSessionsByAgentGroup } from './db/sessions.js';
 import { log } from './log.js';
 import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
 import { openInboundDb, writeSessionMessage } from './session-manager.js';
+import { writeApprovalNotification } from './modules/approvals/notification.js';
 
 /**
  * Kill all running containers for an agent group and respawn them.
@@ -21,12 +22,23 @@ import { openInboundDb, writeSessionMessage } from './session-manager.js';
  * wakeContainer call on exit. Without it, containers are killed and
  * only come back on the next real user message.
  */
-export function restartAgentGroupContainers(agentGroupId: string, reason: string, wakeMessage?: string): number {
+export function restartAgentGroupContainers(
+  agentGroupId: string, reason: string, wakeMessage?: string, deferUntilSettled = false,
+  origin?: { sessionId: string; messageId?: string | null },
+): number {
   const sessions = getSessionsByAgentGroup(agentGroupId).filter(
     (s) => s.status === 'active' && isContainerRunning(s.id),
   );
 
   for (const session of sessions) {
+    if (deferUntilSettled) {
+      writeApprovalNotification(session, wakeMessage ??
+        'The approved restart is complete. Continue the original conversation without repeating completed actions.', {
+        afterRestart: true,
+        originMessageId: origin?.sessionId === session.id ? origin.messageId : undefined,
+      });
+      continue;
+    }
     if (wakeMessage) {
       // Stamp the session's own channel routing rather than the agent group's
       // id. The latter is never one of the agent's destinations, so it renders

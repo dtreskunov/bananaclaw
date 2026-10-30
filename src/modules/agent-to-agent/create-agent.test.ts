@@ -22,6 +22,7 @@ const mockNotifyWrite = vi.fn();
 
 vi.mock('../approvals/index.js', () => ({
   requestApproval: (...a: unknown[]) => mockRequestApproval(...a),
+  notifyAgent: vi.fn(),
 }));
 vi.mock('../../db/container-configs.js', () => ({
   getContainerConfig: (...a: unknown[]) => mockGetContainerConfig(...a),

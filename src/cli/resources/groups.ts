@@ -221,7 +221,13 @@ registerResource({
         }
 
         // From the host: restart all running containers in the group
-        const count = restartAgentGroupContainers(id, 'restarted via ncl', message);
+        const count = restartAgentGroupContainers(
+          id,
+          'restarted via ncl',
+          message,
+          ctx.deferRestart,
+          ctx.restartOrigin,
+        );
         return { restarted: count, rebuilt: !!args.rebuild };
       },
     },

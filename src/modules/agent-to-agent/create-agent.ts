@@ -17,31 +17,12 @@ import path from 'path';
 import { GROUPS_DIR } from '../../config.js';
 import { createAgentGroup, getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
 import { getContainerConfig, updateContainerConfigScalars } from '../../db/container-configs.js';
-import { getSession } from '../../db/sessions.js';
-import { wakeContainer } from '../../container-runner.js';
 import { initGroupFilesystem } from '../../group-init.js';
 import { log } from '../../log.js';
-import { writeSessionMessage } from '../../session-manager.js';
 import type { AgentGroup, Session } from '../../types.js';
-import { requestApproval, type ApprovalHandler } from '../approvals/index.js';
+import { notifyAgent, requestApproval, type ApprovalHandler } from '../approvals/index.js';
 import { createDestination, getDestinationByName, normalizeName } from './db/agent-destinations.js';
 import { writeDestinations } from './write-destinations.js';
-
-function notifyAgent(session: Session, text: string): void {
-  writeSessionMessage(session.agent_group_id, session.id, {
-    id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    kind: 'chat',
-    timestamp: new Date().toISOString(),
-    platformId: session.agent_group_id,
-    channelType: 'agent',
-    threadId: null,
-    content: JSON.stringify({ text, sender: 'system', senderId: 'system' }),
-  });
-  const fresh = getSession(session.id);
-  if (fresh) {
-    wakeContainer(fresh).catch((err) => log.error('Failed to wake container after notification', { err }));
-  }
-}
 
 /**
  * Delivery-action entry.
@@ -56,18 +37,24 @@ function notifyAgent(session: Session, text: string): void {
  *     central-DB write. `applyCreateAgent` runs on approve.
  * Unknown/missing config fails closed to the approval path.
  */
-export async function handleCreateAgent(content: Record<string, unknown>, session: Session): Promise<void> {
+export async function handleCreateAgent(
+  content: Record<string, unknown>,
+  session: Session,
+  _inDb?: unknown,
+  context?: { originMessageId: string | null },
+): Promise<void> {
+  const notify = (text: string) => notifyAgent(session, text, context?.originMessageId);
   const name = typeof content.name === 'string' ? content.name : '';
   const instructions = typeof content.instructions === 'string' ? content.instructions : null;
 
   if (!name) {
-    notifyAgent(session, 'create_agent failed: name is required.');
+    notify('create_agent failed: name is required.');
     return;
   }
 
   const sourceGroup = getAgentGroup(session.agent_group_id);
   if (!sourceGroup) {
-    notifyAgent(session, 'create_agent failed: source agent group not found.');
+    notify('create_agent failed: source agent group not found.');
     log.warn('create_agent failed: missing source group', { sessionAgentGroup: session.agent_group_id, name });
     return;
   }
@@ -75,12 +62,13 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
   const cliScope = getContainerConfig(session.agent_group_id)?.cli_scope ?? 'group';
   if (cliScope === 'global') {
     // Trusted owner agent group — create directly, then notify (+wake) it.
-    await performCreateAgent(name, instructions, session, sourceGroup, (text) => notifyAgent(session, text));
+    await performCreateAgent(name, instructions, session, sourceGroup, notify);
     return;
   }
 
   await requestApproval({
     session,
+    originMessageId: context?.originMessageId,
     agentName: sourceGroup.name,
     action: 'create_agent',
     payload: { name, instructions },

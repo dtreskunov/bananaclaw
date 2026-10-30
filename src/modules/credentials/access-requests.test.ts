@@ -6,7 +6,14 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   grant: vi.fn(),
   directory: `/tmp/nanoclaw-access-${process.pid}`,
-  origin: { id: 'human-request', sender_user_id: 'alice' },
+  origin: {
+    id: 'human-request',
+    sender_user_id: 'alice',
+    channel_type: 'web',
+    platform_id: 'room',
+    thread_id: 'original-thread',
+    source_session_id: null,
+  },
 }));
 vi.mock('../../container-runner.js', () => ({
   wakeContainer: mocks.wake,
@@ -128,7 +135,14 @@ beforeEach(() => {
     return connection;
   });
   mocks.messages.clear();
-  mocks.origin = { id: 'human-request', sender_user_id: 'alice' };
+  mocks.origin = {
+    id: 'human-request',
+    sender_user_id: 'alice',
+    channel_type: 'web',
+    platform_id: 'room',
+    thread_id: 'original-thread',
+    source_session_id: null,
+  };
   mocks.wake.mockClear();
 });
 afterEach(() => {
@@ -380,7 +394,15 @@ describe('assisted access approvals', () => {
         authentication: { connection_id: connection.id, account_alias: 'Personal' },
       },
     });
-    expect(resultMessage(request.request_id)).toMatchObject({ onWake: 1 });
+    expect(resultMessage(request.request_id)).toMatchObject({
+      channelType: 'web',
+      platformId: 'room',
+      threadId: 'original-thread',
+    });
+    const outcome = resultMessage(request.request_id) as { id: string; content: string; onWake?: number };
+    expect(outcome.onWake).toBeUndefined();
+    expect(JSON.parse(outcome.content).inputHandling).toEqual({ mode: 'steer' });
+    expect(mocks.messages.get(`${outcome.id}-restart`)).toMatchObject({ onWake: 1 });
     expect(result.result?.message).toContain('Only MCP server "example"');
     expect(result.result?.message).not.toContain('BIND_TESTHANDLE');
   });

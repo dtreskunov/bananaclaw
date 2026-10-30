@@ -27,7 +27,6 @@ import { createPendingApproval, getSession } from '../../db/sessions.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
-import { writeSessionMessage } from '../../session-manager.js';
 import type { MessagingGroup, PendingApproval, Session } from '../../types.js';
 import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners } from '../permissions/db/user-roles.js';
 import { ensureUserDm } from '../permissions/user-dm.js';
@@ -35,6 +34,7 @@ import { getPrimaryIdentityForChannel } from '../permissions/db/identities.js';
 import { getDb } from '../../db/connection.js';
 import { createApprovalWorkflow } from './workflows.js';
 import type { ResponsePayload } from '../../response-registry.js';
+import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
 
 /** Two-button approval UI — the only options the primitive supports today. */
 const APPROVAL_OPTIONS: RawOption[] = [
@@ -49,11 +49,12 @@ const APPROVAL_OPTIONS: RawOption[] = [
 
 export interface ApprovalHandlerContext {
   session: Session;
+  originMessageId?: string | null;
   payload: Record<string, unknown>;
   /** User ID of the admin who approved. Empty string if unknown. */
   userId: string;
   /** Send a system chat message to the requesting agent's session. */
-  notify: (text: string) => void;
+  notify: (text: string, options?: Pick<ApprovalNotificationOptions, 'afterRestart'>) => void;
 }
 
 export type ApprovalHandler = (ctx: ApprovalHandlerContext) => Promise<void>;
@@ -185,16 +186,8 @@ export async function pickApprovalDelivery(
 // ── Request API ──
 
 /** Send a system chat to the agent's session. Used by callers and by the response handler. */
-export function notifyAgent(session: Session, text: string): void {
-  writeSessionMessage(session.agent_group_id, session.id, {
-    id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    kind: 'chat',
-    timestamp: new Date().toISOString(),
-    platformId: session.agent_group_id,
-    channelType: 'agent',
-    threadId: null,
-    content: JSON.stringify({ text, sender: 'system', senderId: 'system' }),
-  });
+export function notifyAgent(session: Session, text: string, originMessageId?: string | null): void {
+  writeApprovalNotification(session, text, { originMessageId });
   const fresh = getSession(session.id);
   if (fresh) {
     wakeContainer(fresh).catch((err) => log.error('Failed to wake container after notification', { err }));
@@ -202,6 +195,7 @@ export function notifyAgent(session: Session, text: string): void {
 }
 
 export interface RequestApprovalOptions {
+  originMessageId?: string | null;
   session: Session;
   agentName: string;
   /** Free-form action identifier. Must match the key the consumer registered via registerApprovalHandler. */
@@ -237,7 +231,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
 
   const approvers = pickApprover(opts.approverAgentGroupId ?? session.agent_group_id);
   if (approvers.length === 0) {
-    notifyAgent(session, `${action} failed: no owner or admin configured to approve.`);
+    notifyAgent(session, `${action} failed: no owner or admin configured to approve.`, opts.originMessageId);
     return;
   }
 
@@ -258,6 +252,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
       created_at: new Date().toISOString(),
       title,
       options_json: JSON.stringify(normalizedOptions),
+      origin_message_id: opts.originMessageId ?? null,
       ...(opts.workflowKey ? { agent_group_id: session.agent_group_id } : {}),
       expires_at: opts.expiresAt ?? null,
     });
@@ -266,7 +261,11 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
 
   const target = await pickApprovalDelivery(approvers, originChannelType);
   if (!target) {
-    notifyAgent(session, `${action}: review the pending approval in BananaClaw; no eligible DM channel is available.`);
+    notifyAgent(
+      session,
+      `${action}: review the pending approval in BananaClaw; no eligible DM channel is available.`,
+      opts.originMessageId,
+    );
     return approvalId;
   }
 
@@ -289,7 +288,11 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
       );
     } catch (err) {
       log.error('Failed to deliver approval card', { action, approvalId, err });
-      notifyAgent(session, `${action} failed: could not deliver approval request to ${target.userId}.`);
+      notifyAgent(
+        session,
+        `${action} failed: could not deliver approval request to ${target.userId}.`,
+        opts.originMessageId,
+      );
       return approvalId;
     }
   }

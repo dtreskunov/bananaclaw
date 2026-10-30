@@ -189,6 +189,32 @@ register({
 
 import { dispatch } from './dispatch.js';
 import type { CallerContext } from './frame.js';
+import { requestApproval } from '../modules/approvals/index.js';
+
+register({
+  name: 'groups-approval-origin-test',
+  resource: 'groups',
+  description: 'approval origin regression',
+  access: 'approval',
+  parseArgs: (raw) => raw,
+  handler: async () => ({}),
+});
+
+it('retains the transport-captured input when requesting approval for a CLI command', async () => {
+  mockGetContainerConfig.mockReturnValue({ cli_scope: 'global' });
+  mockGetSession.mockReturnValue({ id: 'session', agent_group_id: 'group' });
+  await dispatch(
+    { id: 'request', command: 'groups-approval-origin-test', args: {} },
+    {
+      caller: 'agent',
+      sessionId: 'session',
+      agentGroupId: 'group',
+      messagingGroupId: 'web',
+      originMessageId: 'original-input',
+    },
+  );
+  expect(requestApproval).toHaveBeenCalledWith(expect.objectContaining({ originMessageId: 'original-input' }));
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

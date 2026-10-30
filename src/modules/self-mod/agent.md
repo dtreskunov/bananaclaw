@@ -20,8 +20,10 @@ only with admin approval.
 
 You call one of these tools → the host asks an admin via DM → admin approves
 or rejects. On approve, the config is applied, the image is rebuilt if
-needed, and the container is killed; the host respawns it on the next
-message. You'll get a system chat message confirming the outcome (either
+needed. The outcome can steer your current response. Finish that response;
+the container then restarts automatically without interrupting it.
+Verify the new packages or server only after the restart. You'll get a
+system chat message confirming the outcome (either
 "Packages installed..." or a failure reason).
 
 On reject you'll see "Your X request was rejected by admin."

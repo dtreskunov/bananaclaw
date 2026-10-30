@@ -36,10 +36,15 @@ export type ErrorCode =
  * caller identity from here, never from the frame.
  */
 export type CallerContext =
-  | { caller: 'host' }
+  | {
+      caller: 'host';
+      deferRestart?: boolean;
+      restartOrigin?: { sessionId: string; messageId?: string | null };
+    }
   | {
       caller: 'agent';
       sessionId: string;
       agentGroupId: string;
       messagingGroupId: string;
+      originMessageId?: string | null;
     };

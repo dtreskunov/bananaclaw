@@ -159,7 +159,12 @@ export function accessRequestStatus(id: string, sessionId?: string) {
   };
 }
 
-export async function requestAccess(session: Session, raw: unknown, requestId?: string) {
+export async function requestAccess(
+  session: Session,
+  raw: unknown,
+  requestId?: string,
+  originMessageId?: string | null,
+) {
   if (!usesAgentVault(session.agent_group_id))
     throw new ConnectionInputError('This agent must use AgentVault to request shared access.');
   if (getContainerConfig(session.agent_group_id)?.cli_scope === 'disabled')
@@ -171,12 +176,16 @@ export async function requestAccess(session: Session, raw: unknown, requestId?: 
   try {
     origin = inbound
       .prepare(
-        "SELECT id,sender_user_id FROM messages_in WHERE kind='chat' AND sender_user_id IS NOT NULL ORDER BY seq DESC LIMIT 1",
+        `SELECT id,sender_user_id FROM messages_in WHERE kind IN ('chat', 'chat-sdk')
+         AND (? IS NOT NULL AND id = ? OR ? IS NULL AND sender_user_id IS NOT NULL)
+         ORDER BY seq DESC LIMIT 1`,
       )
-      .get() as typeof origin;
+      .get(originMessageId ?? null, originMessageId ?? null, originMessageId ?? null) as typeof origin;
   } finally {
     inbound.close();
   }
+  if (originMessageId && !origin)
+    throw new ConnectionInputError('The originating conversation message no longer exists.', 409);
   if (requestId && !/^appr-access-[a-zA-Z0-9-]{1,100}$/.test(requestId))
     throw new ConnectionInputError('Invalid access request identifier');
   if (requestId && getApprovalWorkflow(requestId)) return accessRequestStatus(requestId, session.id);
@@ -213,6 +222,7 @@ export async function requestAccess(session: Session, raw: unknown, requestId?: 
   const group = getAgentGroup(session.agent_group_id);
   const created = await requestApproval({
     session,
+    originMessageId: origin?.id,
     agentName: group?.name ?? session.agent_group_id,
     action: ACCESS_ACTION,
     approvalId: id,
@@ -461,7 +471,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
       'completed',
       `Access granted for ${preview.request.resource_url}. The group grant was verified; upstream authentication has not yet been verified. ${
         selection.configureMcp
-          ? `Only MCP server ${JSON.stringify(selection.mcpServer)} now uses account alias ${JSON.stringify(selection.accountAlias)}. The host resolves its current binding; do not construct authentication headers.`
+          ? `Only MCP server ${JSON.stringify(selection.mcpServer)} is configured to use account alias ${JSON.stringify(selection.accountAlias)}. The host resolves its current binding; do not construct authentication headers.`
           : `Runtime routing: ${JSON.stringify(runtime!.instructions)}.`
       } Safely verify the original operation, then continue the original request with its original dates, timezone and account choice. Do not automatically replay writes or create a recurring poller.`,
       selection.configureMcp,
@@ -531,6 +541,7 @@ registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, use
       notifyAgent(
         session,
         `Access review is still pending. The user must privately select and confirm a credential in BananaClaw: ${reviewUrl(approval.approval_id)}. Do not poll, search for secrets or treat review as approval.`,
+        approval.origin_message_id,
       );
   } else {
     throw new ConnectionInputError(
@@ -540,16 +551,16 @@ registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, use
   }
 });
 
-registerDeliveryAction(ACCESS_ACTION, async (content, session) => {
+registerDeliveryAction(ACCESS_ACTION, async (content, session, _inDb, context) => {
   try {
     const { requestId, ...body } = content;
     delete body.action;
     delete body.timelinePosition;
-    await requestAccess(session, body, typeof requestId === 'string' ? requestId : undefined);
+    await requestAccess(session, body, typeof requestId === 'string' ? requestId : undefined, context?.originMessageId);
   } catch (error) {
     if (!(error instanceof ConnectionInputError)) throw error;
     log.warn('Access request rejected', { sessionId: session.id, error: error.message });
-    notifyAgent(session, `Access request failed: ${error.message}`);
+    notifyAgent(session, `Access request failed: ${error.message}`, context?.originMessageId);
   }
 });
 

@@ -14,10 +14,10 @@ the approval handler itself — there is no separate "request rebuild" step.
   `approvals.requestApproval()`.
 - Two matching approval handlers that run on approve:
   - `install_packages` → update `container.json`, rebuild the image via
-    `buildAgentGroupImage`, and kill the container so the host sweep
-    respawns it on the new image. Also schedules a verify-and-report
-    follow-up prompt ~5 s after kill.
-  - `add_mcp_server` → update `container.json` and kill the container.
+    `buildAgentGroupImage`, and queue a restart after the active response
+    settles. The replacement verifies and reports on the new packages.
+  - `add_mcp_server` → update `container.json` and defer the restart until
+    the active response settles.
     No image rebuild — bun runs TS directly, so the new MCP wiring is
     picked up on the next container start.
 
@@ -28,8 +28,9 @@ Self-mod depends on the approvals default module for:
 - `registerApprovalHandler(action, handler)` to run orchestration on approve
 - `notifyAgent()` to send failure feedback back to the requesting agent
 
-It also calls core's `buildAgentGroupImage`, `killContainer`, and
-`updateContainerConfig`.
+Outcomes use the existing steering path in the requesting conversation.
+Verification is an `on_wake` instruction for the replacement runtime; normal
+turn settlement and journal acknowledgement precede exit and respawn.
 
 ## Removing the module
 

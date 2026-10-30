@@ -1,7 +1,7 @@
 import { getDb } from '../../db/connection.js';
 import { getPendingApproval, getSession } from '../../db/sessions.js';
-import { writeSessionMessage } from '../../session-manager.js';
-import { isContainerRunning, killContainer, wakeContainer } from '../../container-runner.js';
+import { wakeContainer } from '../../container-runner.js';
+import { writeApprovalNotification } from './notification.js';
 
 export type WorkflowStage = 'pending' | 'applying' | 'completed' | 'rejected' | 'cancelled' | 'expired' | 'failed';
 export interface ApprovalWorkflow {
@@ -151,26 +151,28 @@ export async function notifyApprovalWorkflow(id: string): Promise<void> {
   const session = approval?.session_id ? getSession(approval.session_id) : undefined;
   if (!session) return;
   const result = JSON.parse(workflow.result_json) as { message: string; restart?: boolean; notification_id?: string };
-  writeSessionMessage(session.agent_group_id, session.id, {
+  const origin = JSON.parse(workflow.origin_json) as { messageId?: string | null };
+  const options = {
+    originMessageId: approval?.origin_message_id ?? origin.messageId,
     id: result.notification_id ?? `approval-result-${workflow.approval_id}`,
     idempotent: true,
-    kind: 'chat',
     timestamp: workflow.updated_at,
-    channelType: 'agent',
-    platformId: session.agent_group_id,
-    threadId: session.thread_id,
-    ...(result.restart ? { onWake: 1 as const } : {}),
-    content: JSON.stringify({ text: result.message, sender: 'system', senderId: 'system' }),
-  });
-  if (result.restart && isContainerRunning(session.id)) {
-    await new Promise<void>((resolve, reject) => {
-      killContainer(session.id, 'approved configuration changed', () => {
-        void wakeContainer(session).then(() => resolve(), reject);
-      });
+  };
+  writeApprovalNotification(
+    session,
+    result.restart
+      ? 'The approval was applied and the runtime configuration saved. Finish the current response first. The container will restart afterward; verify the new configuration only after that restart.'
+      : result.message,
+    options,
+  );
+  if (result.restart) {
+    writeApprovalNotification(session, `The approved configuration is now loaded.\n${result.message}`, {
+      ...options,
+      id: `${options.id}-restart`,
+      afterRestart: true,
     });
-  } else {
-    await wakeContainer(session);
   }
+  await wakeContainer(session);
   getDb()
     .prepare('UPDATE approval_workflows SET notified=1 WHERE approval_id=? AND revision=?')
     .run(workflow.approval_id, workflow.revision);

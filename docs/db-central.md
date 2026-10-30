@@ -292,13 +292,19 @@ CREATE TABLE pending_approvals (
   expires_at          TEXT,
   status              TEXT NOT NULL DEFAULT 'pending',
   title               TEXT NOT NULL DEFAULT '',
-  options_json        TEXT NOT NULL DEFAULT '[]'
+  options_json        TEXT NOT NULL DEFAULT '[]',
+  origin_message_id   TEXT
 );
 CREATE INDEX idx_pending_approvals_action_status ON pending_approvals(action, status);
 ```
 
 - `status`: `pending` | `approved` | `rejected` | `expired`.
 - `platform_message_id` lets the host edit the admin card in place after a decision.
+- `origin_message_id` identifies the requesting input in the session's inbound DB,
+  independently of the administrator's delivery channel. Approval outcomes inherit
+  that input's channel, platform, thread and agent-to-agent source session. Legacy
+  approvals without it use their workflow origin or the session's messaging group;
+  a host notification is never fabricated as an agent-to-agent message to itself.
 - Access layer: `src/db/sessions.ts`; sweep + delivery: `src/onecli-approvals.ts`.
 
 ### 1.12 `unregistered_senders`

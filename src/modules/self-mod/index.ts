@@ -7,10 +7,10 @@
  *     input and queue an approval via requestApproval().
  *   - Two matching approval handlers that run on approve and perform the
  *     complete follow-up:
- *       install_packages → update container.json, rebuild image, kill
- *         container (next wake respawns on the new image), schedule a
+ *       install_packages → update container.json, rebuild image, retire
+ *         the container after its response settles, schedule a
  *         verify-and-report follow-up prompt.
- *       add_mcp_server → update container.json, kill container. No image
+ *       add_mcp_server → update container.json, deferred restart. No image
  *         rebuild — bun runs TS directly, so the new MCP server is wired
  *         by the next container start.
  *

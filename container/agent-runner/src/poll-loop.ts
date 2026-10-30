@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { findByName, findByRouting, type DestinationEntry } from './destinations.js';
 import {
   getPendingMessages,
+  hasPendingRestart,
   releaseProcessing,
   markCompleted,
   nextPendingDueDelayMs,
@@ -149,6 +150,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
   let pollCount = 0;
   let isFirstPoll = true;
+  const bootInboundSeq = Number(process.env.NANOCLAW_BOOT_INBOUND_SEQ ?? Number.MAX_SAFE_INTEGER);
+  if (!Number.isSafeInteger(bootInboundSeq) || bootInboundSeq < 0)
+    throw new Error('Invalid NANOCLAW_BOOT_INBOUND_SEQ');
 
   // Honor the stop signal even while a warm, long-lived query is mid-flight.
   // The while-loop below only checks `signal.aborted` between batches; a warm
@@ -171,10 +175,16 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
   while (true) {
     if (config.signal?.aborted) return;
+    if (hasPendingRestart(isFirstPoll ? bootInboundSeq : -1)) {
+      log('Approved configuration changed — response settled, restarting before the next turn');
+      return;
+    }
     const hostGeneration = getHostEventGeneration();
     processPendingInputEdits(config.provider, getContinuation(config.providerName));
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
-    let messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
+    let messages = getPendingMessages(isFirstPoll, {
+      wakeThroughSeq: process.env.NANOCLAW_BOOT_INBOUND_SEQ === undefined ? undefined : bootInboundSeq,
+    }).filter((m) => m.kind !== 'system');
     isFirstPoll = false;
     pollCount++;
 
@@ -961,6 +971,10 @@ export async function processQuery(
   let resultFinishing = false;
   const pollForFollowUps = async (): Promise<void> => {
     processPendingInputEdits(provider, getContinuation(providerName), { query, steeringInputs: steering.inputs });
+    if (!turnActive && hasPendingRestart()) {
+      endStream();
+      return;
+    }
     const pending = getPendingMessages();
 
     // Slash commands need a fresh query: /clear resets the SDK's

@@ -16,29 +16,10 @@
  */
 import { log } from '../../log.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
-import { getSession } from '../../db/sessions.js';
-import { wakeContainer } from '../../container-runner.js';
-import { writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners, hasAdminPrivilege } from '../permissions/db/user-roles.js';
-import { requestApproval } from '../approvals/index.js';
+import { notifyAgent, requestApproval } from '../approvals/index.js';
 import { applyAgentLink, AgentLinkError, validateLocalName } from './apply-link.js';
-
-function notifyAgent(session: Session, text: string): void {
-  writeSessionMessage(session.agent_group_id, session.id, {
-    id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    kind: 'chat',
-    timestamp: new Date().toISOString(),
-    platformId: session.agent_group_id,
-    channelType: 'agent',
-    threadId: null,
-    content: JSON.stringify({ text, sender: 'system', senderId: 'system' }),
-  });
-  const fresh = getSession(session.id);
-  if (fresh) {
-    wakeContainer(fresh).catch((err) => log.error('Failed to wake container after notification', { err }));
-  }
-}
 
 /**
  * Returns an ordered list of user ids who admin the source group. Preference:
@@ -62,18 +43,24 @@ function listSourceAdmins(sourceGid: string): string[] {
   return ids;
 }
 
-export async function handleAgentLinkRequest(content: Record<string, unknown>, session: Session): Promise<void> {
+export async function handleAgentLinkRequest(
+  content: Record<string, unknown>,
+  session: Session,
+  _inDb?: unknown,
+  context?: { originMessageId: string | null },
+): Promise<void> {
+  const notify = (text: string) => notifyAgent(session, text, context?.originMessageId);
   const targetGid = content.target_group_id as string | undefined;
   const localNameRaw = content.local_name as string | undefined;
   const alsoReverse = content.also_reverse === true;
   const reverseLocalNameRaw = content.reverse_local_name as string | undefined;
 
   if (!targetGid || typeof targetGid !== 'string') {
-    notifyAgent(session, 'add_agent_destination failed: target_group_id is required.');
+    notify('add_agent_destination failed: target_group_id is required.');
     return;
   }
   if (!localNameRaw || typeof localNameRaw !== 'string') {
-    notifyAgent(session, 'add_agent_destination failed: local_name is required.');
+    notify('add_agent_destination failed: local_name is required.');
     return;
   }
 
@@ -81,30 +68,30 @@ export async function handleAgentLinkRequest(content: Record<string, unknown>, s
   try {
     localName = validateLocalName(localNameRaw);
   } catch (err) {
-    notifyAgent(session, `add_agent_destination failed: ${(err as Error).message}`);
+    notify(`add_agent_destination failed: ${(err as Error).message}`);
     return;
   }
 
   const sourceGid = session.agent_group_id;
   if (sourceGid === targetGid) {
-    notifyAgent(session, 'add_agent_destination failed: cannot link an agent to itself.');
+    notify('add_agent_destination failed: cannot link an agent to itself.');
     return;
   }
 
   const sourceGroup = getAgentGroup(sourceGid);
   const targetGroup = getAgentGroup(targetGid);
   if (!sourceGroup) {
-    notifyAgent(session, 'add_agent_destination failed: source agent group not found.');
+    notify('add_agent_destination failed: source agent group not found.');
     return;
   }
   if (!targetGroup) {
-    notifyAgent(session, `add_agent_destination failed: target agent group "${targetGid}" not found.`);
+    notify(`add_agent_destination failed: target agent group "${targetGid}" not found.`);
     return;
   }
 
   const sourceAdmins = listSourceAdmins(sourceGid);
   if (sourceAdmins.length === 0) {
-    notifyAgent(session, 'add_agent_destination failed: no admin found for source agent group.');
+    notify('add_agent_destination failed: no admin found for source agent group.');
     return;
   }
 
@@ -123,7 +110,7 @@ export async function handleAgentLinkRequest(content: Record<string, unknown>, s
       const reverseNote = result.reverse
         ? ` Reverse link from "${targetGroup.name}" → "${sourceGroup.name}" added as "${result.reverse.local_name}".`
         : '';
-      notifyAgent(session, `Linked agent "${targetGroup.name}" as destination "${localName}".${reverseNote}`);
+      notify(`Linked agent "${targetGroup.name}" as destination "${localName}".${reverseNote}`);
       log.info('agent-link auto-applied', {
         sourceGid,
         targetGid,
@@ -133,9 +120,9 @@ export async function handleAgentLinkRequest(content: Record<string, unknown>, s
       });
     } catch (err) {
       if (err instanceof AgentLinkError) {
-        notifyAgent(session, `add_agent_destination failed: ${err.message}`);
+        notify(`add_agent_destination failed: ${err.message}`);
       } else {
-        notifyAgent(session, `add_agent_destination failed unexpectedly.`);
+        notify(`add_agent_destination failed unexpectedly.`);
         log.error('agent-link auto-apply failed', { err, sourceGid, targetGid });
       }
     }
@@ -151,6 +138,7 @@ export async function handleAgentLinkRequest(content: Record<string, unknown>, s
 
   await requestApproval({
     session,
+    originMessageId: context?.originMessageId,
     agentName: sourceGroup.name,
     action: 'add_agent_destination',
     approverAgentGroupId: targetGid,
@@ -167,8 +155,7 @@ export async function handleAgentLinkRequest(content: Record<string, unknown>, s
       `(name "${localName}"${alsoReverse ? `, plus a reverse link back` : ''}). Allow?`,
   });
 
-  notifyAgent(
-    session,
+  notify(
     `Requested permission to add "${targetGroup.name}" as destination "${localName}". An admin of "${targetGroup.name}" will be asked to approve.`,
   );
 }

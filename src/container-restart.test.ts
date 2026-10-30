@@ -74,6 +74,15 @@ function makeSession(id: string, agentGroupId: string, status = 'active') {
 // --- Tests ---
 
 describe('restartAgentGroupContainers', () => {
+  it('defers approval-driven restarts using a durable on-wake instruction, without killing the response', () => {
+    mockGetSessionsByAgentGroup.mockReturnValue([makeSession('s1', 'g1')]);
+    mockIsContainerRunning.mockReturnValue(true);
+    expect(restartAgentGroupContainers('g1', 'approved restart', undefined, true)).toBe(1);
+    expect(mockKillContainer).not.toHaveBeenCalled();
+    expect(mockWriteSessionMessage.mock.calls[0][2]).toMatchObject({
+      onWake: 1, channelType: 'web', platformId: 'web-1', threadId: 'thread-1',
+    });
+  });
   it('skips sessions without a running container', () => {
     mockGetSessionsByAgentGroup.mockReturnValue([makeSession('s1', 'g1'), makeSession('s2', 'g1')]);
     mockIsContainerRunning.mockReturnValue(false);

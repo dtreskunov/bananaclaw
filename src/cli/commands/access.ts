@@ -35,13 +35,18 @@ for (const verb of ['request', 'status', 'cancel'] as const) {
           if (typeof args.scopes !== 'string') throw new ConnectionInputError('Supply scopes as a JSON array.');
           scopes = JSON.parse(args.scopes);
         }
-        return requestAccess(session, {
-          resource_url: args['resource-url'],
-          reason: args.reason,
-          ...(args['mcp-server'] === undefined ? {} : { mcp_server: args['mcp-server'] }),
-          ...(scopes === undefined ? {} : { scopes }),
-          ...(authentication === undefined ? {} : { authentication }),
-        });
+        return requestAccess(
+          session,
+          {
+            resource_url: args['resource-url'],
+            reason: args.reason,
+            ...(args['mcp-server'] === undefined ? {} : { mcp_server: args['mcp-server'] }),
+            ...(scopes === undefined ? {} : { scopes }),
+            ...(authentication === undefined ? {} : { authentication }),
+          },
+          undefined,
+          ctx.originMessageId,
+        );
       }
       if (typeof args['request-id'] !== 'string') throw new ConnectionInputError('--request-id is required.');
       return verb === 'status'
