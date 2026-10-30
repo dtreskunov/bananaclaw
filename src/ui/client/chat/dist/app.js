@@ -21641,11 +21641,14 @@ function openCredentials(intent) {
     navigate();
   }
 }
-function openChat2() {
+function clearAccessApproval() {
   accessApprovalId.value = null;
   const url = new URL(location.href);
   url.searchParams.delete("access_request");
   history.replaceState(history.state, "", url);
+}
+function openChat2() {
+  clearAccessApproval();
   credentialsOpen.value = false;
   writeHash();
   if (location.hash === "#credentials") location.hash = "";
@@ -30190,8 +30193,62 @@ function useConnectionSignIn(onFinished) {
   };
 }
 
+// ../../shared/credential-matching.ts
+function serviceMatchesResource(service, resourceUrl) {
+  const url = URL.parse(resourceUrl);
+  if (!url || service.enabled === false || service.https_only && url.protocol !== "https:") return false;
+  const slash = service.host.indexOf("/");
+  const authority = slash < 0 ? service.host : service.host.slice(0, slash);
+  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
+  const separator = authority.lastIndexOf(":");
+  const explicitPort = separator >= 0 && /^\d+$/.test(authority.slice(separator + 1));
+  const host = explicitPort ? authority.slice(0, separator) : authority;
+  if (explicitPort && authority.slice(separator + 1) !== (url.port || (url.protocol === "https:" ? "443" : "80")))
+    return false;
+  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(value);
+  return glob(host.toLowerCase(), url.hostname.toLowerCase()) && (!path || glob(path, url.pathname));
+}
+
+// ../../shared/access-authentication.ts
+var ACCESS_AUTHENTICATION_LABELS = {
+  mcp_oauth: "MCP OAuth",
+  oauth_app: "OAuth app",
+  bearer: "Bearer token",
+  "api-key": "API-key header",
+  basic: "Username and password",
+  custom: "Custom headers"
+};
+function connectionMatchesAccess(connection2, request) {
+  const destination = URL.parse(request.resource_url);
+  if (!destination || destination.protocol !== "https:") return false;
+  const hint = request.authentication;
+  const oauthHint = hint?.type === "mcp_oauth" || hint?.type === "oauth_app";
+  if (oauthHint && connection2.kind !== hint.type) return false;
+  if (hint?.app_id && connection2.app_id !== hint.app_id) return false;
+  if (request.scopes?.length) {
+    if (connection2.kind === "static") return false;
+    const scopes = connection2.status === "ready" ? connection2.scope_source === "provider" ? connection2.granted_scopes : null : connection2.requested_scopes;
+    if (!scopes || request.scopes.some((scope) => !scopes.includes(scope))) return false;
+  }
+  const services = connection2.services.filter((service) => serviceMatchesResource(service, request.resource_url));
+  if (!services.length) {
+    return connection2.kind === "mcp_oauth" && connection2.status !== "ready" && (!hint || oauthHint || hint.type === "bearer") && URL.parse(connection2.resource_url ?? "")?.href === destination.href;
+  }
+  if (!hint || oauthHint) return true;
+  return services.some((service) => {
+    if (service.auth.type !== hint.type) return false;
+    if (hint.type === "api-key")
+      return service.auth.header?.toLowerCase() === hint.header?.toLowerCase() && (hint.prefix === void 0 || (service.auth.prefix ?? "") === hint.prefix);
+    if (hint.type === "custom") {
+      const headers = Object.keys(service.auth.headers ?? {}).map((header) => header.toLowerCase());
+      return hint.headers?.every((header) => headers.includes(header.toLowerCase())) ?? false;
+    }
+    return true;
+  });
+}
+
 // src/components/AccessRequestReview.tsx
-function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved }) {
+function AccessRequestReview({ id: id2, connections, preferredConnectionId, signingIn, onCreate, onManage, onSaved }) {
   const path = credentialsPath(`/access-requests/${encodeURIComponent(id2)}`);
   const request = useCredentialResource(path);
   const [selected, setSelected] = h2("");
@@ -30202,7 +30259,28 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
   const [configureMcp, setConfigureMcp] = h2(false);
   const [mcpServer, setMcpServer] = h2("");
   const [accountAlias, setAccountAlias] = h2("");
-  const connectionVersion = JSON.stringify(connections.map((connection2) => [connection2.id, connection2.revision, connection2.status]));
+  const preferred = A2();
+  const compatible = request.data ? connections.filter((connection2) => connectionMatchesAccess(connection2, request.data)) : [];
+  const created = connections.find((connection2) => connection2.id === preferredConnectionId);
+  const createdMismatch = created?.status === "ready" && !compatible.some((connection2) => connection2.id === created.id);
+  const compatibleIds = JSON.stringify(compatible.map((connection2) => connection2.id));
+  y2(() => {
+    if (!request.data) return;
+    if (preferredConnectionId && preferred.current !== preferredConnectionId && compatible.some((connection2) => connection2.id === preferredConnectionId)) {
+      preferred.current = preferredConnectionId;
+      setSelected(preferredConnectionId);
+    } else if (selected && !compatible.some((connection2) => connection2.id === selected)) {
+      setSelected("");
+    }
+  }, [preferredConnectionId, compatibleIds, selected, request.data]);
+  const connectionVersion = JSON.stringify(connections.map((connection2) => [
+    connection2.id,
+    connection2.revision,
+    connection2.status,
+    connection2.requested_scopes,
+    connection2.granted_scopes,
+    connection2.scope_source
+  ]));
   y2(() => {
     setPreview(null);
     setConfirmed(false);
@@ -30278,6 +30356,15 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
         "Recipient agent: ",
         request.data.agent_group_name ?? request.data.agent_group_id
       ] }),
+      request.data.authentication ? /* @__PURE__ */ u4("p", { children: [
+        "Requested authentication: ",
+        ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type],
+        request.data.authentication.app_id ? ` \xB7 OAuth app: ${request.data.authentication.app_id}` : "",
+        request.data.authentication.header ? ` \xB7 Header: ${request.data.authentication.header}` : "",
+        request.data.authentication.prefix !== void 0 ? ` \xB7 Public prefix: ${JSON.stringify(request.data.authentication.prefix)}` : "",
+        request.data.authentication.headers?.length ? ` \xB7 Headers: ${request.data.authentication.headers.join(", ")}` : "",
+        ". Review these agent suggestions before using them."
+      ] }) : null,
       request.data.scopes?.length ? /* @__PURE__ */ u4("p", { children: [
         "Suggested scopes (not automatically granted): ",
         request.data.scopes.join(" ")
@@ -30294,7 +30381,7 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
               onChange: (event) => setSelected(event.currentTarget.value),
               children: [
                 /* @__PURE__ */ u4("option", { value: "", children: "Choose from your Credentials" }),
-                connections.map((connection2) => /* @__PURE__ */ u4("option", { value: connection2.id, children: [
+                compatible.map((connection2) => /* @__PURE__ */ u4("option", { value: connection2.id, children: [
                   connectionName(connection2),
                   connection2.status === "ready" ? "" : ` (${connection2.status})`
                 ] }, connection2.id))
@@ -30302,7 +30389,27 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
             }
           )
         ] }),
-        /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => onCreate(request.data.resource_url), children: "Add credential" }),
+        /* @__PURE__ */ u4("p", { class: "muted", children: "Only credentials matching this URL and the requested authentication and scopes are listed. Unknown scope grants are not assumed to match." }),
+        !compatible.length ? /* @__PURE__ */ u4("p", { role: "status", children: "No credentials match this destination, authentication mechanism and requested scopes. Create one to continue." }) : null,
+        createdMismatch && !selected ? /* @__PURE__ */ u4("div", { role: "alert", children: [
+          "The new credential was saved, but its destination, authentication or provider-reported scopes do not meet this request. No access was granted.",
+          /* @__PURE__ */ u4("button", { type: "button", disabled: busy || signingIn, onClick: () => onManage(created), children: "Review new credential" })
+        ] }) : null,
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: !compatible.length ? "primary" : void 0,
+            disabled: busy || signingIn,
+            onClick: () => {
+              setSelected("");
+              setPreview(null);
+              setConfirmed(false);
+              onCreate(request.data);
+            },
+            children: "Create new credential"
+          }
+        ),
         /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => void reject(), children: "Reject request" }),
         preview ? /* @__PURE__ */ u4(k, { children: [
           /* @__PURE__ */ u4("h4", { children: connectionName(preview.connection) }),
@@ -30377,7 +30484,7 @@ function AccessRequestReview({ id: id2, connections, onCreate, onManage, onSaved
             "button",
             {
               type: "button",
-              disabled: busy,
+              disabled: busy || signingIn,
               onClick: () => onManage(preview.connection),
               children: "Manage this connection"
             }
@@ -30426,6 +30533,27 @@ function GroupAdminField({
 }
 
 // src/components/credential-routing.ts
+function accessCreationDefaults(request, apps) {
+  const hint = request.authentication;
+  const oauthScopes = !!request.scopes?.length && (!hint || hint.type === "bearer");
+  const kind = hint?.type === "mcp_oauth" || hint?.type === "oauth_app" ? hint.type : (!hint || oauthScopes) && request.mcp_server ? "mcp_oauth" : oauthScopes ? "oauth_app" : "static";
+  const candidates = apps.filter(
+    (app2) => app2.api_hosts.some((host) => serviceMatchesResource({ host, https_only: true }, request.resource_url))
+  );
+  const app = hint?.app_id ? apps.find((app2) => app2.id === hint.app_id) : kind === "oauth_app" && candidates.length === 1 ? candidates[0] : void 0;
+  const routes = routingDrafts();
+  routes[0].pattern = request.resource_url;
+  if (kind === "static" && hint) {
+    routes[0].service.auth = authentication(hint.type, { type: "unset" }, []);
+    if (hint.type === "api-key")
+      routes[0].service.auth = { ...routes[0].service.auth, header: hint.header, prefix: hint.prefix };
+    if (hint.type === "custom")
+      routes[0].service.auth.headers = Object.fromEntries(
+        (hint.headers ?? []).map((header, index) => [header, `{{ HEADER_VALUE_${index + 1} }}`])
+      );
+  }
+  return { kind, appId: app?.id ?? "", scopes: request.scopes ?? app?.default_scopes ?? [], routes };
+}
 function parseUrlPattern(value) {
   const text2 = value.trim();
   const source = /^[a-z][a-z0-9+.-]*:\/\//i.test(text2) ? text2 : `https://${text2}`;
@@ -31468,13 +31596,15 @@ function ExistingConnectionEditor({ id: id2, ...props }) {
   ] }) });
   return /* @__PURE__ */ g(ConnectionForm, { ...props, key: `${data.id}:${data.revision}`, connection: data });
 }
-function ConnectionForm({ connection: connection2, apps, groups: groups2, initialKind = "static", resourceUrl, onStart, onClose, onSaved }) {
-  const [kind, setKind] = h2(connection2?.kind ?? initialKind);
-  const [label, setLabel] = h2(connection2 ? connectionName(connection2, apps) : hostnameFromPattern(resourceUrl ?? ""));
+function ConnectionForm({ connection: connection2, apps, groups: groups2, initialKind = "static", resourceUrl, accessRequest, onCreated, onStart, onClose, onSaved }) {
+  const defaults = accessRequest ? accessCreationDefaults(accessRequest, apps) : void 0;
+  const destination = resourceUrl ?? accessRequest?.resource_url;
+  const [kind, setKind] = h2(connection2?.kind ?? defaults?.kind ?? initialKind);
+  const [label, setLabel] = h2(connection2 ? connectionName(connection2, apps) : hostnameFromPattern(destination ?? ""));
   const [automaticName, setAutomaticName] = h2(!connection2);
   const [routes, setRoutes] = h2(() => {
-    const result = routingDrafts(connection2?.services);
-    if (!connection2 && resourceUrl) result[0].pattern = resourceUrl;
+    const result = !connection2 && defaults ? defaults.routes : routingDrafts(connection2?.services);
+    if (!connection2 && destination) result[0].pattern = destination;
     return result;
   });
   const [routingChanged, setRoutingChanged] = h2(false);
@@ -31482,8 +31612,8 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
   const [busy, setBusy] = h2(false);
   const [error, setError] = h2("");
   const [stale, setStale] = h2(false);
-  const [appId, setAppId] = h2("");
-  const [scopes, setScopes] = h2("");
+  const [appId, setAppId] = h2(defaults?.appId ?? "");
+  const [scopes, setScopes] = h2(defaults?.scopes.join("\n") ?? "");
   const [unspecifiedScopes, setUnspecifiedScopes] = h2(false);
   const [reviewed, setReviewed] = h2(false);
   const [oauthDraft, setOauthDraft] = h2(null);
@@ -31541,6 +31671,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
         if (!target) {
           target = await credentialRequest(credentialsPath("/connections"), "POST", { label: label.trim(), kind, ...input });
           setOauthDraft(target);
+          onCreated?.(target);
           onSaved();
         }
         await onStart(target.id, input);
@@ -31548,7 +31679,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
         onClose();
         return;
       }
-      await credentialRequest(
+      const saved = await credentialRequest(
         connection2 ? connectionPath(connection2.id) : credentialsPath("/connections"),
         connection2 ? "PUT" : "POST",
         {
@@ -31558,6 +31689,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
           ...connection2 ? { revision: connection2.revision } : { kind: "static" }
         }
       );
+      if (!connection2) onCreated?.(saved);
       setValues({});
       showToast(connection2 ? "Credential saved" : "Credential created");
       onSaved();
@@ -31574,6 +31706,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
     /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: onClose, children: "Cancel" }),
     /* @__PURE__ */ u4("button", { type: "submit", form: "personal-connection", class: "primary", disabled: !canSave, children: busy ? creatingOAuth ? "Starting\u2026" : "Saving\u2026" : creatingOAuth ? oauthDraft ? "Retry sign-in" : "Start sign-in" : "Save" })
   ] }), children: /* @__PURE__ */ u4("form", { id: "personal-connection", onSubmit: save, children: [
+    !connection2 && accessRequest ? /* @__PURE__ */ u4("p", { class: "ga-cred-callout", children: "These settings were suggested for the access request. Review the authentication, destination and permissions before saving or signing in. Creation does not grant the agent access." }) : null,
     /* @__PURE__ */ u4(
       "input",
       {
@@ -31602,7 +31735,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
             return;
           }
           setKind(next);
-          setScopes(next === "oauth_app" ? (apps.find((app) => app.id === appId)?.default_scopes ?? []).join("\n") : "");
+          setScopes((next === "static" ? [] : accessRequest?.scopes ?? (next === "oauth_app" ? apps.find((app) => app.id === appId)?.default_scopes ?? [] : [])).join("\n"));
           setUnspecifiedScopes(false);
           setReviewed(false);
           if (automaticName) setLabel(next === "oauth_app" ? apps.find((app) => app.id === appId)?.label ?? "" : hostnameFromPattern(routes[0].pattern));
@@ -31634,7 +31767,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
           onApp: (id2) => {
             setAppId(id2);
             setUnspecifiedScopes(false);
-            setScopes((apps.find((app) => app.id === id2)?.default_scopes ?? []).join("\n"));
+            setScopes((accessRequest?.scopes ?? apps.find((app) => app.id === id2)?.default_scopes ?? []).join("\n"));
             if (automaticName && kind === "oauth_app") setLabel(apps.find((app) => app.id === id2)?.label ?? "");
             setReviewed(false);
           },
@@ -31971,6 +32104,7 @@ function CredentialsContent({ agent } = {}) {
   const [view, setView] = h2("credentials");
   const [dialog, setDialog] = h2(null);
   const [tableVersion, setTableVersion] = h2(0);
+  const [created, setCreated] = h2(null);
   const signIn = useConnectionSignIn(() => void refresh());
   const intent = agent ? null : credentialsIntent.value;
   y2(() => {
@@ -31997,6 +32131,7 @@ function CredentialsContent({ agent } = {}) {
     return () => window.removeEventListener("keydown", key);
   }, [dialog, agent]);
   const connections = data?.connections ?? [];
+  const reviewing = !agent && !!accessApprovalId.value;
   const close = () => setDialog(null);
   const reload = () => {
     setTableVersion((value) => value + 1);
@@ -32012,20 +32147,26 @@ function CredentialsContent({ agent } = {}) {
         role: "region",
         "aria-label": agent ? "Agent credentials" : "Personal credentials",
         children: [
-          !agent && accessApprovalId.value && data ? /* @__PURE__ */ u4(
-            AccessRequestReview,
-            {
-              id: accessApprovalId.value,
-              connections,
-              onCreate: (resourceUrl) => setDialog({ kind: "edit", resourceUrl }),
-              onManage: (connection2) => setDialog(connection2.status === "disabled" ? { kind: "action", connection: connection2, action: "enable" } : connection2.kind === "static" ? { kind: "edit", id: connection2.id } : { kind: "connect", connection: connection2 }),
-              onSaved: () => {
-                void refresh();
-              }
-            }
-          ) : null,
+          !agent && accessApprovalId.value && data ? /* @__PURE__ */ u4(k, { children: [
+            /* @__PURE__ */ u4(
+              AccessRequestReview,
+              {
+                id: accessApprovalId.value,
+                connections,
+                preferredConnectionId: created?.requestId === accessApprovalId.value ? created.connectionId : void 0,
+                signingIn: !!signIn.waiting,
+                onCreate: (request) => setDialog({ kind: "edit", resourceUrl: request.resource_url, accessRequest: request, accessRequestId: accessApprovalId.value ?? void 0 }),
+                onManage: (connection2) => setDialog(connection2.status === "disabled" ? { kind: "action", connection: connection2, action: "enable" } : connection2.kind === "static" ? { kind: "edit", id: connection2.id } : { kind: "connect", connection: connection2 }),
+                onSaved: () => {
+                  void refresh();
+                }
+              },
+              accessApprovalId.value
+            ),
+            /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: clearAccessApproval, children: "Manage all Credentials" })
+          ] }) : null,
           /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
-            !agent ? /* @__PURE__ */ u4("div", { class: "credentials-toolbar", children: [
+            !agent && !reviewing ? /* @__PURE__ */ u4("div", { class: "credentials-toolbar", children: [
               /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: [
                 /* @__PURE__ */ u4(
                   "button",
@@ -32063,7 +32204,7 @@ function CredentialsContent({ agent } = {}) {
             loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading credentials\u2026" }) : null,
             /* @__PURE__ */ u4(ErrorNotice, { message: error ? `Couldn't load credentials: ${error}` : "" }),
             error ? /* @__PURE__ */ u4("button", { type: "button", onClick: reload, children: "Try again" }) : null,
-            data && !error ? /* @__PURE__ */ u4(k, { children: [
+            data && !error && !reviewing ? /* @__PURE__ */ u4(k, { children: [
               view === "credentials" ? connections.length ? /* @__PURE__ */ u4(
                 CredentialsTable,
                 {
@@ -32107,8 +32248,13 @@ function CredentialsContent({ agent } = {}) {
       {
         id: dialog.id,
         resourceUrl: dialog.resourceUrl,
+        accessRequest: dialog.accessRequest,
         apps: data.apps,
         groups: data.groups,
+        onCreated: (connection2) => {
+          const requestId = dialog?.kind === "edit" ? dialog.accessRequestId : void 0;
+          if (requestId) setCreated({ requestId, connectionId: connection2.id });
+        },
         onStart: signIn.start,
         onClose: close,
         onSaved: () => void refresh()
@@ -32175,22 +32321,6 @@ function ReconnectLatest(props) {
     /* @__PURE__ */ u4("button", { type: "button", onClick: props.onClose, children: "Cancel" })
   ] });
   return /* @__PURE__ */ u4(OAuthConnectionDialog, { ...props, connection: data });
-}
-
-// ../../shared/credential-matching.ts
-function serviceMatchesResource(service, resourceUrl) {
-  const url = URL.parse(resourceUrl);
-  if (!url || service.enabled === false || service.https_only && url.protocol !== "https:") return false;
-  const slash = service.host.indexOf("/");
-  const authority = slash < 0 ? service.host : service.host.slice(0, slash);
-  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
-  const separator = authority.lastIndexOf(":");
-  const explicitPort = separator >= 0 && /^\d+$/.test(authority.slice(separator + 1));
-  const host = explicitPort ? authority.slice(0, separator) : authority;
-  if (explicitPort && authority.slice(separator + 1) !== (url.port || (url.protocol === "https:" ? "443" : "80")))
-    return false;
-  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(value);
-  return glob(host.toLowerCase(), url.hostname.toLowerCase()) && (!path || glob(path, url.pathname));
 }
 
 // src/components/GroupCredentialAccess.tsx

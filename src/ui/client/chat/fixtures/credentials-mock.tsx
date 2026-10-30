@@ -5,6 +5,7 @@ import {
 } from '../src/components/CredentialsApi';
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
 import { serviceMatchesResource } from '../src/components/GroupCredentialAccess';
+import { connectionMatchesAccess, parseAccessAuthentication } from '../../../shared/access-authentication';
 
 export const FIXTURE_GROUP = { id: 'assistant', name: 'Assistant' };
 export interface FixtureOptions {
@@ -114,8 +115,12 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
   if (path === '/ui/chat/api/credentials' && method === 'GET') return overview();
   const access = /^\/ui\/chat\/api\/credentials\/access-requests\/fixture-access(?:\/(preview|apply))?$/.exec(path);
   if (access) {
-    const resource = new URLSearchParams(location.search).get('request_resource') || 'https://nextcloud.example.org/mcp/tools';
+    const params = new URLSearchParams(location.search);
+    const resource = params.get('request_resource') || 'https://nextcloud.example.org/mcp/tools';
+    const authentication = params.has('request_auth') ? parseAccessAuthentication(JSON.parse(params.get('request_auth')!)) : undefined;
+    const scopes: string[] | undefined = params.has('request_scopes') ? JSON.parse(params.get('request_scopes')!) : undefined;
     const request = { request_id: 'fixture-access', status: accessStage, resource_url: resource,
+      authentication, scopes, mcp_server: params.get('request_server') || undefined,
       reason: 'Finish the requested report.', revision: 1, agent_group_id: FIXTURE_GROUP.id, agent_group_name: FIXTURE_GROUP.name,
       result: accessStage === 'completed' ? { message: 'Access granted. The agent will safely verify the original operation.' } : null };
     if (!access[1] && method === 'GET') return request;
@@ -124,7 +129,7 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
     const item = current(input.connection_id);
     const names = Object.entries(mcpServers).filter(([, server]) => 'url' in server && server.url === resource).map(([name]) => name);
     if (access[1] === 'preview' && method === 'POST') return {
-      request, connection: item, matches: item.services.some(service => serviceMatchesResource(service, resource)),
+      request, connection: item, matches: connectionMatchesAccess(item, request),
       grantBreadth: 'All current and future URL patterns on this connection, not just the requested URL.',
       verification: 'Grant verification only. The agent must verify the authenticated operation after access is granted.',
       mcp: { names, revision: 'fixture-mcp', configured: Object.fromEntries(names.map(name =>
@@ -133,7 +138,7 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
     if (access[1] === 'apply' && method === 'POST') {
       if (accessStage !== 'pending' || input.connection_revision !== item.revision || input.request_revision !== 1)
         throw new HttpError(409, 'Review the current request and connection.');
-      if (item.status !== 'ready' || !item.services.some(service => serviceMatchesResource(service, resource)))
+      if (item.status !== 'ready' || !connectionMatchesAccess(item, request))
         throw new HttpError(409, 'Connect a compatible credential first.');
       if (input.configure_mcp) {
         if (!input.mcp_server || !input.account_alias || !names.includes(input.mcp_server)) throw new HttpError(409, 'Choose one named server.');

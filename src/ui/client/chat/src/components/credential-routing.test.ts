@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   authentication,
+  accessCreationDefaults,
   compileRoutes,
   credentialFields,
   hostnameFromPattern,
@@ -11,6 +12,45 @@ import {
 import type { Service } from './CredentialsApi';
 
 describe('credential URL pattern form', () => {
+  it('prefills MCP OAuth and exact requested scopes without broadening destinations', () => {
+    const request = {
+      resource_url: 'https://gmailmcp.example.com/mcp/v1',
+      mcp_server: 'google-gmail',
+      authentication: { type: 'mcp_oauth' as const, app_id: 'google' },
+      scopes: ['mail.read'],
+    };
+    const defaults = accessCreationDefaults(request, [
+      { id: 'google', api_hosts: ['gmail.example.com'], default_scopes: ['broad.default'] },
+    ]);
+    expect(defaults.kind).toBe('mcp_oauth');
+    expect(defaults.appId).toBe('google');
+    expect(defaults.scopes).toEqual(['mail.read']);
+    expect(defaults.routes[0].pattern).toBe(request.resource_url);
+    expect(accessCreationDefaults({ resource_url: request.resource_url, mcp_server: 'google-gmail' }, []).kind).toBe(
+      'mcp_oauth',
+    );
+  });
+  it('prefills only public static authentication recipes, leaving secret inputs empty', () => {
+    const request = { resource_url: 'https://api.example.com/v1/items' };
+    const header = accessCreationDefaults(
+      { ...request, authentication: { type: 'api-key', header: 'X-Research-Key', prefix: 'Token ' } },
+      [],
+    );
+    expect(header.kind).toBe('static');
+    expect(compileRoutes(header.routes)[0]).toMatchObject({
+      host: 'api.example.com/v1/items',
+      auth: { type: 'api-key', key: 'API_KEY', header: 'X-Research-Key', prefix: 'Token ' },
+    });
+    const custom = accessCreationDefaults(
+      { ...request, authentication: { type: 'custom', headers: ['X-Key', 'X-Signature'] } },
+      [],
+    );
+    expect(custom.routes[0].service.auth.headers).toEqual({
+      'X-Key': '{{ HEADER_VALUE_1 }}',
+      'X-Signature': '{{ HEADER_VALUE_2 }}',
+    });
+    expect(credentialFields(custom.routes.map((route) => route.service))).toHaveLength(2);
+  });
   it('uses concrete HTTPS URLs for OAuth, retaining resource query strings', () => {
     expect(oauthResourceUrl('mcp.example.com/mcp?version=1')).toBe('https://mcp.example.com/mcp?version=1');
     expect(hostnameFromPattern('https://mcp.example.com/mcp?version=1')).toBe('mcp.example.com');

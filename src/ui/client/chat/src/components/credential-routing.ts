@@ -1,9 +1,52 @@
 import { CredentialsError, serviceKeys, type Service } from './CredentialsApi';
 import { serviceDestination } from './credential-presentation';
+import type { AccessRequirements } from '../../../../shared/access-authentication';
+import { serviceMatchesResource } from '../../../../shared/credential-matching';
 
 export interface RouteDraft {
   service: Service;
   pattern: string;
+}
+
+export function accessCreationDefaults(
+  request: AccessRequirements,
+  apps: { id: string; api_hosts: string[]; default_scopes: string[] }[],
+): {
+  kind: 'static' | 'mcp_oauth' | 'oauth_app';
+  appId: string;
+  scopes: string[];
+  routes: RouteDraft[];
+} {
+  const hint = request.authentication;
+  const oauthScopes = !!request.scopes?.length && (!hint || hint.type === 'bearer');
+  const kind =
+    hint?.type === 'mcp_oauth' || hint?.type === 'oauth_app'
+      ? hint.type
+      : (!hint || oauthScopes) && request.mcp_server
+        ? 'mcp_oauth'
+        : oauthScopes
+          ? 'oauth_app'
+          : 'static';
+  const candidates = apps.filter((app) =>
+    app.api_hosts.some((host) => serviceMatchesResource({ host, https_only: true }, request.resource_url)),
+  );
+  const app = hint?.app_id
+    ? apps.find((app) => app.id === hint.app_id)
+    : kind === 'oauth_app' && candidates.length === 1
+      ? candidates[0]
+      : undefined;
+  const routes = routingDrafts();
+  routes[0].pattern = request.resource_url;
+  if (kind === 'static' && hint) {
+    routes[0].service.auth = authentication(hint.type, { type: 'unset' }, []);
+    if (hint.type === 'api-key')
+      routes[0].service.auth = { ...routes[0].service.auth, header: hint.header, prefix: hint.prefix };
+    if (hint.type === 'custom')
+      routes[0].service.auth.headers = Object.fromEntries(
+        (hint.headers ?? []).map((header, index) => [header, `{{ HEADER_VALUE_${index + 1} }}`]),
+      );
+  }
+  return { kind, appId: app?.id ?? '', scopes: request.scopes ?? app?.default_scopes ?? [], routes };
 }
 
 export function parseUrlPattern(value: string): { host: string; hostname: string } {

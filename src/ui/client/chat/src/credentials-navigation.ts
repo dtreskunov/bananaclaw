@@ -39,11 +39,15 @@ export function openCredentials(intent?: CredentialsIntent): void {
   }
 }
 
-export function openChat(): void {
+export function clearAccessApproval(): void {
   accessApprovalId.value = null;
   const url = new URL(location.href);
   url.searchParams.delete('access_request');
   history.replaceState(history.state, '', url);
+}
+
+export function openChat(): void {
+  clearAccessApproval();
   credentialsOpen.value = false;
   writeHash();
   if (location.hash === '#credentials') location.hash = '';

@@ -11,9 +11,14 @@ import { uiBaseUrl } from '../../ui/server/server.js';
 import { openInboundDb } from '../../session-manager.js';
 import type { PendingApproval, Session } from '../../types.js';
 import { isOAuthScope } from '../../ui/shared/oauth-app.js';
+import {
+  AccessAuthenticationError,
+  connectionMatchesAccess,
+  parseAccessAuthentication,
+  type AccessRequirements,
+} from '../../ui/shared/access-authentication.js';
 import { McpAuthenticationError, parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
 import { resolveMcpAuthentication } from './mcp-authentication.js';
-import { serviceMatchesResource } from '../../ui/shared/credential-matching.js';
 import { requestApproval, registerInteractiveApprovalHandler, notifyAgent } from '../approvals/primitive.js';
 import {
   claimApprovalWorkflow,
@@ -41,20 +46,26 @@ const TTL_MS = 24 * 60 * 60_000;
 const activeApplications = new Set<string>();
 const reviewUrl = (id: string): string => `${uiBaseUrl()}/chat/?access_request=${encodeURIComponent(id)}#credentials`;
 
-export interface AccessRequestInput {
-  resource_url: string;
+export interface AccessRequestInput extends AccessRequirements {
   reason: string;
-  scopes?: string[];
-  mcp_server?: string;
 }
 
 export function accessRequestInput(raw: unknown): AccessRequestInput {
   const body = objectBody(raw);
-  if (Object.keys(body).some((key) => !['resource_url', 'reason', 'scopes', 'mcp_server'].includes(key)))
+  if (
+    Object.keys(body).some((key) => !['resource_url', 'reason', 'scopes', 'mcp_server', 'authentication'].includes(key))
+  )
     throw new ConnectionInputError(
       'Access requests accept only resource_url, reason, optional scopes and an optional mcp_server name. Never supply secrets.',
     );
   const url = typeof body.resource_url === 'string' ? URL.parse(body.resource_url) : null;
+  let authentication;
+  try {
+    authentication = parseAccessAuthentication(body.authentication);
+  } catch (error) {
+    if (!(error instanceof AccessAuthenticationError)) throw error;
+    throw new ConnectionInputError(error.message);
+  }
   if (
     body.mcp_server !== undefined &&
     (typeof body.mcp_server !== 'string' || !/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(body.mcp_server))
@@ -87,9 +98,17 @@ export function accessRequestInput(raw: unknown): AccessRequestInput {
       !body.scopes.every((scope) => isOAuthScope(scope) && scope.length <= 2048))
   )
     throw new ConnectionInputError('Provide valid scope suggestions, never tokens.');
+  if (
+    Array.isArray(body.scopes) &&
+    body.scopes.length &&
+    authentication &&
+    !['mcp_oauth', 'oauth_app', 'bearer'].includes(authentication.type)
+  )
+    throw new ConnectionInputError('OAuth scope suggestions require an OAuth or bearer authentication request.');
   return {
     resource_url: url.href,
     reason: body.reason.trim(),
+    ...(authentication ? { authentication } : {}),
     ...(body.mcp_server === undefined ? {} : { mcp_server: body.mcp_server as string }),
     ...(body.scopes === undefined ? {} : { scopes: [...new Set(body.scopes as string[])].sort() }),
   };
@@ -125,6 +144,7 @@ export function accessRequestStatus(id: string, sessionId?: string) {
     status: record.workflow.stage,
     resource_url: record.input.resource_url,
     reason: record.input.reason,
+    authentication: record.input.authentication,
     mcp_server: record.input.mcp_server,
     scopes: record.input.scopes,
     revision: record.workflow.revision,
@@ -164,6 +184,7 @@ export async function requestAccess(session: Session, raw: unknown, requestId?: 
         input.resource_url,
         input.scopes ?? [],
         ...(input.mcp_server ? [input.mcp_server] : []),
+        ...(input.authentication ? [input.authentication] : []),
       ]),
     )
     .digest('hex');
@@ -218,7 +239,7 @@ export async function previewAccessRequest(userId: string, id: string, connectio
   return {
     request,
     connection,
-    matches: connection.services.some((service) => serviceMatchesResource(service, request.resource_url)),
+    matches: connectionMatchesAccess(connection, request),
     grantBreadth: 'All current and future URL patterns on this connection, not just the requested URL.',
     verification: 'Grant verification only. The agent must verify the authenticated operation after access is granted.',
     mcp: mcpConfiguration(request.agent_group_id, request.resource_url, request.mcp_server),
@@ -294,7 +315,7 @@ async function selectionGranted(id: string, selection: ApplySelection): Promise<
   return (
     connection.revision === selection.connectionRevision &&
     connection.status === 'ready' &&
-    connection.services.some((service) => serviceMatchesResource(service, request.resource_url)) &&
+    connectionMatchesAccess(connection, request) &&
     connection.grants.some((grant) => grant.vault === request.agent_group_id && grant.status === 'active')
   );
 }

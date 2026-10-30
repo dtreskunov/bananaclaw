@@ -17,6 +17,11 @@ Outbound HTTPS uses the configured credential gateway and CA. Check the backend:
   references and account aliases select one named instance; the host resolves
   current headers. Never substitute another account or update every instance
   sharing the URL. Two Gmail accounts should have two clearly named instances.
+  Include researched `authentication` hints when known (OAuth type/configured
+  app ID or static header names/public prefix) and desired OAuth `scopes`.
+  Never include actual values, passwords, client secrets or credential IDs.
+  The user sees only matching candidates and can create a reviewed connection;
+  creation/consent alone does not grant access.
   Do not recommend the OneCLI dashboard or trust old
   OneCLI account memory. Scope metadata can be legacy/requested rather than
   provider-verified; requesting fewer scopes does not revoke earlier grants.

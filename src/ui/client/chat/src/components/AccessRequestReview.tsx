@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { credentialRequest, credentialsPath, errorMessage, CredentialsError, type Connection } from './CredentialsApi';
 import { ErrorNotice, useCredentialResource } from './CredentialsParts';
 import { connectionName, serviceDestination } from './credential-presentation';
 import { respondApproval } from '../actions';
+import { ACCESS_AUTHENTICATION_LABELS, connectionMatchesAccess, type AccessRequirements } from '../../../../shared/access-authentication';
 
-interface AccessRequest {
+interface AccessRequest extends AccessRequirements {
   request_id: string;
   status: string;
   resource_url: string;
@@ -25,10 +26,12 @@ interface AccessPreview {
   mcp?: { names: string[]; revision: string; configured?: Record<string, { connection_id: string; account_alias: string } | undefined> };
 }
 
-export function AccessRequestReview({ id, connections, onCreate, onManage, onSaved }: {
+export function AccessRequestReview({ id, connections, preferredConnectionId, signingIn, onCreate, onManage, onSaved }: {
   id: string;
   connections: Connection[];
-  onCreate: (resourceUrl: string) => void;
+  preferredConnectionId?: string;
+  signingIn?: boolean;
+  onCreate: (request: AccessRequirements) => void;
   onManage: (connection: Connection) => void;
   onSaved: () => void;
 }) {
@@ -42,7 +45,23 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
   const [configureMcp, setConfigureMcp] = useState(false);
   const [mcpServer, setMcpServer] = useState('');
   const [accountAlias, setAccountAlias] = useState('');
-  const connectionVersion = JSON.stringify(connections.map(connection => [connection.id, connection.revision, connection.status]));
+  const preferred = useRef<string | undefined>();
+  const compatible = request.data ? connections.filter(connection => connectionMatchesAccess(connection, request.data!)) : [];
+  const created = connections.find(connection => connection.id === preferredConnectionId);
+  const createdMismatch = created?.status === 'ready' && !compatible.some(connection => connection.id === created.id);
+  const compatibleIds = JSON.stringify(compatible.map(connection => connection.id));
+  useEffect(() => {
+    if (!request.data) return;
+    if (preferredConnectionId && preferred.current !== preferredConnectionId &&
+      compatible.some(connection => connection.id === preferredConnectionId)) {
+      preferred.current = preferredConnectionId;
+      setSelected(preferredConnectionId);
+    } else if (selected && !compatible.some(connection => connection.id === selected)) {
+      setSelected('');
+    }
+  }, [preferredConnectionId, compatibleIds, selected, request.data]);
+  const connectionVersion = JSON.stringify(connections.map(connection => [connection.id, connection.revision, connection.status,
+    connection.requested_scopes, connection.granted_scopes, connection.scope_source]));
   useEffect(() => {
     setPreview(null);
     setConfirmed(false);
@@ -111,18 +130,31 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
       <p><code>{request.data.resource_url}</code></p>
       {request.data.mcp_server ? <p>MCP server: {request.data.mcp_server}</p> : null}
       <p>Recipient agent: {request.data.agent_group_name ?? request.data.agent_group_id}</p>
+      {request.data.authentication ? <p>Requested authentication: {ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type]}
+        {request.data.authentication.app_id ? ` · OAuth app: ${request.data.authentication.app_id}` : ''}
+        {request.data.authentication.header ? ` · Header: ${request.data.authentication.header}` : ''}
+        {request.data.authentication.prefix !== undefined ? ` · Public prefix: ${JSON.stringify(request.data.authentication.prefix)}` : ''}
+        {request.data.authentication.headers?.length ? ` · Headers: ${request.data.authentication.headers.join(', ')}` : ''}
+        . Review these agent suggestions before using them.</p> : null}
       {request.data.scopes?.length ? <p>Suggested scopes (not automatically granted): {request.data.scopes.join(' ')}</p> : null}
       {request.data.status !== 'pending' ? <p role="status">{request.data.result?.message ?? request.data.status}</p> : <>
         <label>Personal connection
           <select aria-label="Connection for access request" value={selected} disabled={busy}
             onChange={event => setSelected(event.currentTarget.value)}>
             <option value="">Choose from your Credentials</option>
-            {connections.map(connection => <option value={connection.id} key={connection.id}>
+            {compatible.map(connection => <option value={connection.id} key={connection.id}>
               {connectionName(connection)}{connection.status === 'ready' ? '' : ` (${connection.status})`}
             </option>)}
           </select>
         </label>
-        <button type="button" disabled={busy} onClick={() => onCreate(request.data!.resource_url)}>Add credential</button>
+        <p class="muted">Only credentials matching this URL and the requested authentication and scopes are listed. Unknown scope grants are not assumed to match.</p>
+        {!compatible.length ? <p role="status">No credentials match this destination, authentication mechanism and requested scopes. Create one to continue.</p> : null}
+        {createdMismatch && !selected ? <div role="alert">
+          The new credential was saved, but its destination, authentication or provider-reported scopes do not meet this request. No access was granted.
+          <button type="button" disabled={busy || signingIn} onClick={() => onManage(created)}>Review new credential</button>
+        </div> : null}
+        <button type="button" class={!compatible.length ? 'primary' : undefined} disabled={busy || signingIn}
+          onClick={() => { setSelected(''); setPreview(null); setConfirmed(false); onCreate(request.data!); }}>Create new credential</button>
         <button type="button" disabled={busy} onClick={() => void reject()}>Reject request</button>
         {preview ? <>
           <h4>{connectionName(preview.connection)}</h4>
@@ -152,7 +184,7 @@ export function AccessRequestReview({ id, connections, onCreate, onManage, onSav
             <p>Only {mcpServer || 'the selected server'} will change. Other servers using the same URL keep their own accounts. Manual Authorization is replaced by the host-managed connection.</p>
           </> : null}</div> : null}
           {!preview.matches ? <p role="status">This connection does not cover the requested destination. Do not extend OAuth routing just to match a hostname.</p> : null}
-          {preview.connection.status !== 'ready' || !preview.matches ? <button type="button" disabled={busy}
+          {preview.connection.status !== 'ready' || !preview.matches ? <button type="button" disabled={busy || signingIn}
             onClick={() => onManage(preview.connection)}>Manage this connection</button> : null}
           <label><input type="checkbox" checked={confirmed} disabled={busy || !preview.matches || preview.connection.status !== 'ready'}
             onChange={event => setConfirmed(event.currentTarget.checked)} />

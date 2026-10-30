@@ -226,12 +226,15 @@ describe('user-owned Credentials API', () => {
     const request = await requestAccess(session, {
       resource_url: 'https://api.example.test/search',
       reason: 'Read search results.',
+      authentication: { type: 'bearer' },
     });
     const path = `/ui/chat/api/credentials/access-requests/${request.request_id}`;
     user = 'member';
     expect((await call('GET', path)).status).toBe(403);
     user = 'alice';
-    expect((await call('GET', path)).status).toBe(200);
+    const review = await call('GET', path);
+    expect(review.status).toBe(200);
+    expect(review.value).toMatchObject({ authentication: { type: 'bearer' } });
     const preview = await call('POST', path + '/preview', { connection_id: 'connection-one' });
     expect(preview.status).toBe(200);
     expect(preview.value).toMatchObject({ matches: true, connection: { owner: { id: 'native-alice' } } });

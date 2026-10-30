@@ -763,6 +763,24 @@ and purpose. The user chooses an existing connection or uses the unified Add
 credential form (key, MCP OAuth or configured OAuth app), then confirms the
 recipient and full current/future connection access. Scope suggestions are
 shown but never selected automatically. Signing in does not grant access.
+`request_access` also accepts an optional nonsecret `authentication` suggestion:
+`{type: "mcp_oauth"}` or `{type: "oauth_app", app_id: "google"}`, with desired
+OAuth permissions in the separate `scopes` array; static examples include
+`{type: "api-key", header: "X-Api-Key", prefix: "Token "}` or
+`{type: "custom", headers: ["X-Api-Key", "X-Client-Id"]}`. Bearer and Basic
+authentication use `type: "bearer"` and `type: "basic"`. Header hints contain
+names/public prefixes only; values, passwords, client secrets and owner/connection
+overrides are rejected. CLI callers use `--authentication '<safe-json-object>'`.
+The request picker lists only the user's credentials covering its destination
+and requested mechanism/header details. Requested scopes must be present in
+provider-reported grants for ready OAuth credentials; unknown grants and implied
+scope hierarchies are not assumed. Compatible MCP drafts can finish consent,
+but cannot be granted until ready. With no matches, **Create new credential**
+opens the existing form with the exact URL, type, app suggestion and scopes
+prefilled for explicit review; advertised scopes are not auto-selected.
+New matching credentials are selected on return, but access is never granted
+merely by creating or signing in. The general library is hidden during request
+review and remains available through **Manage all Credentials**.
 Optional updates to a named MCP server use stable connection references
 and require explicit consent to restart the requesting session.
 An access request can target `mcp_server` (CLI `--mcp-server`); review selects

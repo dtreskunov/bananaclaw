@@ -13,7 +13,8 @@ import {
 import { GroupAdminField as Field } from './GroupAdminField';
 import { showToast } from './Toast';
 import { connectionName } from './credential-presentation';
-import { compileRoutes, credentialFields, hostnameFromPattern, oauthResourceUrl, routingDrafts, type RouteDraft } from './credential-routing';
+import { accessCreationDefaults, compileRoutes, credentialFields, hostnameFromPattern, oauthResourceUrl, routingDrafts, type RouteDraft } from './credential-routing';
+import type { AccessRequirements } from '../../../../shared/access-authentication';
 import { CredentialServiceForm } from './CredentialServiceForm';
 import { OAuthAppForm } from './OAuthAppForm';
 import { compileOAuthApp, oauthAppDraft } from './oauth-app-form';
@@ -22,6 +23,8 @@ import { scopeValues, validScopeSelection } from './oauth-scopes';
 
 interface ConnectionEditorProps {
   id?: string; apps: AppInfo[]; groups: CredentialGroup[]; initialKind?: Connection['kind']; resourceUrl?: string;
+  accessRequest?: AccessRequirements;
+  onCreated?: (connection: Connection) => void;
   onStart: (id: string, input: SignInInput) => Promise<void>; onClose: () => void; onSaved: () => void;
 }
 
@@ -38,14 +41,16 @@ function ExistingConnectionEditor({ id, ...props }: ConnectionEditorProps & { id
   return <ConnectionForm {...props} key={`${data.id}:${data.revision}`} connection={data} />;
 }
 
-function ConnectionForm({ connection, apps, groups, initialKind = 'static', resourceUrl, onStart, onClose, onSaved }:
+function ConnectionForm({ connection, apps, groups, initialKind = 'static', resourceUrl, accessRequest, onCreated, onStart, onClose, onSaved }:
   ConnectionEditorProps & { connection?: Connection }): JSX.Element {
-  const [kind, setKind] = useState<Connection['kind']>(connection?.kind ?? initialKind);
-  const [label, setLabel] = useState(connection ? connectionName(connection, apps) : hostnameFromPattern(resourceUrl ?? ''));
+  const defaults = accessRequest ? accessCreationDefaults(accessRequest, apps) : undefined;
+  const destination = resourceUrl ?? accessRequest?.resource_url;
+  const [kind, setKind] = useState<Connection['kind']>(connection?.kind ?? defaults?.kind ?? initialKind);
+  const [label, setLabel] = useState(connection ? connectionName(connection, apps) : hostnameFromPattern(destination ?? ''));
   const [automaticName, setAutomaticName] = useState(!connection);
   const [routes, setRoutes] = useState(() => {
-    const result = routingDrafts(connection?.services);
-    if (!connection && resourceUrl) result[0].pattern = resourceUrl;
+    const result = !connection && defaults ? defaults.routes : routingDrafts(connection?.services);
+    if (!connection && destination) result[0].pattern = destination;
     return result;
   });
   const [routingChanged, setRoutingChanged] = useState(false);
@@ -53,8 +58,8 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [stale, setStale] = useState(false);
-  const [appId, setAppId] = useState('');
-  const [scopes, setScopes] = useState('');
+  const [appId, setAppId] = useState(defaults?.appId ?? '');
+  const [scopes, setScopes] = useState(defaults?.scopes.join('\n') ?? '');
   const [unspecifiedScopes, setUnspecifiedScopes] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [oauthDraft, setOauthDraft] = useState<Connection | null>(null);
@@ -111,6 +116,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
         if (!target) {
           target = await credentialRequest<Connection>(credentialsPath('/connections'), 'POST', { label: label.trim(), kind, ...input });
           setOauthDraft(target);
+          onCreated?.(target);
           onSaved();
         }
         await onStart(target.id, input);
@@ -118,13 +124,14 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
         onClose();
         return;
       }
-      await credentialRequest<Connection>(connection ? connectionPath(connection.id) : credentialsPath('/connections'),
+      const saved = await credentialRequest<Connection>(connection ? connectionPath(connection.id) : credentialsPath('/connections'),
         connection ? 'PUT' : 'POST', {
           ...(renamed ? { label: label.trim() } : {}),
           ...(isStatic && (!connection || routingChanged) ? { services } : {}),
           ...(isStatic && Object.keys(supplied).length ? { values: supplied } : {}),
           ...(connection ? { revision: connection.revision } : { kind: 'static' }),
         });
+      if (!connection) onCreated?.(saved);
       setValues({});
       showToast(connection ? 'Credential saved' : 'Credential created');
       onSaved();
@@ -142,6 +149,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
     </button>
   </>}>
     <form id="personal-connection" onSubmit={save}>
+      {!connection && accessRequest ? <p class="ga-cred-callout">These settings were suggested for the access request. Review the authentication, destination and permissions before saving or signing in. Creation does not grant the agent access.</p> : null}
       <input type="text" class="credential-name-input" aria-label="Credential name" placeholder="Credential name" value={label} disabled={busy || !!oauthDraft}
         onInput={(event) => { setLabel(event.currentTarget.value); setAutomaticName(false); }} />
       {!connection ? <Field label="Credential type"><select aria-label="Credential type" value={kind} disabled={busy || !!oauthDraft}
@@ -149,7 +157,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
           const next = event.currentTarget.value;
           if (next !== 'static' && next !== 'mcp_oauth' && next !== 'oauth_app') { showToast('Choose a credential type.', 'err'); return; }
           setKind(next);
-          setScopes(next === 'oauth_app' ? (apps.find(app => app.id === appId)?.default_scopes ?? []).join('\n') : '');
+          setScopes((next === 'static' ? [] : accessRequest?.scopes ?? (next === 'oauth_app' ? apps.find(app => app.id === appId)?.default_scopes ?? [] : [])).join('\n'));
           setUnspecifiedScopes(false);
           setReviewed(false);
           if (automaticName) setLabel(next === 'oauth_app' ? apps.find((app) => app.id === appId)?.label ?? '' : hostnameFromPattern(routes[0].pattern));
@@ -164,7 +172,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
           onApp={(id) => {
             setAppId(id);
             setUnspecifiedScopes(false);
-            setScopes((apps.find((app) => app.id === id)?.default_scopes ?? []).join('\n'));
+            setScopes((accessRequest?.scopes ?? apps.find((app) => app.id === id)?.default_scopes ?? []).join('\n'));
             if (automaticName && kind === 'oauth_app') setLabel(apps.find((app) => app.id === id)?.label ?? '');
             setReviewed(false);
           }} onScopes={(value) => { setScopes(value); setReviewed(false); }} />

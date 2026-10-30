@@ -54,6 +54,14 @@ Follow this section and do not apply the OneCLI instructions below.
   tools matching the user's intended account; ask when ambiguous. The host
   resolves current group handles and transport headers. Do not copy binding
   headers into configuration or switch to another account when one is blocked.
+- When documentation or discovery identifies the required mechanism, include
+  optional `authentication` hints in `request_access`: `type` is `mcp_oauth`,
+  `oauth_app`, `bearer`, `api-key`, `basic` or `custom`. OAuth may suggest a
+  configured `app_id`; place documented scopes in the separate `scopes` array.
+  API-key hints use `header` plus an optional public `prefix`; custom hints use
+  `headers` as an array of names, never values. Do not invent scopes, header
+  values, client secrets or account identifiers. The user reviews these hints
+  in the existing form; they do not authorize any change by themselves.
 - Scope metadata may be provider-reported, requested, legacy or unknown.
   Do not describe legacy/requested metadata as a newly verified grant.
   Requesting fewer scopes is not a guaranteed provider-side revocation.

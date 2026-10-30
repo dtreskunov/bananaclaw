@@ -15,6 +15,7 @@ import type { OAuthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker } from './OAuthScopePicker';
 import { ApprovalCard } from './ApprovalCard';
 import { AccessRequestReview } from './AccessRequestReview';
+import { accessApprovalId } from '../credentials-navigation';
 
 const hooks = vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -82,6 +83,7 @@ const groups = [
 ];
 
 beforeEach(() => {
+  accessApprovalId.value = null;
   hooks.slots = [];
   hooks.cursor = 0;
   hooks.effects = [];
@@ -103,6 +105,7 @@ beforeEach(() => {
   vi.mocked(showToast).mockClear();
 });
 afterEach(() => {
+  accessApprovalId.value = null;
   credentialsOpen.value = false;
   isMobile.value = false;
   vi.useRealTimers();
@@ -111,6 +114,9 @@ afterEach(() => {
 
 interface TestProps {
   class?: string;
+  scopes?: string;
+  appId?: string;
+  resource?: string;
   footer: unknown;
   value: unknown;
   type: string;
@@ -144,6 +150,118 @@ function render(node: { type: unknown; props: unknown }): TestNode {
 }
 
 describe('assisted credential approval UI', () => {
+  it('surfaces a newly created credential that did not receive requested scopes without choosing a fallback', () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      status: 'pending',
+      resource_url: 'https://api.example.com/',
+      reason: 'Read mail',
+      revision: 1,
+      agent_group_id: 'one',
+      result: null,
+      authentication: { type: 'mcp_oauth' },
+      scopes: ['read'],
+    };
+    const created: Connection = {
+      ...original,
+      id: 'new-oauth',
+      kind: 'mcp_oauth',
+      scope_source: 'provider',
+      granted_scopes: ['other'],
+    };
+    const onManage = vi.fn();
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [original, created],
+      preferredConnectionId: created.id,
+      onCreate: vi.fn(),
+      onManage,
+      onSaved: vi.fn(),
+    });
+    expect(
+      descendants(node)
+        .filter((child) => child.type === 'option')
+        .map((child) => child.props.value),
+    ).toEqual(['']);
+    descendants(node)
+      .find((child) => child.type === 'button' && child.props.children === 'Review new credential')!
+      .props.onClick();
+    expect(onManage).toHaveBeenCalledWith(created);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+  it('lists only URL/mechanism-compatible credentials and passes creation suggestions intact', () => {
+    const request = {
+      request_id: 'access-one',
+      status: 'pending',
+      resource_url: 'https://api.example.com/',
+      reason: 'Read the report',
+      revision: 1,
+      agent_group_id: 'one',
+      result: null,
+      authentication: { type: 'basic' as const },
+    };
+    hooks.resource.data = request;
+    const wrongUrl = {
+      ...original,
+      id: 'wrong-url',
+      services: [{ ...original.services[0], host: 'other.example.com' }],
+    };
+    const wrongMethod = {
+      ...original,
+      id: 'wrong-method',
+      services: [{ ...original.services[0], auth: { type: 'bearer', token: 'TOKEN' } }],
+    };
+    const onCreate = vi.fn();
+    const node = AccessRequestReview({
+      id: request.request_id,
+      connections: [original, wrongUrl, wrongMethod],
+      onCreate,
+      onManage: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(
+      descendants(node)
+        .filter((child) => child.type === 'option')
+        .map((child) => child.props.value),
+    ).toEqual(['', original.id]);
+    descendants(node)
+      .find((child) => child.type === 'button' && child.props.children === 'Create new credential')!
+      .props.onClick();
+    expect(onCreate).toHaveBeenCalledWith(request);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+  it('prefills researched MCP OAuth settings but requires scope/identity review before consent', () => {
+    const request = {
+      resource_url: 'https://gmailmcp.example.com/mcp/v1',
+      mcp_server: 'google-gmail',
+      authentication: { type: 'mcp_oauth' as const },
+      scopes: ['mail.read'],
+    };
+    const draw = newFormRenderer({ accessRequest: request });
+    const node = draw();
+    const kind = descendants(node).find(
+      (child) =>
+        child.type === 'select' &&
+        (child.props as TestProps & { 'aria-label'?: string })['aria-label'] === 'Credential type',
+    )!;
+    expect(kind.props.value).toBe('mcp_oauth');
+    const oauth = descendants(node).find(
+      (child) => typeof child.type === 'function' && child.type.name === 'OAuthFields',
+    )!;
+    expect(oauth.props.scopes).toBe('mail.read');
+    expect(oauth.props.resource).toBe(request.resource_url);
+    expect(
+      descendants(node).find((child) => child.type === 'button' && child.props.type === 'submit')?.props.disabled,
+    ).toBe(true);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+  it('keeps the general credential table out of access-review mode', () => {
+    hooks.resource.data = { connections: [original], groups, apps: [], canEditInstall: true };
+    accessApprovalId.value = 'access-one';
+    const node = CredentialsContent();
+    expect(descendants(node).some((child) => child.type === AccessRequestReview)).toBe(true);
+    expect(descendants(node).some((child) => child.type === CredentialsTable)).toBe(false);
+  });
   it('lets the user pin a private granted connection and an account alias without copying headers', () => {
     hooks.resource.data = {
       grants: [

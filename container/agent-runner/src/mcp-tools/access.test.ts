@@ -23,6 +23,17 @@ describe('request_access MCP tool', () => {
     expect(result.isError).not.toBe(true);
     expect(JSON.parse(getUndeliveredMessages()[0].content)).toMatchObject({ mcp_server: 'gmail_personal' });
   });
+  it('carries researched nonsecret hints and scopes but rejects secret-valued hints', async () => {
+    const request = { resource_url: 'https://api.example.com/mcp', reason: 'Read mail.',
+      authentication: { type: 'mcp_oauth', app_id: 'google' }, scopes: ['mail.read'] };
+    expect((await requestAccess.handler(request)).isError).not.toBe(true);
+    expect(JSON.parse(getUndeliveredMessages()[0].content)).toMatchObject({
+      authentication: { type: 'mcp_oauth', app_id: 'google' }, scopes: ['mail.read'],
+    });
+    expect((await requestAccess.handler({ ...request, authentication: { type: 'bearer', token: 'secret' } })).isError).toBe(true);
+    expect((await requestAccess.handler({ ...request, authentication: { type: 'custom', headers: { 'X-Key': 'secret' } } })).isError).toBe(true);
+    expect(getUndeliveredMessages()).toHaveLength(1);
+  });
   it('rejects owner/secret overrides and unsafe destinations before delivery', async () => {
     for (const raw of [
       { resource_url: 'http://api.example.com/', reason: 'Read' },

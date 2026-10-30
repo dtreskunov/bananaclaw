@@ -395,6 +395,13 @@ These are configuration/grant approvals, not F3 approval of individual upstream
 HTTP requests. Repeated submissions in the same human-request context reuse the
 same approval, including a rejected outcome; a new human message can initiate a
 new request.
+Optional `authentication` hints describe MCP/API OAuth, bearer, Basic, API-key
+header or custom-header mechanisms. They contain only public method/app/header
+metadata, never values or owner/connection overrides. Scope hints remain
+separate, opaque tokens. The user sees only compatible personal candidates;
+host apply checks use the same URL/method/header/scope matcher. The existing
+creation dialog is prefilled for review and returns to the pending request.
+Creating a connection or completing consent never grants it implicitly.
 
 ### 6.2 Authorization and lifecycle
 

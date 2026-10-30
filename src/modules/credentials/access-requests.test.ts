@@ -140,6 +140,45 @@ const selection = (revision = 1) => ({
 });
 
 describe('assisted access approvals', () => {
+  it('accepts safe authentication JSON through ncl without granting access', async () => {
+    const response = await dispatch(
+      {
+        id: 'auth-hint-cli',
+        command: 'access-request',
+        args: {
+          'resource-url': input.resource_url,
+          reason: input.reason,
+          authentication: JSON.stringify({ type: 'api-key', header: 'X-Research-Key', prefix: 'Token ' }),
+        },
+      },
+      { caller: 'agent', sessionId: session.id, agentGroupId: session.agent_group_id, messagingGroupId: '' },
+    );
+    expect(response).toMatchObject({
+      ok: true,
+      data: { status: 'pending', authentication: { type: 'api-key', header: 'X-Research-Key', prefix: 'Token ' } },
+    });
+    expect(mocks.grant).not.toHaveBeenCalled();
+  });
+  it('persists researched mechanism/scope hints and rejects incompatible direct grant attempts', async () => {
+    const request = await requestAccess(session, {
+      ...input,
+      authentication: { type: 'mcp_oauth', app_id: 'google' },
+      scopes: ['read'],
+    });
+    expect(accessRequestStatus(request.request_id)).toMatchObject({
+      authentication: { type: 'mcp_oauth', app_id: 'google' },
+      scopes: ['read'],
+    });
+    expect((await previewAccessRequest('alice', request.request_id, connection.id)).matches).toBe(false);
+    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('Connect a compatible');
+    connection.kind = 'mcp_oauth';
+    connection.app_id = 'google';
+    connection.scope_source = 'provider';
+    connection.granted_scopes = ['other'];
+    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('Connect a compatible');
+    connection.granted_scopes = ['read'];
+    expect((await applyAccessRequest('alice', request.request_id, selection())).status).toBe('completed');
+  });
   it('accepts the real MCP transport envelope and provides session-scoped ncl parity', async () => {
     await getDeliveryAction('request_access')!(
       { action: 'request_access', requestId: 'appr-access-envelope', timelinePosition: 123, ...input },

@@ -1,7 +1,7 @@
 import './Credentials.css';
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
-import { accessApprovalId, credentialsIntent, openChat, openCredentials } from '../credentials-navigation';
+import { accessApprovalId, clearAccessApproval, credentialsIntent, openChat, openCredentials } from '../credentials-navigation';
 import { AccessRequestReview } from './AccessRequestReview';
 import { credentialsOpen, isMobile } from '../state';
 import { returnToUserMenu } from '../actions';
@@ -13,9 +13,10 @@ import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnecti
 import { CredentialAction, CredentialsTable } from './CredentialsTable';
 import { showToast } from './Toast';
 import { displayDestination } from './credential-presentation';
+import type { AccessRequirements } from '../../../../shared/access-authentication';
 
 type Dialog =
-  | { kind: 'edit'; id?: string; resourceUrl?: string }
+  | { kind: 'edit'; id?: string; resourceUrl?: string; accessRequest?: AccessRequirements; accessRequestId?: string }
   | { kind: 'connect'; connection?: Connection; resourceUrl?: string }
   | { kind: 'action'; connection: Connection; action: 'disable' | 'enable' | 'delete' }
   | { kind: 'app'; app?: AppInfo };
@@ -31,6 +32,7 @@ export function CredentialsContent({ agent }: {
   const [view, setView] = useState<'credentials' | 'apps'>('credentials');
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [tableVersion, setTableVersion] = useState(0);
+  const [created, setCreated] = useState<{ requestId: string; connectionId: string } | null>(null);
   const signIn = useConnectionSignIn(() => void refresh());
   const intent = agent ? null : credentialsIntent.value;
   useEffect(() => {
@@ -57,6 +59,7 @@ export function CredentialsContent({ agent }: {
     return () => window.removeEventListener('keydown', key);
   }, [dialog, agent]);
   const connections = data?.connections ?? [];
+  const reviewing = !agent && !!accessApprovalId.value;
   const close = (): void => setDialog(null);
   const reload = (): void => { setTableVersion((value) => value + 1); void refresh(); };
   const tableGroups = agent ? [data?.groups.find((group) => group.id === agent.id) ??
@@ -64,15 +67,18 @@ export function CredentialsContent({ agent }: {
   const content = <>
     <div class={agent ? 'ga-cred' : 'credentials-page settings-body'} id={agent ? 'agent-credentials' : 'credentials-page'}
       role="region" aria-label={agent ? 'Agent credentials' : 'Personal credentials'}>
-      {!agent && accessApprovalId.value && data ? <AccessRequestReview id={accessApprovalId.value}
+      {!agent && accessApprovalId.value && data ? <><AccessRequestReview key={accessApprovalId.value} id={accessApprovalId.value}
         connections={connections}
-        onCreate={resourceUrl => setDialog({ kind: 'edit', resourceUrl })}
+        preferredConnectionId={created?.requestId === accessApprovalId.value ? created.connectionId : undefined}
+        signingIn={!!signIn.waiting}
+        onCreate={request => setDialog({ kind: 'edit', resourceUrl: request.resource_url, accessRequest: request, accessRequestId: accessApprovalId.value ?? undefined })}
         onManage={connection => setDialog(connection.status === 'disabled'
           ? { kind: 'action', connection, action: 'enable' }
           : connection.kind === 'static' ? { kind: 'edit', id: connection.id } : { kind: 'connect', connection })}
-        onSaved={() => { void refresh(); }} /> : null}
+        onSaved={() => { void refresh(); }} />
+        <button type="button" class="ghost" onClick={clearAccessApproval}>Manage all Credentials</button></> : null}
       <section class="ga-cred">
-        {!agent ? <div class="credentials-toolbar">
+        {!agent && !reviewing ? <div class="credentials-toolbar">
           <nav class="ga-cred-segments" aria-label="Credentials sections">
             <button type="button" class={view === 'credentials' ? 'active' : ''} aria-current={view === 'credentials' ? 'page' : undefined}
               onClick={() => setView('credentials')}>Credentials</button>
@@ -98,7 +104,7 @@ export function CredentialsContent({ agent }: {
         {loading ? <p role="status">Loading credentials…</p> : null}
         <ErrorNotice message={error ? `Couldn't load credentials: ${error}` : ''} />
         {error ? <button type="button" onClick={reload}>Try again</button> : null}
-        {data && !error ? <>
+        {data && !error && !reviewing ? <>
           {view === 'credentials' ? connections.length ? <CredentialsTable key={tableVersion}
             connections={connections} groups={tableGroups} apps={data.apps} onlyGroup={agent?.id}
             busy={loading || !!signIn.waiting} onEdit={(connection) => setDialog({ kind: 'edit', id: connection.id })}
@@ -119,7 +125,9 @@ export function CredentialsContent({ agent }: {
         </> : null}
       </section>
     </div>
-    {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} resourceUrl={dialog.resourceUrl} apps={data.apps} groups={data.groups}
+    {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} resourceUrl={dialog.resourceUrl} accessRequest={dialog.accessRequest} apps={data.apps} groups={data.groups}
+      onCreated={connection => { const requestId = dialog?.kind === 'edit' ? dialog.accessRequestId : undefined;
+        if (requestId) setCreated({ requestId, connectionId: connection.id }); }}
       onStart={signIn.start} onClose={close} onSaved={() => void refresh()} /> : null}
     {dialog?.kind === 'connect' && data ? dialog.connection
       ? <ReconnectLatest id={dialog.connection.id} apps={data.apps} groups={data.groups} onStart={signIn.start} onClose={close} onSaved={() => void refresh()} />
