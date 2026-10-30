@@ -50,3 +50,43 @@ export function TrashIcon() {
     </svg>
   );
 }
+
+export function RefreshIcon() {
+  return (
+    <svg class="msg-action-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M12.5 5A5 5 0 1 0 13 9M12.5 2v3.5H9" />
+    </svg>
+  );
+}
+
+export function CheckIcon() {
+  return (
+    <svg class="msg-action-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m3 8 3.5 3.5L13 4.5" />
+    </svg>
+  );
+}
+
+export function CloseIcon() {
+  return (
+    <svg class="msg-action-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m4 4 8 8M12 4l-8 8" />
+    </svg>
+  );
+}
+
+export function PlayIcon() {
+  return (
+    <svg class="msg-action-icon msg-action-icon-solid" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m5 3 8 5-8 5z" />
+    </svg>
+  );
+}
+
+export function ExternalLinkIcon() {
+  return (
+    <svg class="msg-action-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M9 2.5h4.5V7M13 3 7 9M7 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V9" />
+    </svg>
+  );
+}

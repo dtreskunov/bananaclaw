@@ -119,11 +119,19 @@ BananaClaw-specific:
 
 ## Shared credentials: coordinated release
 
-The shared-connection implementation uses a top-level **Credentials** tab for
-your API keys and OAuth accounts. Enter or connect once, then explicitly grant
-selected services to the agents you administer. Agent Settings shows **Access**
-references, not another copy of the credential. Rotation and reconnect happen
+The account menu's **Credentials** entry, immediately after **My Profile**,
+opens your personal API keys and OAuth accounts. Enter or connect once, then explicitly grant
+selected services to the agents you administer. Agent Settings → **Credentials**
+uses the same table with only that agent's column and no header, not another
+copy of the credential. Rotation and reconnect happen
 once; removing one agent's access does not disconnect the account everywhere.
+Credentials uses the shared desktop dialog/mobile full-screen presentation.
+Its authorization table shows credentials as rows and agents as columns; edit
+checkboxes and use the row's checkmark to save. Compact icon actions manage the
+credential itself. Migration-generated IDs are replaced with recognizable
+provider or destination names in the display.
+The shared **Add credential** dialog supports keys and OAuth accounts.
+Names and HTTPS URL patterns size to their contents without wrapping.
 
 NanoClaw maps its stable user identities to native AgentVault managed users
 with personal library vaults. These users cannot log in to the gateway.

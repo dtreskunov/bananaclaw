@@ -58,11 +58,11 @@ export function App() {
   return (
     <>
       <Header />
-      <main id="main" class={mainCls.trim()} style={credentialsOpen.value ? 'display:none' : undefined}>
+      <main id="main" class={mainCls.trim()}>
         {groups.value.length ? <><ThreadsRail /><ChatMain /><FilesPane /></>
           : <p class="settings-body">No accessible groups. Your personal connections remain available in Credentials.</p>}
       </main>
-      {credentialsOpen.value ? <CredentialsPage /> : null}
+      <CredentialsPage />
       <div class={'backdrop' + (backdropShown ? ' show' : '')} id="backdrop" onClick={onBackdrop}></div>
       <Settings />
       <ShareLinkModal />

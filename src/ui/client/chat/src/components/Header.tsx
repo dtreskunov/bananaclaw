@@ -1,7 +1,6 @@
 // Header: brand, group strip, account menu, mobile drawer buttons.
 import './Header.css';
 import { credentialsOpen, drawerOpen, groupId } from '../state';
-import { openChat, openCredentials } from '../credentials-navigation';
 import { startNewThread } from '../actions';
 import { BRAND } from '../brand';
 import { GroupStrip } from './GroupPicker';
@@ -26,10 +25,6 @@ export function Header() {
         onClick={startNewThread}
       ><span class="plus-glyph" aria-hidden="true">+</span></button> : null}
       <GroupStrip />
-      <nav class="primary-navigation" aria-label="Primary">
-        <button type="button" aria-current={!credentialsOpen.value ? 'page' : undefined} onClick={openChat}>Chat</button>
-        <button type="button" aria-current={credentialsOpen.value ? 'page' : undefined} onClick={() => openCredentials()}>Credentials</button>
-      </nav>
       <UserMenu />
       {!credentialsOpen.value ? <button
         type="button"

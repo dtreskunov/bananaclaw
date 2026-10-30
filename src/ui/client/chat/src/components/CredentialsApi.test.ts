@@ -5,7 +5,7 @@ import {
   connectionPath,
   credentialRequest,
   credentialsPath,
-  parseAppConfiguration,
+  validateAppConfiguration,
   parseServices,
   providedValues,
   serviceKeys,
@@ -118,12 +118,11 @@ describe('safe service and app editors', () => {
     expect(config).not.toHaveProperty('client_secret_set');
     expect(config).not.toHaveProperty('source');
     expect(config).not.toHaveProperty('id');
-    expect(parseAppConfiguration(JSON.stringify(config))).toMatchObject({ client_id: 'public-client' });
-    expect(() => parseAppConfiguration(JSON.stringify({ ...config, client_secret: 'not-safe' }))).toThrow(
+    expect(validateAppConfiguration(config)).toMatchObject({ client_id: 'public-client' });
+    const unsafe = { ...config, client_secret: 'not-safe' };
+    expect(() => validateAppConfiguration(unsafe)).toThrow('separate password');
+    expect(() => validateAppConfiguration({ ...config, authorization_params: { client_secret: 'not-safe' } })).toThrow(
       'separate password',
     );
-    expect(() =>
-      parseAppConfiguration(JSON.stringify({ ...config, authorization_params: { client_secret: 'not-safe' } })),
-    ).toThrow('separate password');
   });
 });

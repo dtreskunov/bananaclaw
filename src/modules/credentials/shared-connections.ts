@@ -1,6 +1,7 @@
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/user-roles.js';
 import { getUser } from '../permissions/db/users.js';
+import { getBranding } from '../../ui/server/branding.js';
 import { AgentVaultError, gatewayJson, type GatewayRequestOptions } from './agent-vault-client.js';
 import { synchronizeManagedUser } from './managed-users.js';
 import type { GatewayService, AppInfo } from './gateway-credentials.js';
@@ -51,8 +52,10 @@ export class ConnectionInputError extends Error {
   }
 }
 
-function requireUser(userId: string): void {
-  if (!getUser(userId)) throw new ConnectionInputError('Unknown credential owner', 403);
+function requireUser(userId: string) {
+  const user = getUser(userId);
+  if (!user) throw new ConnectionInputError('Unknown credential owner', 403);
+  return user;
 }
 
 export function requireGroupAdmin(userId: string, groupId: string): void {
@@ -117,14 +120,20 @@ async function userRequest<T>(
   method: string,
   suffix: string,
   opts: GatewayRequestOptions = {},
-): Promise<T> {
+): Promise<{ data: T; ownerId: string }> {
   requireUser(userId);
   const user = await synchronizeManagedUser(userId);
   requireUser(userId);
-  return gatewayJson<T>(method, `/v1/managed-users/${id(user.id)}${suffix}`, 'shared credential operation', opts);
+  const data = await gatewayJson<T>(
+    method,
+    `/v1/managed-users/${id(user.id)}${suffix}`,
+    'shared credential operation',
+    opts,
+  );
+  return { data, ownerId: user.id };
 }
 
-function connectionResult(connection: SharedConnection): SharedConnection {
+function connectionResult(connection: SharedConnection, ownerId: string): SharedConnection {
   if (
     !connection ||
     typeof connection.id !== 'string' ||
@@ -139,6 +148,12 @@ function connectionResult(connection: SharedConnection): SharedConnection {
     !Array.isArray(connection.grants)
   )
     throw new AgentVaultError('Gateway returned invalid connection metadata', 502);
+  if (connection.owner.id !== ownerId)
+    throw new AgentVaultError(
+      'Gateway returned a connection outside your personal library',
+      502,
+      'connection_owner_mismatch',
+    );
   return {
     id: connection.id,
     label: connection.label,
@@ -159,13 +174,15 @@ function connectionResult(connection: SharedConnection): SharedConnection {
 }
 
 export async function listConnections(userId: string): Promise<SharedConnection[]> {
-  const result = await userRequest<{ connections: SharedConnection[] }>(userId, 'GET', '/connections');
-  if (!Array.isArray(result?.connections)) throw new AgentVaultError('Gateway returned invalid connection list', 502);
-  return result.connections.map(connectionResult);
+  const { data, ownerId } = await userRequest<{ connections: SharedConnection[] }>(userId, 'GET', '/connections');
+  if (!Array.isArray(data?.connections)) throw new AgentVaultError('Gateway returned invalid connection list', 502);
+  return data.connections.map((connection) => connectionResult(connection, ownerId));
 }
 
 export function getConnection(userId: string, connectionId: string): Promise<SharedConnection> {
-  return userRequest<SharedConnection>(userId, 'GET', `/connections/${id(connectionId)}`).then(connectionResult);
+  return userRequest<SharedConnection>(userId, 'GET', `/connections/${id(connectionId)}`).then(({ data, ownerId }) =>
+    connectionResult(data, ownerId),
+  );
 }
 
 export function createConnection(userId: string, raw: unknown): Promise<SharedConnection> {
@@ -179,7 +196,9 @@ export function createConnection(userId: string, raw: unknown): Promise<SharedCo
   safeServices(body.services);
   if (body.kind === 'static' && (!body.services || !body.values))
     throw new ConnectionInputError('A static connection needs services and credential values');
-  return userRequest<SharedConnection>(userId, 'POST', '/connections', { body }).then(connectionResult);
+  return userRequest<SharedConnection>(userId, 'POST', '/connections', { body }).then(({ data, ownerId }) =>
+    connectionResult(data, ownerId),
+  );
 }
 
 export function updateConnection(userId: string, connectionId: string, raw: unknown): Promise<SharedConnection> {
@@ -198,7 +217,7 @@ export function updateConnection(userId: string, connectionId: string, raw: unkn
   return userRequest<SharedConnection>(userId, 'PUT', `/connections/${id(connectionId)}`, {
     body: update,
     ifMatch: connectionRevision(revision),
-  }).then(connectionResult);
+  }).then(({ data, ownerId }) => connectionResult(data, ownerId));
 }
 
 export async function deleteConnection(userId: string, connectionId: string, revision: unknown): Promise<void> {
@@ -224,10 +243,10 @@ export async function grantConnection(
     new Set(body.services).size !== body.services.length
   )
     throw new ConnectionInputError('Select distinct connection services');
-  return userRequest(userId, 'PUT', `/connections/${id(connectionId)}/grants/${id(groupId)}`, {
+  return userRequest<SharedConnection>(userId, 'PUT', `/connections/${id(connectionId)}/grants/${id(groupId)}`, {
     body: { services: body.services },
     ...(body.revision === undefined ? { ifNoneMatch: '*' as const } : { ifMatch: connectionRevision(body.revision) }),
-  });
+  }).then(({ data, ownerId }) => connectionResult(data, ownerId));
 }
 
 export async function detachConnection(userId: string, connectionId: string, groupId: string): Promise<void> {
@@ -241,7 +260,14 @@ export async function revokeConnectionGrant(userId: string, connectionId: string
 
 export async function groupConnectionAccess(userId: string, groupId: string): Promise<SharedAccessGrant[]> {
   requireGroupAdmin(userId, groupId);
-  return (await userRequest<{ grants: SharedAccessGrant[] }>(userId, 'GET', `/vaults/${id(groupId)}/access`)).grants;
+  const { data, ownerId } = await userRequest<{ grants: SharedAccessGrant[] }>(
+    userId,
+    'GET',
+    `/vaults/${id(groupId)}/access`,
+  );
+  if (!Array.isArray(data?.grants) || data.grants.some((grant) => !grant || typeof grant.owner?.id !== 'string'))
+    throw new AgentVaultError('Gateway returned invalid connection access metadata', 502);
+  return data.grants.filter((grant) => grant.owner.id === ownerId);
 }
 
 export async function startConnectionSignIn(userId: string, connectionId: string, raw: unknown) {
@@ -256,11 +282,19 @@ export async function startConnectionSignIn(userId: string, connectionId: string
   const user = await synchronizeManagedUser(userId);
   const connection = await getConnection(userId, connectionId);
   if (connection.kind === 'static') throw new ConnectionInputError('Static connections do not use OAuth sign-in');
+  const profile = requireUser(userId);
+  const brand = getBranding().name.trim();
+  const name = profile.display_name?.trim();
+  const clientName = name ? `${brand} (${name})` : brand;
+  if (!brand || [...clientName].length > 100 || /\p{Cc}/u.test(clientName))
+    throw new ConnectionInputError(
+      'The app and profile display names must form an OAuth client name of at most 100 characters without control characters',
+    );
   const result = await gatewayJson<{ state: string; authorize_url: string }>(
     'POST',
     `/v1/managed-users/${id(user.id)}/connections/${id(connectionId)}/oauth/start`,
     'connection sign-in',
-    { body, timeoutMs: 30000 },
+    { body: { ...body, client_name: clientName }, timeoutMs: 30000 },
   );
   const authorize = URL.parse(result.authorize_url);
   if (!authorize || authorize.protocol !== 'https:' || authorize.username || authorize.password)
@@ -276,7 +310,7 @@ export async function startConnectionSignIn(userId: string, connectionId: string
 }
 
 export async function listConnectionApps(userId: string): Promise<ConnectionApp[]> {
-  return (await userRequest<{ items: ConnectionApp[] }>(userId, 'GET', '/oauth-apps')).items;
+  return (await userRequest<{ items: ConnectionApp[] }>(userId, 'GET', '/oauth-apps')).data.items;
 }
 
 export async function changeConnectionApp(
@@ -307,5 +341,5 @@ export async function changeConnectionApp(
       body.client_secret = input.clientSecret;
     }
   }
-  return userRequest(userId, method, `/oauth-apps/${id(appId)}?scope=${scope}`, { body });
+  return (await userRequest(userId, method, `/oauth-apps/${id(appId)}?scope=${scope}`, { body })).data;
 }

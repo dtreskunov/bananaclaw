@@ -754,20 +754,64 @@ advance the same turn into a reply to verify trace ownership and frozen elapsed
 time across settlement. Generated fixture assets are ignored and rebuilt from
 `src/ui/client/chat/fixtures/`.
 
-**Credential UI target (plan of record, revision 7):** **Credentials** becomes a
-top-level user-scoped tab, not a section of Agent Settings. Keys and Connected
-accounts are owned by the user's mapped native AgentVault user; the gateway
+**Credential UI (plan of record, revision 7):** the account menu includes
+**Credentials** immediately after **My Profile**, opening the user-scoped
+`#credentials` dialog, not a section of Agent Settings or a separate header tab.
+It uses the same desktop dialog and mobile full-screen/back-to-menu chrome as
+My Profile. Keys and connected accounts share one **Credentials** table;
+**OAuth apps** has its own section. Connections are owned by the user's mapped native AgentVault user; the gateway
 stays headless and does not provide another login. The user enters/connects
 once, manages owner-defined service destinations, and grants selected agents
-access. **Available to** shows authorization; **Used by** reports actual use.
+access. Authorization is an editable table: credential rows, agent columns,
+checkboxes and compact per-row save/cancel icons. It uses transcript table
+formatting with vertical agent headings and hides the default HTTPS port.
+Names and HTTPS URL patterns do not wrap; horizontal scrolling keeps long
+contents accessible. The dialog header has no refresh button.
+Partial and suspended grants
+are indeterminate rather than silently promoted; saved edits are revision-checked
+and detach affects only the selected agent. The table shows readable provider
+or destination labels, not generated IDs, owner/type metadata or key counts.
+Routine explanatory paragraphs and per-connection "Available to" summaries
+are omitted; consequential mutation/consent reviews remain in their dialogs.
 Rotate/reconnect/disable and **Disconnect everywhere** operate on the shared
 connection with an affected-agent preview.
 
-Agent Settings → **Access** shows granted service references, owner/status and
-authorized attach/detach actions. It must not duplicate credential-entry,
-rotation, OAuth reconnect or upstream-disconnect forms. MCP Connect/Manage
-opens the user's connection flow; group administration does not confer
-ownership of another user's credential. F12 copying is removed.
+Credential names are editable directly in the table (Enter or blur saves;
+Escape cancels). New credentials focus the URL pattern and derive their name
+from its hostname until the name is edited manually. Static routing uses
+URL-pattern, authentication, header and request-placeholder controls, not JSON
+or internal service names. Placeholders can reuse a saved value, be copied, and
+have their replacement locations selected explicitly. HTTPS is mandatory, without an override.
+Renaming and value-only rotation omit routing updates so existing grants remain
+active; changed routing requires agent access to be reapproved. Static saves
+do not require a separate routing-review checkbox.
+Keys and OAuth accounts use the same **Add credential** dialog with a
+credential-type selector. OAuth retains explicit policy review and draft-safe
+sign-in retries.
+For dynamic registration, the host supplies the application brand and the
+signed-in user's profile display name, for example
+`BananaClaw (Denis Treskunov)`. Client names are display metadata, not OAuth
+identity or ownership keys. Existing authorization pages keep their registered
+name; start a fresh sign-in after a name change.
+
+OAuth apps use fields for the issuer, client authentication, API hosts and
+scopes, with advanced endpoint, identity and authorization-parameter controls
+instead of JSON. Blank client secrets preserve configured secrets; removed
+optional settings are explicitly cleared. App ownership and consequential
+policy/secret-lifecycle review remain enforced.
+
+Agent Settings → **Credentials** reuses the same table, filtered to that
+agent's column without a table header or extra navigation. It loads only the
+signed-in user's personal credential collection and reuses the same editors
+and actions. Other owners' credentials and metadata are not included, even
+when the user administers the agent. Group administration never confers
+credential ownership. MCP Connect/Manage opens the same personal creation flow.
+This is enforced by the server, not by table filtering: both personal and
+group-access metadata are owner-only, including for instance owners and agent
+administrators. The host rejects foreign-owner personal responses from the
+gateway. Runtime grants still authorize the agent to use shared connections
+without disclosing the owner's credential metadata.
+F12 copying is removed.
 
 Replace the old group-owned credential fixture/routes/DTOs in the coordinated
 release, not behind a permanent compatibility flag. New fixtures must cover
@@ -777,13 +821,9 @@ disconnect, scope/identity-change review and gateway failures. See the
 [plan of record](credential-gateway-agent-vault-fork-proposal.md#61-top-level-credentials-and-agent-access)
 for the target; this is not yet a statement about deployed navigation.
 
-A second, **deployed vault-local** fixture renders the production Agent Settings
-dialog's earlier **Credentials** tab:
-**Keys** (each with one destination) and **Accounts** (MCP sign-ins, OAuth
-accounts, and OAuth apps that are install-wide or the group's own), plus the
-sign-in row in the MCP server editor. The tab is hidden in
-the app until `credentialsUiEnabled` is turned on. The fixture mocks every
-`/admin/credentials/*` route in the page:
+A second fixture renders the production **Credentials** dialog and agent
+**Credentials** table on the canonical user-owned connection/grant APIs.
+It mocks all credential routes; no real keys or upstream authorizations are used:
 
 ```bash
 pnpm --dir src/ui/client/chat run fixture:credentials

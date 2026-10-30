@@ -4,6 +4,7 @@ import { credentialsOpen, groupId } from '../state';
 import { startNewThread } from '../actions';
 import { GroupStrip } from './GroupPicker';
 import { Header } from './Header';
+import { UserMenu } from './UserMenu';
 
 vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -16,7 +17,7 @@ vi.mock('../actions', async (importOriginal) => ({
 
 function newThreadButton() {
   return Header().props.children.find(
-    (child: VNode<{ 'aria-label'?: string }>) => child.props['aria-label'] === 'New thread',
+    (child: VNode<{ 'aria-label'?: string }>) => child?.props['aria-label'] === 'New thread',
   );
 }
 
@@ -27,23 +28,19 @@ afterEach(() => {
 });
 
 describe('mobile header new thread', () => {
-  it('always provides user-scoped Credentials navigation independently of an agent gateway flag', () => {
-    const nav = Header().props.children.find(
-      (child: VNode<{ 'aria-label'?: string }>) => child?.props['aria-label'] === 'Primary',
+  it.each([false, true])('keeps account navigation in the user menu when Credentials is open=%s', (open) => {
+    credentialsOpen.value = open;
+    const children = Header().props.children;
+    expect(children.some((child: VNode) => child?.type === UserMenu)).toBe(true);
+    expect(children.some((child: VNode<{ 'aria-label'?: string }>) => child?.props['aria-label'] === 'Primary')).toBe(
+      false,
     );
-    expect(nav.props.children.map((child: VNode) => child.props.children)).toEqual(['Chat', 'Credentials']);
-    credentialsOpen.value = true;
-    expect(
-      Header().props.children.find(
-        (child: VNode<{ 'aria-label'?: string }>) => child?.props['aria-label'] === 'Primary',
-      ).props.children[1].props['aria-current'],
-    ).toBe('page');
   });
   it('places a mobile-only plus button immediately before the agent selector', () => {
     groupId.value = 'agent';
     const children = Header().props.children;
     const index = children.findIndex(
-      (child: VNode<{ 'aria-label'?: string }>) => child.props['aria-label'] === 'New thread',
+      (child: VNode<{ 'aria-label'?: string }>) => child?.props['aria-label'] === 'New thread',
     );
     expect(index).toBeGreaterThan(0);
     expect(children[index + 1].type).toBe(GroupStrip);

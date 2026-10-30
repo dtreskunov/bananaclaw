@@ -81,7 +81,7 @@ function useMockVersion(): number {
   return version;
 }
 
-function reopen(tab = 'access'): void {
+function reopen(tab = 'credentials'): void {
   const show = (): void => {
     groupAdminTabRequest.value = tab;
     groupAdminOpen.value = true;
@@ -100,7 +100,7 @@ function Controls(): preact.JSX.Element {
   const set = (next: Partial<FixtureOptions>, reload = true): void => {
     setOptions(next);
     if (reload) {
-      if (groupAdminOpen.value) reopen('access');
+      if (groupAdminOpen.value) reopen('credentials');
       fixtureRevision.value++;
     }
   };
@@ -135,9 +135,9 @@ function Controls(): preact.JSX.Element {
         </label>
         <div class="cred-fixture-buttons">
           <button type="button" onClick={() => openCredentials()}>Personal Credentials</button>
-          <button type="button" onClick={() => reopen('access')}>Agent Access</button>
+          <button type="button" onClick={() => reopen('credentials')}>Agent Credentials</button>
           <button type="button" onClick={() => reopen('mcp')}>MCP servers</button>
-          <button type="button" onClick={() => { resetState(); fixtureRevision.value++; if (groupAdminOpen.value) reopen('access'); }}>Reset</button>
+          <button type="button" onClick={() => { resetState(); fixtureRevision.value++; if (groupAdminOpen.value) reopen('credentials'); }}>Reset</button>
         </div>
         <details class="cred-fixture-log">
           <summary>API calls ({callLog.length})</summary>
@@ -160,7 +160,7 @@ function Fixture(): preact.JSX.Element {
     <>
       <Header />
       {credentialsOpen.value ? <CredentialsPage key={fixtureRevision.value} /> : <main class="cred-fixture-page">
-        <p>Chat fixture. Use personal Credentials or Agent Settings → Access.</p>
+        <p>Chat fixture. Use personal Credentials or Agent Settings → Credentials.</p>
         <button type="button" onClick={() => reopen()}>Open Agent Settings</button>
       </main>}
       <GroupAdmin />

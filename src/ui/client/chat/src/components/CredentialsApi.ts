@@ -298,8 +298,7 @@ export function appConfiguration(app: AppInfo): OAuthAppConfiguration {
   };
 }
 
-export function parseAppConfiguration(text: string): OAuthAppConfiguration {
-  const config: unknown = JSON.parse(text);
+export function validateAppConfiguration(config: OAuthAppConfiguration): OAuthAppConfiguration {
   if (
     !isRecord(config) ||
     typeof config.label !== 'string' ||
@@ -314,14 +313,14 @@ export function parseAppConfiguration(text: string): OAuthAppConfiguration {
     !Array.isArray(config.default_scopes) ||
     config.default_scopes.some((v) => typeof v !== 'string')
   )
-    throw new CredentialsError('App JSON needs label, issuer, client_id, api_hosts and default_scopes.');
+    throw new CredentialsError('Enter an app name, issuer URL, client ID and at least one API host.');
   if (
     !['none', 'client_secret_post', 'client_secret_basic'].includes(String(config.token_endpoint_auth_method)) ||
     !['none', 'oidc', 'google', 'github'].includes(String(config.identity)) ||
     !['space', 'comma'].includes(String(config.token_scope_separator))
   )
     throw new CredentialsError(
-      'App JSON needs a supported token_endpoint_auth_method, identity and token_scope_separator.',
+      'Choose a supported client authentication method, identity verifier and scope separator.',
     );
   for (const field of ['authorization_endpoint', 'token_endpoint', 'revocation_endpoint', 'jwks_uri']) {
     if (config[field] !== undefined && typeof config[field] !== 'string')
@@ -339,5 +338,5 @@ export function parseAppConfiguration(text: string): OAuthAppConfiguration {
       ([key, child]) => /secret|password|access_token|refresh_token/i.test(key) || secretFields(child),
     );
   if (secretFields(config)) throw new CredentialsError('Put the client secret only in the separate password field.');
-  return config as unknown as OAuthAppConfiguration;
+  return config;
 }

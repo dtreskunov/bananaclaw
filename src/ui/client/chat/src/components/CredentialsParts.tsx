@@ -8,6 +8,7 @@ import {
 } from './CredentialsApi';
 import { MobileDialog, MobileDialogFooter } from './MobileDialog';
 import { showToast } from './Toast';
+import { serviceDestination } from './credential-presentation';
 
 export function SecretInput({ value, onInput, placeholder = 'New value', disabled, label }: {
   value: string; onInput: (value: string) => void; placeholder?: string; disabled?: boolean; label?: string;
@@ -46,15 +47,14 @@ export function CredentialDialog({ title, children, onClose, busy, footer }: {
 
 export function Impact({ connection, groups }: { connection: Connection; groups: CredentialGroup[] }): JSX.Element {
   return <div class="ga-cred-callout ga-cred-impact">
-    <strong>Available to · {connection.grants.length} agent groups</strong>
+    <strong>Affected agents</strong>
     {connection.grants.length ? <ul>
       {connection.grants.map((grant) => <li key={grant.vault}>
-        {groups.find((group) => group.id === grant.vault)?.name ?? grant.vault}
-        {' · '}{grant.services.join(', ')}{' · '}{grant.status}
+        {groups.find((group) => group.id === grant.vault)?.name ?? 'Unavailable agent'}
+        {' · '}{connection.services.filter((service) => grant.services.includes(service.name)).map(serviceDestination).join(', ')}
+        {grant.status === 'suspended' ? ' · access needs review' : ''}
       </li>)}
     </ul> : <p>No agents currently have access.</p>}
-    <p>These are access grants, not a usage history. Every receiving agent uses the same upstream identity,
-      permissions and quotas. Detaching an agent does not disconnect upstream.</p>
   </div>;
 }
 

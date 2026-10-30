@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Writable } from 'node:stream';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ROOT = vi.hoisted(() => `/tmp/nanoclaw-shared-credentials-${process.pid}-${Math.random().toString(36).slice(2)}`);
 vi.mock('../../../config.js', async () => ({
@@ -30,7 +30,9 @@ import { clearSignIns, getSignIn } from '../../../modules/credentials/sign-ins.j
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { handle } from './routes.js';
 import { handleOAuthCallback } from '../oauth-callback.js';
+import { _resetBrandingCache } from '../branding.js';
 import { dispatch } from '../../../cli/dispatch.js';
+import type { SharedAccessGrant } from '../../../modules/credentials/shared-connections.js';
 import '../../../cli/commands/credentials.js';
 
 const GROUP = 'ag-shared';
@@ -44,15 +46,18 @@ let wrongCompletion = false;
 let gatewayStatus = 200;
 let connectionKind = 'static';
 let duringProvision: (() => void) | null = null;
+let returnedOwner: string | null = null;
+let extraConnections: ReturnType<typeof connection>[] = [];
+let accessGrants: SharedAccessGrant[] = [];
 
-function connection() {
+function connection(ownerId = 'native-alice') {
   return {
     id: 'connection-one',
     label: 'Search',
     kind: connectionKind,
     status: 'ready',
     revision: REVISION,
-    owner: { id: 'native-alice' },
+    owner: { id: returnedOwner ?? ownerId },
     services: [service],
     credentials: ['SEARCH_KEY'],
     grants: [],
@@ -91,17 +96,18 @@ beforeAll(async () => {
     if (url.pathname.endsWith('/oauth-apps')) return send(200, { items: [] });
     if (url.pathname.endsWith('/oauth/start'))
       return send(200, { state: `sign-in-${++sequence}`, authorize_url: 'https://auth.example.test/authorize' });
-    if (url.pathname.endsWith('/access')) return send(200, { grants: [] });
+    const effectiveOwner = /^\/v1\/managed-users\/([^/]+)\//.exec(url.pathname)?.[1] ?? 'native-alice';
+    if (url.pathname.endsWith('/access')) return send(200, { grants: accessGrants });
     if (url.pathname.endsWith('/connections')) {
-      if (req.method === 'GET') return send(200, { connections: [connection()] });
-      return send(201, connection());
+      if (req.method === 'GET') return send(200, { connections: [connection(effectiveOwner), ...extraConnections] });
+      return send(201, connection(effectiveOwner));
     }
     if (req.method === 'DELETE') {
       res.writeHead(204);
       res.end();
       return;
     }
-    send(200, connection());
+    send(200, connection(effectiveOwner));
   });
   await new Promise<void>((resolve) => gateway.listen(0, '127.0.0.1', resolve));
   process.env.NANOCLAW_AGENT_VAULT_URL = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}`;
@@ -112,6 +118,10 @@ afterAll(async () => {
   await new Promise<void>((resolve) => gateway.close(() => resolve()));
   delete process.env.NANOCLAW_AGENT_VAULT_URL;
   fs.rmSync(ROOT, { recursive: true, force: true });
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  _resetBrandingCache();
 });
 
 beforeEach(() => {
@@ -141,6 +151,9 @@ beforeEach(() => {
   clearSignIns();
   connectionKind = 'static';
   duringProvision = null;
+  returnedOwner = null;
+  extraConnections = [];
+  accessGrants = [];
 });
 
 async function call(method: string, url: string, body?: unknown, headers: Record<string, string> = {}) {
@@ -208,6 +221,63 @@ describe('user-owned Credentials API', () => {
         .every((entry) => entry.path.startsWith('/v1/managed-users/native-bob/')),
     ).toBe(true);
     expect(result.value).toMatchObject({ groups: [{ id: GROUP, canAdmin: true }] });
+    expect(result.value).toMatchObject({ connections: [{ owner: { id: 'native-bob' } }] });
+  });
+
+  it.each(['alice', 'bob'])(
+    'never exposes other owners through group access, even to administrator %s',
+    async (actor) => {
+      user = actor;
+      accessGrants = ['alice', 'bob', 'member'].map((owner) => ({
+        connection_id: `${owner}-connection`,
+        label: `${owner} private connection`,
+        owner: { id: `native-${owner}` },
+        services: [service],
+        status: 'active',
+      }));
+      const response = await call('GET', `/ui/chat/api/groups/${GROUP}/admin/access?owner=someone-else`);
+      expect(response.status).toBe(200);
+      expect(response.value).toMatchObject({ grants: [{ connection_id: `${actor}-connection` }] });
+      expect((response.value as { grants: unknown[] }).grants).toHaveLength(1);
+      for (const owner of ['alice', 'bob', 'member'].filter((owner) => owner !== actor))
+        expect(response.text).not.toContain(`${owner} private connection`);
+    },
+  );
+
+  it.each(['alice', 'bob'])('fails closed if the personal list for %s contains foreign metadata', async (actor) => {
+    user = actor;
+    extraConnections = [{ ...connection('native-foreign'), id: 'foreign-connection', label: 'Hidden private label' }];
+    const response = await call('GET', '/ui/chat/api/credentials');
+    expect(response.status).toBe(502);
+    expect(response.value).toMatchObject({ code: 'connection_owner_mismatch' });
+    expect(response.text).not.toContain('Hidden private label');
+    expect(response.text).not.toContain('native-foreign');
+  });
+
+  it.each([
+    ['GET', '/connections/connection-one', undefined],
+    [
+      'POST',
+      '/connections',
+      { label: 'Search', kind: 'static', services: [service], values: { SEARCH_KEY: 'test-key' } },
+    ],
+    ['PUT', '/connections/connection-one', { label: 'Renamed', revision: REVISION }],
+    ['PUT', `/connections/connection-one/grants/${GROUP}`, { services: ['search'] }],
+  ])('does not forward a foreign-owner %s result from %s', async (method, endpoint, body) => {
+    returnedOwner = 'native-foreign';
+    const response = await call(String(method), `/ui/chat/api/credentials${endpoint}`, body);
+    expect(response.status).toBe(502);
+    expect(response.value).toMatchObject({ code: 'connection_owner_mismatch' });
+    expect(response.text).not.toContain('native-foreign');
+    expect(response.text).not.toContain('SEARCH_KEY');
+  });
+
+  it('does not start OAuth for a connection whose owner does not match the session', async () => {
+    connectionKind = 'mcp_oauth';
+    returnedOwner = 'native-foreign';
+    const response = await call('POST', '/ui/chat/api/credentials/connections/connection-one/start', {});
+    expect(response.status).toBe(502);
+    expect(requests.some((entry) => entry.path.endsWith('/oauth/start'))).toBe(false);
   });
 
   it('allows ordinary users to manage their own library without granting agent administration', async () => {
@@ -339,6 +409,37 @@ describe('connection-bound OAuth consent', () => {
     expect(response.status).toBe(200);
     return (response.value as { state: string }).state;
   }
+
+  it.each([
+    ['Denis Treskunov', 'BananaClaw (Denis Treskunov)'],
+    ['  Denis Treskunov  ', 'BananaClaw (Denis Treskunov)'],
+    ['', 'BananaClaw'],
+  ])('derives the registration name from trusted branding and profile "%s"', async (displayName, expected) => {
+    vi.stubEnv('UI_BRAND_NAME', 'BananaClaw');
+    _resetBrandingCache();
+    getDb().prepare('UPDATE users SET display_name=? WHERE id=?').run(displayName, 'alice');
+    await start();
+    expect(requests.find((entry) => entry.path.endsWith('/oauth/start'))?.body.client_name).toBe(expected);
+  });
+
+  it('does not allow the browser to impersonate another registration display name', async () => {
+    connectionKind = 'mcp_oauth';
+    const response = await call('POST', '/ui/chat/api/credentials/connections/connection-one/start', {
+      client_name: 'BananaClaw (Another user)',
+    });
+    expect(response.status).toBe(400);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('reports an invalid combined display name instead of sending a generated user ID', async () => {
+    vi.stubEnv('UI_BRAND_NAME', 'BananaClaw');
+    _resetBrandingCache();
+    getDb().prepare('UPDATE users SET display_name=? WHERE id=?').run('x'.repeat(100), 'alice');
+    connectionKind = 'mcp_oauth';
+    const response = await call('POST', '/ui/chat/api/credentials/connections/connection-one/start', {});
+    expect(response.status).toBe(400);
+    expect(requests.some((entry) => entry.path.endsWith('/oauth/start'))).toBe(false);
+  });
 
   it('binds completion to the initiating user and authoritative connection', async () => {
     const state = await start();

@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Connection, CredentialGroup } from './CredentialsApi';
-import { ConnectionActionDialog, ConnectionEditor, ConnectionGrantsDialog } from './CredentialsDialogs';
+import type { AppInfo, Connection, CredentialGroup } from './CredentialsApi';
+import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog } from './CredentialsDialogs';
 import { ConfirmCredentialAction, Impact, Review, SecretInput, useConnectionSignIn } from './CredentialsParts';
-import { GroupCredentialAccess, McpConnectionAccess, serviceMatchesResource } from './GroupCredentialAccess';
+import { GroupCredentials, McpConnectionAccess, serviceMatchesResource } from './GroupCredentialAccess';
 import { showToast } from './Toast';
+import { CredentialsContent, CredentialsPage } from './CredentialsPage';
+import { CredentialsTable } from './CredentialsTable';
+import { MobileDialog } from './MobileDialog';
+import { credentialsOpen, isMobile } from '../state';
+import { CredentialServiceForm } from './CredentialServiceForm';
+import type { RouteDraft } from './credential-routing';
+import { OAuthAppForm } from './OAuthAppForm';
+import type { OAuthAppDraft } from './oauth-app-form';
 
 const hooks = vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -11,6 +19,7 @@ const hooks = vi.hoisted(() => {
     slots: [] as unknown[],
     cursor: 0,
     effects: [] as (() => void | (() => void))[],
+    urls: [] as string[],
     resource: { data: null as unknown, error: '', loading: false, refresh: vi.fn().mockResolvedValue(undefined) },
   };
 });
@@ -36,7 +45,10 @@ vi.mock('preact/hooks', () => ({
 }));
 vi.mock('./CredentialsParts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./CredentialsParts')>()),
-  useCredentialResource: () => hooks.resource,
+  useCredentialResource: (url: string) => {
+    hooks.urls.push(url);
+    return hooks.resource;
+  },
 }));
 vi.mock('./Toast', () => ({ showToast: vi.fn() }));
 
@@ -70,6 +82,7 @@ beforeEach(() => {
   hooks.slots = [];
   hooks.cursor = 0;
   hooks.effects = [];
+  hooks.urls = [];
   hooks.resource = {
     data: structuredClone(original),
     error: '',
@@ -87,6 +100,8 @@ beforeEach(() => {
   vi.mocked(showToast).mockClear();
 });
 afterEach(() => {
+  credentialsOpen.value = false;
+  isMobile.value = false;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -98,11 +113,18 @@ interface TestProps {
   disabled: boolean;
   checked: boolean;
   connection: Connection;
+  connections: Connection[];
+  draft: OAuthAppDraft;
+  route: RouteDraft;
   group: CredentialGroup;
-  onChange(value: boolean): void;
+  onlyGroup?: string;
+  onChange(value: unknown): void;
   onInput(value: unknown): void;
   oninput(value: unknown): void;
   onClick(): void;
+  onClose(): void;
+  onBack?: () => void;
+  title?: string;
   onConfirm(): Promise<void>;
   onSubmit(event: { preventDefault(): void }): Promise<void>;
 }
@@ -126,15 +148,110 @@ function find(node: unknown, type: unknown): TestNode {
   return descendants(node).find((child) => child.type === type)!;
 }
 function formRenderer(): () => TestNode {
-  const editor = ConnectionEditor({ id: original.id, groups, onClose: vi.fn(), onSaved: vi.fn() });
+  const editor = ConnectionEditor({
+    id: original.id,
+    apps: [],
+    onStart: vi.fn(),
+    groups,
+    onClose: vi.fn(),
+    onSaved: vi.fn(),
+  });
   const form = render(editor);
   return () => render(form);
+}
+function newFormRenderer(options: Partial<Parameters<typeof ConnectionEditor>[0]> = {}): () => TestNode {
+  const form = ConnectionEditor({ apps: [], onStart: vi.fn(), groups, onClose: vi.fn(), onSaved: vi.fn(), ...options });
+  return () => render(form);
+}
+function nameInput(node: unknown): TestNode {
+  return descendants(node).find(
+    (child) =>
+      child.type === 'input' &&
+      (child.props as TestProps & { 'aria-label'?: string })['aria-label'] === 'Credential name',
+  )!;
 }
 function requestBody(): Record<string, unknown> {
   return JSON.parse(vi.mocked(fetch).mock.calls.at(-1)![1]!.body as string) as Record<string, unknown>;
 }
 
 describe('connection UI safety and ownership', () => {
+  it.each([false, true])('uses the standard account dialog and authorization table (mobile=%s)', (mobile) => {
+    credentialsOpen.value = true;
+    isMobile.value = mobile;
+    hooks.resource.data = { connections: [original], groups, apps: [], canEditInstall: false };
+    const wrapper = CredentialsPage();
+    expect(wrapper).not.toBeNull();
+    const dialog = render(wrapper!);
+    expect(dialog.type).toBe(MobileDialog);
+    expect(dialog.props.title).toBe('Credentials');
+    expect(typeof dialog.props.onBack).toBe(mobile ? 'function' : 'undefined');
+    expect(find(dialog, CredentialsTable)).toBeDefined();
+    const labels = descendants(dialog)
+      .map((child) => (typeof child.props.children === 'string' ? child.props.children : ''))
+      .join(' ');
+    expect(labels).not.toContain('Your personal keys');
+    expect(labels).not.toContain('A connection can hold');
+    expect(labels).not.toContain('Authorize a provider');
+    expect(labels).not.toContain('Available to');
+  });
+  it('combines keys and accounts while keeping OAuth apps in their own section', () => {
+    credentialsOpen.value = true;
+    const account: Connection = { ...original, id: 'account', kind: 'mcp_oauth' };
+    hooks.resource.data = { connections: [original, account], groups, apps: [], canEditInstall: false };
+    const wrapper = CredentialsPage()!;
+    let node = render(wrapper);
+    expect(find(node, CredentialsTable).props.connections.map((item) => item.id)).toEqual(['pair', 'account']);
+    expect(descendants(node).some((item) => item.props.children === 'Connected accounts')).toBe(false);
+    expect(descendants(node).some((item) => item.props.children === 'Keys')).toBe(false);
+    descendants(node)
+      .find((item) => item.type === 'button' && item.props.children === 'OAuth apps')!
+      .props.onClick();
+    node = render(wrapper);
+    expect(find(node, CredentialsTable)).toBeUndefined();
+    expect(descendants(node).some((item) => item.props.children === 'No OAuth apps configured.')).toBe(true);
+  });
+  it('uses the OAuth app form and keeps a configured secret write-only and unchanged on a blank save', async () => {
+    const app: AppInfo = {
+      id: 'provider',
+      label: 'Provider',
+      source: 'user',
+      issuer: 'https://accounts.example.com',
+      client_id: 'client',
+      api_hosts: ['api.example.com'],
+      default_scopes: [],
+      token_endpoint_auth_method: 'client_secret_post',
+      identity: 'none',
+      token_scope_separator: 'space',
+      client_secret_set: true,
+      authorization_params: { access_type: 'offline' },
+    };
+    const draw = (): TestNode => {
+      hooks.cursor = 0;
+      return OAuthAppDialog({
+        app,
+        canEditInstall: false,
+        connections: [],
+        groups,
+        onClose: vi.fn(),
+        onSaved: vi.fn(),
+      }) as TestNode;
+    };
+    let node = draw();
+    expect(find(node, OAuthAppForm)).toBeDefined();
+    expect(find(node, 'textarea')).toBeUndefined();
+    expect(find(node, SecretInput).props.value).toBe('');
+    find(node, Review).props.onChange(true);
+    node = draw();
+    descendants(node)
+      .find((item) => item.type === 'button' && item.props.children === 'Save app')!
+      .props.onClick();
+    await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledOnce());
+    expect(requestBody()).not.toHaveProperty('clientSecret');
+    expect(requestBody()).toMatchObject({
+      config: { authorization_params: { access_type: 'offline' }, client_id: 'client' },
+    });
+  });
+
   it('never prefills secrets and omits the values field entirely on blank edits', async () => {
     const draw = formRenderer();
     let node = draw();
@@ -145,11 +262,13 @@ describe('connection UI safety and ownership', () => {
     ).toEqual(['', '']);
     expect(find(node, Impact).props.connection.grants).toHaveLength(2);
     expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(true);
-    find(node, Review).props.onChange(true);
+    expect(find(node, Review)).toBeUndefined();
+    nameInput(node).props.oninput({ currentTarget: { value: 'Renamed credential' } });
     node = draw();
     await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
-    expect(requestBody()).toEqual({ label: original.label, services: original.services, revision: original.revision });
+    expect(requestBody()).toEqual({ label: 'Renamed credential', revision: original.revision });
     expect(requestBody()).not.toHaveProperty('values');
+    expect(requestBody()).not.toHaveProperty('services');
   });
 
   it('rotates a provided component once, preserving the blank username and reviewed revision', async () => {
@@ -159,26 +278,46 @@ describe('connection UI safety and ownership', () => {
       .filter((child) => child.type === SecretInput)[1]
       .props.onInput('replacement');
     node = draw();
-    find(node, Review).props.onChange(true);
-    node = draw();
     await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
     expect(fetch).toHaveBeenCalledOnce();
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/ui/chat/api/credentials/connections/pair');
     expect(requestBody()).toMatchObject({ revision: '"reviewed"', values: { PASSWORD: 'replacement' } });
+    expect(requestBody()).not.toHaveProperty('services');
+    expect(find(node, Review)).toBeUndefined();
   });
 
-  it('requires renewed review after retargeting a shared service', () => {
+  it('uses routing form controls and saves changed destinations without a review checkbox', async () => {
     const draw = formRenderer();
     let node = draw();
-    find(node, Review).props.onChange(true);
+    const routing = find(node, CredentialServiceForm);
+    routing.props.onChange({ ...routing.props.route, pattern: 'https://different.example.com/api/*' });
     node = draw();
     expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(false);
-    find(node, 'textarea').props.oninput({
-      currentTarget: { value: JSON.stringify([{ ...original.services[0], host: 'different.example.com' }]) },
+    expect(find(node, 'textarea')).toBeUndefined();
+    expect(find(node, Review)).toBeUndefined();
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(requestBody()).toMatchObject({
+      services: [{ name: 'basic', host: 'different.example.com/api/*', https_only: true }],
     });
+  });
+
+  it('names new credentials from the first URL until the user edits the name', () => {
+    const draw = newFormRenderer();
+    let node = draw();
+    let routing = find(node, CredentialServiceForm);
+    routing.props.onChange({ ...routing.props.route, pattern: 'https://first.example.com/api/*' });
     node = draw();
-    expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(true);
-    expect(find(node, Review).props.checked).toBe(false);
+    expect(nameInput(node).props.value).toBe('first.example.com');
+    routing = find(node, CredentialServiceForm);
+    routing.props.onChange({ ...routing.props.route, pattern: 'https://second.example.com/api/*' });
+    node = draw();
+    expect(nameInput(node).props.value).toBe('second.example.com');
+    nameInput(node).props.oninput({ currentTarget: { value: 'My chosen name' } });
+    node = draw();
+    routing = find(node, CredentialServiceForm);
+    routing.props.onChange({ ...routing.props.route, pattern: 'https://third.example.com/api/*' });
+    node = draw();
+    expect(nameInput(node).props.value).toBe('My chosen name');
   });
 
   it('deletes/disconnects the connection with its exact latest revision, never blind DELETE', async () => {
@@ -196,40 +335,48 @@ describe('connection UI safety and ownership', () => {
     expect(requestBody()).toEqual({ revision: '"reviewed"' });
   });
 
-  it('lets owners revoke references even after losing destination-group access', () => {
-    const node = ConnectionGrantsDialog({ connection: original, groups: [], onClose: vi.fn(), onSaved: vi.fn() });
-    const destinations = descendants(node).filter((child) => typeof child.type === 'function' && child.props.group);
-    expect(destinations.map((child) => child.props.group)).toEqual([
-      { id: 'one', name: 'one', canAdmin: false },
-      { id: 'two', name: 'two', canAdmin: false },
-    ]);
-  });
-
-  it('keeps agent Access reference-only and detaches without an upstream connection mutation', async () => {
-    hooks.resource.data = {
-      grants: [
-        {
-          connection_id: original.id,
-          label: original.label,
-          owner: { id: 'someone-else', label: 'Other owner' },
-          services: original.services,
-          status: 'active',
-        },
-      ],
-    };
-    let node = GroupCredentialAccess({ gid: 'one' });
-    expect(descendants(node).some((child) => child.type === SecretInput || child.type === ConnectionEditor)).toBe(
-      false,
-    );
-    descendants(node)
-      .find((child) => child.type === 'button' && child.props.children === 'Detach this agent')!
-      .props.onClick();
+  it('uses only the private personal collection in the shared agent table', () => {
+    const node = GroupCredentials({ gid: 'one' });
+    expect(find(node, CredentialsContent)).toBeDefined();
+    hooks.resource.data = { connections: [original], groups, apps: [], canEditInstall: false };
     hooks.cursor = 0;
-    node = GroupCredentialAccess({ gid: 'one' });
-    await find(node, ConfirmCredentialAction).props.onConfirm();
-    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/ui/chat/api/groups/one/admin/access/pair');
-    expect(vi.mocked(fetch).mock.calls[0][1]!.method).toBe('DELETE');
-    expect(vi.mocked(fetch).mock.calls[0][1]!.body).toBeUndefined();
+    const content = render(find(node, CredentialsContent));
+    expect(find(content, CredentialsTable).props.onlyGroup).toBe('one');
+    expect(hooks.urls).toEqual(['/ui/chat/api/credentials']);
+    expect(descendants(content).some((child) => child.type === 'nav')).toBe(false);
+    expect(find(content, MobileDialog)).toBeUndefined();
+  });
+  it('creates OAuth in the same editor and retries a saved draft without duplicating it', async () => {
+    const start = vi.fn().mockRejectedValueOnce(new TypeError('Network unavailable')).mockResolvedValueOnce(undefined);
+    const draw = newFormRenderer({ onStart: start });
+    let node = draw();
+    const route = find(node, CredentialServiceForm);
+    route.props.onChange({ ...route.props.route, pattern: 'https://mcp.example.com/mcp' });
+    node = draw();
+    nameInput(node).props.oninput({ currentTarget: { value: 'My browser' } });
+    node = draw();
+    descendants(node)
+      .find((child) => child.type === 'select')!
+      .props.onChange({ currentTarget: { value: 'mcp_oauth' } });
+    node = draw();
+    expect(node.props.title).toBe('Add credential');
+    expect(nameInput(node).props.value).toBe('My browser');
+    const review = descendants(node).find(
+      (child) => typeof child.type === 'function' && child.type.name === 'OAuthReview',
+    )!;
+    find(render(review), Review).props.onChange(true);
+    node = draw();
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(requestBody()).toMatchObject({
+      label: 'My browser',
+      kind: 'mcp_oauth',
+      resource_url: 'https://mcp.example.com/mcp',
+    });
+    expect(requestBody()).not.toHaveProperty('services');
+    node = draw();
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledTimes(2);
   });
 
   it('routes MCP Manage to the existing personal binding instead of a new sign-in', () => {

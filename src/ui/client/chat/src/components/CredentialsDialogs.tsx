@@ -1,8 +1,8 @@
-import { useState } from 'preact/hooks';
-import type { JSX } from 'preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import type { JSX, RefObject } from 'preact';
 import {
-  appConfiguration, connectionPath, credentialRequest, credentialsPath, errorMessage, CredentialsError,
-  parseAppConfiguration, parseServices, providedValues, serviceKeys, SERVICE_PRESETS,
+  connectionPath, credentialRequest, credentialsPath, errorMessage, CredentialsError,
+  providedValues, serviceKeys,
   type AppInfo, type Connection, type CredentialGroup, type OAuthAppConfiguration,
   type OAuthAppScope, type Service, type SignInInput,
 } from './CredentialsApi';
@@ -12,47 +12,85 @@ import {
 } from './CredentialsParts';
 import { GroupAdminField as Field } from './GroupAdminField';
 import { showToast } from './Toast';
+import { connectionName } from './credential-presentation';
+import { compileRoutes, credentialFields, hostnameFromPattern, oauthResourceUrl, routingDrafts, type RouteDraft } from './credential-routing';
+import { CredentialServiceForm } from './CredentialServiceForm';
+import { OAuthAppForm } from './OAuthAppForm';
+import { compileOAuthApp, oauthAppDraft } from './oauth-app-form';
 
-export function ConnectionEditor({ id, groups, onClose, onSaved }: {
-  id?: string; groups: CredentialGroup[]; onClose: () => void; onSaved: () => void;
-}): JSX.Element {
-  return id ? <ExistingConnectionEditor id={id} groups={groups} onClose={onClose} onSaved={onSaved} />
-    : <ConnectionForm groups={groups} onClose={onClose} onSaved={onSaved} />;
+interface ConnectionEditorProps {
+  id?: string; apps: AppInfo[]; groups: CredentialGroup[]; initialKind?: Connection['kind']; resourceUrl?: string;
+  onStart: (id: string, input: SignInInput) => Promise<void>; onClose: () => void; onSaved: () => void;
 }
 
-function ExistingConnectionEditor({ id, groups, onClose, onSaved }: {
-  id: string; groups: CredentialGroup[]; onClose: () => void; onSaved: () => void;
-}): JSX.Element {
+export function ConnectionEditor(props: ConnectionEditorProps): JSX.Element {
+  return props.id ? <ExistingConnectionEditor {...props} id={props.id} /> : <ConnectionForm {...props} />;
+}
+
+function ExistingConnectionEditor({ id, ...props }: ConnectionEditorProps & { id: string }): JSX.Element {
   const { data, error, loading, refresh } = useCredentialResource<Connection>(connectionPath(id));
-  if (loading || error || !data) return <CredentialDialog title="Load connection" onClose={onClose}>
+  if (loading || error || !data) return <CredentialDialog title="Load connection" onClose={props.onClose}>
     {loading ? <p>Loading latest connection metadata…</p> : <><ErrorNotice message={error} />
       <button type="button" onClick={() => void refresh()}>Retry</button></>}
   </CredentialDialog>;
-  return <ConnectionForm key={`${data.id}:${data.revision}`} connection={data} groups={groups} onClose={onClose} onSaved={onSaved} />;
+  return <ConnectionForm {...props} key={`${data.id}:${data.revision}`} connection={data} />;
 }
 
-function ConnectionForm({ connection, groups, onClose, onSaved }: {
-  connection?: Connection; groups: CredentialGroup[]; onClose: () => void; onSaved: () => void;
-}): JSX.Element {
-  const [label, setLabel] = useState(connection?.label ?? '');
-  const [text, setText] = useState(JSON.stringify(connection?.services ?? SERVICE_PRESETS[0].services, null, 2));
+function ConnectionForm({ connection, apps, groups, initialKind = 'static', resourceUrl, onStart, onClose, onSaved }:
+  ConnectionEditorProps & { connection?: Connection }): JSX.Element {
+  const [kind, setKind] = useState<Connection['kind']>(connection?.kind ?? initialKind);
+  const [label, setLabel] = useState(connection ? connectionName(connection, apps) : hostnameFromPattern(resourceUrl ?? ''));
+  const [automaticName, setAutomaticName] = useState(!connection);
+  const [routes, setRoutes] = useState(() => {
+    const result = routingDrafts(connection?.services);
+    if (!connection && resourceUrl) result[0].pattern = resourceUrl;
+    return result;
+  });
+  const [routingChanged, setRoutingChanged] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [reviewed, setReviewed] = useState(false);
   const [stale, setStale] = useState(false);
+  const [appId, setAppId] = useState('');
+  const [scopes, setScopes] = useState('');
+  const [reviewed, setReviewed] = useState(false);
+  const [oauthDraft, setOauthDraft] = useState<Connection | null>(null);
+  const firstUrl = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (!connection) firstUrl.current?.focus(); }, [kind]);
+  const isStatic = kind === 'static';
+  const creatingOAuth = !connection && !isStatic;
   let services: Service[] = [];
-  let jsonError = '';
-  try { services = parseServices(text); }
+  let routingError = '';
+  try { services = isStatic ? compileRoutes(routes) : connection?.services ?? []; }
   catch (error) {
-    if (!(error instanceof SyntaxError || error instanceof CredentialsError)) throw error;
-    jsonError = errorMessage(error);
+    if (!(error instanceof CredentialsError)) throw error;
+    routingError = errorMessage(error);
   }
-  const isStatic = !connection || connection.kind === 'static';
-  const keys = isStatic ? [...new Set([...(connection?.credentials ?? []), ...serviceKeys(services)])] : [];
+  const drafts = routes.map((route) => route.service);
+  const fields = isStatic ? credentialFields(drafts) : [];
+  const keys = fields.map((field) => field.key);
+  const knownKeys = [...new Set([...(connection?.credentials ?? []), ...serviceKeys(drafts)])];
   const supplied = providedValues(values, keys);
-  const canSave = !busy && !stale && !!label.trim() && !jsonError &&
-    (connection ? reviewed : keys.length > 0 && keys.every((key) => !!supplied[key]));
+  const missingValues = keys.some((key) => !connection?.credentials.includes(key) && !supplied[key]);
+  let resource = '';
+  let oauthError = '';
+  if (creatingOAuth && kind === 'mcp_oauth') {
+    try { resource = oauthResourceUrl(routes[0].pattern); }
+    catch (error) {
+      if (!(error instanceof CredentialsError)) throw error;
+      oauthError = errorMessage(error);
+    }
+  }
+  const renamed = !connection || label.trim() !== connectionName(connection, apps);
+  const canSave = !busy && !stale && !!label.trim() && (creatingOAuth
+    ? reviewed && (kind === 'mcp_oauth' ? !!resource : !!appId)
+    : !routingError && !missingValues && (!connection || renamed || routingChanged || Object.keys(supplied).length > 0));
+  const changeRoute = (index: number, route: RouteDraft): void => {
+    setRoutes((old) => old.map((item, at) => at === index ? route : item));
+    setRoutingChanged(true);
+    setReviewed(false);
+    if (index === 0 && automaticName) setLabel(hostnameFromPattern(route.pattern));
+  };
 
   async function save(event: Event): Promise<void> {
     event.preventDefault();
@@ -60,14 +98,32 @@ function ConnectionForm({ connection, groups, onClose, onSaved }: {
     setBusy(true);
     setError('');
     try {
+      if (creatingOAuth) {
+        const input: SignInInput = {
+          ...(kind === 'mcp_oauth' ? { resource_url: resource } : {}),
+          ...(appId ? { app_id: appId } : {}),
+          scopes: scopes.split(/[\s,]+/).filter(Boolean),
+        };
+        let target = oauthDraft;
+        if (!target) {
+          target = await credentialRequest<Connection>(credentialsPath('/connections'), 'POST', { label: label.trim(), kind, ...input });
+          setOauthDraft(target);
+          onSaved();
+        }
+        await onStart(target.id, input);
+        onSaved();
+        onClose();
+        return;
+      }
       await credentialRequest<Connection>(connection ? connectionPath(connection.id) : credentialsPath('/connections'),
         connection ? 'PUT' : 'POST', {
-          label: label.trim(), services,
+          ...(renamed ? { label: label.trim() } : {}),
+          ...(isStatic && (!connection || routingChanged) ? { services } : {}),
           ...(isStatic && Object.keys(supplied).length ? { values: supplied } : {}),
           ...(connection ? { revision: connection.revision } : { kind: 'static' }),
         });
       setValues({});
-      showToast(connection ? 'Connection updated. Review suspended grants before reapproving access.' : 'Personal connection created');
+      showToast(connection ? routingChanged ? 'Saved. Reapprove agent access for the changed routing.' : 'Credential saved' : 'Credential created');
       onSaved();
       onClose();
     } catch (error) {
@@ -76,36 +132,67 @@ function ConnectionForm({ connection, groups, onClose, onSaved }: {
       if (error instanceof Error && 'status' in error && (error.status === 412 || error.status === 409)) setStale(true);
     } finally { setBusy(false); }
   }
-  return <CredentialDialog title={connection ? `Manage ${connection.label}` : 'Create key connection'} onClose={onClose} busy={busy} footer={<>
+  return <CredentialDialog title={connection ? `Edit ${connectionName(connection)}` : 'Add credential'} onClose={onClose} busy={busy} footer={<>
     <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-    <button type="submit" form="personal-connection" class="primary" disabled={!canSave}>{busy ? 'Saving…' : connection ? 'Save reviewed changes' : 'Create connection'}</button>
+    <button type="submit" form="personal-connection" class="primary" disabled={!canSave}>
+      {busy ? creatingOAuth ? 'Starting…' : 'Saving…' : creatingOAuth ? oauthDraft ? 'Retry sign-in' : 'Start sign-in' : 'Save'}
+    </button>
   </>}>
-    <p class="group-admin-help">Owned by you, stored once. Add one or more services and complementary keys.
-      Only key names and routing appear below; saved secret values are never returned.</p>
     <form id="personal-connection" onSubmit={save}>
-      <Field label="Connection label"><input type="text" aria-label="Connection label" value={label} disabled={busy} onInput={(event) => setLabel(event.currentTarget.value)} /></Field>
-      {!connection ? <Field label="Service preset"><select aria-label="Service preset" disabled={busy} onChange={(event) => {
-        setText(JSON.stringify(SERVICE_PRESETS[Number(event.currentTarget.value)].services, null, 2));
-        setValues({});
-      }}>{SERVICE_PRESETS.map((preset, index) => <option value={index} key={preset.label}>{preset.label}</option>)}</select></Field> : null}
-      <Field label="Service routing JSON">
-        <textarea class="ga-cred-mono" aria-label="Service routing JSON" rows={12} value={text} disabled={busy}
-          spellcheck={false} onInput={(event) => { setText(event.currentTarget.value); setReviewed(false); }} />
-      </Field>
-      <p class="group-admin-help">Use host[:port] and optional path patterns to restrict destinations. auth.token,
-        username, password and key reference key NAMES. Custom auth.headers use templates such as
-        {' '}<code>{'Bearer {{ API_TOKEN }}'}</code>. Substitutions reference a key name and placeholder.
-        Never paste a secret into JSON. Basic pairs and multi-header values are saved together.</p>
-      <ErrorNotice message={jsonError} />
-      {keys.map((key) => <Field key={key} label={key} info={connection ? 'Blank preserves the current value; enter only a new value to rotate.' : 'Required to create this connection.'}>
-        <SecretInput label={key} value={values[key] ?? ''} disabled={busy} placeholder={connection ? 'Keep current value' : 'New value'}
-          onInput={(value) => { setValues((old) => ({ ...old, [key]: value })); setReviewed(false); }} />
+      <input type="text" class="credential-name-input" aria-label="Credential name" placeholder="Credential name" value={label} disabled={busy || !!oauthDraft}
+        onInput={(event) => { setLabel(event.currentTarget.value); setAutomaticName(false); }} />
+      {!connection ? <Field label="Credential type"><select aria-label="Credential type" value={kind} disabled={busy || !!oauthDraft}
+        onChange={(event) => {
+          const next = event.currentTarget.value;
+          if (next !== 'static' && next !== 'mcp_oauth' && next !== 'oauth_app') { showToast('Choose a credential type.', 'err'); return; }
+          setKind(next);
+          setReviewed(false);
+          if (automaticName) setLabel(next === 'oauth_app' ? apps.find((app) => app.id === appId)?.label ?? '' : hostnameFromPattern(routes[0].pattern));
+        }}>
+        <option value="static">Key</option><option value="mcp_oauth">MCP server OAuth</option><option value="oauth_app">OAuth app</option>
+      </select></Field> : null}
+      {creatingOAuth ? <>
+        <OAuthFields kind={kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth'} apps={apps} appId={appId}
+          resource={routes[0].pattern} scopes={scopes} busy={busy} firstInput={firstUrl}
+          onResource={(pattern) => changeRoute(0, { ...routes[0], pattern })}
+          onApp={(id) => {
+            setAppId(id);
+            setScopes((apps.find((app) => app.id === id)?.default_scopes ?? []).join('\n'));
+            if (automaticName && kind === 'oauth_app') setLabel(apps.find((app) => app.id === id)?.label ?? '');
+            setReviewed(false);
+          }} onScopes={(value) => { setScopes(value); setReviewed(false); }} />
+        <OAuthReview checked={reviewed} onChange={setReviewed} />
+        <ErrorNotice message={routes[0].pattern ? oauthError : ''} />
+        {oauthDraft ? <p>A draft credential was saved. Retrying uses the same connection.</p> : null}
+      </> : null}
+      {isStatic ? <>
+        {routes.map((route, index) => <CredentialServiceForm key={route.service.name} route={route} index={index} keys={knownKeys}
+          busy={busy} firstInput={index === 0 ? firstUrl : undefined} onChange={(value) => changeRoute(index, value)}
+          onRemove={routes.length > 1 ? () => {
+            setRoutes((old) => old.filter((_, at) => at !== index));
+            setRoutingChanged(true);
+            if (index === 0 && automaticName) setLabel(hostnameFromPattern(routes[1].pattern));
+          } : undefined} />)}
+        <button type="button" class="ghost" disabled={busy} onClick={() => {
+          let number = routes.length + 1;
+          while (routes.some((route) => route.service.name === `route-${number}`)) number++;
+          const service = structuredClone(routes[0].service);
+          service.name = `route-${number}`;
+          setRoutes((old) => [...old, { service, pattern: '' }]);
+          setRoutingChanged(true);
+        }}>Add URL pattern</button>
+        <ErrorNotice message={routingError && routes.some((route) => route.pattern) ? routingError : ''} />
+      </> : connection ? <details><summary>Permissions</summary>
+        <p>{connection.resource_url ?? connection.app_id}</p>
+        <ul>{(connection.granted_scopes ?? connection.requested_scopes ?? []).map((scope) => <li key={scope}>{scope}</li>)}</ul>
+      </details> : null}
+      {fields.map(({ key, label }) => <Field key={key} label={label}>
+        <SecretInput label={label} value={values[key] ?? ''} disabled={busy} placeholder={connection?.credentials.includes(key) ? 'Keep current value' : 'New value'}
+          onInput={(value) => setValues((old) => ({ ...old, [key]: value }))} />
       </Field>)}
       {connection ? <>
         <Impact connection={connection} groups={groups} />
-        <p>Rotation affects every agent above. Routing, authority and authentication changes can suspend their
-          grants until explicitly reapproved. Review new destinations and all selected services before saving.</p>
-        <Review checked={reviewed} onChange={setReviewed}>I reviewed the routing, rotation and affected-agent impact.</Review>
+        {routingChanged ? <p>Changed routing requires these agents to be reapproved.</p> : null}
       </> : null}
       <ErrorNotice message={error} />
       {stale ? <p role="alert">This connection changed or the operation conflicts. Close and reopen it to load the
@@ -114,20 +201,59 @@ function ConnectionForm({ connection, groups, onClose, onSaved }: {
   </CredentialDialog>;
 }
 
-export function OAuthConnectionDialog({ connection, apps, groups, resourceUrl, onStart, onClose, onSaved }: {
-  connection?: Connection; apps: AppInfo[]; groups: CredentialGroup[]; resourceUrl?: string;
+function OAuthFields({ kind, apps, resource, appId, scopes, busy, firstInput, onResource, onApp, onScopes }: {
+  kind: 'mcp_oauth' | 'oauth_app'; apps: AppInfo[]; resource: string; appId: string; scopes: string; busy: boolean;
+  firstInput?: RefObject<HTMLInputElement>; onResource: (value: string) => void; onApp: (value: string) => void; onScopes: (value: string) => void;
+}): JSX.Element {
+  return <>
+    {kind === 'mcp_oauth' ? <Field label="URL pattern"><input ref={firstInput} type="text" aria-label="URL pattern"
+      value={resource} disabled={busy} placeholder="https://mcp.example.com/mcp" spellcheck={false}
+      onInput={(event) => onResource(event.currentTarget.value)} /></Field> : null}
+    <Field label="OAuth app"><select aria-label="OAuth app" value={appId} disabled={busy}
+      onChange={(event) => onApp(event.currentTarget.value)}>
+      <option value="">{kind === 'mcp_oauth' ? 'Automatic discovery / dynamic registration' : 'Select a configured app'}</option>
+      {apps.map((app) => <option key={`${app.source}:${app.id}`} value={app.id}>{app.label} · {app.source === 'user' ? 'Personal' : 'Install'}</option>)}
+    </select></Field>
+    {kind === 'oauth_app' && !apps.length ? <p>Configure an app in the OAuth apps section first.</p> : null}
+    <Field label="Requested scopes"><textarea aria-label="Requested scopes" rows={4} value={scopes} disabled={busy}
+      placeholder="One scope per line" onInput={(event) => onScopes(event.currentTarget.value)} /></Field>
+  </>;
+}
+
+function OAuthReview({ checked, onChange, reconnect = false }: {
+  checked: boolean; onChange: (value: boolean) => void; reconnect?: boolean;
+}): JSX.Element {
+  return <>
+    <p>All receiving agents share this upstream account and its actual permissions. Selecting services does
+      not downscope a token or make it read-only. Requested scopes are not a guarantee of provider-granted
+      scopes. A different account, issuer, resource or scope policy needs explicit review; scope expansion
+      may suspend existing grants until reapproved. Use a separate connection for a different identity or scope profile.</p>
+    <Review checked={checked} onChange={onChange}>I reviewed the upstream identity, resource, app,
+      requested scopes and {reconnect ? 'affected agents' : 'shared-connection implications'}.</Review>
+  </>;
+}
+
+export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClose, onSaved }: {
+  connection: Connection; apps: AppInfo[]; groups: CredentialGroup[];
   onStart: (id: string, input: SignInInput) => Promise<void>; onClose: () => void; onSaved: () => void;
 }): JSX.Element {
-  const [kind, setKind] = useState<'mcp_oauth' | 'oauth_app'>(connection?.kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth');
-  const [label, setLabel] = useState(connection?.label ?? '');
-  const [resource, setResource] = useState(connection?.resource_url ?? resourceUrl ?? '');
-  const [app, setApp] = useState(connection?.app_id ?? '');
-  const [scopes, setScopes] = useState((connection?.requested_scopes ?? []).join('\n'));
+  const kind = connection.kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth';
+  const [resource, setResource] = useState(connection.resource_url ?? '');
+  const [app, setApp] = useState(connection.app_id ?? '');
+  const [scopes, setScopes] = useState((connection.requested_scopes ?? []).join('\n'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [reviewed, setReviewed] = useState(false);
-  const [draft, setDraft] = useState<Connection | null>(null);
-  const canStart = !busy && !!label.trim() && (kind === 'mcp_oauth' ? !!resource.trim() : !!app) && reviewed;
+  let resourceUrl = '';
+  let resourceError = '';
+  if (kind === 'mcp_oauth') {
+    try { resourceUrl = oauthResourceUrl(resource); }
+    catch (error) {
+      if (!(error instanceof CredentialsError)) throw error;
+      resourceError = errorMessage(error);
+    }
+  }
+  const canStart = !busy && (kind === 'mcp_oauth' ? !!resourceUrl : !!app) && reviewed;
   async function start(event: Event): Promise<void> {
     event.preventDefault();
     if (!canStart) return;
@@ -135,17 +261,11 @@ export function OAuthConnectionDialog({ connection, apps, groups, resourceUrl, o
     setError('');
     try {
       const input: SignInInput = {
-        ...(kind === 'mcp_oauth' ? { resource_url: resource.trim() } : {}),
+        ...(kind === 'mcp_oauth' ? { resource_url: resourceUrl } : {}),
         ...(app ? { app_id: app } : {}),
         scopes: scopes.split(/[\s,]+/).filter(Boolean),
       };
-      let target = connection ?? draft;
-      if (!target) {
-        target = await credentialRequest<Connection>(credentialsPath('/connections'), 'POST', { label: label.trim(), kind, ...input });
-        setDraft(target);
-        onSaved();
-      }
-      await onStart(target.id, input);
+      await onStart(connection.id, input);
       onSaved();
       onClose();
     } catch (error) {
@@ -154,38 +274,21 @@ export function OAuthConnectionDialog({ connection, apps, groups, resourceUrl, o
     }
     finally { setBusy(false); }
   }
-  return <CredentialDialog title={connection ? `Reconnect ${connection.label}` : 'Connect an account'} onClose={onClose} busy={busy} footer={<>
+  return <CredentialDialog title={`Reconnect ${connectionName(connection, apps)}`} onClose={onClose} busy={busy} footer={<>
     <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-    <button type="submit" form="personal-oauth" class="primary" disabled={!canStart}>{busy ? 'Starting…' : draft ? 'Retry sign-in' : 'Start sign-in'}</button>
+    <button type="submit" form="personal-oauth" class="primary" disabled={!canStart}>{busy ? 'Starting…' : 'Start sign-in'}</button>
   </>}>
     <form id="personal-oauth" onSubmit={start}>
-      {!connection && !draft ? <>
-        <Field label="Connection label"><input type="text" aria-label="Connection label" value={label} disabled={busy} onInput={(event) => setLabel(event.currentTarget.value)} /></Field>
-        <Field label="Connection type"><select value={kind} aria-label="Connection type" disabled={busy} onChange={(event) => { setKind(event.currentTarget.value as typeof kind); setReviewed(false); }}>
-          <option value="mcp_oauth">MCP server OAuth</option><option value="oauth_app">Configured OAuth app</option>
-        </select></Field>
-      </> : null}
-      {kind === 'mcp_oauth' ? <Field label="MCP resource URL"><input type="url" aria-label="MCP resource URL" value={resource} disabled={busy}
-        placeholder="https://mcp.example.com/mcp" onInput={(event) => { setResource(event.currentTarget.value); setReviewed(false); }} /></Field> : null}
-      <Field label="OAuth app"><select aria-label="OAuth app" value={app} disabled={busy} onChange={(event) => {
-        setApp(event.currentTarget.value);
-        setScopes((apps.find((item) => item.id === event.currentTarget.value)?.default_scopes ?? []).join('\n'));
-        setReviewed(false);
-      }}>
-        <option value="">{kind === 'mcp_oauth' ? 'Automatic discovery / dynamic registration' : 'Select a configured app'}</option>
-        {apps.map((item) => <option key={`${item.source}:${item.id}`} value={item.id}>{item.label} · {item.source === 'user' ? 'Personal' : 'Install'}</option>)}
-      </select></Field>
-      {kind === 'oauth_app' && !apps.length ? <p>Configure a personal OAuth app below Connected accounts first.</p> : null}
-      <Field label="Requested scopes"><textarea aria-label="Requested scopes" rows={4} value={scopes} disabled={busy}
-        placeholder="One scope per line" onInput={(event) => { setScopes(event.currentTarget.value); setReviewed(false); }} /></Field>
-      {connection ? <Impact connection={connection} groups={groups} /> : null}
-      <p>All receiving agents share this upstream account and its actual permissions. Selecting services does
-        not downscope a token or make it read-only. Requested scopes are not a guarantee of provider-granted
-        scopes. A different account, issuer, resource or scope policy needs explicit review; scope expansion
-        may suspend existing grants until reapproved. Use a separate connection for a different identity or scope profile.</p>
-      <Review checked={reviewed} onChange={setReviewed}>I reviewed the upstream identity, resource, app,
-        requested scopes and {connection ? 'affected agents' : 'shared-connection implications'}.</Review>
-      {draft ? <p>A draft connection was saved. Retrying uses that same connection; it does not duplicate authorization.</p> : null}
+      <OAuthFields kind={kind} apps={apps} resource={resource} appId={app} scopes={scopes} busy={busy}
+        onResource={(value) => { setResource(value); setReviewed(false); }}
+        onApp={(value) => {
+          setApp(value);
+          setScopes((apps.find((item) => item.id === value)?.default_scopes ?? []).join('\n'));
+          setReviewed(false);
+        }} onScopes={(value) => { setScopes(value); setReviewed(false); }} />
+      {resource && resourceError ? <ErrorNotice message={resourceError} /> : null}
+      <Impact connection={connection} groups={groups} />
+      <OAuthReview checked={reviewed} onChange={setReviewed} reconnect />
       <ErrorNotice message={error} />
     </form>
   </CredentialDialog>;
@@ -204,7 +307,7 @@ export function ConnectionActionDialog({ connection, groups, action, onClose, on
   const deleting = action === 'delete';
   const title = deleting ? current.kind === 'static' ? 'Delete connection everywhere' : 'Disconnect everywhere' :
     action === 'disable' ? 'Disable connection everywhere' : 'Enable connection';
-  return <ConfirmCredentialAction title={`${title} · ${current.label}`} label={title} onClose={onClose} onConfirm={async () => {
+  return <ConfirmCredentialAction title={`${title} · ${connectionName(current)}`} label={title} onClose={onClose} onConfirm={async () => {
     await credentialRequest(connectionPath(current.id), deleting ? 'DELETE' : 'PUT',
       { revision: current.revision, ...(deleting ? {} : { enabled: action === 'enable' }) });
     onSaved();
@@ -219,123 +322,49 @@ export function ConnectionActionDialog({ connection, groups, action, onClose, on
   </ConfirmCredentialAction>;
 }
 
-export function ConnectionGrantsDialog({ connection, groups, onClose, onSaved, onlyGroup }: {
-  connection: Connection; groups: CredentialGroup[]; onClose: () => void; onSaved: () => void; onlyGroup?: string;
-}): JSX.Element {
-  const latest = useCredentialResource<Connection>(connectionPath(connection.id));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [stale, setStale] = useState(false);
-  const destinations = onlyGroup ? groups.filter((group) => group.id === onlyGroup) : [
-    ...groups,
-    ...(latest.data?.grants ?? []).filter((grant) => !groups.some((group) => group.id === grant.vault))
-      .map((grant) => ({ id: grant.vault, name: grant.vault, canAdmin: false })),
-  ];
-  return <CredentialDialog title={`Agent access · ${connection.label}`} onClose={onClose} busy={busy} footer={<button type="button" disabled={busy} onClick={onClose}>Done</button>}>
-    <p>You may attach your own connection only to an agent group you administer. Service selection shares
-      the same upstream principal; it does not reduce token scopes or create read-only access.</p>
-    {latest.loading ? <p>Loading latest grants…</p> : null}
-    <ErrorNotice message={latest.error || error} />
-    {stale ? <p role="alert">The connection changed. Close and reopen to review the current revision before reapproving.</p> : null}
-    {latest.data && !latest.loading && !latest.error ? <>
-      <Impact connection={latest.data} groups={groups} />
-      {destinations.filter((group) => group.canAdmin || latest.data!.grants.some((grant) => grant.vault === group.id)).map((group) =>
-        <ServiceGrantForm key={`${group.id}:${latest.data!.revision}:${JSON.stringify(latest.data!.grants)}`}
-          connection={latest.data!} group={group} busy={busy || stale} onChange={async (services) => {
-            setBusy(true);
-            setError('');
-            try {
-              await credentialRequest(connectionPath(connection.id, `/grants/${encodeURIComponent(group.id)}`),
-                services ? 'PUT' : 'DELETE', services ? { services, revision: latest.data!.revision } : undefined);
-              onSaved();
-              await latest.refresh();
-              showToast(services ? 'Agent access approved' : 'Detached agent; upstream connection unchanged');
-            } catch (error) {
-              if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
-              setError(errorMessage(error));
-              if (error instanceof Error && 'status' in error && (error.status === 412 || error.status === 409)) setStale(true);
-            } finally { setBusy(false); }
-          }} />)}
-      {!destinations.some((group) => group.canAdmin) ? <p>No destination groups available for you to administer.</p> : null}
-    </> : null}
-  </CredentialDialog>;
-}
-
-function ServiceGrantForm({ connection, group, busy, onChange }: {
-  connection: Connection; group: CredentialGroup; busy: boolean; onChange: (services: string[] | null) => Promise<void>;
-}): JSX.Element {
-  const grant = connection.grants.find((item) => item.vault === group.id);
-  const [selected, setSelected] = useState((grant?.services ?? []).filter((name) =>
-    connection.services.some((service) => service.name === name && service.enabled !== false)));
-  const [reviewed, setReviewed] = useState(false);
-  const [detaching, setDetaching] = useState(false);
-  return <section class="ga-cred-grant">
-    <strong>{group.name}</strong>{grant ? <span> · {grant.status}</span> : null}
-    <fieldset disabled={busy} class="ga-cred-scope">
-      <legend>Services available to this agent</legend>
-      <div class="ga-cred-grant-services">{connection.services.map((service) => <label key={service.name}>
-        <input type="checkbox" checked={selected.includes(service.name)} disabled={!group.canAdmin || service.enabled === false}
-          onChange={(event) => {
-            setSelected(event.currentTarget.checked ? [...selected, service.name] : selected.filter((name) => name !== service.name));
-            setReviewed(false);
-          }} /> {service.name} · {service.host}{service.path ?? ''}
-      </label>)}</div>
-      {group.canAdmin ? <>
-        <Review checked={reviewed} onChange={setReviewed}>Approve these services and the current connection policy for {group.name} and its members.</Review>
-        <button type="button" disabled={!reviewed || !selected.length || connection.status !== 'ready'} onClick={() => void onChange(selected)}>
-          {grant ? 'Approve selected services' : 'Grant selected services'}
-        </button>
-        {connection.status !== 'ready' ? <p class="muted">The owner must finish connecting or enable this connection before granting access.</p> : null}
-      </> : <p class="muted">You no longer administer this group. You can revoke its grant but cannot reapprove it.</p>}
-      {grant ? <button type="button" class="danger" onClick={() => {
-        if (!detaching) { setDetaching(true); return; }
-        void onChange(null);
-      }}>{detaching ? `Confirm detach ${group.name} only` : 'Detach agent access'}</button> : null}
-      {detaching ? <p>Only {group.name} loses access. Other agents and upstream authorization remain unchanged.</p> : null}
-    </fieldset>
-  </section>;
-}
-
-const EMPTY_APP: OAuthAppConfiguration = {
-  label: '', issuer: 'https://accounts.example.com', client_id: '',
-  token_endpoint_auth_method: 'none', api_hosts: ['api.example.com'], default_scopes: [],
-  identity: 'none', token_scope_separator: 'space',
-};
-
 export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClose, onSaved }: {
   app?: AppInfo; canEditInstall: boolean; connections: Connection[]; groups: CredentialGroup[];
   onClose: () => void; onSaved: () => void;
 }): JSX.Element {
   const [id, setId] = useState(app?.id ?? '');
   const [scope, setScope] = useState<OAuthAppScope>(app?.source ?? 'user');
-  const [text, setText] = useState(JSON.stringify(app ? appConfiguration(app) : EMPTY_APP, null, 2));
+  const [draft, setDraft] = useState(() => oauthAppDraft(app));
   const [secret, setSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [reviewed, setReviewed] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const affected = connections.filter((connection) => connection.app_id === (app?.id ?? id));
-  const canSave = !busy && reviewed && !!id.trim() && (scope !== 'install' || canEditInstall);
+  let config: OAuthAppConfiguration | undefined;
+  let validationError = '';
+  try { config = compileOAuthApp(draft); }
+  catch (error) {
+    if (!(error instanceof CredentialsError)) throw error;
+    validationError = errorMessage(error);
+  }
+  const canManage = !busy && reviewed && !!id.trim() && (scope !== 'install' || canEditInstall);
+  const canSave = canManage && !!config &&
+    (draft.token_endpoint_auth_method === 'none' ? !secret : !!secret || !!app?.client_secret_set);
   async function save(remove: boolean): Promise<void> {
-    if (!canSave) return;
+    if (remove ? !canManage : !canSave) return;
     setBusy(true);
     setError('');
     try {
-      const body = remove ? undefined : { config: parseAppConfiguration(text), ...(secret ? { clientSecret: secret } : {}) };
+      const body = remove ? undefined : { config, ...(secret ? { clientSecret: secret } : {}) };
       await credentialRequest(credentialsPath(`/oauth-apps/${encodeURIComponent(id.trim())}?scope=${scope}`), remove ? 'DELETE' : 'PUT', body);
       setSecret('');
       onSaved();
       onClose();
       showToast(remove ? 'OAuth app removed' : 'OAuth app saved');
     } catch (error) {
-      if (!(error instanceof CredentialsError || error instanceof TypeError || error instanceof SyntaxError)) throw error;
+      if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
       setError(errorMessage(error));
     }
     finally { setBusy(false); }
   }
   return <CredentialDialog title={app ? `Manage OAuth app · ${app.label}` : 'Configure OAuth app'} onClose={onClose} busy={busy} footer={<>
     <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-    {app ? <button type="button" class="danger" disabled={!canSave} onClick={() => {
+    {app ? <button type="button" class="danger" disabled={!canManage} onClick={() => {
       if (!deleting) { setDeleting(true); return; }
       void save(true);
     }}>{deleting ? 'Confirm delete app' : 'Delete app'}</button> : null}
@@ -345,24 +374,23 @@ export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClo
     <Field label="App ownership"><select aria-label="App ownership" value={scope} disabled={busy || !!app} onChange={(event) => { setScope(event.currentTarget.value as OAuthAppScope); setReviewed(false); }}>
       <option value="user">Personal app</option>{canEditInstall ? <option value="install">Install-wide app</option> : null}
     </select></Field>
-    <Field label="Generic app config JSON"><textarea aria-label="Generic app config JSON" class="ga-cred-mono" rows={15} value={text} disabled={busy}
-      spellcheck={false} onInput={(event) => { setText(event.currentTarget.value); setReviewed(false); }} /></Field>
-    <p class="group-admin-help">Configure issuer or explicit authorization_endpoint / token_endpoint, approved api_hosts,
-      default_scopes, authorization_params and identity discovery. Enter the NanoClaw callback URI
-      {' '}<code>{`${location.origin}/oauth/callback`}</code> in your provider console. This is a generic app, not a provider permission catalog.</p>
+    <OAuthAppForm draft={draft} busy={busy} onChange={(next) => { setDraft(next); setReviewed(false); }} />
     <Field label="Client secret" info={app?.client_secret_set ? 'A secret is configured. Blank preserves it.' : 'Required only for confidential clients; never returned after saving.'}>
       <SecretInput label="Client secret" value={secret} disabled={busy} placeholder={app?.client_secret_set ? 'Keep current secret' : 'New client secret'}
         onInput={(value) => { setSecret(value); setReviewed(false); }} />
     </Field>
     <div class="ga-cred-callout">
       <strong>Affected personal connections · {affected.length}</strong>
-      {affected.map((connection) => <div key={connection.id}><p>{connection.label} · {connection.status}</p><Impact connection={connection} groups={groups} /></div>)}
+      {affected.map((connection) => <div key={connection.id}><p>{connectionName(connection)} · {connection.status}</p><Impact connection={connection} groups={groups} /></div>)}
       {scope === 'install' ? <p>Install-wide changes can also affect other users and agents not visible here.</p> : null}
       <p>Connections pin their issuing client. Saving a different client, issuer, host or scope policy does not
         automatically rebind existing connections. Secret rotation or deletion can prevent refresh and require reconnect.
         Review every affected connection before replacing or deleting an app.</p>
     </div>
     <Review checked={reviewed} onChange={setReviewed}>I reviewed the app policy, secret lifecycle and affected connections.</Review>
+    <ErrorNotice message={reviewed ? validationError ||
+      (draft.token_endpoint_auth_method === 'none' && secret ? 'Public clients must not have a client secret.' :
+        draft.token_endpoint_auth_method !== 'none' && !secret && !app?.client_secret_set ? 'Enter a client secret.' : '') : ''} />
     {deleting ? <p role="alert">Delete this app configuration? Existing client bindings may stop refreshing; this does not detach one agent.</p> : null}
     <ErrorNotice message={error} />
   </CredentialDialog>;

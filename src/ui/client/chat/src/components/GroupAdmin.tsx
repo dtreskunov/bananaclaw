@@ -15,7 +15,7 @@ import { useBackButtonCloses } from '../modalBackButton';
 import { TabBar, type TabItem } from './TabBar';
 import { MobileDialog, MobileDialogFooter, MobileDialogItem, MobileDialogList } from './MobileDialog';
 import { MembersTab, RolesTab } from './GroupAdminAccess';
-import { GroupCredentialAccess } from './GroupCredentialAccess';
+import { GroupCredentials } from './GroupCredentialAccess';
 import { apiPath, call, errMsg } from './GroupAdminApi';
 import { DestinationsTab } from './GroupAdminDestinations';
 import { GroupAdminField as Field } from './GroupAdminField';
@@ -24,7 +24,7 @@ import { ModelParamsEditor } from './GroupAdminModelParams';
 import { PackagesSection } from './GroupAdminPackages';
 import { SkillsSection, type AvailableSkillDto } from './GroupAdminSkills';
 
-type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'access' | 'members' | 'roles' | 'destinations';
+type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'credentials' | 'members' | 'roles' | 'destinations';
 
 const SETTINGS_SECTIONS = new Set<Tab>(['models', 'settings', 'packages', 'mcp', 'skills']);
 
@@ -34,7 +34,7 @@ const TAB_ITEMS: TabItem[] = [
   { id: 'packages', label: 'Packages', sublabel: 'apt / npm / pip in the image' },
   { id: 'mcp', label: 'MCP servers', sublabel: 'External tools wired to the agent' },
   { id: 'skills', label: 'Skills', sublabel: 'Container skills mounted at runtime' },
-  { id: 'access', label: 'Access', sublabel: 'Services shared with this agent' },
+  { id: 'credentials', label: 'Credentials', sublabel: 'Keys and accounts available to this agent' },
   { id: 'members', label: 'Members', sublabel: 'Who can use this group' },
   { id: 'roles', label: 'Admins', sublabel: 'Admins for this group' },
   { id: 'destinations', label: 'Destinations', sublabel: 'Where this group can send messages' },
@@ -253,7 +253,7 @@ export function GroupAdmin(): JSX.Element | null {
               onActions={setActions}
             />
           ) : null}
-          {activeTab === 'access' ? <GroupCredentialAccess gid={gid} /> : null}
+          {activeTab === 'credentials' ? <GroupCredentials gid={gid} /> : null}
           {activeTab === 'members' ? <MembersTab gid={gid} /> : null}
           {activeTab === 'roles' ? <RolesTab gid={gid} /> : null}
           {activeTab === 'destinations' ? <DestinationsTab gid={gid} /> : null}

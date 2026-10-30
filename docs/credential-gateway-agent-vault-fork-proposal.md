@@ -2,7 +2,7 @@
 
 **Status:** plan of record. **Originally proposed:** 2026-10-15.
 **Revision 7:** 2026-10-29. User-owned credentials and OAuth connections,
-explicit shared references, and a top-level **Credentials** tab replace
+explicit shared references, and a user-scoped **Credentials** page replace
 duplicated group-owned credentials. **F12 copying is removed, not deferred.**
 Ownership reuses native AgentVault users and actors, provisioned from NanoClaw
 identities without enabling gateway human login.
@@ -31,8 +31,9 @@ override this document.
 - **Authorization:** each group has its own vault and socket identity, with
   explicit grants to selected connection services. A vault is an authorization
   boundary, not the owner or storage location of every secret it uses.
-- **UI:** a top-level, user-scoped **Credentials** tab manages keys, connected
-  accounts and sharing. Agent Settings contains **Access** references only.
+- **UI:** the account menu's **Credentials** entry, immediately after
+  **My Profile**, opens a user-scoped page for keys, connected accounts and
+  sharing. Agent Settings contains the same **Credentials** table scoped to its agent.
 - **Sharing:** references cover both static credentials and OAuth connections
   in R1. There is no implicit inheritance from `default`, no cross-vault
   fallback, and no copy/fan-out synchronization feature.
@@ -232,7 +233,7 @@ metadata or fan-out rotation implementation.
 
 ### 4.2 Static connections
 
-Enter values once in the user's Credentials tab or through write-only stdin.
+Enter values once on the user's Credentials page or through write-only stdin.
 Connection/service/grant creation must be transactional and create-only;
 updates require exact reviewed revisions. Do not weaken existing conditional
 write guarantees or replace them with check-then-upsert.
@@ -314,23 +315,33 @@ privileged host or readable process memory.
 
 ### 6.1 Top-level Credentials and agent Access
 
-The primary navigation gains a user-scoped **Credentials** tab, with **Keys**
-and **Connected accounts**. It replaces the credential-management section of
-Agent Settings rather than duplicating it.
+The account menu gains a **Credentials** entry immediately after **My Profile**,
+opening a user-scoped dialog at `#credentials`, using the standard desktop
+dialog/mobile full-screen chrome. Keys and connected accounts share one
+**Credentials** table; **OAuth apps** is a separate form-based section.
+It replaces the credential-management section of Agent Settings
+rather than duplicating it; there is no separate Chat/Credentials header strip.
 
-- List the signed-in user's connections, connection status, services and
-  current grants. Distinguish **Available to** (authorization) from **Used by**
-  (actual usage).
+- Show an editable authorization matrix of the signed-in user's credentials
+  and agents, with staged checkbox edits and compact save/cancel actions,
+  transcript table formatting and vertical agent headings.
+  Use readable provider/destination labels, not generated migration IDs,
+  owner/type labels, key counts or per-credential grant-count summaries.
+  Authorization must not be presented as usage history.
 - Create a static connection or complete OAuth once; then select the agents
   that may use its services.
 - Rotate/reconnect/disable/delete at connection scope with affected-agent
   previews. Label upstream disconnect explicitly as **Disconnect everywhere**.
 - Expose install-wide app administration only to authorized owners/admins and
   private app administration to its user owner.
-- Agent Settings → **Access** lists granted services and their owner/status.
-  Authorized admins can attach an existing connection or remove that group's
-  access. It has no secret entry, rotation, reconnect or upstream-disconnect
-  forms. Creating a missing connection opens the top-level Credentials flow.
+- Agent Settings → **Credentials** reuses the personal table with just that
+  agent's column and no table header. It loads only the signed-in user's
+  personal collection and reuses the same editors and lifecycle actions.
+  Administering an agent does not expose another user's credentials or their
+  metadata in this table.
+  Enforce this on both host and gateway metadata endpoints, including group
+  access and instance-owner requests. Keep metadata visibility separate from
+  the agent's explicitly granted runtime use.
 - MCP settings show the selected binding and status. Connect/manage actions
   open the user's connection flow; a remote OAuth challenge does not create
   another group-owned authorization automatically.
