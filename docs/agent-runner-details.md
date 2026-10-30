@@ -923,7 +923,14 @@ configuration. The pending instruction survives host or runner failure and the
 normal sweep retries startup if necessary. A boot-time inbound sequence watermark
 (`NANOCLAW_BOOT_INBOUND_SEQ`) prevents an approval arriving during startup from
 being mistaken for configuration already loaded by that runner. Explicit
-operator-requested restarts still retain their immediate-stop behavior.
+`ncl groups restart` requests still retain their immediate-stop behavior.
+
+Agent Settings reuses the same deferred exit for runtime changes. Its `on_wake`
+restart control is a system row, not a verification prompt. A replacement
+acknowledges controls covered by its boot-time configuration snapshot before
+polling for user input, bypassing the prompt cap and making no model call.
+Controls arriving after that snapshot remain pending for another replacement.
+Thus saving settings neither interrupts a response nor generates an extra one.
 
 ### Status Management
 

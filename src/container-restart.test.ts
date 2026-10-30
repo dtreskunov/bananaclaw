@@ -74,14 +74,27 @@ function makeSession(id: string, agentGroupId: string, status = 'active') {
 // --- Tests ---
 
 describe('restartAgentGroupContainers', () => {
-  it('defers approval-driven restarts using a durable on-wake instruction, without killing the response', () => {
+  it('defers restarts silently using a durable on-wake control, without killing the response', () => {
     mockGetSessionsByAgentGroup.mockReturnValue([makeSession('s1', 'g1')]);
     mockIsContainerRunning.mockReturnValue(true);
     expect(restartAgentGroupContainers('g1', 'approved restart', undefined, true)).toBe(1);
     expect(mockKillContainer).not.toHaveBeenCalled();
     expect(mockWriteSessionMessage.mock.calls[0][2]).toMatchObject({
-      onWake: 1, channelType: 'web', platformId: 'web-1', threadId: 'thread-1',
+      onWake: 1, kind: 'system',
     });
+    expect(JSON.parse(mockWriteSessionMessage.mock.calls[0][2].content)).toEqual({
+      action: 'restart', reason: 'approved restart',
+    });
+  });
+  it('retains explicit follow-up instructions when a deferred restart requests them', () => {
+    mockGetSessionsByAgentGroup.mockReturnValue([makeSession('s1', 'g1')]);
+    mockIsContainerRunning.mockReturnValue(true);
+    restartAgentGroupContainers('g1', 'approved restart', 'Verify the new server', true);
+    expect(mockKillContainer).not.toHaveBeenCalled();
+    expect(mockWriteSessionMessage.mock.calls[0][2]).toMatchObject({
+      onWake: 1, kind: 'chat', channelType: 'web', platformId: 'web-1', threadId: 'thread-1',
+    });
+    expect(JSON.parse(mockWriteSessionMessage.mock.calls[0][2].content).text).toBe('Verify the new server');
   });
   it('skips sessions without a running container', () => {
     mockGetSessionsByAgentGroup.mockReturnValue([makeSession('s1', 'g1'), makeSession('s2', 'g1')]);

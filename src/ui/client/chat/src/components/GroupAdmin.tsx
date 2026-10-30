@@ -427,6 +427,7 @@ function SettingsTab({
 
   const RESTART_REQUIRING_FIELDS = new Set([
     'provider',
+    'upstream_provider',
     'model',
     'small_model',
     'effort',
@@ -485,13 +486,12 @@ function SettingsTab({
   const providerChangedWithCustomImage = pending.has('provider') && draft.image_tag != null;
   const needsRebuild = imageRebuildNeeded || packagesChanged || providerChangedWithCustomImage;
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [restartChecked, setRestartChecked] = useState(false);
   const [rebuildChecked, setRebuildChecked] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState('');
   const [archiveBusy, setArchiveBusy] = useState(false);
-  const effectiveRestart = !voiceOnlyChange && (restartChecked || rebuildChecked);
-  const effectiveRebuild = !voiceOnlyChange && rebuildChecked;
+  const effectiveRebuild = !voiceOnlyChange && (needsRebuild || rebuildChecked);
+  const effectiveRestart = needsRestart || effectiveRebuild;
   const canSave = changed;
 
   useEffect(() => {
@@ -501,8 +501,7 @@ function SettingsTab({
 
   function apply(): void {
     if (!changed) return;
-    setRestartChecked(needsRestart || needsRebuild);
-    setRebuildChecked(needsRebuild);
+    setRebuildChecked(false);
     setConfirmOpen(true);
   }
 
@@ -577,6 +576,13 @@ function SettingsTab({
         }
       }
 
+      let restarted: number | undefined;
+      if (effectiveRestart) {
+        const r = await runRestart(effectiveRebuild);
+        if (!r.ok) return;
+        restarted = r.restarted;
+      }
+
       const fresh = await call<SettingsResponse>(apiPath(gid, '/settings'));
       if (fresh.ok) {
         setData(fresh.data);
@@ -598,13 +604,11 @@ function SettingsTab({
         setDraftDisabledSkills([...(fresh.data.disabledSkills ?? [])]);
         groups.value = groups.value.map((g) => (g.id === gid ? { ...g, name: fresh.data.name } : g));
       }
-      if (effectiveRebuild || effectiveRestart) {
-        const r = await runRestart(effectiveRebuild);
-        if (!r.ok) return;
+      if (effectiveRestart) {
         showToast(
-          effectiveRebuild
-            ? `Rebuilt image and restarted ${r.restarted} session${r.restarted === 1 ? '' : 's'}.`
-            : `Restarted ${r.restarted} session${r.restarted === 1 ? '' : 's'}.`,
+          `${effectiveRebuild ? 'Image rebuilt. ' : ''}Saved — ${
+            restarted === 0 ? 'changes apply when the agent next starts.' : 'changes apply after current responses finish.'
+          }`,
         );
       } else {
         showToast('Saved.');
@@ -1045,36 +1049,24 @@ function SettingsTab({
               {pending.size} setting{pending.size === 1 ? '' : 's'} will be saved:{' '}
               <code>{[...pending].join(', ')}</code>
             </p>
+            {effectiveRestart ? (
+              <p class="group-admin-help" role="status">
+                Changes apply automatically after active responses finish and are committed.
+                Idle sessions restart immediately. No agent reply is generated.
+              </p>
+            ) : null}
             <div class="ga-confirm-options">
               <label class="group-admin-check">
                 <input
                   type="checkbox"
-                  checked={effectiveRestart}
-                  disabled={busy || voiceOnlyChange || rebuildChecked /* rebuild always restarts */}
-                  onChange={(e) => setRestartChecked((e.target as HTMLInputElement).checked)}
-                />
-                <span>Restart sessions</span>
-                <Tooltip
-                  text={
-                    'Stop and respawn all running container sessions for this group so they pick up the saved config.\nDefaults on when you change provider, model, effort, image tag, assistant name, or max messages per prompt. CLI scope alone does not need a restart — it is re-read on every CLI call.\nActive conversations resume on the next user message.'
-                  }
-                >
-                  <span class="info-icon" aria-label="More info">
-                    i
-                  </span>
-                </Tooltip>
-              </label>
-              <label class="group-admin-check">
-                <input
-                  type="checkbox"
                   checked={effectiveRebuild}
-                  disabled={busy || voiceOnlyChange}
+                  disabled={busy || voiceOnlyChange || needsRebuild}
                   onChange={(e) => setRebuildChecked((e.target as HTMLInputElement).checked)}
                 />
-                <span>Rebuild image</span>
+                <span>Rebuild image{needsRebuild ? ' (required)' : ''}</span>
                 <Tooltip
                   text={
-                    'Rebuild the container image before restarting.\nDefaults on when the chosen image tag does not exist locally, packages changed, or the provider changed while using a custom image.\nA rebuild always implies a restart and takes minutes, not seconds.'
+                    'Rebuild the container image before its deferred restart.\nRequired when the chosen image tag does not exist locally, packages changed, or the provider changed while using a custom image. Otherwise optional.\nA rebuild takes minutes, not seconds, and never interrupts an active response.'
                   }
                 >
                   <span class="info-icon" aria-label="More info">
@@ -1083,16 +1075,13 @@ function SettingsTab({
                 </Tooltip>
               </label>
             </div>
-            {needsRestart && !effectiveRestart ? (
-              <p class="ga-confirm-warn">These changes won&rsquo;t take effect until the sessions restart.</p>
-            ) : null}
           </div>
           <MobileDialogFooter className="ga-confirm-foot">
             <button type="button" disabled={busy} onClick={() => setConfirmOpen(false)}>
               Cancel
             </button>
             <button type="button" class="primary" disabled={busy} onClick={doApply}>
-              {busy ? 'Applying…' : effectiveRebuild ? 'Save & rebuild' : effectiveRestart ? 'Save & restart' : 'Save'}
+              {busy ? 'Applying…' : effectiveRebuild ? 'Save & rebuild' : 'Save'}
             </button>
           </MobileDialogFooter>
         </MobileDialog>

@@ -1,8 +1,8 @@
 /**
  * Helper to restart all running containers for an agent group.
  *
- * Writes an on_wake message to each session, kills the container, then
- * wakes a fresh container via the onExit callback — race-free.
+ * Deferred restarts use durable on_wake controls; explicit immediate
+ * restarts stop the container and optionally wake it via its exit callback.
  */
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
@@ -21,6 +21,8 @@ import { writeApprovalNotification } from './modules/approvals/notification.js';
  * (picked up only by the fresh container's first poll) and a
  * wakeContainer call on exit. Without it, containers are killed and
  * only come back on the next real user message.
+ * Deferred requests instead wait for committed turn completion. Without a
+ * wakeMessage, the replacement acknowledges a silent control and stays idle.
  */
 export function restartAgentGroupContainers(
   agentGroupId: string, reason: string, wakeMessage?: string, deferUntilSettled = false,
@@ -32,11 +34,20 @@ export function restartAgentGroupContainers(
 
   for (const session of sessions) {
     if (deferUntilSettled) {
-      writeApprovalNotification(session, wakeMessage ??
-        'The approved restart is complete. Continue the original conversation without repeating completed actions.', {
-        afterRestart: true,
-        originMessageId: origin?.sessionId === session.id ? origin.messageId : undefined,
-      });
+      if (wakeMessage) {
+        writeApprovalNotification(session, wakeMessage, {
+          afterRestart: true,
+          originMessageId: origin?.sessionId === session.id ? origin.messageId : undefined,
+        });
+      } else {
+        writeSessionMessage(agentGroupId, session.id, {
+          id: `restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          kind: 'system',
+          timestamp: new Date().toISOString(),
+          content: JSON.stringify({ action: 'restart', reason }),
+          onWake: 1,
+        });
+      }
       continue;
     }
     if (wakeMessage) {
@@ -92,7 +103,9 @@ export function restartAgentGroupContainers(
   }
 
   if (sessions.length > 0) {
-    log.info('Restarting agent group containers', { agentGroupId, reason, count: sessions.length });
+    log.info(deferUntilSettled ? 'Scheduled agent group restarts' : 'Restarting agent group containers', {
+      agentGroupId, reason, count: sessions.length,
+    });
   }
   return sessions.length;
 }

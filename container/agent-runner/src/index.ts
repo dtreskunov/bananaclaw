@@ -143,7 +143,7 @@ async function main(): Promise<void> {
     systemContext: () => ({ instructions: instructions() }),
   });
   await drainSessionJournal();
-  log('Response committed; exiting for approved configuration restart');
+  log('Response committed; exiting for configuration restart');
   process.exit(0);
 }
 

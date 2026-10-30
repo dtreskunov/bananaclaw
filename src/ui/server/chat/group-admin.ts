@@ -1170,15 +1170,15 @@ async function handleRestart(
   if (rebuild) {
     await buildAgentGroupImage(gid);
   }
-  const count = restartAgentGroupContainers(gid, 'restarted via chat-ui admin', message);
+  const count = restartAgentGroupContainers(gid, 'settings changed via chat-ui admin', message, true);
   recordAdminAction({
     actorUserId,
     action: 'group_restart',
     targetKind: 'agent_group',
     targetId: gid,
-    payload: { rebuild, restarted: count },
+    payload: { rebuild, restarted: count, deferred: true },
   });
-  writeJson(res, 200, { restarted: count, rebuilt: rebuild });
+  writeJson(res, 200, { restarted: count, rebuilt: rebuild, deferred: true });
 }
 
 async function handleArchive(

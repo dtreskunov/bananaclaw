@@ -755,7 +755,7 @@ time across settlement. Generated fixture assets are ignored and rebuilt from
 `src/ui/client/chat/fixtures/`.
 
 **Credential UI (plan of record, revision 7):** the account menu includes
-**Credentials** immediately after **My Profile**, opening the user-scoped
+**My Credentials** immediately after **My Profile**, opening the user-scoped
 review and management dialog. Agent `request_access` requests appear in the
 existing Pending approvals banner with **Review access / Reject**. Review
 opens this same private Credentials dialog, prefilled with the exact destination
@@ -763,6 +763,12 @@ and purpose. The user chooses an existing connection or uses the unified Add
 credential form (key, MCP OAuth or configured OAuth app), then confirms the
 recipient and full current/future connection access. Scope suggestions are
 shown but never selected automatically. Signing in does not grant access.
+Personal credential creation, reconnect, app configuration and connection actions
+use their explicit action buttons without an additional acknowledgement message
+or checkbox. Functional scope, no-scope-request and agent-access checkboxes remain.
+Required-field validation, ownership, write-only secrets and exact revision checks
+are unchanged. The personal dialog is also titled **My Credentials**; existing
+`#credentials` links continue to work.
 The access review uses **Account** and **Allow access**, without an additional
 confirmation checkbox or permission notice. The explicit button click remains
 the authorization step; compatibility, readiness and exact revision checks still
@@ -1392,6 +1398,23 @@ Streaming uses VAD commits and `noVerbatim: true` (`no_verbatim` in the ElevenLa
 API) to remove filler words and disfluencies. Interim hypotheses may still contain
 fillers until the provider commits the cleaned text; no separate LLM cleanup pass
 or paid fallback is used.
+
+### Applying Agent Settings
+
+Saving runtime settings (provider, model, effort, image, MCP servers, skills or
+packages) automatically schedules a silent restart. There is no **Restart
+sessions** checkbox: active responses finish and commit their journals before
+the runner exits, while idle sessions can restart immediately. Stopped sessions
+load the changes on their next start. The save confirmation and toast describe
+deferred application rather than claiming the sessions already restarted.
+
+Image rebuilding is automatic and cannot be unchecked when required by package
+changes, an unavailable image tag, or a provider change with a custom image.
+Otherwise **Rebuild image** remains optional. A failed rebuild does not schedule
+a restart; a failed restart request leaves the edited form available for retry.
+Host-only settings, including voice input and CLI scope, do not restart sessions
+unless an optional image rebuild was explicitly requested. Restarts initiated
+by Settings do not inject chat input or cause an unsolicited agent response.
 
 In Agent Settings, voice input has a separate enable toggle and a **Voice input
 backend** selector for the server default or ElevenLabs. The database stores

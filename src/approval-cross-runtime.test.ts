@@ -22,6 +22,7 @@ vi.mock('./modules/typing/index.js', () => ({
 
 import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrations } from './db/index.js';
 import { createPendingApproval } from './db/sessions.js';
+import { restartAgentGroupContainers } from './container-restart.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
 import { registerApprovalHandler } from './modules/approvals/primitive.js';
 import { handleApprovalsResponse } from './modules/approvals/response-handler.js';
@@ -49,9 +50,9 @@ afterEach(async () => {
   fs.rmSync(path.resolve('.test-approval-routing'), { recursive: true, force: true });
 });
 
-it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
-  'routes and steers an approval across Node/Bun, commits the final reply, then retires without consuming queued work',
-  async () => {
+it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).each(['approval', 'settings'] as const)(
+  'commits the final reply before a deferred %s restart across Node/Bun, without consuming queued work',
+  async (mode) => {
     runMigrations(initTestDb());
     const timestamp = new Date().toISOString();
     createAgentGroup({ id: 'group', name: 'Group', folder: 'group', agent_provider: null, created_at: timestamp });
@@ -107,37 +108,49 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     };
     await wait(() => expect(getSessionActiveTurn(session.id).turn?.status).toBe('running'));
     const turnId = getSessionActiveTurn(session.id).turn!.id;
-    registerApprovalHandler('cross-runtime-approval', async ({ notify }) => {
-      notify('Approved. Finish this response before restarting.');
-      notify('The new configuration is loaded; verify it now.', { afterRestart: true });
-    });
-    createPendingApproval({
-      approval_id: 'approval',
-      session_id: session.id,
-      request_id: 'approval',
-      origin_message_id: 'original',
-      action: 'cross-runtime-approval',
-      payload: '{}',
-      created_at: timestamp,
-      title: 'Approve',
-      options_json: '[]',
-    });
-    await handleApprovalsResponse({
-      questionId: 'approval',
-      value: 'approve',
-      userId: 'owner',
-      channelType: 'web',
-      platformId: 'admin-dm',
-      threadId: null,
-    });
-    await wait(() => {
-      const applied = outbound!
-        .prepare(
-          "SELECT value FROM session_state WHERE key LIKE 'input:%' AND json_extract(value,'$.status')='applied'",
-        )
-        .get();
-      expect(applied).toBeTruthy();
-    });
+    if (mode === 'approval') {
+      registerApprovalHandler('cross-runtime-approval', async ({ notify }) => {
+        notify('Approved. Finish this response before restarting.');
+        notify('The new configuration is loaded; verify it now.', { afterRestart: true });
+      });
+      createPendingApproval({
+        approval_id: 'approval',
+        session_id: session.id,
+        request_id: 'approval',
+        origin_message_id: 'original',
+        action: 'cross-runtime-approval',
+        payload: '{}',
+        created_at: timestamp,
+        title: 'Approve',
+        options_json: '[]',
+      });
+      await handleApprovalsResponse({
+        questionId: 'approval',
+        value: 'approve',
+        userId: 'owner',
+        channelType: 'web',
+        platformId: 'admin-dm',
+        threadId: null,
+      });
+      await wait(() => {
+        const applied = outbound!
+          .prepare(
+            "SELECT value FROM session_state WHERE key LIKE 'input:%' AND json_extract(value,'$.status')='applied'",
+          )
+          .get();
+        expect(applied).toBeTruthy();
+      });
+    } else {
+      expect(restartAgentGroupContainers('group', 'settings changed', undefined, true)).toBe(1);
+      await wait(() => {
+        const inbound = openInboundDb('group', session.id);
+        try {
+          expect(inbound.prepare('SELECT COUNT(*) FROM pending_host_events').pluck().get()).toBe(0);
+        } finally { inbound.close(); }
+      });
+      expect(outbound.prepare("SELECT 1 FROM session_state WHERE key LIKE 'input:%' AND json_extract(value,'$.status')='applied'").get())
+        .toBeUndefined();
+    }
     expect(getSessionActiveTurn(session.id).turn?.id).toBe(turnId);
     expect(child.exitCode).toBeNull();
     write('queued-user', 'A follow-up for the next turn');

@@ -3,6 +3,7 @@ import { findByName, findByRouting, type DestinationEntry } from './destinations
 import {
   getPendingMessages,
   hasPendingRestart,
+  completeRestartRequests,
   releaseProcessing,
   markCompleted,
   nextPendingDueDelayMs,
@@ -153,6 +154,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   const bootInboundSeq = Number(process.env.NANOCLAW_BOOT_INBOUND_SEQ ?? Number.MAX_SAFE_INTEGER);
   if (!Number.isSafeInteger(bootInboundSeq) || bootInboundSeq < 0)
     throw new Error('Invalid NANOCLAW_BOOT_INBOUND_SEQ');
+  if (completeRestartRequests(bootInboundSeq) > 0) markBatchPersisted(getOutboundDb());
 
   // Honor the stop signal even while a warm, long-lived query is mid-flight.
   // The while-loop below only checks `signal.aborted` between batches; a warm
@@ -176,7 +178,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   while (true) {
     if (config.signal?.aborted) return;
     if (hasPendingRestart(isFirstPoll ? bootInboundSeq : -1)) {
-      log('Approved configuration changed — response settled, restarting before the next turn');
+      log('Configuration changed — response settled, restarting before the next turn');
       return;
     }
     const hostGeneration = getHostEventGeneration();

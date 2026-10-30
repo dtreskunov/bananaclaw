@@ -25,8 +25,8 @@ export function PackagesSection({
     <>
       <div class="group-admin-toolbar">
         <p class="group-admin-help">
-          Packages baked into the container image. Changes require an image rebuild — the Apply
-          dialog suggests rebuild when any list here changes. Mirrors{' '}
+          Packages baked into the container image. Changes automatically rebuild the image;
+          sessions restart after active responses finish. Mirrors{' '}
           <code>ncl groups config add-package / remove-package</code>.
         </p>
       </div>

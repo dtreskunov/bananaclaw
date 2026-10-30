@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
-import { getPendingMessages, hasPendingRestart, markCompleted, MAX_TIMER_DELAY_MS, nextPendingDueDelayMs } from './db/messages-in.js';
+import { getPendingMessages, hasPendingRestart, completeRestartRequests, markCompleted, MAX_TIMER_DELAY_MS, nextPendingDueDelayMs } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
 import {
-  friendlyProviderErrorFallback, providerFailureSummary, renderFailedTurnReplay, shouldDeferInteractiveResponse,
+  friendlyProviderErrorFallback, providerFailureSummary, renderFailedTurnReplay, runPollLoop, shouldDeferInteractiveResponse,
 } from './poll-loop.js';
 import { appendActivity } from './db/session-state.js';
 import { beginTurn } from './turn-execution.js';
@@ -66,6 +66,55 @@ describe('future message timing', () => {
     const processAfter = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
     insertMessage('future', 'task', { prompt: 'later' }, { processAfter });
     expect(nextPendingDueDelayMs()).toBe(MAX_TIMER_DELAY_MS);
+  });
+});
+
+describe('silent settings restarts', () => {
+  function restart(id: string, seq: number, processAfter?: string) {
+    insertMessage(id, 'system', { action: 'restart', reason: 'settings changed' }, { onWake: 1, processAfter });
+    getInboundDb().prepare('UPDATE messages_in SET seq=? WHERE id=?').run(seq, id);
+  }
+
+  it('acknowledges only due controls covered by the boot snapshot and never exposes them as input', () => {
+    restart('loaded', 2);
+    restart('late', 4);
+    restart('future', 6, new Date(Date.now() + 60_000).toISOString());
+    expect(getPendingMessages(true, { uncapped: true })).toEqual([]);
+    expect(completeRestartRequests(2)).toBe(1);
+    expect(completeRestartRequests(2)).toBe(0);
+    expect(getOutboundDb().prepare('SELECT message_id,status FROM processing_ack').all())
+      .toEqual([{ message_id: 'loaded', status: 'completed' }]);
+    expect(hasPendingRestart(2)).toBe(true);
+    expect(completeRestartRequests(6)).toBe(1);
+    expect(hasPendingRestart()).toBe(false);
+  });
+
+  it('does not let restart controls consume the prompt cap or hide a real input', () => {
+    for (let i = 0; i < 12; i++) restart(`control-${i}`, 2 * i + 4);
+    insertMessage('user', 'chat', { text: 'A real request' });
+    getInboundDb().prepare("UPDATE messages_in SET seq=2 WHERE id='user'").run();
+    expect(getPendingMessages(true).map((message) => message.id)).toEqual(['user']);
+    expect(completeRestartRequests(28)).toBe(12);
+  });
+
+  it('starts the replacement idle without calling the model or entering another restart loop', async () => {
+    restart('settings', 2);
+    const controller = new AbortController();
+    const provider = new MockProvider();
+    let queries = 0;
+    provider.query = () => { queries++; throw new Error('Silent restart must not query the model'); };
+    const loop = runPollLoop({
+      provider, providerName: 'mock', cwd: process.cwd(), signal: controller.signal,
+    });
+    try {
+      await Bun.sleep(20);
+      expect(queries).toBe(0);
+      expect(hasPendingRestart()).toBe(false);
+      expect(getOutboundDb().prepare("SELECT status FROM processing_ack WHERE message_id='settings'").get())
+        .toEqual({ status: 'completed' });
+      expect(getOutboundDb().prepare('SELECT COUNT(*) AS n FROM turns').get()).toEqual({ n: 0 });
+      expect(getUndeliveredMessages()).toEqual([]);
+    } finally { controller.abort(); await loop; }
   });
 });
 

@@ -47,7 +47,14 @@ vi.mock('../auth.js', () => ({
 import { initTestDb, closeDb, runMigrations, getDb, getAgentGroup } from '../../../db/index.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { addMember } from '../../../modules/permissions/db/agent-group-members.js';
-import { isContainerRunning, runMcpProbeContainer } from '../../../container-runner.js';
+import {
+  buildAgentGroupImage,
+  isContainerRunning,
+  killContainer,
+  runMcpProbeContainer,
+} from '../../../container-runner.js';
+import { createSession } from '../../../db/sessions.js';
+import { initSessionFolder, openInboundDb } from '../../../session-manager.js';
 import {
   registerProviderContainerConfig,
   listProviderContainerConfigNames,
@@ -158,6 +165,65 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
+});
+
+describe('POST /api/groups/:gid/admin/restart', () => {
+  beforeEach(() => {
+    seedUser('web:owner');
+    grantRole({ user_id: 'web:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: NOW() });
+    seedGroup('ag-settings', 'settings-group');
+    createSession({
+      id: 'settings-session',
+      agent_group_id: 'ag-settings',
+      messaging_group_id: null,
+      thread_id: null,
+      agent_provider: null,
+      status: 'active',
+      container_status: 'running',
+      last_active: null,
+      created_at: NOW(),
+    });
+    initSessionFolder('ag-settings', 'settings-session');
+    mockUserId = 'web:owner';
+    vi.mocked(isContainerRunning).mockReturnValue(true);
+    vi.mocked(killContainer).mockClear();
+    vi.mocked(buildAgentGroupImage).mockReset().mockResolvedValue(undefined);
+  });
+
+  it.each([false, true])('schedules a silent deferred restart after rebuilding=%s', async (rebuild) => {
+    const res = await call('POST', '/ui/chat/api/groups/ag-settings/admin/restart', { rebuild });
+    expect(res.status()).toBe(200);
+    expect(res.body()).toEqual({ restarted: 1, rebuilt: rebuild, deferred: true });
+    expect(killContainer).not.toHaveBeenCalled();
+    expect(buildAgentGroupImage).toHaveBeenCalledTimes(rebuild ? 1 : 0);
+    const db = openInboundDb('ag-settings', 'settings-session');
+    try {
+      const rows = db.prepare('SELECT kind,on_wake,content,channel_type FROM messages_in').all();
+      expect(rows).toEqual([
+        {
+          kind: 'system',
+          on_wake: 1,
+          channel_type: null,
+          content: JSON.stringify({ action: 'restart', reason: 'settings changed via chat-ui admin' }),
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('does not schedule a restart when the image build fails', async () => {
+    vi.mocked(buildAgentGroupImage).mockRejectedValueOnce(new Error('Image build failed'));
+    const res = await call('POST', '/ui/chat/api/groups/ag-settings/admin/restart', { rebuild: true });
+    expect(res.status()).toBe(500);
+    expect(killContainer).not.toHaveBeenCalled();
+    const db = openInboundDb('ag-settings', 'settings-session');
+    try {
+      expect(db.prepare('SELECT COUNT(*) FROM messages_in').pluck().get()).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 describe('POST /api/groups/:gid/admin/archive', () => {

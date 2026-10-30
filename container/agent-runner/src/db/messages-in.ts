@@ -73,7 +73,7 @@ export function getPendingMessages(
            AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
            AND (on_wake = 0 OR (?1 = 1 AND (?3 IS NULL OR seq <= ?3)))
            AND NOT (kind = 'system' AND COALESCE(
-             CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END, '') IN ('edit_input', 'cancel_input'))
+             CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END, '') IN ('edit_input', 'cancel_input', 'restart'))
          ORDER BY seq DESC
          LIMIT ?2`,
       )
@@ -113,6 +113,24 @@ export function hasPendingRestart(afterSeq = -1): boolean {
     } finally {
       db.close();
     }
+}
+
+/** Silent restart controls are consumed only by the runtime that loaded their saved configuration. */
+export function completeRestartRequests(wakeThroughSeq: number): number {
+  const db = openInboundDb();
+  try {
+    const rows = db.prepare(
+      `SELECT id FROM messages_in WHERE status = 'pending' AND kind = 'system' AND on_wake = 1
+       AND seq <= ? AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
+       AND CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END = 'restart'`,
+    ).all(wakeThroughSeq) as { id: string }[];
+    const acknowledged = getOutboundDb().prepare('SELECT 1 FROM processing_ack WHERE message_id = ?');
+    const ids = rows.filter((row) => !acknowledged.get(row.id)).map((row) => row.id);
+    markCompleted(ids);
+    return ids.length;
+  } finally {
+    db.close();
+  }
 }
 
 /** Control requests bypass the prompt cap and never become model input. */
