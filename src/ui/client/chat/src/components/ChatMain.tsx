@@ -1064,7 +1064,7 @@ function ApprovalsBanner() {
         {list.map((a) => (
           <ApprovalCard key={a.approvalId} approval={a} busy={busy.has(a.approvalId)}
             onReview={() => openCredentials({ approvalId: a.approvalId })}
-            onRespond={value => { void respondApproval(a.approvalId, value).catch(console.error); }} />
+            onRespond={(value, message) => { void respondApproval(a.approvalId, value, message).catch(console.error); }} />
         ))}
       </div>
     </div>

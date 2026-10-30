@@ -1399,6 +1399,22 @@ API) to remove filler words and disfluencies. Interim hypotheses may still conta
 fillers until the provider commits the cleaned text; no separate LLM cleanup pass
 or paid fallback is used.
 
+### Messages with approval decisions
+
+Session-bound approval cards and private credential-access reviews offer an
+optional **Message to agent** field on both approval and rejection. Drafts are
+shared between a card and its private review, retained after failed submissions,
+and cleared only after a confirmed response. The limit is 4000 characters; blank
+messages preserve the existing request shape. Do not enter passwords or tokens.
+
+The message accompanies the decision in the same request and the same agent
+outcome notification, attributed to the authenticated responder. It uses the
+existing conversation routing and steering/queueing path; it does not produce a
+separate chat turn or alter the approved packages, command, credential or grant.
+It appears once even when the change also schedules post-restart verification.
+Legacy sessionless gateway approvals do not offer this field because they have
+no originating conversation; the server rejects a non-empty message for them.
+
 ### Applying Agent Settings
 
 Saving runtime settings (provider, model, effort, image, MCP servers, skills or

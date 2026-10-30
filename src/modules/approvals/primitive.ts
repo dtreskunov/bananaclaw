@@ -35,6 +35,7 @@ import { getDb } from '../../db/connection.js';
 import { createApprovalWorkflow } from './workflows.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
+import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
 
 /** Two-button approval UI — the only options the primitive supports today. */
 const APPROVAL_OPTIONS: RawOption[] = [
@@ -186,8 +187,13 @@ export async function pickApprovalDelivery(
 // ── Request API ──
 
 /** Send a system chat to the agent's session. Used by callers and by the response handler. */
-export function notifyAgent(session: Session, text: string, originMessageId?: string | null): void {
-  writeApprovalNotification(session, text, { originMessageId });
+export function notifyAgent(
+  session: Session,
+  text: string,
+  originMessageId?: string | null,
+  responseMessage?: ApprovalResponseMessage,
+): void {
+  writeApprovalNotification(session, text, { originMessageId, responseMessage });
   const fresh = getSession(session.id);
   if (fresh) {
     wakeContainer(fresh).catch((err) => log.error('Failed to wake container after notification', { err }));

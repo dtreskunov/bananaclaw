@@ -27,6 +27,11 @@ import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/use
 import { ONECLI_ACTION, resolveOneCLIApproval } from './onecli-approvals.js';
 import { getApprovalHandler, getInteractiveApprovalHandler, notifyApprovalResolved } from './primitive.js';
 import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
+import {
+  ApprovalMessageError,
+  parseApprovalMessage,
+  type ApprovalResponseMessage,
+} from '../../ui/shared/approval-message.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
   if (payload.responseType === 'skipped') return false;
@@ -42,6 +47,9 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
     });
     return true;
   }
+  const message = parseApprovalMessage(payload.message);
+  if (message && !approval.session_id)
+    throw new ApprovalMessageError('This approval has no originating conversation for a message.');
 
   const interactive = getInteractiveApprovalHandler(approval.action);
   if (interactive) {
@@ -64,7 +72,7 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
     return true;
   }
   try {
-    await handleRegisteredApproval(approval, payload.value, namespacedUserId(payload) ?? '');
+    await handleRegisteredApproval(approval, payload.value, namespacedUserId(payload) ?? '', message);
   } finally {
     endApprovalExecution(approval.approval_id);
   }
@@ -75,6 +83,7 @@ async function handleRegisteredApproval(
   approval: PendingApproval,
   selectedOption: string,
   userId: string,
+  message?: string,
 ): Promise<void> {
   if (!approval.session_id) {
     deletePendingApproval(approval.approval_id);
@@ -86,11 +95,14 @@ async function handleRegisteredApproval(
     return;
   }
 
+  let responseMessage: ApprovalResponseMessage | undefined = message ? { userId, message } : undefined;
   const notify = (text: string, options?: Pick<ApprovalNotificationOptions, 'afterRestart'>): void => {
     writeApprovalNotification(session, text, {
       originMessageId: approval.origin_message_id,
       ...options,
+      responseMessage,
     });
+    responseMessage = undefined;
   };
 
   if (selectedOption !== 'approve') {
@@ -119,6 +131,7 @@ async function handleRegisteredApproval(
   const payload = JSON.parse(approval.payload);
   try {
     await handler({ session, payload, userId, notify, originMessageId: approval.origin_message_id });
+    if (responseMessage) notify(`Your ${approval.action} request was approved.`);
     log.info('Approval handled', { approvalId: approval.approval_id, action: approval.action, userId });
   } catch (err) {
     log.error('Approval handler threw', { approvalId: approval.approval_id, action: approval.action, err });

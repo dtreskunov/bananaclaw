@@ -97,7 +97,12 @@ function notifications() {
     db.close();
   }
 }
-async function respond(action: string, value = 'approve', originMessageId: string | null = 'original') {
+async function respond(
+  action: string,
+  value = 'approve',
+  originMessageId: string | null = 'original',
+  message?: string,
+) {
   createPendingApproval({
     approval_id: 'approval',
     session_id: session.id,
@@ -116,6 +121,7 @@ async function respond(action: string, value = 'approve', originMessageId: strin
     channelType: 'web',
     platformId: 'admin-dm',
     threadId: null,
+    ...(message !== undefined ? { message } : {}),
   });
 }
 function expectOriginalRoute(row: ReturnType<typeof notifications>[number]) {
@@ -129,6 +135,78 @@ function expectOriginalRoute(row: ReturnType<typeof notifications>[number]) {
 }
 
 describe('approval conversation identity', () => {
+  it.each(['approve', 'reject'])(
+    'includes an attributed user message in the same %s notification',
+    async (decision) => {
+      input('original');
+      let applied = false;
+      registerApprovalHandler('message-test', async ({ payload, notify }) => {
+        applied = true;
+        expect(payload).toEqual({ name: 'gmail', url: 'https://gmail.example/mcp' });
+        notify('Approved and applied.');
+      });
+      await respond('message-test', decision, 'original', '  Keep existing labels.\nDo not send email.  ');
+      expect(applied).toBe(decision === 'approve');
+      const rows = notifications();
+      expect(rows).toHaveLength(1);
+      expectOriginalRoute(rows[0]);
+      const content = JSON.parse(rows[0].content);
+      expect(content.approvalResponse).toEqual({
+        userId: 'owner',
+        message: 'Keep existing labels.\nDo not send email.',
+      });
+      expect(content.text).toContain('User message from "Owner":\nKeep existing labels.\nDo not send email.');
+      expect(content.text).toContain(decision === 'approve' ? 'Approved and applied.' : 'rejected by admin.');
+      expect(
+        await handleApprovalsResponse({
+          questionId: 'approval',
+          value: decision,
+          message: 'Duplicate message',
+          userId: 'owner',
+          channelType: 'web',
+          platformId: 'admin-dm',
+          threadId: null,
+        }),
+      ).toBe(false);
+      expect(notifications()).toHaveLength(1);
+    },
+  );
+
+  it('includes the user message only once when an approval also queues post-restart verification', async () => {
+    input('original');
+    registerApprovalHandler('message-restart', applyAddMcpServer);
+    await respond('message-restart', 'approve', 'original', 'Use this server for reading only.');
+    const rows = notifications();
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.on_wake)).toEqual([0, 1]);
+    expect(JSON.parse(rows[0].content).approvalResponse).toEqual({
+      userId: 'owner',
+      message: 'Use this server for reading only.',
+    });
+    expect(JSON.parse(rows[1].content).approvalResponse).toBeUndefined();
+    expect(JSON.parse(rows[1].content).text).not.toContain('Use this server for reading only.');
+  });
+
+  it('delivers the user message with the failure outcome, not in an additional chat', async () => {
+    input('original');
+    registerApprovalHandler('message-failure', async () => {
+      throw new Error('test failure');
+    });
+    await respond('message-failure', 'approve', 'original', 'Tell me if this fails.');
+    expect(notifications()).toHaveLength(1);
+    expect(JSON.parse(notifications()[0].content).text).toContain('test failure');
+    expect(JSON.parse(notifications()[0].content).text).toContain('Tell me if this fails.');
+  });
+
+  it('supplies a normal outcome when a handler otherwise sends no notification', async () => {
+    input('original');
+    registerApprovalHandler('message-no-notify', async () => {});
+    await respond('message-no-notify', 'approve', 'original', 'Finish the report.');
+    expect(notifications()).toHaveLength(1);
+    expect(JSON.parse(notifications()[0].content).text).toContain('request was approved.');
+    expect(JSON.parse(notifications()[0].content).text).toContain('Finish the report.');
+  });
+
   it('persists the requesting input, not a later conversation in a shared session', async () => {
     input('original');
     input('later', { ...origin, threadId: 'another-thread' });

@@ -3,6 +3,8 @@ import { credentialRequest, credentialsPath, errorMessage, CredentialsError, typ
 import { ErrorNotice, useCredentialResource } from './CredentialsParts';
 import { connectionName, serviceDestination } from './credential-presentation';
 import { respondApproval } from '../actions';
+import { approvalMessageDrafts, clearApprovalMessage } from '../approval-messages';
+import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { ACCESS_AUTHENTICATION_LABELS, connectionMatchesAccess, type AccessRequirements } from '../../../../shared/access-authentication';
 
 interface AccessRequest extends AccessRequirements {
@@ -110,12 +112,15 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
     setBusy(true);
     setError('');
     try {
+      const message = approvalMessageDrafts.value[id]?.trim();
       await credentialRequest(path + '/apply', 'POST', {
         connection_id: preview.connection.id, connection_revision: preview.connection.revision,
         request_revision: preview.request.revision,
         configure_mcp: configureMcp, config_revision: preview.mcp?.revision,
         ...(configureMcp ? { mcp_server: mcpServer, account_alias: accountAlias } : {}),
+        ...(message ? { message } : {}),
       });
+      clearApprovalMessage(id);
       setPreview(null);
       await request.refresh();
       onSaved();
@@ -132,7 +137,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
     setBusy(true);
     setError('');
     try {
-      await respondApproval(id, 'reject');
+      await respondApproval(id, 'reject', approvalMessageDrafts.value[id]);
       await request.refresh();
     } catch (error) {
       setError(errorMessage(error));
@@ -183,6 +188,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
           This account doesn't match the request. No access was granted.
           <button type="button" disabled={busy || signingIn} onClick={() => onManage(created)}>Review new credential</button>
         </div> : null}
+        <ApprovalMessageInput approvalId={id} disabled={busy || signingIn === true} />
         <button type="button" class={!compatible.length ? 'primary' : undefined} disabled={busy || signingIn}
           onClick={() => { setSelected(''); setPreview(null); onCreate(request.data!); }}>Add account</button>
         <button type="button" disabled={busy} onClick={() => void reject()}>Decline</button>

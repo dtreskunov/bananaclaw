@@ -2,6 +2,7 @@ import { getDb } from '../../db/connection.js';
 import { getPendingApproval, getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { writeApprovalNotification } from './notification.js';
+import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
 
 export type WorkflowStage = 'pending' | 'applying' | 'completed' | 'rejected' | 'cancelled' | 'expired' | 'failed';
 export interface ApprovalWorkflow {
@@ -125,6 +126,7 @@ export function finishApprovalWorkflow(
   stage: Exclude<WorkflowStage, 'pending' | 'applying'>,
   message: string,
   restart = false,
+  responseMessage?: ApprovalResponseMessage,
 ): void {
   getDb().transaction(() => {
     const workflow = getApprovalWorkflow(id);
@@ -136,7 +138,17 @@ export function finishApprovalWorkflow(
         `UPDATE approval_workflows SET stage=?,revision=revision+1,result_json=?,updated_at=?
       WHERE approval_id=? AND stage IN ('pending','applying')`,
       )
-      .run(stage, JSON.stringify({ message, restart, notification_id: notificationId }), new Date().toISOString(), id);
+      .run(
+        stage,
+        JSON.stringify({
+          message,
+          restart,
+          notification_id: notificationId,
+          ...(responseMessage ? { response_message: responseMessage } : {}),
+        }),
+        new Date().toISOString(),
+        id,
+      );
     if (!updated.changes) return;
     getDb()
       .prepare('UPDATE pending_approvals SET status=? WHERE approval_id=?')
@@ -150,7 +162,12 @@ export async function notifyApprovalWorkflow(id: string): Promise<void> {
   const approval = getPendingApproval(workflow.approval_id);
   const session = approval?.session_id ? getSession(approval.session_id) : undefined;
   if (!session) return;
-  const result = JSON.parse(workflow.result_json) as { message: string; restart?: boolean; notification_id?: string };
+  const result = JSON.parse(workflow.result_json) as {
+    message: string;
+    restart?: boolean;
+    notification_id?: string;
+    response_message?: ApprovalResponseMessage;
+  };
   const origin = JSON.parse(workflow.origin_json) as { messageId?: string | null };
   const options = {
     originMessageId: approval?.origin_message_id ?? origin.messageId,
@@ -163,7 +180,7 @@ export async function notifyApprovalWorkflow(id: string): Promise<void> {
     result.restart
       ? 'The approval was applied and the runtime configuration saved. Finish the current response first. The container will restart afterward; verify the new configuration only after that restart.'
       : result.message,
-    options,
+    { ...options, responseMessage: result.response_message },
   );
   if (result.restart) {
     writeApprovalNotification(session, `The approved configuration is now loaded.\n${result.message}`, {

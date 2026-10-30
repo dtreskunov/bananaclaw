@@ -369,6 +369,7 @@ export interface PendingApprovalDto {
   createdAt: string;
   reviewRequired?: boolean;
   stage?: string;
+  supportsResponseMessage?: boolean;
 }
 
 export interface PendingQuestionDto {

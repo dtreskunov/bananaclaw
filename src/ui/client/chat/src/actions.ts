@@ -55,6 +55,7 @@ import {
   SYNC_INTERVAL_MS,
 } from './state';
 import { api, postJson } from './api';
+import { clearApprovalMessage } from './approval-messages';
 import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
@@ -1617,7 +1618,7 @@ export function installLivenessHandlers(): void {
 }
 
 // ── pending approvals (banner inbox) ────────────────────────────────
-export async function respondApproval(approvalId: string, value: string): Promise<void> {
+export async function respondApproval(approvalId: string, value: string, message?: string): Promise<void> {
   if (respondingApprovalIds.value.has(approvalId)) return;
   const next = new Set(respondingApprovalIds.value);
   next.add(approvalId);
@@ -1633,9 +1634,10 @@ export async function respondApproval(approvalId: string, value: string): Promis
   try {
     const res = await postJson<{ ok?: boolean; error?: string }>(
       `api/approvals/${encodeURIComponent(approvalId)}/respond`,
-      { value },
+      { value, ...(message?.trim() ? { message: message.trim() } : {}) },
     );
     if (!res.ok) throw new Error(res.data?.error || 'HTTP ' + res.status);
+    clearApprovalMessage(approvalId);
     chatStatus.value = verb.replace(/ing$/, 'ed') + ' \u2014 applied';
     setTimeout(() => {
       if (

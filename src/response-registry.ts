@@ -17,6 +17,7 @@ import type { QuestionResponse } from './ui/shared/question-response.js';
 
 export type ResponsePayload = QuestionResponse & {
   questionId: string;
+  message?: string;
   userId: string | null;
   channelType: string;
   platformId: string;

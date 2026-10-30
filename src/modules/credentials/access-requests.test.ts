@@ -165,6 +165,87 @@ function resultMessage(id: string) {
 }
 
 describe('assisted access approvals', () => {
+  it('includes an access approval message in its single existing outcome notification', async () => {
+    const request = await seed();
+    await applyAccessRequest('alice', request.request_id, { ...selection(), message: '  Use read-only operations.  ' });
+    expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
+    const content = JSON.parse((resultMessage(request.request_id) as { content: string }).content);
+    expect(content.text).toContain('Access granted for');
+    expect(content.text).toContain('User message from "alice":\nUse read-only operations.');
+    expect(content.approvalResponse).toEqual({ userId: 'alice', message: 'Use read-only operations.' });
+    expect(mocks.grant).toHaveBeenCalledWith('alice', connection.id, session.agent_group_id, { revision: rev });
+    await notifyApprovalWorkflow(request.request_id);
+    expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
+  });
+
+  it('includes a decline message without granting access or changing the decision', async () => {
+    const request = await seed();
+    const approval = getPendingApproval(request.request_id)!;
+    await getInteractiveApprovalHandler(approval.action)!(
+      approval,
+      {
+        questionId: approval.approval_id,
+        userId: 'alice',
+        channelType: 'web',
+        platformId: 'admin',
+        threadId: null,
+        value: 'reject',
+        message: 'Already finished elsewhere; do not retry.',
+      },
+      'alice',
+    );
+    expect(mocks.grant).not.toHaveBeenCalled();
+    expect(accessRequestStatus(request.request_id).status).toBe('rejected');
+    const content = JSON.parse((resultMessage(request.request_id) as { content: string }).content);
+    expect(content.text).toContain('Your access request was rejected.');
+    expect(content.text).toContain('Already finished elsewhere; do not retry.');
+    expect(content.approvalResponse.userId).toBe('alice');
+  });
+
+  it.each([42, null, 'x'.repeat(4001)])(
+    'rejects malformed or oversized approval messages before applying access',
+    async (message) => {
+      const request = await seed();
+      await expect(applyAccessRequest('alice', request.request_id, { ...selection(), message })).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(accessRequestStatus(request.request_id).status).toBe('pending');
+      expect(mocks.grant).not.toHaveBeenCalled();
+    },
+  );
+
+  it('retains the response message in a failed application outcome', async () => {
+    const request = await seed();
+    mocks.grant.mockRejectedValueOnce(new Error('gateway failed'));
+    await expect(
+      applyAccessRequest('alice', request.request_id, {
+        ...selection(),
+        message: 'Report the error instead of retrying.',
+      }),
+    ).rejects.toThrow('gateway failed');
+    expect(accessRequestStatus(request.request_id).status).toBe('failed');
+    const content = JSON.parse((resultMessage(request.request_id) as { content: string }).content);
+    expect(content.text).toContain('Access approval failed');
+    expect(content.text).toContain('Report the error instead of retrying.');
+    expect(content.approvalResponse.userId).toBe('alice');
+  });
+
+  it('recovers the exact responding user and message from a persisted access application', async () => {
+    const request = await seed();
+    connection.grants = [{ vault: session.agent_group_id, services: ['api'], status: 'active' }];
+    claimApprovalWorkflow(request.request_id, 1, {
+      userId: 'alice',
+      connectionId: connection.id,
+      connectionRevision: connection.revision,
+      responseMessage: { userId: 'alice', message: 'Continue the original report.' },
+    });
+    await recoverAccessRequests(true);
+    expect(accessRequestStatus(request.request_id).status).toBe('completed');
+    const content = JSON.parse((resultMessage(request.request_id) as { content: string }).content);
+    expect(content.text).toContain('Continue the original report.');
+    expect(content.approvalResponse).toEqual({ userId: 'alice', message: 'Continue the original report.' });
+    expect(mocks.grant).not.toHaveBeenCalled();
+  });
   it('accepts safe authentication JSON through ncl without granting access', async () => {
     const response = await dispatch(
       {
@@ -381,6 +462,7 @@ describe('assisted access approvals', () => {
       config_revision: preview.mcp.revision,
       mcp_server: 'example',
       account_alias: 'Personal',
+      message: 'Keep this account separate.',
     });
     expect(result.status).toBe('completed');
     const config = getDb()
@@ -403,6 +485,13 @@ describe('assisted access approvals', () => {
     expect(outcome.onWake).toBeUndefined();
     expect(JSON.parse(outcome.content).inputHandling).toEqual({ mode: 'steer' });
     expect(mocks.messages.get(`${outcome.id}-restart`)).toMatchObject({ onWake: 1 });
+    expect(JSON.parse(outcome.content).approvalResponse).toEqual({
+      userId: 'alice',
+      message: 'Keep this account separate.',
+    });
+    expect(
+      JSON.parse((mocks.messages.get(`${outcome.id}-restart`) as { content: string }).content).approvalResponse,
+    ).toBeUndefined();
     expect(result.result?.message).toContain('Only MCP server "example"');
     expect(result.result?.message).not.toContain('BIND_TESTHANDLE');
   });

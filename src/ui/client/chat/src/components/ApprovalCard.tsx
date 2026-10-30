@@ -1,10 +1,12 @@
 import type { PendingApprovalDto } from '../types';
 import { RelativeTime } from './RelativeTime';
+import { ApprovalMessageInput } from './ApprovalMessageInput';
+import { approvalMessageDrafts } from '../approval-messages';
 
 export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
   approval: PendingApprovalDto;
   busy: boolean;
-  onRespond: (value: string) => void;
+  onRespond: (value: string, message?: string) => void;
   onReview: () => void;
 }) {
   return <div class="approval-row">
@@ -21,12 +23,21 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
         <RelativeTime ts={a.createdAt} />
       </div>
       {a.stage === 'applying' ? <div role="status">Applying approved access…</div> : null}
+      {a.supportsResponseMessage ? <ApprovalMessageInput approvalId={a.approvalId}
+        disabled={busy || a.stage === 'applying'} /> : null}
     </div>
     <div class="approval-actions">
       {!a.options.length ? <span class="approval-disabled">no options</span> : a.options.map(option =>
         <button type="button" class={'approval-btn approval-' + (option.value === 'approve' ? 'approve' : option.value === 'reject' ? 'reject' : 'neutral')}
           disabled={busy || a.stage === 'applying'} key={option.value}
-          onClick={() => a.reviewRequired && option.value === 'review' ? onReview() : onRespond(option.value)}>
+          onClick={() => {
+            if (a.reviewRequired && option.value === 'review') onReview();
+            else {
+              const message = a.supportsResponseMessage ? approvalMessageDrafts.value[a.approvalId]?.trim() : undefined;
+              if (message) onRespond(option.value, message);
+              else onRespond(option.value);
+            }
+          }}>
           {option.label}
         </button>)}
     </div>

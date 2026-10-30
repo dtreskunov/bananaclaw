@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { clearChat, respondQuestion, retryChatSend, sendChat, skipQuestion } from './actions';
+import { clearChat, respondApproval, respondQuestion, retryChatSend, sendChat, skipQuestion } from './actions';
+import { approvalMessageDrafts } from './approval-messages';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
 import { applyConversationFrame, conversationState } from './conversation-state';
@@ -370,6 +371,46 @@ describe('immediate web submission feedback', () => {
   });
 });
 describe('question response requests', () => {
+  it('sends an optional approval message in the same decision POST and clears the draft only on success', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+      approvalMessageDrafts.value = {};
+    });
+    approvalMessageDrafts.value = { 'approval-one': 'Keep the old labels.', other: 'Keep this draft.' };
+    await respondApproval('approval-one', 'approve', '  Keep the old labels.  ');
+    expect(fetch).toHaveBeenLastCalledWith(
+      'api/approvals/approval-one/respond',
+      expect.objectContaining({
+        body: JSON.stringify({ value: 'approve', message: 'Keep the old labels.' }),
+      }),
+    );
+    expect(approvalMessageDrafts.value).toEqual({ other: 'Keep this draft.' });
+  });
+
+  it('retains the message draft if the approval POST fails', async () => {
+    approvalMessageDrafts.value = { 'approval-one': 'Do not retry.' };
+    onTestFinished(() => {
+      approvalMessageDrafts.value = {};
+    });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"temporarily unavailable"}', { status: 503 }));
+    await respondApproval('approval-one', 'reject', 'Do not retry.');
+    expect(approvalMessageDrafts.value['approval-one']).toBe('Do not retry.');
+  });
+
+  it('keeps approval requests without a message backward compatible', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    await respondApproval('approval-one', 'approve');
+    expect(fetch).toHaveBeenLastCalledWith(
+      'api/approvals/approval-one/respond',
+      expect.objectContaining({
+        body: JSON.stringify({ value: 'approve' }),
+      }),
+    );
+  });
   it('uses the existing endpoint for typed skips and ordinary answers without submitting files or context', async () => {
     channelType.value = 'web';
     respondingQuestionIds.value = new Set();

@@ -914,6 +914,15 @@ an active, matching conversation when supported; otherwise they remain queued
 for a follow-up. Neither a different thread nor an agent-to-agent message can
 bypass the existing steering guards.
 
+Web approval decisions can include an optional user message (up to 4000
+characters). The host appends it, with the authenticated responder's identity,
+to the existing outcome notification rather than creating another input or
+turn. It is context for the agent, not a change to the approved action or
+credential grant. Post-restart verification does not repeat the message.
+Credential workflows persist the responder and message with their application
+state so failed or recovered outcomes carry the same context. Approvals with
+no originating session cannot carry a message; unsupported input is rejected.
+
 Approving a runtime configuration change does not interrupt the active response.
 The outcome can steer that response immediately; a separate `on_wake` verification
 instruction waits for the replacement runtime. The runner settles the response,

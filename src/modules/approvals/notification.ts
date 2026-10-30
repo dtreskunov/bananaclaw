@@ -4,6 +4,8 @@ import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { log } from '../../log.js';
 import { openInboundDb, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
+import { getUser } from '../permissions/db/users.js';
+import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
 
 export interface ApprovalNotificationOptions {
   originMessageId?: string | null;
@@ -11,6 +13,7 @@ export interface ApprovalNotificationOptions {
   timestamp?: string;
   afterRestart?: boolean;
   idempotent?: boolean;
+  responseMessage?: ApprovalResponseMessage;
 }
 
 export function writeApprovalNotification(
@@ -55,16 +58,23 @@ export function writeApprovalNotification(
       originMessageId: options.originMessageId,
     });
   }
+  const responder = options.responseMessage
+    ? getUser(options.responseMessage.userId)?.display_name?.trim() || options.responseMessage.userId
+    : undefined;
+  const contentText = options.responseMessage
+    ? `${text}\n\nUser message from ${JSON.stringify(responder)}:\n${options.responseMessage.message}`
+    : text;
   writeSessionMessage(session.agent_group_id, session.id, {
     id: options.id ?? `appr-note-${randomUUID()}`,
     kind: 'chat',
     timestamp: options.timestamp ?? new Date().toISOString(),
     ...routing,
     content: JSON.stringify({
-      text,
+      text: contentText,
       sender: 'system',
       senderId: 'system',
       inputHandling: { mode: 'steer' },
+      ...(options.responseMessage ? { approvalResponse: options.responseMessage } : {}),
     }),
     ...(options.afterRestart ? { onWake: 1 as const } : {}),
     ...(options.idempotent ? { idempotent: true } : {}),

@@ -31,10 +31,13 @@ import { createPendingApproval, createQuestion, getQuestion } from '../../../db/
 import { initSessionFolder, openInboundDb } from '../../../session-manager.js';
 import '../../../modules/interactive/index.js';
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
+import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
+import { registerResponseHandler } from '../../../response-registry.js';
 import { handle } from './routes.js';
 import { readChatHistory } from './chat.js';
 
 const NOW = '2026-10-05T18:00:00Z';
+registerResponseHandler(handleApprovalsResponse);
 beforeEach(() => {
   runMigrations(initTestDb());
   const db = getDb();
@@ -95,6 +98,85 @@ async function respond(body: unknown, id = 'q') {
   await handle(req, res);
   return { status, body: JSON.parse(content) };
 }
+
+describe('approval response messages', () => {
+  const applied = vi.fn();
+  beforeEach(() => {
+    applied.mockReset();
+    getDb().exec(`
+      INSERT INTO user_roles(user_id,role,granted_at) VALUES('web:member','owner','${NOW}');
+      UPDATE sessions SET messaging_group_id='mg',thread_id='thread' WHERE id='session';
+    `);
+    createPendingApproval({
+      approval_id: 'message-approval',
+      session_id: 'session',
+      request_id: 'request',
+      action: 'message-test',
+      payload: '{"requested":"unchanged"}',
+      title: 'Test approval',
+      options_json: '[]',
+      created_at: NOW,
+    });
+    registerApprovalHandler('message-test', async ({ payload, notify }) => {
+      applied(payload);
+      notify('Approved and applied.');
+    });
+  });
+  function notificationRows() {
+    const db = openInboundDb('agent', 'session');
+    try {
+      return db.prepare('SELECT channel_type,platform_id,thread_id,content FROM messages_in').all() as {
+        channel_type: string;
+        platform_id: string;
+        thread_id: string;
+        content: string;
+      }[];
+    } finally {
+      db.close();
+    }
+  }
+  it.each(['approve', 'reject'])('carries the note in the same authenticated %s outcome', async (value) => {
+    expect(await respond({ value, message: '  Keep the original account.  ' }, 'message-approval')).toEqual({
+      status: 200,
+      body: { ok: true },
+    });
+    const rows = notificationRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ channel_type: 'web', platform_id: 'group:agent', thread_id: 'thread' });
+    expect(JSON.parse(rows[0].content).approvalResponse).toEqual({
+      userId: 'web:member',
+      message: 'Keep the original account.',
+    });
+    expect(JSON.parse(rows[0].content).text).toContain('Keep the original account.');
+    expect(applied).toHaveBeenCalledTimes(value === 'approve' ? 1 : 0);
+    if (value === 'approve') expect(applied).toHaveBeenCalledWith({ requested: 'unchanged' });
+    await respond({ value, message: 'Duplicate message' }, 'message-approval');
+    expect(notificationRows()).toHaveLength(1);
+  });
+  it.each([null, 42, {}, 'x'.repeat(4001)])('rejects invalid notes before resolving the approval', async (message) => {
+    expect((await respond({ value: 'approve', message }, 'message-approval')).status).toBe(400);
+    expect(applied).not.toHaveBeenCalled();
+    expect(notificationRows()).toEqual([]);
+    expect(
+      getDb().prepare("SELECT status FROM pending_approvals WHERE approval_id='message-approval'").pluck().get(),
+    ).toBe('pending');
+  });
+  it('does not deliver a note from an unauthorized responder', async () => {
+    runtime.userId = 'web:other';
+    expect((await respond({ value: 'reject', message: 'Forged note' }, 'message-approval')).status).toBe(403);
+    expect(notificationRows()).toEqual([]);
+    expect(applied).not.toHaveBeenCalled();
+  });
+  it('rejects notes for sessionless approvals rather than silently discarding them', async () => {
+    getDb().exec("UPDATE pending_approvals SET session_id=NULL WHERE approval_id='message-approval'");
+    expect((await respond({ value: 'approve', message: 'A note' }, 'message-approval')).status).toBe(400);
+    expect(applied).not.toHaveBeenCalled();
+  });
+  it('does not reinterpret an ordinary question response as an approval message', async () => {
+    expect((await respond({ value: 'yes', message: 'A note' })).status).toBe(400);
+    expect(getQuestion('q')?.status).toBe('pending');
+  });
+});
 
 describe('typed responses through the existing endpoint', () => {
   it('persists and projects one skip event across duplicate requests', async () => {

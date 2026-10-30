@@ -12,6 +12,11 @@ import { openInboundDb } from '../../session-manager.js';
 import type { PendingApproval, Session } from '../../types.js';
 import { isOAuthScope } from '../../ui/shared/oauth-app.js';
 import {
+  ApprovalMessageError,
+  parseApprovalMessage,
+  type ApprovalResponseMessage,
+} from '../../ui/shared/approval-message.js';
+import {
   AccessAuthenticationError,
   connectionMatchesAccess,
   parseAccessAuthentication,
@@ -323,6 +328,7 @@ interface ApplySelection {
   appliedConfigRevision?: string;
   mcpServer?: string;
   accountAlias?: string;
+  responseMessage?: ApprovalResponseMessage;
 }
 
 async function selectionGranted(id: string, selection: ApplySelection): Promise<boolean> {
@@ -338,6 +344,13 @@ async function selectionGranted(id: string, selection: ApplySelection): Promise<
 
 export async function applyAccessRequest(userId: string, id: string, raw: unknown) {
   const body = objectBody(raw);
+  let message: string | undefined;
+  try {
+    message = parseApprovalMessage(body.message);
+  } catch (error) {
+    if (!(error instanceof ApprovalMessageError)) throw error;
+    throw new ConnectionInputError(error.message);
+  }
   if (
     Object.keys(body).some(
       (key) =>
@@ -349,6 +362,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
           'config_revision',
           'mcp_server',
           'account_alias',
+          'message',
         ].includes(key),
     ) ||
     typeof body.connection_id !== 'string' ||
@@ -382,6 +396,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
     reviewedConnectionRevision: body.connection_revision,
     configureMcp: body.configure_mcp === true,
     configRevision: preview.mcp.revision,
+    ...(message ? { responseMessage: { userId, message } } : {}),
     ...(body.configure_mcp ? { mcpServer: String(body.mcp_server), accountAlias: String(body.account_alias) } : {}),
   };
   let authentication;
@@ -475,6 +490,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
           : `Runtime routing: ${JSON.stringify(runtime!.instructions)}.`
       } Safely verify the original operation, then continue the original request with its original dates, timezone and account choice. Do not automatically replay writes or create a recurring poller.`,
       selection.configureMcp,
+      selection.responseMessage,
     );
   } catch (error) {
     const reason =
@@ -487,6 +503,8 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
       id,
       'failed',
       `Access approval failed during ${phase}. ${reason} Some changes may have applied. Review and retry this request; existing credentials do not need to be recreated.`,
+      false,
+      selection.responseMessage,
     );
     log.error('Access approval application failed', { approvalId: id, userId, phase, err: error });
     await notifyApprovalWorkflow(id);
@@ -528,11 +546,15 @@ export async function cancelAccessRequest(id: string, sessionId: string) {
 registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, userId) => {
   const request = reviewAccessRequest(userId, approval.approval_id);
   if (request.status !== 'pending') return;
+  const message = parseApprovalMessage(response.message);
+  const responseMessage = message ? { userId, message } : undefined;
   if (response.value === 'reject') {
     finishApprovalWorkflow(
       approval.approval_id,
       'rejected',
       'Your access request was rejected. No credentials were changed. Do not repeat this request unless the user asks.',
+      false,
+      responseMessage,
     );
     await notifyApprovalWorkflow(approval.approval_id);
   } else if (response.value === 'review') {
@@ -542,6 +564,7 @@ registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, use
         session,
         `Access review is still pending. The user must privately select and confirm a credential in BananaClaw: ${reviewUrl(approval.approval_id)}. Do not poll, search for secrets or treat review as approval.`,
         approval.origin_message_id,
+        responseMessage,
       );
   } else {
     throw new ConnectionInputError(
@@ -607,12 +630,15 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
                 : `Runtime routing: ${JSON.stringify(runtime!.instructions)}.`
             } Safely verify upstream access before continuing the original request. Preserve its original dates and timezone; do not replay writes automatically.`,
             selection.configureMcp,
+            selection.responseMessage,
           );
         } else {
           finishApprovalWorkflow(
             row.approval_id,
             'failed',
             'Access approval was interrupted by restart. Review Credentials; no additional grant was replayed automatically.',
+            false,
+            selection.responseMessage,
           );
         }
       } else {

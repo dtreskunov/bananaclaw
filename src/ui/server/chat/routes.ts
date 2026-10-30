@@ -29,6 +29,7 @@ import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
 import type { PendingApproval } from '../../../types.js';
 import type { QuestionResponse } from '../../shared/question-response.js';
+import { ApprovalMessageError, parseApprovalMessage } from '../../shared/approval-message.js';
 import { isVoiceDiagnostic } from '../../shared/voice.js';
 import { presentApproval, type ApprovalPackageLists } from './approval-presentation.js';
 import { getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
@@ -572,6 +573,7 @@ interface ApprovalDto {
   createdAt: string;
   reviewRequired?: boolean;
   stage?: string;
+  supportsResponseMessage: boolean;
 }
 
 function listApprovalsForUser(userId: string): ApprovalDto[] {
@@ -634,6 +636,7 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
       agentGroupId: displayGroupId,
       agentGroupName: groupName,
       createdAt: r.created_at,
+      supportsResponseMessage: r.session_id !== null,
       ...(getApprovalWorkflow(r.approval_id)
         ? {
             reviewRequired: true,
@@ -706,12 +709,21 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
     }
   }
 
-  let body: { value?: unknown; responseType?: unknown };
+  let body: { value?: unknown; responseType?: unknown; message?: unknown };
   try {
-    body = (await readJsonBody(ctx.req)) as { value?: unknown; responseType?: unknown };
+    body = (await readJsonBody(ctx.req)) as { value?: unknown; responseType?: unknown; message?: unknown };
   } catch {
     return json(ctx, 400, { error: 'invalid_body' });
   }
+  let message: string | undefined;
+  try {
+    message = parseApprovalMessage(body?.message);
+  } catch (error) {
+    if (!(error instanceof ApprovalMessageError)) throw error;
+    return json(ctx, 400, { error: error.message });
+  }
+  if (message && !row?.session_id)
+    return json(ctx, 400, { error: 'This approval has no originating conversation for a message.' });
   let response: QuestionResponse;
   if (body?.responseType === 'skipped') {
     if (body.value !== undefined) return json(ctx, 400, { error: 'skip_has_no_value' });
@@ -749,6 +761,7 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   const claimed = await dispatchResponse({
     questionId: approvalId,
     ...response,
+    ...(message ? { message } : {}),
     userId,
     channelType: 'web',
     platformId: userId,

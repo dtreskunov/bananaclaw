@@ -127,6 +127,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
       await handleApprovalsResponse({
         questionId: 'approval',
         value: 'approve',
+        message: 'Keep existing labels and finish this report.',
         userId: 'owner',
         channelType: 'web',
         platformId: 'admin-dm',
@@ -140,6 +141,17 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
           .get();
         expect(applied).toBeTruthy();
       });
+      const inbound = openInboundDb('group', session.id);
+      try {
+        const rows = inbound.prepare(
+          "SELECT content FROM messages_in WHERE json_extract(content,'$.approvalResponse.message')=?",
+        ).all('Keep existing labels and finish this report.') as { content: string }[];
+        expect(rows).toHaveLength(1);
+        const content = JSON.parse(rows[0].content);
+        expect(content.text).toContain('Approved. Finish this response before restarting.');
+        expect(content.text).toContain('Keep existing labels and finish this report.');
+        expect(content.approvalResponse.userId).toBe('owner');
+      } finally { inbound.close(); }
     } else {
       expect(restartAgentGroupContainers('group', 'settings changed', undefined, true)).toBe(1);
       await wait(() => {
