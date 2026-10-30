@@ -8,6 +8,7 @@ import {
   ConnectionInputError,
   createConnection,
   deleteConnection,
+  discoverConnectionScopes,
   detachConnection,
   getConnection,
   grantConnection,
@@ -83,6 +84,10 @@ export async function handleCredentialsRequest(
       return true;
     }
     const sub = path.slice('/api/credentials'.length);
+    if (sub === '/scopes' && method === 'POST') {
+      json(res, 200, await discoverConnectionScopes(userId, await readBody(req)));
+      return true;
+    }
     if (!sub && method === 'GET') {
       const [connections, apps] = await Promise.all([listConnections(userId), listConnectionApps(userId)]);
       json(res, 200, {

@@ -100,11 +100,21 @@ function grants(gid: string): AccessGrant[] {
 export function fixtureRoute(method: string, url: URL, init?: RequestInit): unknown {
   const path = url.pathname;
   if (options.gatewayDown) throw new HttpError(503, 'gateway_unreachable');
-  if (method !== 'GET' && options.failNextWrite) {
+  if (method !== 'GET' && path !== '/ui/chat/api/credentials/scopes' && options.failNextWrite) {
     options.failNextWrite = false;
     throw new HttpError(502, 'The gateway rejected this change (simulated)');
   }
   if (path === '/ui/chat/api/credentials' && method === 'GET') return overview();
+  if (path === '/ui/chat/api/credentials/scopes' && method === 'POST') {
+    const input = body<{ resource_url?: string; issuer?: string; app_id?: string }>(init);
+    if (input.resource_url?.includes('no-scopes.example'))
+      return { scopes: [], source: 'not_advertised', oauth: true, issuer: 'https://no-scopes.example' };
+    if (input.resource_url)
+      return { scopes: ['read', 'write'], source: 'resource', oauth: true, issuer: 'https://mcp.example.com' };
+    const configured = apps.find(app => app.id === input.app_id);
+    return { scopes: ['read:documents', 'write:documents'], source: 'authorization_server', oauth: true,
+      issuer: input.issuer ?? configured?.issuer ?? 'https://accounts.example.com' };
+  }
   if (path === '/ui/chat/api/credentials/connections' && method === 'POST') {
     const input = body<Partial<Connection> & { values?: Record<string, string>; scopes?: string[] }>(init);
     if (!input.label || !input.kind) throw new HttpError(400, 'Label and kind required');
@@ -184,7 +194,8 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
   match = /^\/ui\/chat\/api\/groups\/([^/]+)\/admin\/access(?:\/([^/]+))?$/.exec(path);
   if (match) {
     const gid = decodeURIComponent(match[1]);
-    if (!match[2] && method === 'GET') return { grants: grants(gid).filter((grant) => !detachedForeign.has(`${gid}:${grant.connection_id}`)) };
+    if (!match[2] && method === 'GET') return { grants: grants(gid).filter((grant) =>
+      grant.owner.id === owner.id && !detachedForeign.has(`${gid}:${grant.connection_id}`)) };
     if (match[2] && method === 'DELETE') {
       if (!options.canAdmin) throw new HttpError(403, 'Group administration required');
       const id = decodeURIComponent(match[2]);

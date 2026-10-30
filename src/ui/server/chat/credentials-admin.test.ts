@@ -49,6 +49,7 @@ let duringProvision: (() => void) | null = null;
 let returnedOwner: string | null = null;
 let extraConnections: ReturnType<typeof connection>[] = [];
 let accessGrants: SharedAccessGrant[] = [];
+let scopeOptions: unknown;
 
 function connection(ownerId = 'native-alice') {
   return {
@@ -94,6 +95,7 @@ beforeAll(async () => {
     if (url.pathname === '/v1/oauth/complete')
       return send(200, { status: 'connected', connection_id: wrongCompletion ? 'wrong-connection' : 'connection-one' });
     if (url.pathname.endsWith('/oauth-apps')) return send(200, { items: [] });
+    if (url.pathname.endsWith('/oauth/scopes')) return send(200, scopeOptions);
     if (url.pathname.endsWith('/oauth/start'))
       return send(200, { state: `sign-in-${++sequence}`, authorize_url: 'https://auth.example.test/authorize' });
     const effectiveOwner = /^\/v1\/managed-users\/([^/]+)\//.exec(url.pathname)?.[1] ?? 'native-alice';
@@ -154,6 +156,7 @@ beforeEach(() => {
   returnedOwner = null;
   extraConnections = [];
   accessGrants = [];
+  scopeOptions = { scopes: ['read', 'write'], source: 'resource', oauth: true, issuer: 'https://issuer.example.test' };
 });
 
 async function call(method: string, url: string, body?: unknown, headers: Record<string, string> = {}) {
@@ -195,6 +198,33 @@ async function call(method: string, url: string, body?: unknown, headers: Record
 }
 
 describe('user-owned Credentials API', () => {
+  it('discovers scopes as the signed-in native user without starting OAuth', async () => {
+    user = 'bob';
+    const response = await call('POST', '/ui/chat/api/credentials/scopes', {
+      resource_url: 'https://mcp.example.test/mcp',
+    });
+    expect(response.status).toBe(200);
+    expect(response.value).toEqual(scopeOptions);
+    expect(requests.at(-1)?.path).toBe('/v1/managed-users/native-bob/oauth/scopes');
+    expect(requests.some((entry) => entry.path.endsWith('/oauth/start') || entry.path.endsWith('/connections'))).toBe(
+      false,
+    );
+  });
+  it('allows issuer inspection for an unsaved app but rejects mixed authorities and owner overrides', async () => {
+    expect(
+      (await call('POST', '/ui/chat/api/credentials/scopes', { issuer: 'https://issuer.example.test' })).status,
+    ).toBe(200);
+    for (const body of [
+      {},
+      { issuer: 'https://issuer.example.test', app_id: 'private' },
+      { resource_url: 'https://mcp.example.test/mcp', owner: 'other' },
+    ])
+      expect((await call('POST', '/ui/chat/api/credentials/scopes', body)).status).toBe(400);
+  });
+  it('rejects malformed scope metadata instead of presenting it as an empty successful list', async () => {
+    scopeOptions = { scopes: ['invalid scope'], source: 'resource', oauth: true };
+    expect((await call('POST', '/ui/chat/api/credentials/scopes', { app_id: 'private' })).status).toBe(502);
+  });
   it('requires a signed-in user before provisioning or listing', async () => {
     user = null;
     expect((await call('GET', '/ui/chat/api/credentials')).status).toBe(401);

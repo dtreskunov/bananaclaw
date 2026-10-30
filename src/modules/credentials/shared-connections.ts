@@ -2,6 +2,7 @@ import { getAgentGroup } from '../../db/agent-groups.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/user-roles.js';
 import { getUser } from '../permissions/db/users.js';
 import { getBranding } from '../../ui/server/branding.js';
+import { isOAuthScope, type OAuthScopeOptions } from '../../ui/shared/oauth-app.js';
 import { AgentVaultError, gatewayJson, type GatewayRequestOptions } from './agent-vault-client.js';
 import { synchronizeManagedUser } from './managed-users.js';
 import type { GatewayService, AppInfo } from './gateway-credentials.js';
@@ -115,6 +116,13 @@ function safeServices(value: unknown): void {
   }
 }
 
+function scopeList(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(isOAuthScope))
+    throw new ConnectionInputError('Scopes must be individual nonempty OAuth scope strings');
+  return [...new Set(value)].sort();
+}
+
 async function userRequest<T>(
   userId: string,
   method: string,
@@ -194,6 +202,7 @@ export function createConnection(userId: string, raw: unknown): Promise<SharedCo
     throw new ConnectionInputError('Unsupported connection kind');
   safeValues(body.values);
   safeServices(body.services);
+  if (body.scopes !== undefined) body.scopes = scopeList(body.scopes);
   if (body.kind === 'static' && (!body.services || !body.values))
     throw new ConnectionInputError('A static connection needs services and credential values');
   return userRequest<SharedConnection>(userId, 'POST', '/connections', { body }).then(({ data, ownerId }) =>
@@ -273,12 +282,7 @@ export async function groupConnectionAccess(userId: string, groupId: string): Pr
 export async function startConnectionSignIn(userId: string, connectionId: string, raw: unknown) {
   const body = objectBody(raw);
   fields(body, ['resource_url', 'app_id', 'scopes']);
-  if (
-    body.scopes !== undefined &&
-    (!Array.isArray(body.scopes) ||
-      !body.scopes.every((scope) => typeof scope === 'string' && scope.length > 0 && !/\s/u.test(scope)))
-  )
-    throw new ConnectionInputError('Scopes must be individual nonempty OAuth scope strings');
+  if (body.scopes !== undefined) body.scopes = scopeList(body.scopes);
   const user = await synchronizeManagedUser(userId);
   const connection = await getConnection(userId, connectionId);
   if (connection.kind === 'static') throw new ConnectionInputError('Static connections do not use OAuth sign-in');
@@ -307,6 +311,38 @@ export async function startConnectionSignIn(userId: string, connectionId: string
     label: connection.label,
   });
   return { state: result.state, authorizeUrl: result.authorize_url, label: connection.label };
+}
+
+export async function discoverConnectionScopes(userId: string, raw: unknown): Promise<OAuthScopeOptions> {
+  const body = objectBody(raw);
+  fields(body, ['resource_url', 'app_id', 'issuer']);
+  if (
+    (!body.resource_url && !body.app_id && !body.issuer) ||
+    (body.resource_url !== undefined &&
+      (typeof body.resource_url !== 'string' || !body.resource_url.trim() || body.resource_url.length > 4096)) ||
+    (body.app_id !== undefined &&
+      (typeof body.app_id !== 'string' || !body.app_id.trim() || body.app_id.length > 200)) ||
+    (body.issuer !== undefined &&
+      (typeof body.issuer !== 'string' || !body.issuer.trim() || body.issuer.length > 4096)) ||
+    (body.issuer && (body.resource_url || body.app_id))
+  )
+    throw new ConnectionInputError('Provide an MCP resource URL, OAuth app or a separate issuer');
+  const { data } = await userRequest<OAuthScopeOptions>(userId, 'POST', '/oauth/scopes', { body, timeoutMs: 30000 });
+  if (
+    !data ||
+    !Array.isArray(data.scopes) ||
+    !data.scopes.every(isOAuthScope) ||
+    !['resource', 'authorization_server', 'not_advertised'].includes(data.source) ||
+    typeof data.oauth !== 'boolean' ||
+    (data.issuer !== undefined && typeof data.issuer !== 'string')
+  )
+    throw new AgentVaultError('Gateway returned invalid scope metadata', 502);
+  return {
+    scopes: data.scopes,
+    source: data.source,
+    oauth: data.oauth,
+    ...(data.issuer ? { issuer: data.issuer } : {}),
+  };
 }
 
 export async function listConnectionApps(userId: string): Promise<ConnectionApp[]> {

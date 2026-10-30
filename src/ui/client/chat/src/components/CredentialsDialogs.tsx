@@ -17,6 +17,8 @@ import { compileRoutes, credentialFields, hostnameFromPattern, oauthResourceUrl,
 import { CredentialServiceForm } from './CredentialServiceForm';
 import { OAuthAppForm } from './OAuthAppForm';
 import { compileOAuthApp, oauthAppDraft } from './oauth-app-form';
+import { OAuthScopePicker } from './OAuthScopePicker';
+import { scopeValues, validScopeSelection } from './oauth-scopes';
 
 interface ConnectionEditorProps {
   id?: string; apps: AppInfo[]; groups: CredentialGroup[]; initialKind?: Connection['kind']; resourceUrl?: string;
@@ -53,6 +55,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
   const [stale, setStale] = useState(false);
   const [appId, setAppId] = useState('');
   const [scopes, setScopes] = useState('');
+  const [unspecifiedScopes, setUnspecifiedScopes] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [oauthDraft, setOauthDraft] = useState<Connection | null>(null);
   const firstUrl = useRef<HTMLInputElement>(null);
@@ -83,7 +86,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
   }
   const renamed = !connection || label.trim() !== connectionName(connection, apps);
   const canSave = !busy && !stale && !!label.trim() && (creatingOAuth
-    ? reviewed && (kind === 'mcp_oauth' ? !!resource : !!appId)
+    ? reviewed && validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resource : !!appId)
     : !routingError && !missingValues && (!connection || renamed || routingChanged || Object.keys(supplied).length > 0));
   const changeRoute = (index: number, route: RouteDraft): void => {
     setRoutes((old) => old.map((item, at) => at === index ? route : item));
@@ -102,7 +105,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
         const input: SignInInput = {
           ...(kind === 'mcp_oauth' ? { resource_url: resource } : {}),
           ...(appId ? { app_id: appId } : {}),
-          scopes: scopes.split(/[\s,]+/).filter(Boolean),
+          scopes: scopeValues(scopes),
         };
         let target = oauthDraft;
         if (!target) {
@@ -146,6 +149,8 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
           const next = event.currentTarget.value;
           if (next !== 'static' && next !== 'mcp_oauth' && next !== 'oauth_app') { showToast('Choose a credential type.', 'err'); return; }
           setKind(next);
+          setScopes(next === 'oauth_app' ? (apps.find(app => app.id === appId)?.default_scopes ?? []).join('\n') : '');
+          setUnspecifiedScopes(false);
           setReviewed(false);
           if (automaticName) setLabel(next === 'oauth_app' ? apps.find((app) => app.id === appId)?.label ?? '' : hostnameFromPattern(routes[0].pattern));
         }}>
@@ -153,10 +158,12 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
       </select></Field> : null}
       {creatingOAuth ? <>
         <OAuthFields kind={kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth'} apps={apps} appId={appId}
-          resource={routes[0].pattern} scopes={scopes} busy={busy} firstInput={firstUrl}
+          resource={routes[0].pattern} scopes={scopes} unspecifiedScopes={unspecifiedScopes} busy={busy} firstInput={firstUrl}
+          onUnspecifiedScopes={value => { setUnspecifiedScopes(value); setReviewed(false); }}
           onResource={(pattern) => changeRoute(0, { ...routes[0], pattern })}
           onApp={(id) => {
             setAppId(id);
+            setUnspecifiedScopes(false);
             setScopes((apps.find((app) => app.id === id)?.default_scopes ?? []).join('\n'));
             if (automaticName && kind === 'oauth_app') setLabel(apps.find((app) => app.id === id)?.label ?? '');
             setReviewed(false);
@@ -184,7 +191,11 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
         <ErrorNotice message={routingError && routes.some((route) => route.pattern) ? routingError : ''} />
       </> : connection ? <details><summary>Permissions</summary>
         <p>{connection.resource_url ?? connection.app_id}</p>
-        <ul>{(connection.granted_scopes ?? connection.requested_scopes ?? []).map((scope) => <li key={scope}>{scope}</li>)}</ul>
+        <p>Requested scopes</p>
+        {connection.requested_scopes?.length ? <ul>{connection.requested_scopes.map(scope => <li key={scope}>{scope}</li>)}</ul> : <p class="muted">No explicit scope request.</p>}
+        <p>Provider-reported scopes</p>
+        {connection.granted_scopes == null ? <p class="muted">Not reported by the provider.</p> :
+          connection.granted_scopes.length ? <ul>{connection.granted_scopes.map(scope => <li key={scope}>{scope}</li>)}</ul> : <p class="muted">None.</p>}
       </details> : null}
       {fields.map(({ key, label }) => <Field key={key} label={label}>
         <SecretInput label={label} value={values[key] ?? ''} disabled={busy} placeholder={connection?.credentials.includes(key) ? 'Keep current value' : 'New value'}
@@ -201,9 +212,10 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
   </CredentialDialog>;
 }
 
-function OAuthFields({ kind, apps, resource, appId, scopes, busy, firstInput, onResource, onApp, onScopes }: {
+function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, busy, firstInput, onResource, onApp, onScopes, onUnspecifiedScopes }: {
   kind: 'mcp_oauth' | 'oauth_app'; apps: AppInfo[]; resource: string; appId: string; scopes: string; busy: boolean;
   firstInput?: RefObject<HTMLInputElement>; onResource: (value: string) => void; onApp: (value: string) => void; onScopes: (value: string) => void;
+  unspecifiedScopes: boolean; onUnspecifiedScopes: (value: boolean) => void;
 }): JSX.Element {
   return <>
     {kind === 'mcp_oauth' ? <Field label="URL pattern"><input ref={firstInput} type="text" aria-label="URL pattern"
@@ -215,8 +227,9 @@ function OAuthFields({ kind, apps, resource, appId, scopes, busy, firstInput, on
       {apps.map((app) => <option key={`${app.source}:${app.id}`} value={app.id}>{app.label} · {app.source === 'user' ? 'Personal' : 'Install'}</option>)}
     </select></Field>
     {kind === 'oauth_app' && !apps.length ? <p>Configure an app in the OAuth apps section first.</p> : null}
-    <Field label="Requested scopes"><textarea aria-label="Requested scopes" rows={4} value={scopes} disabled={busy}
-      placeholder="One scope per line" onInput={(event) => onScopes(event.currentTarget.value)} /></Field>
+    <OAuthScopePicker resource={kind === 'mcp_oauth' ? resource : undefined} appId={appId}
+      configured={apps.find(app => app.id === appId)?.default_scopes ?? []}
+      value={scopes} onChange={onScopes} disabled={busy} unspecified={unspecifiedScopes} onUnspecified={onUnspecifiedScopes} />
   </>;
 }
 
@@ -241,6 +254,7 @@ export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClo
   const [resource, setResource] = useState(connection.resource_url ?? '');
   const [app, setApp] = useState(connection.app_id ?? '');
   const [scopes, setScopes] = useState((connection.requested_scopes ?? []).join('\n'));
+  const [unspecifiedScopes, setUnspecifiedScopes] = useState(!connection.requested_scopes?.length);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [reviewed, setReviewed] = useState(false);
@@ -253,7 +267,7 @@ export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClo
       resourceError = errorMessage(error);
     }
   }
-  const canStart = !busy && (kind === 'mcp_oauth' ? !!resourceUrl : !!app) && reviewed;
+  const canStart = !busy && validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resourceUrl : !!app) && reviewed;
   async function start(event: Event): Promise<void> {
     event.preventDefault();
     if (!canStart) return;
@@ -263,7 +277,7 @@ export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClo
       const input: SignInInput = {
         ...(kind === 'mcp_oauth' ? { resource_url: resourceUrl } : {}),
         ...(app ? { app_id: app } : {}),
-        scopes: scopes.split(/[\s,]+/).filter(Boolean),
+        scopes: scopeValues(scopes),
       };
       await onStart(connection.id, input);
       onSaved();
@@ -279,10 +293,12 @@ export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClo
     <button type="submit" form="personal-oauth" class="primary" disabled={!canStart}>{busy ? 'Starting…' : 'Start sign-in'}</button>
   </>}>
     <form id="personal-oauth" onSubmit={start}>
-      <OAuthFields kind={kind} apps={apps} resource={resource} appId={app} scopes={scopes} busy={busy}
+      <OAuthFields kind={kind} apps={apps} resource={resource} appId={app} scopes={scopes} busy={busy} unspecifiedScopes={unspecifiedScopes}
+        onUnspecifiedScopes={value => { setUnspecifiedScopes(value); setReviewed(false); }}
         onResource={(value) => { setResource(value); setReviewed(false); }}
         onApp={(value) => {
           setApp(value);
+          setUnspecifiedScopes(false);
           setScopes((apps.find((item) => item.id === value)?.default_scopes ?? []).join('\n'));
           setReviewed(false);
         }} onScopes={(value) => { setScopes(value); setReviewed(false); }} />

@@ -28,6 +28,22 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('canonical credentials fixture', () => {
+  it('inspects scopes without changing credentials or consuming a pending write failure', () => {
+    const before = request<CredentialsOverview>(credentialsPath());
+    setOptions({ failNextWrite: true });
+    expect(request(credentialsPath('/scopes'), 'POST', { resource_url: 'https://mcp.example.com/mcp' })).toMatchObject({
+      scopes: ['read', 'write'],
+      source: 'resource',
+      oauth: true,
+    });
+    expect(request<CredentialsOverview>(credentialsPath())).toEqual(before);
+    expect(() =>
+      request(connectionPath('basic-pair'), 'PUT', {
+        revision: before.connections[0].revision,
+        label: 'Changed',
+      }),
+    ).toThrow('simulated');
+  });
   it('stores one multi-key connection, rotates once and detaches one recipient only', () => {
     const original = request<Connection>(connectionPath('basic-pair'));
     expect(original.grants).toHaveLength(2);
@@ -51,11 +67,11 @@ describe('canonical credentials fixture', () => {
     ).toThrow('Reload and review');
   });
 
-  it('lists other owners only as Access references, not as manageable personal connections', () => {
+  it('keeps other owners metadata out of personal and group access reads', () => {
     const overview = request<CredentialsOverview>(credentialsPath());
     const access = request<{ grants: AccessGrant[] }>(accessPath('assistant'));
     expect(overview.connections.every((connection) => connection.owner.id === 'native-alex')).toBe(true);
-    expect(access.grants.find((grant) => grant.connection_id === 'sam-owned')?.owner.label).toBe('Sam');
+    expect(access.grants.find((grant) => grant.connection_id === 'sam-owned')).toBeUndefined();
     expect(() => request(connectionPath('sam-owned'))).toThrow('Unknown personal connection');
     request(accessPath('assistant', 'sam-owned'), 'DELETE');
     expect(

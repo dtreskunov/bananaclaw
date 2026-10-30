@@ -12,6 +12,7 @@ import { CredentialServiceForm } from './CredentialServiceForm';
 import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
 import type { OAuthAppDraft } from './oauth-app-form';
+import { OAuthScopePicker } from './OAuthScopePicker';
 
 const hooks = vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -361,6 +362,11 @@ describe('connection UI safety and ownership', () => {
     node = draw();
     expect(node.props.title).toBe('Add credential');
     expect(nameInput(node).props.value).toBe('My browser');
+    const fields = descendants(node).find(
+      (child) => typeof child.type === 'function' && child.type.name === 'OAuthFields',
+    )!;
+    find(render(fields), OAuthScopePicker).props.onChange('mcp');
+    node = draw();
     const review = descendants(node).find(
       (child) => typeof child.type === 'function' && child.type.name === 'OAuthReview',
     )!;

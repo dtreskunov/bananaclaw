@@ -29775,6 +29775,11 @@ function UserPicker({
   ] });
 }
 
+// ../../shared/oauth-app.ts
+function isOAuthScope(value) {
+  return typeof value === "string" && value.length > 0 && [...value].every((character) => character >= "!" && character <= "~" && character !== '"' && character !== "\\");
+}
+
 // src/components/CredentialsApi.ts
 function credentialsPath(sub = "") {
   return `/ui/chat/api/credentials${sub}`;
@@ -29791,12 +29796,13 @@ var CredentialsError = class extends Error {
     this.status = status;
   }
 };
-async function credentialRequest(url, method = "GET", body) {
+async function credentialRequest(url, method = "GET", body, signal) {
   const response = await fetch(url, {
     method,
     credentials: "same-origin",
     headers: body === void 0 ? {} : { "Content-Type": "application/json" },
-    body: body === void 0 ? void 0 : JSON.stringify(body)
+    body: body === void 0 ? void 0 : JSON.stringify(body),
+    signal
   });
   const text2 = await response.text();
   let data;
@@ -29862,6 +29868,8 @@ function appConfiguration(app) {
 function validateAppConfiguration(config) {
   if (!isRecord2(config) || typeof config.label !== "string" || !config.label.trim() || typeof config.client_id !== "string" || !config.client_id.trim() || typeof config.issuer !== "string" || !config.issuer.trim() || !Array.isArray(config.api_hosts) || !config.api_hosts.length || config.api_hosts.some((v5) => typeof v5 !== "string") || !Array.isArray(config.default_scopes) || config.default_scopes.some((v5) => typeof v5 !== "string"))
     throw new CredentialsError("Enter an app name, issuer URL, client ID and at least one API host.");
+  if (!config.default_scopes.every(isOAuthScope))
+    throw new CredentialsError("Enter valid individual OAuth scope values without quotes or backslashes.");
   if (!["none", "client_secret_post", "client_secret_basic"].includes(String(config.token_endpoint_auth_method)) || !["none", "oidc", "google", "github"].includes(String(config.identity)) || !["space", "comma"].includes(String(config.token_scope_separator)))
     throw new CredentialsError(
       "Choose a supported client authentication method, identity verifier and scope separator."
@@ -30193,12 +30201,14 @@ function oauthResourceUrl(value) {
   return source;
 }
 function routingDrafts(services) {
-  return (services?.length ? services : [{
-    name: "route-1",
-    host: "",
-    https_only: true,
-    auth: { type: "bearer", token: "TOKEN" }
-  }]).map((service) => ({
+  return (services?.length ? services : [
+    {
+      name: "route-1",
+      host: "",
+      https_only: true,
+      auth: { type: "bearer", token: "TOKEN" }
+    }
+  ]).map((service) => ({
     service: structuredClone(service),
     pattern: service.host ? serviceDestination(service) : ""
   }));
@@ -30239,8 +30249,7 @@ function compileRoutes(routes) {
     if (service.auth.prefix && /[\r\n]/.test(service.auth.prefix))
       throw new CredentialsError("Header prefixes cannot contain line breaks.");
     if (service.auth.type === "custom") {
-      if (!Object.keys(service.auth.headers ?? {}).length)
-        throw new CredentialsError("Add a header.");
+      if (!Object.keys(service.auth.headers ?? {}).length) throw new CredentialsError("Add a header.");
       for (const [name, value] of Object.entries(service.auth.headers ?? {}))
         if (!headerName.test(name) || /[\r\n]/.test(value))
           throw new CredentialsError("Enter valid header names and values without line breaks.");
@@ -30248,9 +30257,12 @@ function compileRoutes(routes) {
     const placeholders = /* @__PURE__ */ new Set();
     for (const substitution of service.substitutions ?? []) {
       if (!/^[A-Za-z0-9_.~-]{4,128}$/.test(substitution.placeholder) || !/[A-Za-z0-9]/.test(substitution.placeholder) || placeholders.has(substitution.placeholder))
-        throw new CredentialsError("Use distinct placeholders of 4\u2013128 letters, digits, underscores, dots, tildes or hyphens.");
+        throw new CredentialsError(
+          "Use distinct placeholders of 4\u2013128 letters, digits, underscores, dots, tildes or hyphens."
+        );
       placeholders.add(substitution.placeholder);
-      if (substitution.in && !substitution.in.length) throw new CredentialsError("Choose where to replace each placeholder.");
+      if (substitution.in && !substitution.in.length)
+        throw new CredentialsError("Choose where to replace each placeholder.");
     }
     if (!serviceKeys([service]).length) throw new CredentialsError("Add a credential value or placeholder.");
     return { ...service, host: parsed.host, path: void 0, https_only: true };
@@ -30766,6 +30778,147 @@ function HeaderTemplate({ template, keys, service, busy, onChange }) {
   ] });
 }
 
+// src/components/oauth-scopes.ts
+function scopeValues(value) {
+  return [...new Set(value.split(/\s+/).filter(Boolean))].sort();
+}
+function validScopeSelection(value, unspecified) {
+  const scopes = scopeValues(value);
+  return (scopes.length > 0 || unspecified) && scopes.every(isOAuthScope);
+}
+function scopeDiscoveryInput({
+  resource,
+  appId,
+  issuer
+}) {
+  if (resource !== void 0) {
+    try {
+      return { resource_url: oauthResourceUrl(resource), ...appId ? { app_id: appId } : {} };
+    } catch (error) {
+      if (!(error instanceof CredentialsError)) throw error;
+      return null;
+    }
+  }
+  if (issuer !== void 0) {
+    const url = URL.parse(issuer.trim());
+    if (!url || url.protocol !== "https:" || url.username || url.password || url.hash) return null;
+    return { issuer: issuer.trim() };
+  }
+  return appId ? { app_id: appId } : null;
+}
+
+// src/components/OAuthScopePicker.tsx
+function OAuthScopePicker({
+  value,
+  onChange,
+  resource,
+  appId,
+  issuer,
+  configured = [],
+  disabled,
+  unspecified,
+  onUnspecified,
+  label = "Permissions"
+}) {
+  const input = scopeDiscoveryInput({ resource, appId, issuer });
+  const key = input ? JSON.stringify(input) : "";
+  const [discovery, setDiscovery] = h2({ key: "", loading: false, data: null, error: "" });
+  const [retry, setRetry] = h2(0);
+  const sequence = A2(0);
+  y2(() => {
+    const request = ++sequence.current;
+    const controller = new AbortController();
+    if (!key) {
+      setDiscovery({ key, loading: false, data: null, error: "" });
+      return () => {
+        sequence.current++;
+        controller.abort();
+      };
+    }
+    setDiscovery({ key, loading: true, data: null, error: "" });
+    const timer2 = setTimeout(() => {
+      void credentialRequest(credentialsPath("/scopes"), "POST", JSON.parse(key), controller.signal).then((data) => {
+        if (sequence.current === request) setDiscovery({ key, loading: false, data, error: "" });
+      }).catch((error) => {
+        if (controller.signal.aborted) return;
+        if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
+        if (sequence.current === request) setDiscovery({ key, loading: false, data: null, error: errorMessage(error) });
+      });
+    }, 500);
+    return () => {
+      sequence.current++;
+      clearTimeout(timer2);
+      controller.abort();
+    };
+  }, [key, retry]);
+  const current = discovery.key === key ? discovery : null;
+  const selected = scopeValues(value);
+  const advertised = current?.data?.scopes ?? [];
+  const choices = [.../* @__PURE__ */ new Set([...advertised, ...configured, ...selected])].sort();
+  const choose = (scope, checked) => onChange((checked ? [...selected, scope] : selected.filter((item) => item !== scope)).sort().join("\n"));
+  return /* @__PURE__ */ u4("fieldset", { class: "credential-scope-picker", disabled, children: [
+    /* @__PURE__ */ u4("legend", { children: label }),
+    key && (!current || current.loading) ? /* @__PURE__ */ u4("p", { class: "muted", role: "status", children: "Discovering scope options\u2026" }) : null,
+    !key ? /* @__PURE__ */ u4("p", { class: "muted", children: "Enter a valid URL or select an OAuth app to discover scope options." }) : null,
+    current?.error ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(ErrorNotice, { message: `Could not discover scope options: ${current.error}` }),
+      /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setRetry((value2) => value2 + 1), children: "Retry discovery" })
+    ] }) : null,
+    current?.data ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: !current.data.oauth ? "This resource did not advertise an OAuth challenge. Verify whether OAuth is required." : current.data.source === "not_advertised" ? "No scopes were advertised. App defaults and custom scopes are still available." : current.data.source === "resource" ? "Scopes advertised by this MCP resource." : "Scopes advertised by the authorization server; this list may be incomplete." }) : null,
+    onUnspecified ? /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "checkbox",
+          checked: unspecified,
+          "aria-label": "Make no scope request",
+          onChange: (event) => {
+            onUnspecified(event.currentTarget.checked);
+            if (event.currentTarget.checked) onChange("");
+          }
+        }
+      ),
+      /* @__PURE__ */ u4("span", { children: "Make no scope request (provider defaults)" })
+    ] }) : null,
+    unspecified ? /* @__PURE__ */ u4("p", { class: "ga-cred-warn-text", children: "The provider chooses the permissions. This does not mean no access." }) : null,
+    choices.length ? /* @__PURE__ */ u4("div", { class: "credential-scope-options", children: choices.map((scope) => /* @__PURE__ */ u4("label", { children: [
+      /* @__PURE__ */ u4(
+        "input",
+        {
+          type: "checkbox",
+          "aria-label": `Request scope ${scope}`,
+          checked: selected.includes(scope),
+          disabled: unspecified,
+          onChange: (event) => choose(scope, event.currentTarget.checked)
+        }
+      ),
+      /* @__PURE__ */ u4("code", { children: scope }),
+      /* @__PURE__ */ u4("span", { class: "muted", children: advertised.includes(scope) ? "Discovered" : configured.includes(scope) ? "App default" : "Custom" })
+    ] }, scope)) }) : null,
+    configured.length && onUnspecified ? /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => {
+      onUnspecified(false);
+      onChange([...new Set(configured)].sort().join("\n"));
+    }, children: "Use app defaults" }) : null,
+    /* @__PURE__ */ u4("details", { class: "credential-custom-scopes", children: [
+      /* @__PURE__ */ u4("summary", { children: "Custom scopes" }),
+      /* @__PURE__ */ u4(
+        "textarea",
+        {
+          "aria-label": label === "Default scopes" ? "Default scopes" : "Custom scopes",
+          rows: 3,
+          value,
+          disabled: unspecified,
+          spellcheck: false,
+          placeholder: "One exact scope value per line",
+          onInput: (event) => onChange(event.currentTarget.value)
+        }
+      )
+    ] }),
+    selected.some((scope) => !isOAuthScope(scope)) ? /* @__PURE__ */ u4(ErrorNotice, { message: "Scope values must be printable ASCII without quotes or backslashes." }) : null,
+    onUnspecified && !unspecified && selected.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Select scopes, enter custom values, or explicitly choose provider defaults." }) : null
+  ] });
+}
+
 // src/components/OAuthAppForm.tsx
 function OAuthAppForm({ draft, busy, onChange }) {
   const update = (patch) => onChange({ ...draft, ...patch });
@@ -30835,18 +30988,16 @@ function OAuthAppForm({ draft, busy, onChange }) {
         onInput: (event) => update({ apiHosts: event.currentTarget.value })
       }
     ) }),
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Default scopes", info: "One scope per line.", children: /* @__PURE__ */ u4(
-      "textarea",
+    /* @__PURE__ */ u4(
+      OAuthScopePicker,
       {
-        "aria-label": "Default scopes",
-        rows: 3,
+        label: "Default scopes",
+        issuer: draft.issuer,
         value: draft.scopes,
-        placeholder: "read:documents\nread:profile",
         disabled: busy,
-        spellcheck: false,
-        onInput: (event) => update({ scopes: event.currentTarget.value })
+        onChange: (scopes) => update({ scopes })
       }
-    ) }),
+    ),
     /* @__PURE__ */ u4(GroupAdminField, { label: "Callback URL", info: "Register this redirect URL in your provider console.", children: /* @__PURE__ */ u4("div", { class: "credential-inline-field", children: [
       /* @__PURE__ */ u4("code", { class: "credential-callback", children: `${location.origin}/oauth/callback` }),
       /* @__PURE__ */ u4(CredentialAction, { label: "Copy callback URL", disabled: busy, onClick: () => {
@@ -31009,21 +31160,28 @@ function compileOAuthApp(draft) {
     "refresh_token",
     "id_token"
   ]);
-  const authorization_params = Object.fromEntries(parameters.map(({ name, value }) => {
-    if (!name.trim() || /\p{Cc}/u.test(name + value))
-      throw new CredentialsError("Enter authorization parameter names and values without control characters.");
-    const key = name.trim();
-    if (names.has(key)) throw new CredentialsError(`Duplicate authorization parameter: ${key}`);
-    if (reserved.has(key.toLowerCase())) throw new CredentialsError("Authorization parameters cannot override OAuth bindings or contain credentials.");
-    names.add(key);
-    return [key, value];
-  }));
-  const api_hosts = [...new Set(apiHosts.split(/\r?\n/).map((host) => host.trim()).filter(Boolean).map((host) => {
-    const url = URL.parse(`https://${host}`);
-    if (!url || /[/\\*?#@\s]/.test(host) || !url.hostname || url.port && Number(url.port) < 1)
-      throw new CredentialsError("Enter exact API hostnames, with an optional port, without paths or wildcards.");
-    return url.host;
-  }))];
+  const authorization_params = Object.fromEntries(
+    parameters.map(({ name, value }) => {
+      if (!name.trim() || /\p{Cc}/u.test(name + value))
+        throw new CredentialsError("Enter authorization parameter names and values without control characters.");
+      const key = name.trim();
+      if (names.has(key)) throw new CredentialsError(`Duplicate authorization parameter: ${key}`);
+      if (reserved.has(key.toLowerCase()))
+        throw new CredentialsError("Authorization parameters cannot override OAuth bindings or contain credentials.");
+      names.add(key);
+      return [key, value];
+    })
+  );
+  const api_hosts = [
+    ...new Set(
+      apiHosts.split(/\r?\n/).map((host) => host.trim()).filter(Boolean).map((host) => {
+        const url = URL.parse(`https://${host}`);
+        if (!url || /[/\\*?#@\s]/.test(host) || !url.hostname || url.port && Number(url.port) < 1)
+          throw new CredentialsError("Enter exact API hostnames, with an optional port, without paths or wildcards.");
+        return url.host;
+      })
+    )
+  ];
   const config = validateAppConfiguration({
     ...fields,
     label: fields.label.trim(),
@@ -31084,6 +31242,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
   const [stale, setStale] = h2(false);
   const [appId, setAppId] = h2("");
   const [scopes, setScopes] = h2("");
+  const [unspecifiedScopes, setUnspecifiedScopes] = h2(false);
   const [reviewed, setReviewed] = h2(false);
   const [oauthDraft, setOauthDraft] = h2(null);
   const firstUrl = A2(null);
@@ -31117,7 +31276,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
     }
   }
   const renamed = !connection2 || label.trim() !== connectionName(connection2, apps);
-  const canSave = !busy && !stale && !!label.trim() && (creatingOAuth ? reviewed && (kind === "mcp_oauth" ? !!resource : !!appId) : !routingError && !missingValues && (!connection2 || renamed || routingChanged || Object.keys(supplied).length > 0));
+  const canSave = !busy && !stale && !!label.trim() && (creatingOAuth ? reviewed && validScopeSelection(scopes, unspecifiedScopes) && (kind === "mcp_oauth" ? !!resource : !!appId) : !routingError && !missingValues && (!connection2 || renamed || routingChanged || Object.keys(supplied).length > 0));
   const changeRoute = (index, route) => {
     setRoutes((old) => old.map((item, at) => at === index ? route : item));
     setRoutingChanged(true);
@@ -31134,7 +31293,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
         const input = {
           ...kind === "mcp_oauth" ? { resource_url: resource } : {},
           ...appId ? { app_id: appId } : {},
-          scopes: scopes.split(/[\s,]+/).filter(Boolean)
+          scopes: scopeValues(scopes)
         };
         let target = oauthDraft;
         if (!target) {
@@ -31201,6 +31360,8 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
             return;
           }
           setKind(next);
+          setScopes(next === "oauth_app" ? (apps.find((app) => app.id === appId)?.default_scopes ?? []).join("\n") : "");
+          setUnspecifiedScopes(false);
           setReviewed(false);
           if (automaticName) setLabel(next === "oauth_app" ? apps.find((app) => app.id === appId)?.label ?? "" : hostnameFromPattern(routes[0].pattern));
         },
@@ -31220,11 +31381,17 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
           appId,
           resource: routes[0].pattern,
           scopes,
+          unspecifiedScopes,
           busy,
           firstInput: firstUrl,
+          onUnspecifiedScopes: (value) => {
+            setUnspecifiedScopes(value);
+            setReviewed(false);
+          },
           onResource: (pattern) => changeRoute(0, { ...routes[0], pattern }),
           onApp: (id2) => {
             setAppId(id2);
+            setUnspecifiedScopes(false);
             setScopes((apps.find((app) => app.id === id2)?.default_scopes ?? []).join("\n"));
             if (automaticName && kind === "oauth_app") setLabel(apps.find((app) => app.id === id2)?.label ?? "");
             setReviewed(false);
@@ -31269,7 +31436,10 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
     ] }) : connection2 ? /* @__PURE__ */ u4("details", { children: [
       /* @__PURE__ */ u4("summary", { children: "Permissions" }),
       /* @__PURE__ */ u4("p", { children: connection2.resource_url ?? connection2.app_id }),
-      /* @__PURE__ */ u4("ul", { children: (connection2.granted_scopes ?? connection2.requested_scopes ?? []).map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) })
+      /* @__PURE__ */ u4("p", { children: "Requested scopes" }),
+      connection2.requested_scopes?.length ? /* @__PURE__ */ u4("ul", { children: connection2.requested_scopes.map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) }) : /* @__PURE__ */ u4("p", { class: "muted", children: "No explicit scope request." }),
+      /* @__PURE__ */ u4("p", { children: "Provider-reported scopes" }),
+      connection2.granted_scopes == null ? /* @__PURE__ */ u4("p", { class: "muted", children: "Not reported by the provider." }) : connection2.granted_scopes.length ? /* @__PURE__ */ u4("ul", { children: connection2.granted_scopes.map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) }) : /* @__PURE__ */ u4("p", { class: "muted", children: "None." })
     ] }) : null,
     fields.map(({ key, label: label2 }) => /* @__PURE__ */ u4(GroupAdminField, { label: label2, children: /* @__PURE__ */ u4(
       SecretInput,
@@ -31289,7 +31459,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
     stale ? /* @__PURE__ */ u4("p", { role: "alert", children: "This connection changed or the operation conflicts. Close and reopen it to load the latest revision; your changes were not blindly overwritten." }) : null
   ] }) });
 }
-function OAuthFields({ kind, apps, resource, appId, scopes, busy, firstInput, onResource, onApp, onScopes }) {
+function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, busy, firstInput, onResource, onApp, onScopes, onUnspecifiedScopes }) {
   return /* @__PURE__ */ u4(k, { children: [
     kind === "mcp_oauth" ? /* @__PURE__ */ u4(GroupAdminField, { label: "URL pattern", children: /* @__PURE__ */ u4(
       "input",
@@ -31322,17 +31492,19 @@ function OAuthFields({ kind, apps, resource, appId, scopes, busy, firstInput, on
       }
     ) }),
     kind === "oauth_app" && !apps.length ? /* @__PURE__ */ u4("p", { children: "Configure an app in the OAuth apps section first." }) : null,
-    /* @__PURE__ */ u4(GroupAdminField, { label: "Requested scopes", children: /* @__PURE__ */ u4(
-      "textarea",
+    /* @__PURE__ */ u4(
+      OAuthScopePicker,
       {
-        "aria-label": "Requested scopes",
-        rows: 4,
+        resource: kind === "mcp_oauth" ? resource : void 0,
+        appId,
+        configured: apps.find((app) => app.id === appId)?.default_scopes ?? [],
         value: scopes,
+        onChange: onScopes,
         disabled: busy,
-        placeholder: "One scope per line",
-        onInput: (event) => onScopes(event.currentTarget.value)
+        unspecified: unspecifiedScopes,
+        onUnspecified: onUnspecifiedScopes
       }
-    ) })
+    )
   ] });
 }
 function OAuthReview({ checked, onChange, reconnect = false }) {
@@ -31350,6 +31522,7 @@ function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2,
   const [resource, setResource] = h2(connection2.resource_url ?? "");
   const [app, setApp] = h2(connection2.app_id ?? "");
   const [scopes, setScopes] = h2((connection2.requested_scopes ?? []).join("\n"));
+  const [unspecifiedScopes, setUnspecifiedScopes] = h2(!connection2.requested_scopes?.length);
   const [busy, setBusy] = h2(false);
   const [error, setError] = h2("");
   const [reviewed, setReviewed] = h2(false);
@@ -31363,7 +31536,7 @@ function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2,
       resourceError = errorMessage(error2);
     }
   }
-  const canStart = !busy && (kind === "mcp_oauth" ? !!resourceUrl : !!app) && reviewed;
+  const canStart = !busy && validScopeSelection(scopes, unspecifiedScopes) && (kind === "mcp_oauth" ? !!resourceUrl : !!app) && reviewed;
   async function start(event) {
     event.preventDefault();
     if (!canStart) return;
@@ -31373,7 +31546,7 @@ function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2,
       const input = {
         ...kind === "mcp_oauth" ? { resource_url: resourceUrl } : {},
         ...app ? { app_id: app } : {},
-        scopes: scopes.split(/[\s,]+/).filter(Boolean)
+        scopes: scopeValues(scopes)
       };
       await onStart(connection2.id, input);
       onSaved();
@@ -31398,12 +31571,18 @@ function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2,
         appId: app,
         scopes,
         busy,
+        unspecifiedScopes,
+        onUnspecifiedScopes: (value) => {
+          setUnspecifiedScopes(value);
+          setReviewed(false);
+        },
         onResource: (value) => {
           setResource(value);
           setReviewed(false);
         },
         onApp: (value) => {
           setApp(value);
+          setUnspecifiedScopes(false);
           setScopes((apps.find((item) => item.id === value)?.default_scopes ?? []).join("\n"));
           setReviewed(false);
         },

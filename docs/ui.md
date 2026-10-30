@@ -788,6 +788,16 @@ do not require a separate routing-review checkbox.
 Keys and OAuth accounts use the same **Add credential** dialog with a
 credential-type selector. OAuth retains explicit policy review and draft-safe
 sign-in retries.
+Scope selection uses discovered MCP protected-resource scopes, falling back to
+authorization-server metadata when the resource does not advertise any. OAuth
+apps inspect issuer metadata, including while editing an unsaved app. Configured
+defaults and custom values remain available because discovery lists may be
+incomplete; advertised scopes are never automatically selected. An empty
+connection selection requires an explicit "Make no scope request" choice.
+Requested and provider-reported scopes are displayed separately.
+Discovery creates no DCR registration, consent state, token refresh or grant
+change. Failed discovery is shown explicitly without preventing custom entry.
+Equivalent scope sets do not suspend grants merely because their order changed.
 For dynamic registration, the host supplies the application brand and the
 signed-in user's profile display name, for example
 `BananaClaw (Denis Treskunov)`. Client names are display metadata, not OAuth

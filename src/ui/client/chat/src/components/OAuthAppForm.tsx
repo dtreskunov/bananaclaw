@@ -5,6 +5,7 @@ import { CopyIcon, TrashIcon } from './ActionIcons';
 import { showToast } from './Toast';
 import type { OAuthAppDraft } from './oauth-app-form';
 import { displayDestination } from './credential-presentation';
+import { OAuthScopePicker } from './OAuthScopePicker';
 
 export function OAuthAppForm({ draft, busy, onChange }: {
   draft: OAuthAppDraft; busy: boolean; onChange: (draft: OAuthAppDraft) => void;
@@ -34,10 +35,8 @@ export function OAuthAppForm({ draft, busy, onChange }: {
       <textarea aria-label="API hosts" rows={3} value={draft.apiHosts} placeholder={'api.example.com\nfiles.example.com:8443'}
         disabled={busy} spellcheck={false} onInput={(event) => update({ apiHosts: event.currentTarget.value })} />
     </Field>
-    <Field label="Default scopes" info="One scope per line.">
-      <textarea aria-label="Default scopes" rows={3} value={draft.scopes} placeholder={'read:documents\nread:profile'}
-        disabled={busy} spellcheck={false} onInput={(event) => update({ scopes: event.currentTarget.value })} />
-    </Field>
+    <OAuthScopePicker label="Default scopes" issuer={draft.issuer} value={draft.scopes} disabled={busy}
+      onChange={scopes => update({ scopes })} />
     <Field label="Callback URL" info="Register this redirect URL in your provider console.">
       <div class="credential-inline-field"><code class="credential-callback">{`${location.origin}/oauth/callback`}</code>
         <CredentialAction label="Copy callback URL" disabled={busy} onClick={() => {

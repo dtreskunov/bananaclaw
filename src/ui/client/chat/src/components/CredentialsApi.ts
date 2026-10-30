@@ -1,5 +1,5 @@
-import type { OAuthAppConfiguration } from '../../../../shared/oauth-app';
-export type { OAuthAppConfiguration } from '../../../../shared/oauth-app';
+import { isOAuthScope, type OAuthAppConfiguration } from '../../../../shared/oauth-app';
+export type { OAuthAppConfiguration, OAuthScopeOptions } from '../../../../shared/oauth-app';
 
 export interface Service {
   name: string;
@@ -106,12 +106,18 @@ export class CredentialsError extends Error {
 }
 
 /** Boundary errors are displayed verbatim, but request bodies/secret values are never logged. */
-export async function credentialRequest<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
+export async function credentialRequest<T>(
+  url: string,
+  method = 'GET',
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(url, {
     method,
     credentials: 'same-origin',
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   const text = await response.text();
   let data: unknown;
@@ -314,6 +320,8 @@ export function validateAppConfiguration(config: OAuthAppConfiguration): OAuthAp
     config.default_scopes.some((v) => typeof v !== 'string')
   )
     throw new CredentialsError('Enter an app name, issuer URL, client ID and at least one API host.');
+  if (!config.default_scopes.every(isOAuthScope))
+    throw new CredentialsError('Enter valid individual OAuth scope values without quotes or backslashes.');
   if (
     !['none', 'client_secret_post', 'client_secret_basic'].includes(String(config.token_endpoint_auth_method)) ||
     !['none', 'oidc', 'google', 'github'].includes(String(config.identity)) ||
