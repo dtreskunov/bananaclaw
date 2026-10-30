@@ -29983,8 +29983,8 @@ function Impact({ connection: connection2, groups: groups2 }) {
     connection2.grants.length ? /* @__PURE__ */ u4("ul", { children: connection2.grants.map((grant) => /* @__PURE__ */ u4("li", { children: [
       groups2.find((group) => group.id === grant.vault)?.name ?? "Unavailable agent",
       " \xB7 ",
-      connection2.services.filter((service) => grant.services.includes(service.name)).map(serviceDestination).join(", "),
-      grant.status === "suspended" ? " \xB7 access needs review" : ""
+      connection2.services.map(serviceDestination).join(", "),
+      grant.status === "suspended" ? " \xB7 access paused" : ""
     ] }, grant.vault)) }) : /* @__PURE__ */ u4("p", { children: "No agents currently have access." })
   ] });
 }
@@ -30344,11 +30344,11 @@ function CredentialRow({ connection: connection2, groups: groups2, apps, busy, o
       let latest = await credentialRequest(connectionPath(connection2.id));
       if (latest.revision !== connection2.revision)
         throw new CredentialsError("This credential changed. Refresh and review agent access again.", 412);
-      for (const [group, selected] of Object.entries(changes2)) {
+      for (const [group, enabled] of Object.entries(changes2)) {
         await credentialRequest(
           connectionPath(connection2.id, `/grants/${encodeURIComponent(group)}`),
-          selected ? "PUT" : "DELETE",
-          selected ? { services: selected, revision: latest.revision } : void 0
+          enabled ? "PUT" : "DELETE",
+          enabled ? { revision: latest.revision } : void 0
         );
         latest = await credentialRequest(connectionPath(connection2.id));
       }
@@ -30425,12 +30425,9 @@ function CredentialRow({ connection: connection2, groups: groups2, apps, busy, o
       groups2.map((group) => {
         const grant = connection2.grants.find((item) => item.vault === group.id);
         const changed = Object.hasOwn(changes2, group.id);
-        const selected = changed ? changes2[group.id] ?? [] : grant?.services ?? [];
-        const active = changed || grant?.status === "active";
-        const checked = active && services.length > 0 && services.every((service) => selected.includes(service));
-        const partial = selected.length > 0 && (!checked || !active);
+        const checked = changed ? changes2[group.id] : grant?.status === "active";
         const canGrant = group.canAdmin && connection2.status === "ready" && services.length > 0;
-        const canRevoke = !!grant && selected.length > 0;
+        const canRevoke = grant?.status === "active";
         const label = `${name} \u2014 ${group.name}`;
         return /* @__PURE__ */ u4("td", { children: /* @__PURE__ */ u4(
           "input",
@@ -30438,15 +30435,12 @@ function CredentialRow({ connection: connection2, groups: groups2, apps, busy, o
             type: "checkbox",
             "aria-label": label,
             checked,
-            "aria-checked": partial ? "mixed" : checked,
-            ref: (node) => {
-              if (node) node.indeterminate = partial;
-            },
+            "aria-checked": checked,
             disabled: blocked || !canGrant && !canRevoke,
-            title: grant?.status === "suspended" && !changed ? "Access needs review" : partial ? "Some services selected" : !canGrant && !grant ? "Agent administrator required" : label,
+            title: grant?.status === "suspended" && !changed ? "Access paused; turn on to restore access" : !canGrant && !grant ? "Agent administrator required" : `${label} \u2014 all current and future URL patterns`,
             onChange: (event) => {
-              const next = canGrant && event.currentTarget.checked ? [...services] : null;
-              const unchanged = grant ? grant.status === "active" && next !== null && next.length === grant.services.length && next.every((service) => grant.services.includes(service)) : next === null;
+              const next = canGrant && event.currentTarget.checked;
+              const unchanged = next === (grant?.status === "active");
               setChanges((old) => {
                 const updated = { ...old };
                 if (unchanged) delete updated[group.id];
@@ -31317,7 +31311,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
         }
       );
       setValues({});
-      showToast(connection2 ? routingChanged ? "Saved. Reapprove agent access for the changed routing." : "Credential saved" : "Credential created");
+      showToast(connection2 ? "Credential saved" : "Credential created");
       onSaved();
       onClose();
     } catch (error2) {
@@ -31453,7 +31447,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
     ) }, key)),
     connection2 ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4(Impact, { connection: connection2, groups: groups2 }),
-      routingChanged ? /* @__PURE__ */ u4("p", { children: "Changed routing requires these agents to be reapproved." }) : null
+      routingChanged ? /* @__PURE__ */ u4("p", { children: "These agents automatically receive access to all updated URL patterns." }) : null
     ] }) : null,
     /* @__PURE__ */ u4(ErrorNotice, { message: error }),
     stale ? /* @__PURE__ */ u4("p", { role: "alert", children: "This connection changed or the operation conflicts. Close and reopen it to load the latest revision; your changes were not blindly overwritten." }) : null
@@ -31509,7 +31503,7 @@ function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, b
 }
 function OAuthReview({ checked, onChange, reconnect = false }) {
   return /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("p", { children: "All receiving agents share this upstream account and its actual permissions. Selecting services does not downscope a token or make it read-only. Requested scopes are not a guarantee of provider-granted scopes. A different account, issuer, resource or scope policy needs explicit review; scope expansion may suspend existing grants until reapproved. Use a separate connection for a different identity or scope profile." }),
+    /* @__PURE__ */ u4("p", { children: "All receiving agents share this upstream account and its actual permissions, including future URL patterns and permissions approved during sign-in. Requested scopes are not a guarantee of provider-granted scopes. Use a separate connection to keep a different account or permission profile separate." }),
     /* @__PURE__ */ u4(Review, { checked, onChange, children: [
       "I reviewed the upstream identity, resource, app, requested scopes and ",
       reconnect ? "affected agents" : "shared-connection implications",
@@ -31617,7 +31611,7 @@ function ConnectionActionDialog({ connection: connection2, groups: groups2, acti
     showToast(deleting ? "Connection deleted everywhere" : `Connection ${action === "enable" ? "enabled" : "disabled"}`);
   }, children: [
     /* @__PURE__ */ u4(Impact, { connection: current, groups: groups2 }),
-    /* @__PURE__ */ u4("p", { children: deleting ? current.kind === "static" ? "Permanently remove this connection and its keys. Every receiving agent loses access." : "Delete this connection and disconnect the upstream authorization, affecting every receiving agent. Provider-side revocation may also affect other grants; failed remote cleanup is reported." : action === "disable" ? "Stop every receiving agent from using this connection without deleting its saved state." : "Allow active, approved grants to use this connection again. Suspended grants still need review." })
+    /* @__PURE__ */ u4("p", { children: deleting ? current.kind === "static" ? "Permanently remove this connection and its keys. Every receiving agent loses access." : "Delete this connection and disconnect the upstream authorization, affecting every receiving agent. Provider-side revocation may also affect other grants; failed remote cleanup is reported." : action === "disable" ? "Stop every receiving agent from using this connection without deleting its saved state." : "Restore access for agents with this credential turned on. Paused grants stay off until explicitly restored." })
   ] });
 }
 function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onClose, onSaved }) {

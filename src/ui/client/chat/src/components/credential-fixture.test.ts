@@ -81,15 +81,18 @@ describe('canonical credentials fixture', () => {
     ).toBe(false);
   });
 
-  it('reapproves specific services at the reviewed revision and enforces destination administration', () => {
+  it('keeps whole-credential grants active after URL changes and enforces destination administration', () => {
     const item = request<Connection>(connectionPath('basic-pair'));
     const edited = request<Connection>(connectionPath(item.id), 'PUT', {
       revision: item.revision,
-      services: [{ ...item.services[0], host: 'new.example.com' }],
+      services: [
+        { ...item.services[0], host: 'new.example.com' },
+        { ...item.services[0], name: 'added', host: 'added.example.com' },
+      ],
     });
-    expect(edited.grants.every((grant) => grant.status === 'suspended')).toBe(true);
+    expect(edited.grants.every((grant) => grant.status === 'active')).toBe(true);
+    expect(edited.grants.every((grant) => grant.services.join(',') === 'nextcloud,added')).toBe(true);
     request(connectionPath(item.id, '/grants/assistant'), 'PUT', {
-      services: ['nextcloud'],
       revision: edited.revision,
     });
     expect(
@@ -98,7 +101,6 @@ describe('canonical credentials fixture', () => {
     setOptions({ canAdmin: false });
     expect(() =>
       request(connectionPath(item.id, '/grants/research'), 'PUT', {
-        services: ['nextcloud'],
         revision: edited.revision,
       }),
     ).toThrow('Destination administration');

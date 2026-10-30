@@ -164,18 +164,17 @@ describe('editable credential authorization matrix', () => {
     checkbox(draw(), 'New Agent').props.onChange!({ currentTarget: { checked: true } });
     expect(descendants(draw()).find((item) => item.type === CredentialName)!.props.busy).toBe(true);
   });
-  it('preserves partial access until an explicit edit is saved', () => {
+  it('shows existing partial grants as whole-credential access without an indeterminate state', () => {
     const node = draw(),
       field = checkbox(node, 'Lab');
-    expect(field.props['aria-checked']).toBe('mixed');
-    const input = { indeterminate: false };
-    field.ref!(input);
-    expect(input.indeterminate).toBe(true);
+    expect(field.props['aria-checked']).toBe(true);
+    expect(field.props.checked).toBe(true);
+    expect(field.ref).toBeUndefined();
     expect(checkbox(node, 'My Agent').props.checked).toBe(true);
     expect(writes).toEqual([]);
     expect(save(node)).toBeUndefined();
   });
-  it('saves only edited agent cells with selected services and exact current revision', async () => {
+  it('saves only edited agent cells as whole-credential grants at the current revision', async () => {
     checkbox(draw(), 'New Agent').props.onChange!({ currentTarget: { checked: true } });
     expect(writes).toEqual([]);
     await save(draw()).props.onClick!();
@@ -183,7 +182,7 @@ describe('editable credential authorization matrix', () => {
       {
         url: '/ui/chat/api/credentials/connections/shared/grants/three',
         method: 'PUT',
-        body: { services: ['search', 'lookup'], revision: '"reviewed"' },
+        body: { revision: '"reviewed"' },
       },
     ]);
   });
@@ -206,9 +205,10 @@ describe('editable credential authorization matrix', () => {
     expect(writes).toEqual([]);
   });
   it('uses the refreshed revision between two explicitly edited cells', async () => {
-    checkbox(draw(), 'New Agent').props.onChange!({ currentTarget: { checked: true } });
-    checkbox(draw(), 'Lab').props.onChange!({ currentTarget: { checked: true } });
-    await save(draw()).props.onClick!();
+    const connection = { ...original, grants: [] };
+    checkbox(draw(connection), 'New Agent').props.onChange!({ currentTarget: { checked: true } });
+    checkbox(draw(connection), 'Lab').props.onChange!({ currentTarget: { checked: true } });
+    await save(draw(connection)).props.onClick!();
     expect(writes.map((write) => write.body?.revision)).toEqual(['"reviewed"', '"updated"']);
     expect(writes.map((write) => write.url.split('/').at(-1))).toEqual(['three', 'one']);
   });
@@ -216,7 +216,7 @@ describe('editable credential authorization matrix', () => {
     const destinations = groups.map((group) => ({ ...group, canAdmin: false }));
     const field = checkbox(draw(original, destinations), 'Lab');
     expect(field.props.disabled).toBe(false);
-    field.props.onChange!({ currentTarget: { checked: true } });
+    field.props.onChange!({ currentTarget: { checked: false } });
     await save(draw(original, destinations)).props.onClick!();
     expect(writes[0].method).toBe('DELETE');
     expect(checkbox(draw(original, destinations), 'New Agent').props.disabled).toBe(true);
@@ -227,8 +227,23 @@ describe('editable credential authorization matrix', () => {
     await save(draw(suspended)).props.onClick!();
     expect(writes[0]).toMatchObject({
       method: 'PUT',
-      body: { services: ['search', 'lookup'], revision: '"reviewed"' },
+      body: { revision: '"reviewed"' },
     });
+  });
+  it('keeps credential access on when routes are added or the credential is disabled', () => {
+    const expanded: Connection = {
+      ...original,
+      status: 'disabled',
+      services: [
+        ...original.services,
+        { name: 'new', host: 'new.example.com', auth: { type: 'bearer', token: 'KEY' } },
+      ],
+    };
+    const field = checkbox(draw(expanded), 'Lab');
+    expect(field.props.checked).toBe(true);
+    expect(field.props['aria-checked']).toBe(true);
+    expect(field.props.disabled).toBe(false);
+    expect(checkbox(draw(expanded), 'New Agent').props.disabled).toBe(true);
   });
   it('does not send a stale authorization update or retry after a conflict', async () => {
     checkbox(draw(), 'New Agent').props.onChange!({ currentTarget: { checked: true } });

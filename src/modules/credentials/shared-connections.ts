@@ -244,16 +244,9 @@ export async function grantConnection(
 ): Promise<unknown> {
   requireGroupAdmin(userId, groupId);
   const body = objectBody(raw);
-  fields(body, ['services', 'revision']);
-  if (
-    !Array.isArray(body.services) ||
-    !body.services.length ||
-    !body.services.every((service) => typeof service === 'string' && service.length > 0) ||
-    new Set(body.services).size !== body.services.length
-  )
-    throw new ConnectionInputError('Select distinct connection services');
+  fields(body, ['revision']);
   return userRequest<SharedConnection>(userId, 'PUT', `/connections/${id(connectionId)}/grants/${id(groupId)}`, {
-    body: { services: body.services },
+    body: {},
     ...(body.revision === undefined ? { ifNoneMatch: '*' as const } : { ifMatch: connectionRevision(body.revision) }),
   }).then(({ data, ownerId }) => connectionResult(data, ownerId));
 }

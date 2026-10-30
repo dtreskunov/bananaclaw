@@ -118,7 +118,7 @@ flowchart LR
 | Personal library vault | Native vault owned by that user, containing connection state; cannot be bound to a group proxy session                                                                       |
 | Connection             | Stable ID, native owner-user foreign key, library-vault ID, kind, status, policy revision, encrypted static material or OAuth authorization state                            |
 | Connection service     | Stable ID, destination host/port/path, HTTPS requirement, injection/substitution recipe and credential references within that connection                                     |
-| Group grant            | Group/vault ID, connection ID, selected service IDs, approved policy revision, active/revoked state and audit provenance                                                     |
+| Group grant            | Group/vault ID, connection ID, whole-credential access to current and future URL rules, active/paused/revoked state and audit provenance                                        |
 | Group binding          | Group-local service name and reference to an authorized connection service; contains no copied secret                                                                        |
 | OAuth app              | Install-managed or user-owned client configuration; connections pin the issuing app/client binding                                                                           |
 | OAuth flow             | Initiating NanoClaw identity and mapped native user, connection/draft ID, exact issuer/client/resource, PKCE verifier, nonce, redirect and optional initial group attachment |
@@ -149,7 +149,7 @@ assumption must not force copies or expose component values.
 - A user's library is an ordinary native storage vault with an explicit
   library purpose/owner. The native user has library-admin membership; receiving
   groups and their proxy identities receive **no membership in that vault**.
-  Their connection-service grants remain separate, narrower authorization.
+  Their whole-connection grants remain separate from library membership.
 - Reuse native user/agent actors and native vault roles. Ordinary managed
   users start without instance-wide rights; explicit library/group memberships
   provide needed authority. Reconcile NanoClaw owner/global-admin privileges
@@ -238,9 +238,13 @@ Connection/service/grant creation must be transactional and create-only;
 updates require exact reviewed revisions. Do not weaken existing conditional
 write guarantees or replace them with check-then-upsert.
 
-Routine secret rotation preserves references. Destination, injection or other
-authority changes create a new policy revision and require affected group
-grants to be reviewed/reapproved before using the changed authority.
+Routine secret rotation preserves references. Destination, injection and other
+policy changes create a new revision and automatically apply to granted agents.
+An agent grant covers the whole credential, including URL rules added later.
+Existing partial grants expand to that model; the legacy per-grant service and
+revision snapshots remain storage-compatible but no longer restrict authorization.
+Grant writes accept `{}` (plus a host-side revision), not service selectors.
+Connection revisions still invalidate in-flight requests using old routing.
 
 ### 4.3 Shared OAuth connections
 
@@ -264,9 +268,9 @@ grants to be reviewed/reapproved before using the changed authority.
 - An uncertain refresh outcome is not permission to blindly retry an old token.
   Surface actionable reconnect/error state; a shared failure is visible to
   every affected group.
-- A reconnect preserves the connection's approved identity, issuer, resource
-  and scope policy. An account/authority change is a new or explicitly reviewed
-  connection, not a silent replacement for existing consumers.
+- A reconnect remains bound to the connection's owner, issuer, resource and app.
+  Changes approved by the owner at OAuth consent apply to all receiving agents.
+  A connection needing sign-in cannot be used until its owner reconnects.
 
 Sharing means the groups use the same upstream identity, authorization grant
 and applicable quotas. Separate identities or independently revocable upstream
@@ -274,12 +278,10 @@ authorizations require separate connections. Provider-side revocation may
 affect more than one grant; do not promise isolation the provider does not give.
 
 **Scopes are not labels.** Record requested scopes, provider-reported grants and
-their provenance. A group grant does not downscope a token. R1 selects services
-but does not claim per-operation read-only access unless actually enforced.
-Use separate connections for different scope profiles when necessary. Scope
-expansion must not silently increase existing groups' access: hold affected
-grants for impact review and reapproval. Do not automatically union scopes or
-combine accounts by email/label.
+their provenance. A group grant does not downscope a token: it covers the entire
+credential and future owner-approved permissions. Use separate connections for
+different scope profiles when necessary. OAuth consent remains required; do not
+automatically union scope requests or combine accounts by email/label.
 
 F8 placeholders identify a group-local binding whose grant is checked on every
 use, including synthetic refresh. Real access/refresh tokens and client secrets
@@ -370,7 +372,9 @@ discovery but cannot administer them.
 - Owners can revoke grants; destination group admins can detach their group.
   Ordinary group members/agents cannot rotate, retarget, reshare or reveal.
 - Receiving a grant authorizes the group's agent, potentially on behalf of
-  that group's members. Make the recipient and impact explicit.
+  that group's members, for all current and future credential URL rules.
+  Make the recipient and impact explicit. The UI is binary, never indeterminate;
+  no grant still means no credential access.
 - Recheck roles on mutations and OAuth completion. If a grant creator loses
   the required connection-sharing or destination-admin authority, suspend the
   affected grant pending review rather than silently transferring authority.
@@ -566,8 +570,11 @@ Required acceptance includes:
   of it and reports failed remote cleanup.
 - Wrong-group/provider/endpoint F8 placeholders are rejected. Revoked bindings
   cannot refresh, fall through or use another group's authorization.
-- Identity changes, scope expansion, ownership/role changes and destination
-  changes require the specified review/reapproval, with no silent scope union.
+- Destination changes and owner-approved OAuth scope expansion automatically
+  apply to all active grants, including formerly partial grants. Credential
+  disablement/reconnection still blocks use while preserving access settings.
+  Ownership/role loss pauses grants until explicitly restored; OAuth consent
+  remains required and separate from agent authorization, with no scope union.
 - Top-level navigation, owner/group visibility, generic OAuth app setup,
   callback user/state binding and CLI restrictions work on the canonical API.
 - New-group and first-login paths use AgentVault and guide owners to personal

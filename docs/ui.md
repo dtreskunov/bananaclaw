@@ -772,8 +772,10 @@ checkboxes and compact per-row save/cancel icons. It uses transcript table
 formatting with vertical agent headings and hides the default HTTPS port.
 Names and HTTPS URL patterns do not wrap; horizontal scrolling keeps long
 contents accessible. The dialog header has no refresh button.
-Partial and suspended grants
-are indeterminate rather than silently promoted; saved edits are revision-checked
+Agent access is binary and covers the whole credential, including current and
+future URL patterns. Existing partial grants are expanded, not shown as
+indeterminate. Grants paused by loss of native authority are off and can be
+explicitly restored by an authorized owner/admin. Saved edits are revision-checked
 and detach affects only the selected agent. The table shows readable provider
 or destination labels, not generated IDs, owner/type metadata or key counts.
 Routine explanatory paragraphs and per-connection "Available to" summaries
@@ -788,7 +790,7 @@ URL-pattern, authentication, header and request-placeholder controls, not JSON
 or internal service names. Placeholders can reuse a saved value, be copied, and
 have their replacement locations selected explicitly. HTTPS is mandatory, without an override.
 Renaming and value-only rotation omit routing updates so existing grants remain
-active; changed routing requires agent access to be reapproved. Static saves
+active; changed routing automatically applies to every granted agent. Static saves
 do not require a separate routing-review checkbox.
 Keys and OAuth accounts use the same **Add credential** dialog with a
 credential-type selector. OAuth retains explicit policy review and draft-safe
@@ -802,7 +804,8 @@ connection selection requires an explicit "Make no scope request" choice.
 Requested and provider-reported scopes are displayed separately.
 Discovery creates no DCR registration, consent state, token refresh or grant
 change. Failed discovery is shown explicitly without preventing custom entry.
-Equivalent scope sets do not suspend grants merely because their order changed.
+Owner-approved OAuth permission changes apply to all receiving agents; OAuth
+consent and provider-reported token scopes remain separate from the access toggle.
 For dynamic registration, the host supplies the application brand and the
 signed-in user's profile display name, for example
 `BananaClaw (Denis Treskunov)`. Client names are display metadata, not OAuth

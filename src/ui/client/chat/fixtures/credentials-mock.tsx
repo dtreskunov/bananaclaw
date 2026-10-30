@@ -141,8 +141,8 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
         if (input.label) item.label = input.label;
         if (input.enabled !== undefined) item.status = input.enabled ? 'ready' : 'disabled';
         if (input.services) {
-          if (JSON.stringify(input.services) !== JSON.stringify(item.services)) item.grants.forEach((grant) => { grant.status = 'suspended'; });
           item.services = input.services;
+          item.grants.forEach((grant) => { grant.services = item.services.map((service) => service.name); });
         }
         if (input.values) item.credentials = [...new Set([...item.credentials, ...Object.keys(input.values)])];
         bump(item);
@@ -163,12 +163,12 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
       if (method === 'DELETE') {
         item.grants = item.grants.filter((existing) => existing.vault !== gid);
       } else if (method === 'PUT') {
-        const input = body<{ services: string[]; revision: string }>(init);
+        const input = body<{ revision: string; services?: unknown }>(init);
         revision(item, input.revision);
-        if (!input.services.length || input.services.some((name) => !item.services.some((service) => service.name === name)))
-          throw new HttpError(400, 'Select known services');
-        item.grants = [...item.grants.filter((existing) => existing.vault !== gid), { vault: gid, services: input.services, status: 'active' }];
+        if (input.services !== undefined) throw new HttpError(400, 'Grants cover the whole credential');
+        item.grants = [...item.grants.filter((existing) => existing.vault !== gid), { vault: gid, services: item.services.map((service) => service.name), status: 'active' }];
       }
+      bump(item);
       return { success: true };
     }
   }

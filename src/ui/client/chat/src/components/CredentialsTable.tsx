@@ -45,7 +45,7 @@ export function CredentialRow({ connection, groups, apps, busy, onEdit, onConnec
   onAction: (connection: Connection, action: 'enable' | 'disable' | 'delete') => void;
   onSaved: () => Promise<void>;
 }): JSX.Element {
-  const [changes, setChanges] = useState<Record<string, string[] | null>>({});
+  const [changes, setChanges] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [stale, setStale] = useState(false);
@@ -60,9 +60,9 @@ export function CredentialRow({ connection, groups, apps, busy, onEdit, onConnec
       let latest = await credentialRequest<Connection>(connectionPath(connection.id));
       if (latest.revision !== connection.revision)
         throw new CredentialsError('This credential changed. Refresh and review agent access again.', 412);
-      for (const [group, selected] of Object.entries(changes)) {
+      for (const [group, enabled] of Object.entries(changes)) {
         await credentialRequest(connectionPath(connection.id, `/grants/${encodeURIComponent(group)}`),
-          selected ? 'PUT' : 'DELETE', selected ? { services: selected, revision: latest.revision } : undefined);
+          enabled ? 'PUT' : 'DELETE', enabled ? { revision: latest.revision } : undefined);
         latest = await credentialRequest<Connection>(connectionPath(connection.id));
       }
       setChanges({});
@@ -104,25 +104,18 @@ export function CredentialRow({ connection, groups, apps, busy, onEdit, onConnec
       {groups.map((group) => {
         const grant = connection.grants.find((item) => item.vault === group.id);
         const changed = Object.hasOwn(changes, group.id);
-        const selected = changed ? changes[group.id] ?? [] : grant?.services ?? [];
-        const active = changed || grant?.status === 'active';
-        const checked = active && services.length > 0 && services.every((service) => selected.includes(service));
-        const partial = selected.length > 0 && (!checked || !active);
+        const checked = changed ? changes[group.id] : grant?.status === 'active';
         const canGrant = group.canAdmin && connection.status === 'ready' && services.length > 0;
-        const canRevoke = !!grant && selected.length > 0;
+        const canRevoke = grant?.status === 'active';
         const label = `${name} — ${group.name}`;
         return <td key={group.id}>
-          <input type="checkbox" aria-label={label} checked={checked} aria-checked={partial ? 'mixed' : checked}
-            ref={(node) => { if (node) node.indeterminate = partial; }}
+          <input type="checkbox" aria-label={label} checked={checked} aria-checked={checked}
             disabled={blocked || (!canGrant && !canRevoke)}
-            title={grant?.status === 'suspended' && !changed ? 'Access needs review' :
-              partial ? 'Some services selected' : !canGrant && !grant ? 'Agent administrator required' : label}
+            title={grant?.status === 'suspended' && !changed ? 'Access paused; turn on to restore access' :
+              !canGrant && !grant ? 'Agent administrator required' : `${label} — all current and future URL patterns`}
             onChange={(event) => {
-              const next = canGrant && event.currentTarget.checked ? [...services] : null;
-              const unchanged = grant
-                ? grant.status === 'active' && next !== null &&
-                  next.length === grant.services.length && next.every((service) => grant.services.includes(service))
-                : next === null;
+              const next = canGrant && event.currentTarget.checked;
+              const unchanged = next === (grant?.status === 'active');
               setChanges((old) => {
                 const updated = { ...old };
                 if (unchanged) delete updated[group.id];

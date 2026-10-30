@@ -292,7 +292,7 @@ describe('user-owned Credentials API', () => {
       { label: 'Search', kind: 'static', services: [service], values: { SEARCH_KEY: 'test-key' } },
     ],
     ['PUT', '/connections/connection-one', { label: 'Renamed', revision: REVISION }],
-    ['PUT', `/connections/connection-one/grants/${GROUP}`, { services: ['search'] }],
+    ['PUT', `/connections/connection-one/grants/${GROUP}`, {}],
   ])('does not forward a foreign-owner %s result from %s', async (method, endpoint, body) => {
     returnedOwner = 'native-foreign';
     const response = await call(String(method), `/ui/chat/api/credentials${endpoint}`, body);
@@ -316,13 +316,9 @@ describe('user-owned Credentials API', () => {
       canEditInstall: false,
       groups: [{ id: GROUP, canAdmin: false }],
     });
-    expect(
-      (
-        await call('PUT', `/ui/chat/api/credentials/connections/connection-one/grants/${GROUP}`, {
-          services: ['search'],
-        })
-      ).status,
-    ).toBe(403);
+    expect((await call('PUT', `/ui/chat/api/credentials/connections/connection-one/grants/${GROUP}`, {})).status).toBe(
+      403,
+    );
   });
 
   it('creates a static connection without returning its values', async () => {
@@ -369,18 +365,39 @@ describe('user-owned Credentials API', () => {
     expect(result.text).not.toContain('rotated-test-key');
   });
 
-  it('grants explicit services create-only without copying credentials', async () => {
+  it('grants a whole credential create-only without copying credentials', async () => {
     user = 'bob';
-    expect(
-      (
-        await call('PUT', `/ui/chat/api/credentials/connections/connection-one/grants/${GROUP}`, {
-          services: ['search'],
-        })
-      ).status,
-    ).toBe(200);
+    expect((await call('PUT', `/ui/chat/api/credentials/connections/connection-one/grants/${GROUP}`, {})).status).toBe(
+      200,
+    );
     const request = requests.find((entry) => entry.path.endsWith(`/grants/${GROUP}`))!;
-    expect(request).toMatchObject({ create: '*', body: { services: ['search'] } });
+    expect(request).toMatchObject({ create: '*', body: {} });
     expect(request.body).not.toHaveProperty('values');
+  });
+
+  it('rejects obsolete service-selection grant requests rather than implying partial access', async () => {
+    const response = await call('PUT', `/ui/chat/api/credentials/connections/connection-one/grants/${GROUP}`, {
+      services: ['search'],
+    });
+    expect(response.status).toBe(400);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('grants the whole credential through the CLI and rejects obsolete --services', async () => {
+    const args = { user: 'alice', id: 'connection-one', group: GROUP };
+    const granted = await dispatch({ id: 'grant', command: 'credentials-grant', args }, { caller: 'host' });
+    expect(granted.ok).toBe(true);
+    expect(requests.find((entry) => entry.path.endsWith(`/grants/${GROUP}`))).toMatchObject({
+      create: '*',
+      body: {},
+    });
+    requests.length = 0;
+    const rejected = await dispatch(
+      { id: 'partial', command: 'credentials-grant', args: { ...args, services: '["search"]' } },
+      { caller: 'host' },
+    );
+    expect(rejected.ok).toBe(false);
+    expect(requests).toHaveLength(0);
   });
 
   it('detaches a group through Access, never the upstream connection-delete endpoint', async () => {

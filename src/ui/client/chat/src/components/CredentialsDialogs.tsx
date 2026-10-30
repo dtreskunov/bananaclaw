@@ -126,7 +126,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
           ...(connection ? { revision: connection.revision } : { kind: 'static' }),
         });
       setValues({});
-      showToast(connection ? routingChanged ? 'Saved. Reapprove agent access for the changed routing.' : 'Credential saved' : 'Credential created');
+      showToast(connection ? 'Credential saved' : 'Credential created');
       onSaved();
       onClose();
     } catch (error) {
@@ -203,7 +203,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
       </Field>)}
       {connection ? <>
         <Impact connection={connection} groups={groups} />
-        {routingChanged ? <p>Changed routing requires these agents to be reapproved.</p> : null}
+        {routingChanged ? <p>These agents automatically receive access to all updated URL patterns.</p> : null}
       </> : null}
       <ErrorNotice message={error} />
       {stale ? <p role="alert">This connection changed or the operation conflicts. Close and reopen it to load the
@@ -237,10 +237,9 @@ function OAuthReview({ checked, onChange, reconnect = false }: {
   checked: boolean; onChange: (value: boolean) => void; reconnect?: boolean;
 }): JSX.Element {
   return <>
-    <p>All receiving agents share this upstream account and its actual permissions. Selecting services does
-      not downscope a token or make it read-only. Requested scopes are not a guarantee of provider-granted
-      scopes. A different account, issuer, resource or scope policy needs explicit review; scope expansion
-      may suspend existing grants until reapproved. Use a separate connection for a different identity or scope profile.</p>
+    <p>All receiving agents share this upstream account and its actual permissions, including future URL
+      patterns and permissions approved during sign-in. Requested scopes are not a guarantee of provider-granted
+      scopes. Use a separate connection to keep a different account or permission profile separate.</p>
     <Review checked={checked} onChange={onChange}>I reviewed the upstream identity, resource, app,
       requested scopes and {reconnect ? 'affected agents' : 'shared-connection implications'}.</Review>
   </>;
@@ -334,7 +333,7 @@ export function ConnectionActionDialog({ connection, groups, action, onClose, on
       ? 'Permanently remove this connection and its keys. Every receiving agent loses access.'
       : 'Delete this connection and disconnect the upstream authorization, affecting every receiving agent. Provider-side revocation may also affect other grants; failed remote cleanup is reported.'
       : action === 'disable' ? 'Stop every receiving agent from using this connection without deleting its saved state.'
-        : 'Allow active, approved grants to use this connection again. Suspended grants still need review.'}</p>
+        : 'Restore access for agents with this credential turned on. Paused grants stay off until explicitly restored.'}</p>
   </ConfirmCredentialAction>;
 }
 

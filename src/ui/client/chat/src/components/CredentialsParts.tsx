@@ -51,8 +51,8 @@ export function Impact({ connection, groups }: { connection: Connection; groups:
     {connection.grants.length ? <ul>
       {connection.grants.map((grant) => <li key={grant.vault}>
         {groups.find((group) => group.id === grant.vault)?.name ?? 'Unavailable agent'}
-        {' · '}{connection.services.filter((service) => grant.services.includes(service.name)).map(serviceDestination).join(', ')}
-        {grant.status === 'suspended' ? ' · access needs review' : ''}
+        {' · '}{connection.services.map(serviceDestination).join(', ')}
+        {grant.status === 'suspended' ? ' · access paused' : ''}
       </li>)}
     </ul> : <p>No agents currently have access.</p>}
   </div>;

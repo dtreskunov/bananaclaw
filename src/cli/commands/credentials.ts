@@ -150,12 +150,14 @@ command(
 );
 command(
   'grant',
-  'Grant selected connection services to a group you administer. --user --id --group --services <JSON-name-array> [--revision for reapproval].',
-  (args, userId) =>
-    grantConnection(userId, required(args, 'id'), required(args, 'group'), {
-      services: parsed(required(args, 'services')),
+  'Grant a whole credential, including future URL patterns, to a group you administer. --user --id --group [--revision for an existing grant].',
+  (args, userId) => {
+    if (args.services !== undefined)
+      throw new ConnectionInputError('Grants cover the whole credential; omit --services');
+    return grantConnection(userId, required(args, 'id'), required(args, 'group'), {
       ...(text(args, 'revision') ? { revision: text(args, 'revision') } : {}),
-    }),
+    });
+  },
 );
 command('revoke', 'Remove only one group grant. Requires --user --id --group.', async (args, userId) => {
   await revokeConnectionGrant(userId, required(args, 'id'), required(args, 'group'));

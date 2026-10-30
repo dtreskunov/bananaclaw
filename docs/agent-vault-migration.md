@@ -4,7 +4,11 @@
 
 The [gateway plan of record](credential-gateway-agent-vault-fork-proposal.md)
 now replaces duplicated group-owned credentials with user-owned connections
-and explicit service-level group grants. Ownership reuses native AgentVault
+and explicit whole-credential group grants covering current and future URL rules.
+The connection-wide grant migration expands existing non-revoked partial-grant
+snapshots without changing active/paused/revoked settings or credential status.
+Back up the gateway database before a coordinated host/gateway upgrade.
+Ownership reuses native AgentVault
 users, mapped from stable NanoClaw installation/user IDs; those managed users
 cannot log in to the headless gateway. **F12 copying is removed.**
 

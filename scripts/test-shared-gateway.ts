@@ -83,18 +83,25 @@ try {
   assert.equal(created.status, 'ready');
   assert.deepEqual(created.grants, []);
   assert(!JSON.stringify(created).includes('synthetic-key-one'));
-  await grantConnection(alice, created.id, 'ag-host-one', { services: ['search'] });
-  await grantConnection(alice, created.id, 'ag-host-two', { services: ['search'] });
+  await grantConnection(alice, created.id, 'ag-host-one', {});
+  await grantConnection(alice, created.id, 'ag-host-two', {});
   const shared = await getConnection(alice, created.id);
   assert.equal(shared.grants.length, 2);
   assert(shared.grants.every((grant) => grant.status === 'active'));
+  const expanded = await updateConnection(alice, created.id, {
+    revision: shared.revision,
+    services: [service, { ...service, name: 'added', host: 'added.example.test/*' }],
+  });
+  assert(expanded.grants.every((grant) => grant.status === 'active' && grant.services.includes('added')));
 
   const recipient = await groupConnectionAccess(bob, 'ag-host-two');
-  assert(recipient.some((grant) => grant.connection_id === created.id));
+  assert(!recipient.some((grant) => grant.connection_id === created.id));
+  const ownerAccess = await groupConnectionAccess(alice, 'ag-host-two');
+  assert(ownerAccess.some((grant) => grant.connection_id === created.id && grant.services.length === 2));
   await assert.rejects(getConnection(bob, created.id), denied);
-  await assert.rejects(grantConnection(bob, created.id, 'ag-host-two', { services: ['search'] }), denied);
+  await assert.rejects(grantConnection(bob, created.id, 'ag-host-two', {}), denied);
   const rotated = await updateConnection(alice, created.id, {
-    revision: shared.revision,
+    revision: expanded.revision,
     values: { SEARCH_KEY: 'synthetic-key-two' },
   });
   assert(rotated.grants.every((grant) => grant.status === 'active'));
@@ -145,7 +152,7 @@ try {
   db.prepare('DELETE FROM users WHERE id=?').run(bob);
   await flushManagedUsers();
   console.log(
-    'Real host-to-gateway contract passed: native users, owned libraries, shared grants, rotation, stale writes, detach isolation, private/install apps and role/deletion synchronization.',
+    'Real host-to-gateway contract passed: native users, owned libraries, whole-credential grants, automatic URL expansion, rotation, stale writes, detach isolation, private/install apps and role/deletion synchronization.',
   );
 } finally {
   closeDb();
