@@ -17,10 +17,10 @@
  * Startup sweep edits any leftover cards from a previous process to
  * "Expired (host restarted)" and drops the rows.
  */
-import { OneCLI, type ApprovalRequest, type ManualApprovalHandle } from '@onecli-sh/sdk';
+import type { ApprovalRequest, ManualApprovalHandle } from '@onecli-sh/sdk';
 
 import { pickApprovalDelivery, pickApprover } from './primitive.js';
-import { ONECLI_API_KEY, ONECLI_URL } from '../../config.js';
+import { getOneCliClient, isOneCliConfigured } from '../../onecli-agent.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import {
   createPendingApproval,
@@ -36,8 +36,6 @@ export const ONECLI_ACTION = 'onecli_credential';
 
 type Decision = 'approve' | 'deny';
 
-const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
-
 interface PendingState {
   resolve: (decision: Decision) => void;
   timer: NodeJS.Timeout;
@@ -46,6 +44,8 @@ interface PendingState {
 const pending = new Map<string, PendingState>();
 let handle: ManualApprovalHandle | null = null;
 let adapterRef: ChannelDeliveryAdapter | null = null;
+let starting: Promise<void> | null = null;
+let generation = 0;
 
 /**
  * Generate a short approval id for card buttons.
@@ -82,36 +82,53 @@ export function resolveOneCLIApproval(approvalId: string, selectedOption: string
   return true;
 }
 
-export function startOneCLIApprovalHandler(deliveryAdapter: ChannelDeliveryAdapter): void {
-  if (handle) return;
+export function startOneCLIApprovalHandler(deliveryAdapter: ChannelDeliveryAdapter): Promise<void> {
   adapterRef = deliveryAdapter;
-
-  // Sweep any rows left over from a previous process.
-  sweepStaleApprovals().catch((err) => log.error('OneCLI approval sweep failed', { err }));
-
-  handle = onecli.configureManualApproval(async (request: ApprovalRequest): Promise<Decision> => {
-    try {
-      return await handleRequest(request);
-    } catch (err) {
-      log.error('OneCLI approval handler errored', { id: request.id, err });
-      return 'deny';
+  if (handle) return Promise.resolve();
+  if (starting) return starting;
+  const current = generation;
+  const start = async (): Promise<void> => {
+    const sweep = sweepStaleApprovals().catch((err) => log.error('OneCLI approval sweep failed', { err }));
+    if (!isOneCliConfigured()) {
+      await sweep;
+      log.info('OneCLI approval handler disabled: no legacy gateway configured');
+      return;
     }
+    const onecli = await getOneCliClient();
+    if (generation !== current || !adapterRef) return;
+    handle = onecli.configureManualApproval(async (request: ApprovalRequest): Promise<Decision> => {
+      try {
+        return await handleRequest(request, current);
+      } catch (err) {
+        log.error('OneCLI approval handler errored', { id: request.id, err });
+        return 'deny';
+      }
+    });
+    log.info('OneCLI approval handler started');
+    await sweep;
+  };
+  const task = start().finally(() => {
+    if (starting === task) starting = null;
   });
-  log.info('OneCLI approval handler started');
+  starting = task;
+  return task;
 }
 
 export function stopOneCLIApprovalHandler(): void {
+  generation++;
+  starting = null;
   handle?.stop();
   handle = null;
   for (const state of pending.values()) {
     clearTimeout(state.timer);
+    state.resolve('deny');
   }
   pending.clear();
   adapterRef = null;
 }
 
-async function handleRequest(request: ApprovalRequest): Promise<Decision> {
-  if (!adapterRef) return 'deny';
+async function handleRequest(request: ApprovalRequest, expectedGeneration: number): Promise<Decision> {
+  if (!adapterRef || generation !== expectedGeneration) return 'deny';
 
   // Originating agent group is carried on the request via OneCLI's agent
   // identifier (set by container-runner.ts to agentGroup.id). Use it as
@@ -138,6 +155,8 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
     });
     return 'deny';
   }
+  if (!adapterRef || generation !== expectedGeneration) return 'deny';
+  const deliveryAdapter = adapterRef;
 
   // Use a short id for the card/button so Chat SDK's Telegram adapter can
   // fit everything inside the 64-byte callback_data limit. The OneCLI
@@ -152,7 +171,7 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
   ];
   let platformMessageId: string | undefined;
   try {
-    platformMessageId = await adapterRef.deliver(
+    platformMessageId = await deliveryAdapter.deliver(
       target.messagingGroup.channel_type,
       target.messagingGroup.platform_id,
       null,
@@ -168,6 +187,19 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
     );
   } catch (err) {
     log.error('Failed to deliver OneCLI approval card', { approvalId, oneCliRequestId: request.id, err });
+    return 'deny';
+  }
+  if (!adapterRef || generation !== expectedGeneration) {
+    await editCardExpired(
+      {
+        approval_id: approvalId,
+        platform_message_id: platformMessageId ?? null,
+        channel_type: target.messagingGroup.channel_type,
+        platform_id: target.messagingGroup.platform_id,
+      },
+      'host stopped',
+      deliveryAdapter,
+    );
     return 'deny';
   }
 
@@ -226,10 +258,14 @@ async function expireApproval(approvalId: string, reason: string): Promise<void>
   log.info('OneCLI approval expired', { approvalId, reason });
 }
 
-async function editCardExpired(row: PendingApproval, reason: string): Promise<void> {
-  if (!adapterRef || !row.platform_message_id || !row.channel_type || !row.platform_id) return;
+async function editCardExpired(
+  row: Pick<PendingApproval, 'approval_id' | 'platform_message_id' | 'channel_type' | 'platform_id'>,
+  reason: string,
+  deliveryAdapter = adapterRef,
+): Promise<void> {
+  if (!deliveryAdapter || !row.platform_message_id || !row.channel_type || !row.platform_id) return;
   try {
-    await adapterRef.deliver(
+    await deliveryAdapter.deliver(
       row.channel_type,
       row.platform_id,
       null,

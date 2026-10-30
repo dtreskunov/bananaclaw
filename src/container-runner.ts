@@ -7,8 +7,6 @@ import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { OneCLI } from '@onecli-sh/sdk';
-
 import {
   CONTAINER_CPU_LIMIT,
   CONTAINER_IMAGE,
@@ -18,8 +16,6 @@ import {
   CONTAINER_MEMORY_LIMIT,
   DATA_DIR,
   GROUPS_DIR,
-  ONECLI_API_KEY,
-  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
 import { materializeContainerJson } from './container-config.js';
@@ -51,7 +47,7 @@ import { defaultSkillRoots, groupSkillRoots, listSkills, type SkillRoot } from '
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
-import { ensureOneCliAgent } from './onecli-agent.js';
+import { ensureOneCliAgent, getOneCliClient } from './onecli-agent.js';
 import {
   SESSION_LINK_VERSION,
   sessionLinkDir,
@@ -77,10 +73,11 @@ import {
 } from './session-manager.js';
 import type { AgentGroup, Session } from './types.js';
 
-const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
-
 /** Active containers tracked by session ID. */
-const activeContainers = new Map<string, { process: ChildProcess; containerName: string; adopted?: boolean; recovering?: boolean }>();
+const activeContainers = new Map<
+  string,
+  { process: ChildProcess; containerName: string; adopted?: boolean; recovering?: boolean }
+>();
 
 export interface McpProbeResult {
   ok: boolean;
@@ -124,10 +121,12 @@ export function isContainerRunning(sessionId: string): boolean {
  */
 export function wakeContainer(session: Session): Promise<boolean> {
   const recovery = recoveryPromises.get(session.id);
-  if (recovery) return recovery.then((recovered) => recovered ? wakeContainer(session) : false);
+  if (recovery) return recovery.then((recovered) => (recovered ? wakeContainer(session) : false));
   const active = activeContainers.get(session.id);
   if (active) {
-    log.debug(active.recovering ? 'Recovery container still owns session' : 'Container already running', { sessionId: session.id });
+    log.debug(active.recovering ? 'Recovery container still owns session' : 'Container already running', {
+      sessionId: session.id,
+    });
     return Promise.resolve(!active.recovering);
   }
   const existing = wakePromises.get(session.id);
@@ -177,12 +176,23 @@ async function runRecoveryContainer(session: Session): Promise<boolean> {
     },
   ];
   const config: import('./container-config.js').ContainerConfig = {
-    mcpServers: {}, packages: { apt: [], npm: [], pip: [] },
-    additionalMounts: [], skills: [], disabledSkills: [],
+    mcpServers: {},
+    packages: { apt: [], npm: [], pip: [] },
+    additionalMounts: [],
+    skills: [],
+    disabledSkills: [],
     imageTag: getContainerConfig(agentGroup.id)?.image_tag ?? undefined,
   };
   const args = await buildContainerArgs(
-    mounts, containerName, agentGroup, config, 'native', {}, undefined, session.id, 'recovery',
+    mounts,
+    containerName,
+    agentGroup,
+    config,
+    'native',
+    {},
+    undefined,
+    session.id,
+    'recovery',
   );
   log.info('Recovering stopped runner journal', { sessionId: session.id, containerName });
   const child = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -190,13 +200,20 @@ async function runRecoveryContainer(session: Session): Promise<boolean> {
   activeContainers.set(session.id, entry);
   let stderr = '';
   let stopFailed = false;
-  child.stderr?.on('data', (data: Buffer) => { stderr = (stderr + data.toString()).slice(-64 * 1024); });
+  child.stderr?.on('data', (data: Buffer) => {
+    stderr = (stderr + data.toString()).slice(-64 * 1024);
+  });
   const timeout = setTimeout(() => {
     log.warn('Runner recovery timed out — stopping recovery container', { sessionId: session.id, containerName });
-    try { stopContainer(containerName); }
-    catch (err) {
+    try {
+      stopContainer(containerName);
+    } catch (err) {
       stopFailed = true;
-      log.error('Failed to stop recovery container; keeping session locked until runtime recovery', { sessionId: session.id, containerName, err });
+      log.error('Failed to stop recovery container; keeping session locked until runtime recovery', {
+        sessionId: session.id,
+        containerName,
+        err,
+      });
       child.kill('SIGTERM');
     }
   }, 45_000);
@@ -915,10 +932,7 @@ function selectedSkillNames(
     .map((skill) => skill.slug);
 }
 
-export function resourceLimitArgs(
-  memory = CONTAINER_MEMORY_LIMIT,
-  cpus = CONTAINER_CPU_LIMIT,
-): string[] {
+export function resourceLimitArgs(memory = CONTAINER_MEMORY_LIMIT, cpus = CONTAINER_CPU_LIMIT): string[] {
   const args: string[] = [];
   if (memory !== '0') {
     if (!/^\d+[kmg]?$/i.test(memory) || parseInt(memory, 10) === 0) {
@@ -1023,7 +1037,7 @@ export async function buildContainerArgs(
     if (ksm) args.push('-e', `KSM_MERGE=${ksm}`);
   }
 
-  // Agent Vault groups (credential gateway spike) replace OneCLI and its
+  // AgentVault groups replace OneCLI and its
   // network setup; their egress env must win over provider contributions.
   const agentVault = usesAgentVault(agentGroup.id);
   const reservedEnv = agentVault ? agentVaultEnvKeys() : new Set<string>();
@@ -1082,6 +1096,7 @@ export async function buildContainerArgs(
       label: `${launchMode}:${sessionId}`,
     });
   } else {
+    const onecli = await getOneCliClient();
     if (agentIdentifier) {
       await ensureOneCliAgent(onecli, agentGroup.name, agentIdentifier);
     }

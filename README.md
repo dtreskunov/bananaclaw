@@ -22,7 +22,7 @@
 BananaClaw is a fork of [**NanoClaw**](https://github.com/nanocoai/nanoclaw) by
 **Gavriel Cohen** and the [NanoClaw contributors](CONTRIBUTORS.md). The runtime
 — host router, two-DB session protocol, per-session container model, Claude
-Agent SDK integration, skills-as-branches, OneCLI credential isolation — is
+Agent SDK integration, skills-as-branches, credential-isolated egress — is
 NanoClaw's, line-for-line. Upstream's README is preserved as
 [README.nanoclaw.md](README.nanoclaw.md).
 

@@ -1,10 +1,27 @@
 import type { OneCLI } from '@onecli-sh/sdk';
 
-import { ONECLI_NEW_AGENT_SECRET_IDS } from './config.js';
+import { ONECLI_API_KEY, ONECLI_NEW_AGENT_SECRET_IDS, ONECLI_URL } from './config.js';
 import { log } from './log.js';
 
 type AgentProvisioningClient = Pick<OneCLI, 'ensureAgent' | 'listAgents' | 'attachSecret'>;
 const provisioning = new Map<string, Promise<void>>();
+let legacyClient: Promise<OneCLI> | null = null;
+
+export function isOneCliConfigured(): boolean {
+  if (!ONECLI_URL && !ONECLI_API_KEY) return false;
+  if (!ONECLI_URL || !ONECLI_API_KEY)
+    throw new Error('Legacy OneCLI requires both ONECLI_URL and ONECLI_API_KEY; no cloud fallback is allowed');
+  return true;
+}
+
+export function getOneCliClient(): Promise<OneCLI> {
+  if (!isOneCliConfigured())
+    throw new Error('OneCLI is not configured for this legacy agent; migrate it to AgentVault before starting it');
+  legacyClient ??= import('@onecli-sh/sdk').then(
+    ({ OneCLI }) => new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY }),
+  );
+  return legacyClient;
+}
 
 export function ensureOneCliAgent(
   client: AgentProvisioningClient,

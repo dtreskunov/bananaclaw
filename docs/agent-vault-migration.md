@@ -52,6 +52,21 @@ The target transition must:
 
 ## Deployed vault-local tooling
 
+### Legacy runtime isolation during retirement
+
+AgentVault container setup and the approval module no longer import the OneCLI
+SDK eagerly. When both `ONECLI_URL` and `ONECLI_API_KEY` are absent, the
+legacy approval listener stays disabled and AgentVault-only operation requires
+neither the SDK at runtime nor a reachable OneCLI service. Stale approval cards
+are still swept. Partial legacy configuration is reported explicitly; it never
+falls back to the SDK's default cloud endpoint.
+
+Existing OneCLI groups still require both settings and lazily load their
+shared client on use. The dependency remains installed for those groups and
+the metadata inventory tooling until their reviewed cutovers are complete.
+This isolation does not retire groups, change backends or grants, cancel queued
+messages/tasks, or change the effective default for new groups.
+
 The Agent Vault canary is working. This tooling advances the remaining
 per-group migration without copying credentials or changing live access.
 Inventory and preparation remain read-only with respect to live access.

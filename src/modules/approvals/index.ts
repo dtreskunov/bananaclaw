@@ -27,9 +27,7 @@ export type { ApprovalHandler, ApprovalHandlerContext, RequestApprovalOptions } 
 
 registerResponseHandler(handleApprovalsResponse);
 
-onDeliveryAdapterReady((adapter) => {
-  startOneCLIApprovalHandler(adapter);
-});
+onDeliveryAdapterReady(startOneCLIApprovalHandler);
 
 onShutdown(() => {
   stopOneCLIApprovalHandler();
