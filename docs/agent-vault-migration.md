@@ -84,6 +84,28 @@ Schema rollback requires the matching protected DB snapshot and host files,
 not a binary-only downgrade. No existing group's credentials, grants or queued
 work are changed by this migration.
 
+### Approved archival retirement
+
+Retirement is a separate, owner-approved operation, not a side effect of
+inventory or inactivity. Before archiving, check running containers, every
+recorded session's queued/paused work, approvals, questions, incoming routes
+and filesystem availability. Rehearse archive/restore on a protected consistent
+DB copy and retain matched private backups.
+
+Use the existing group archive flow to preserve the restorable row snapshot,
+group directory and session tree. Remove only the retiring agents' OneCLI
+secret/connection grants and gateway group bindings; do not delete shared
+credentials or disconnect their upstream accounts. Gateway revoked grant rows
+remain for audit: verify no active/suspended grants, not physical row absence.
+Restoring archived rows/history does **not** restore revoked external grants;
+review credentials and explicitly authorize access before resuming the agent.
+
+The approved 2026-10-30 retirement archived five groups and preserved all five
+recorded sessions. The active fleet is now three AgentVault and six OneCLI
+groups. Remaining group configuration and source grant metadata, native
+connections/policies and OAuth state were verified unchanged. OneCLI must remain available for those
+six groups until their reviewed cutovers and the sustained acceptance gate.
+
 The Agent Vault canary is working. This tooling advances the remaining
 per-group migration without copying credentials or changing live access.
 Inventory and preparation remain read-only with respect to live access.
