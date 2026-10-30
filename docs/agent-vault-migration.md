@@ -124,6 +124,16 @@ fail closed, and no caller gains access to another owner's management metadata.
 Static credential destination conflicts remain rejected. Do not silently add
 destination administration merely to make another owner's grant possible.
 
+One more Google-dependent group subsequently completed owner consent, all seven
+Google API metadata checks, model generation and private-journal MCP validation.
+Its nine session queues, journal data and routing were retained; the explicitly
+removed cross-owner legacy Google grants were revoked without changing the
+other groups' source grants. The active fleet is now **seven AgentVault and two
+OneCLI groups**, awaiting the second owner's Google/BananaBrowse authorizations.
+Missing Docs, Sheets and Forms API enablement in the existing OAuth client
+project was resolved before cutover. No journal contents or provider tokens
+were exported for validation.
+
 The Agent Vault canary is working. This tooling advances the remaining
 per-group migration without copying credentials or changing live access.
 Inventory and preparation remain read-only with respect to live access.
