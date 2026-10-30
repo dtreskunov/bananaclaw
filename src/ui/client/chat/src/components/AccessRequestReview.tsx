@@ -26,6 +26,20 @@ interface AccessPreview {
   mcp?: { names: string[]; revision: string; configured?: Record<string, { connection_id: string; account_alias: string } | undefined> };
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  applying: 'Applying access...',
+  completed: 'Access granted.',
+  rejected: 'Request declined.',
+  cancelled: 'Request cancelled.',
+  expired: 'Request expired.',
+};
+
+function accountNickname(preview: AccessPreview, server: string): string {
+  const configured = preview.mcp?.configured?.[server];
+  return configured?.connection_id === preview.connection.id ? configured.account_alias :
+    connectionName(preview.connection).replace(/\p{Cc}/gu, ' ').trim().slice(0, 80);
+}
+
 export function AccessRequestReview({ id, connections, preferredConnectionId, signingIn, onCreate, onManage, onSaved }: {
   id: string;
   connections: Connection[];
@@ -41,7 +55,6 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
   const [preview, setPreview] = useState<AccessPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [confirmed, setConfirmed] = useState(false);
   const [configureMcp, setConfigureMcp] = useState(false);
   const [mcpServer, setMcpServer] = useState('');
   const [accountAlias, setAccountAlias] = useState('');
@@ -62,9 +75,15 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
   }, [preferredConnectionId, compatibleIds, selected, request.data]);
   const connectionVersion = JSON.stringify(connections.map(connection => [connection.id, connection.revision, connection.status,
     connection.requested_scopes, connection.granted_scopes, connection.scope_source]));
+  const chosen = connections.find(connection => connection.id === selected);
+  const canApply = !busy && !signingIn && chosen?.status === 'ready' && preview?.matches && preview.connection.status === 'ready' &&
+    preview.connection.id === selected && chosen?.revision === preview.connection.revision &&
+    request.data?.status === 'pending' && preview.request.status === 'pending' &&
+    preview.request.revision === request.data.revision &&
+    (!configureMcp || (!!mcpServer && !!accountAlias.trim()));
+  const failed = request.data?.status === 'failed';
   useEffect(() => {
     setPreview(null);
-    setConfirmed(false);
     setConfigureMcp(false);
     if (request.data?.status !== 'pending') return;
     setError('');
@@ -76,7 +95,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
         setPreview(value);
         const name = value.request.mcp_server ?? (value.mcp?.names.length === 1 ? value.mcp.names[0] : '');
         setMcpServer(name);
-        setAccountAlias(value.mcp?.configured?.[name]?.account_alias || name);
+        setAccountAlias(accountNickname(value, name));
       })
       .catch(error => {
         if (controller.signal.aborted) return;
@@ -87,7 +106,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
   }, [path, selected, connectionVersion, request.data?.revision, request.data?.status]);
 
   async function apply(): Promise<void> {
-    if (!preview || !confirmed || busy) return;
+    if (!preview || !canApply) return;
     setBusy(true);
     setError('');
     try {
@@ -98,14 +117,12 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
         ...(configureMcp ? { mcp_server: mcpServer, account_alias: accountAlias } : {}),
       });
       setPreview(null);
-      setConfirmed(false);
       await request.refresh();
       onSaved();
     } catch (error) {
       if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
       setError(errorMessage(error));
       setPreview(null);
-      setConfirmed(false);
       await request.refresh();
       onSaved();
     } finally { setBusy(false); }
@@ -127,7 +144,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
     setBusy(true);
     setError('');
     setPreview(null);
-    setConfirmed(false);
+    setConfigureMcp(false);
     try {
       await credentialRequest(path + '/retry', 'POST', { request_revision: request.data.revision });
       setSelected('');
@@ -141,83 +158,84 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
   }
 
   return <section class="ga-cred access-request-review" aria-label="Review access request">
-    <h3>Review agent access</h3>
-    <ErrorNotice message={request.error || error} />
+    <h3>Allow agent access</h3>
+    <ErrorNotice message={request.error || (failed ? "Couldn't finish setup. Some changes may have applied." : error)} />
     {request.loading ? <p role="status">Loading access request…</p> : null}
     {request.error ? <button type="button" onClick={() => void request.refresh()}>Retry</button> : null}
     {request.data ? <>
-      <p>{request.data.reason}</p>
-      <p><code>{request.data.resource_url}</code></p>
-      {request.data.mcp_server ? <p>MCP server: {request.data.mcp_server}</p> : null}
-      <p>Recipient agent: {request.data.agent_group_name ?? request.data.agent_group_id}</p>
-      {request.data.authentication ? <p>Requested authentication: {ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type]}
-        {request.data.authentication.app_id ? ` · OAuth app: ${request.data.authentication.app_id}` : ''}
-        {request.data.authentication.header ? ` · Header: ${request.data.authentication.header}` : ''}
-        {request.data.authentication.prefix !== undefined ? ` · Public prefix: ${JSON.stringify(request.data.authentication.prefix)}` : ''}
-        {request.data.authentication.headers?.length ? ` · Headers: ${request.data.authentication.headers.join(', ')}` : ''}
-        . Review these agent suggestions before using them.</p> : null}
-      {request.data.scopes?.length ? <p>Suggested scopes (not automatically granted): {request.data.scopes.join(' ')}</p> : null}
+      <p><strong>{request.data.agent_group_name ?? request.data.agent_group_id}</strong> · <code>{new URL(request.data.resource_url).host}</code></p>
       {request.data.status !== 'pending' ? <div>
-        <p role="status">{request.data.result?.message ?? request.data.status}</p>
+        {!failed ? <p role="status">{STATUS_LABELS[request.data.status] ?? request.data.status}</p> : null}
         {request.data.status === 'failed' ? <button type="button" disabled={busy || signingIn}
           onClick={() => void retry()}>Review and retry</button> : null}
       </div> : <>
-        <label>Personal connection
-          <select aria-label="Connection for access request" value={selected} disabled={busy}
+        <label>Account
+          <select aria-label="Account" value={selected} disabled={busy}
             onChange={event => setSelected(event.currentTarget.value)}>
-            <option value="">Choose from your Credentials</option>
+            <option value="">Choose an account</option>
             {compatible.map(connection => <option value={connection.id} key={connection.id}>
-              {connectionName(connection)}{connection.status === 'ready' ? '' : ` (${connection.status})`}
+              {connectionName(connection)}{connection.account ? ` (${connection.account})` : ''}{connection.status === 'ready' ? '' : ` (${connection.status})`}
             </option>)}
           </select>
         </label>
-        <p class="muted">Only credentials matching this URL and the requested authentication and scopes are listed. Unknown scope grants are not assumed to match.</p>
-        {!compatible.length ? <p role="status">No credentials match this destination, authentication mechanism and requested scopes. Create one to continue.</p> : null}
+        {!compatible.length ? <p role="status">No matching accounts. Add one to continue.</p> : null}
         {createdMismatch && !selected ? <div role="alert">
-          The new credential was saved, but its destination, authentication or provider-reported scopes do not meet this request. No access was granted.
+          This account doesn't match the request. No access was granted.
           <button type="button" disabled={busy || signingIn} onClick={() => onManage(created)}>Review new credential</button>
         </div> : null}
         <button type="button" class={!compatible.length ? 'primary' : undefined} disabled={busy || signingIn}
-          onClick={() => { setSelected(''); setPreview(null); setConfirmed(false); onCreate(request.data!); }}>Create new credential</button>
-        <button type="button" disabled={busy} onClick={() => void reject()}>Reject request</button>
+          onClick={() => { setSelected(''); setPreview(null); onCreate(request.data!); }}>Add account</button>
+        <button type="button" disabled={busy} onClick={() => void reject()}>Decline</button>
         {preview ? <>
-          <h4>{connectionName(preview.connection)}</h4>
-          {preview.connection.account ? <p>{preview.connection.account}</p> : null}
+          {preview.mcp?.names.length ? <div><label>
+            <input type="checkbox" checked={configureMcp} disabled={busy}
+              onChange={event => setConfigureMcp(event.currentTarget.checked)} />
+            Use for {mcpServer || 'an MCP server'}
+          </label>
+          {configureMcp ? <>
+            {!preview.request.mcp_server ? <label>MCP server<select aria-label="MCP server for access request" value={mcpServer} disabled={busy}
+              onChange={event => {
+                const name = event.currentTarget.value;
+                setMcpServer(name); setAccountAlias(accountNickname(preview, name));
+              }}>
+              <option value="">Choose one server</option>
+              {preview.mcp.names.map(name => <option key={name} value={name}>{name}</option>)}
+            </select></label> : null}
+            <p class="muted">Restarts the requesting session.</p>
+            <details><summary>Customize name</summary>
+              <label>Nickname<input aria-label="Account nickname" value={accountAlias} maxLength={80} disabled={busy}
+                onInput={event => setAccountAlias(event.currentTarget.value)} /></label>
+            </details>
+          </> : null}</div> : null}
+          {!preview.matches ? <p role="status">This account doesn't match the request.</p> : null}
+          {preview.connection.status !== 'ready' || !preview.matches ? <button type="button" disabled={busy || signingIn}
+            onClick={() => onManage(preview.connection)}>Manage this connection</button> : null}
+          <button type="button" class="primary" disabled={!canApply}
+            onClick={() => void apply()}>{busy ? 'Applying…' : 'Allow access'}</button>
+        </> : null}
+      </>}
+      <details><summary>Details</summary>
+        <p>Agent's explanation: {request.data.reason}</p>
+        <p><code>{request.data.resource_url}</code></p>
+        {request.data.mcp_server ? <p>MCP server: {request.data.mcp_server}</p> : null}
+        {request.data.authentication ? <p>Requested authentication: {ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type]}
+          {request.data.authentication.app_id ? ` · OAuth app: ${request.data.authentication.app_id}` : ''}
+          {request.data.authentication.header ? ` · Header: ${request.data.authentication.header}` : ''}
+          {request.data.authentication.prefix !== undefined ? ` · Public prefix: ${JSON.stringify(request.data.authentication.prefix)}` : ''}
+          {request.data.authentication.headers?.length ? ` · Headers: ${request.data.authentication.headers.join(', ')}` : ''}
+        </p> : null}
+        {request.data.scopes?.length ? <p>Suggested scopes: {request.data.scopes.join(' ')}</p> : null}
+        {preview ? <>
           <ul>{preview.connection.services.map(service => <li key={service.name}>
             {serviceDestination(service)} · {service.auth.type}
           </li>)}</ul>
           {preview.connection.kind !== 'static' ? <p>Provider-reported scopes: {preview.connection.granted_scopes?.join(' ') || 'Not reported; permissions are not verified.'}</p> : null}
-          <p>{preview.grantBreadth}</p>
           <p>{preview.verification}</p>
-          {preview.mcp?.names.length ? <div><label>
-            <input type="checkbox" checked={configureMcp} disabled={busy}
-              onChange={event => setConfigureMcp(event.currentTarget.checked)} />
-            Pin this connection to one named MCP server and restart the requesting session.
-          </label>
-          {configureMcp ? <>
-            <label>MCP server<select aria-label="MCP server for access request" value={mcpServer} disabled={busy || !!preview.request.mcp_server}
-              onChange={event => {
-                const name = event.currentTarget.value;
-                setMcpServer(name); setAccountAlias(preview.mcp?.configured?.[name]?.account_alias || name);
-              }}>
-              <option value="">Choose one server</option>
-              {preview.mcp.names.map(name => <option key={name} value={name}>{name}</option>)}
-            </select></label>
-            <label>Account alias<input aria-label="MCP account alias" value={accountAlias} maxLength={80} disabled={busy}
-              onInput={event => setAccountAlias(event.currentTarget.value)} /></label>
-            <p>Only {mcpServer || 'the selected server'} will change. Other servers using the same URL keep their own accounts. Manual Authorization is replaced by the host-managed connection.</p>
-          </> : null}</div> : null}
-          {!preview.matches ? <p role="status">This connection does not cover the requested destination. Do not extend OAuth routing just to match a hostname.</p> : null}
-          {preview.connection.status !== 'ready' || !preview.matches ? <button type="button" disabled={busy || signingIn}
-            onClick={() => onManage(preview.connection)}>Manage this connection</button> : null}
-          <label><input type="checkbox" checked={confirmed} disabled={busy || !preview.matches || preview.connection.status !== 'ready'}
-            onChange={event => setConfirmed(event.currentTarget.checked)} />
-            Allow this agent to use this connection, including its full permissions and current and future URL patterns.
-          </label>
-          <button type="button" class="primary" disabled={busy || !confirmed || !preview.matches || preview.connection.status !== 'ready' || preview.request.status !== 'pending' || (configureMcp && (!mcpServer || !accountAlias.trim()))}
-            onClick={() => void apply()}>{busy ? 'Applying…' : 'Allow access and continue'}</button>
+          {configureMcp ? <p>Only {mcpServer || 'the selected server'} changes. Manual Authorization is replaced by this account; other servers are unchanged.</p> : null}
         </> : null}
-      </>}
+        {failed && error ? <p>{error}</p> : null}
+        {request.data.result?.message && request.data.result.message !== error ? <p>{request.data.result.message}</p> : null}
+      </details>
     </> : null}
   </section>;
 }

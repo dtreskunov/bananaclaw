@@ -113,6 +113,8 @@ afterEach(() => {
 });
 
 interface TestProps {
+  'aria-label'?: string;
+  open?: boolean;
   class?: string;
   scopes?: string;
   appId?: string;
@@ -225,7 +227,7 @@ describe('assisted credential approval UI', () => {
         .map((child) => child.props.value),
     ).toEqual(['', original.id]);
     descendants(node)
-      .find((child) => child.type === 'button' && child.props.children === 'Create new credential')!
+      .find((child) => child.type === 'button' && child.props.children === 'Add account')!
       .props.onClick();
     expect(onCreate).toHaveBeenCalledWith(request);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
@@ -335,7 +337,7 @@ describe('assisted credential approval UI', () => {
     expect(onRespond).toHaveBeenCalledWith('approve');
   });
 
-  it('reopens failed requests for review without granting access or retaining confirmation', async () => {
+  it('reopens failed requests without granting access or retaining the account or server choice', async () => {
     hooks.resource.data = {
       request_id: 'access-one',
       status: 'failed',
@@ -369,7 +371,7 @@ describe('assisted credential approval UI', () => {
     expect(hooks.slots[4]).toBe(false);
   });
 
-  it('requires explicit selection and breadth confirmation before granting access', async () => {
+  it('uses the Allow access button as confirmation without a checkbox or permission notice', async () => {
     const request = {
       request_id: 'access-one',
       status: 'pending',
@@ -382,16 +384,17 @@ describe('assisted credential approval UI', () => {
     hooks.resource.data = request;
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            request,
-            connection: original,
-            matches: true,
-            grantBreadth: 'All current and future URL patterns.',
-            verification: 'Authenticated operation not verified.',
-          }),
-        ),
+      vi.fn().mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              request,
+              connection: original,
+              matches: true,
+              grantBreadth: 'All current and future URL patterns.',
+              verification: 'Authenticated operation not verified.',
+            }),
+          ),
       ),
     );
     const props = { id: 'access-one', connections: [original], onCreate: vi.fn(), onManage: vi.fn(), onSaved: vi.fn() };
@@ -411,13 +414,128 @@ describe('assisted credential approval UI', () => {
     node = draw();
     const allow = (): TestNode =>
       descendants(node).find((child) => child.type === 'button' && child.props.class === 'primary')!;
+    expect(allow().props.disabled).toBe(false);
+    expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
+      0,
+    );
+    expect(
+      descendants(node)
+        .filter((child) => child.type === 'label')
+        .map((child) => child.props.children),
+    ).not.toContain(
+      'Allow this agent to use this connection, including its full permissions and current and future URL patterns.',
+    );
+    expect(
+      descendants(node).some(
+        (child) => child.type === 'p' && child.props.children === 'All current and future URL patterns.',
+      ),
+    ).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.every(([url]) => String(url).endsWith('/preview'))).toBe(true);
+    props.connections = [{ ...original, revision: 'new-revision' }];
+    node = draw();
     expect(allow().props.disabled).toBe(true);
-    descendants(node)
-      .find((child) => child.type === 'input' && child.props.type === 'checkbox')!
-      .props.onChange({ currentTarget: { checked: true } });
+    await allow().props.onClick();
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+    props.connections = [{ ...original, status: 'disabled' }];
+    node = draw();
+    expect(allow().props.disabled).toBe(true);
+    await allow().props.onClick();
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+    props.connections = [original];
+    node = draw();
+    await allow().props.onClick();
+    await vi.waitFor(() => expect(props.onSaved).toHaveBeenCalledOnce());
+    const [url, options] = vi.mocked(fetch).mock.calls[1];
+    expect(String(url)).toMatch(/\/apply$/);
+    expect(JSON.parse(String(options?.body))).toMatchObject({
+      connection_id: original.id,
+      connection_revision: original.revision,
+      request_revision: 1,
+      configure_mcp: false,
+    });
+  });
+
+  it('keeps named MCP setup compact and defaults the nickname to the selected account', async () => {
+    const request = {
+      request_id: 'access-one',
+      status: 'pending',
+      resource_url: 'https://api.example.com/',
+      reason: 'Read the report',
+      revision: 1,
+      agent_group_id: 'one',
+      mcp_server: 'search',
+      result: null,
+    };
+    hooks.resource.data = request;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              request,
+              connection: original,
+              matches: true,
+              grantBreadth: 'Full access',
+              verification: 'Not yet verified',
+              mcp: {
+                names: ['search'],
+                revision: 'mcp-r1',
+                configured: {
+                  search: { connection_id: 'another-account', account_alias: 'Work account' },
+                },
+              },
+            }),
+          ),
+      ),
+    );
+    const draw = (): TestNode => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestReview({
+        id: request.request_id,
+        connections: [original],
+        onCreate: vi.fn(),
+        onManage: vi.fn(),
+        onSaved: vi.fn(),
+      }) as TestNode;
+    };
+    let node = draw();
+    find(node, 'select').props.onChange({ currentTarget: { value: original.id } });
+    node = draw();
+    for (const effect of hooks.effects) effect();
+    await vi.waitFor(() => expect(hooks.slots[1]).toMatchObject({ matches: true }));
+    node = draw();
+    const checkboxes = descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox');
+    expect(checkboxes).toHaveLength(1);
+    checkboxes[0].props.onChange({ currentTarget: { checked: true } });
+    node = draw();
+    expect(descendants(node).filter((child) => child.type === 'select')).toHaveLength(1);
+    const nickname = descendants(node).find(
+      (child) => child.type === 'input' && child.props['aria-label'] === 'Account nickname',
+    )!;
+    expect(nickname.props.value).toBe(original.label);
+    expect(
+      descendants(node)
+        .filter((child) => child.type === 'details')
+        .every((child) => !child.props.open),
+    ).toBe(true);
+    const allow = (): TestNode =>
+      descendants(node).find((child) => child.type === 'button' && child.props.children === 'Allow access')!;
+    nickname.props.oninput({ currentTarget: { value: '' } });
+    node = draw();
+    expect(allow().props.disabled).toBe(true);
+    nickname.props.oninput({ currentTarget: { value: 'Personal account' } });
     node = draw();
     expect(allow().props.disabled).toBe(false);
-    expect(vi.mocked(fetch).mock.calls.every(([url]) => String(url).endsWith('/preview'))).toBe(true);
+    await allow().props.onClick();
+    const [, options] = vi.mocked(fetch).mock.calls.at(-1)!;
+    expect(JSON.parse(String(options?.body))).toMatchObject({
+      configure_mcp: true,
+      mcp_server: 'search',
+      account_alias: 'Personal account',
+      config_revision: 'mcp-r1',
+    });
   });
 });
 function descendants(value: unknown): TestNode[] {

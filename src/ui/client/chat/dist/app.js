@@ -30248,6 +30248,17 @@ function connectionMatchesAccess(connection2, request) {
 }
 
 // src/components/AccessRequestReview.tsx
+var STATUS_LABELS = {
+  applying: "Applying access...",
+  completed: "Access granted.",
+  rejected: "Request declined.",
+  cancelled: "Request cancelled.",
+  expired: "Request expired."
+};
+function accountNickname(preview, server) {
+  const configured = preview.mcp?.configured?.[server];
+  return configured?.connection_id === preview.connection.id ? configured.account_alias : connectionName(preview.connection).replace(/\p{Cc}/gu, " ").trim().slice(0, 80);
+}
 function AccessRequestReview({ id: id2, connections, preferredConnectionId, signingIn, onCreate, onManage, onSaved }) {
   const path = credentialsPath(`/access-requests/${encodeURIComponent(id2)}`);
   const request = useCredentialResource(path);
@@ -30255,7 +30266,6 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
   const [preview, setPreview] = h2(null);
   const [busy, setBusy] = h2(false);
   const [error, setError] = h2("");
-  const [confirmed, setConfirmed] = h2(false);
   const [configureMcp, setConfigureMcp] = h2(false);
   const [mcpServer, setMcpServer] = h2("");
   const [accountAlias, setAccountAlias] = h2("");
@@ -30281,9 +30291,11 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
     connection2.granted_scopes,
     connection2.scope_source
   ]));
+  const chosen = connections.find((connection2) => connection2.id === selected);
+  const canApply = !busy && !signingIn && chosen?.status === "ready" && preview?.matches && preview.connection.status === "ready" && preview.connection.id === selected && chosen?.revision === preview.connection.revision && request.data?.status === "pending" && preview.request.status === "pending" && preview.request.revision === request.data.revision && (!configureMcp || !!mcpServer && !!accountAlias.trim());
+  const failed = request.data?.status === "failed";
   y2(() => {
     setPreview(null);
-    setConfirmed(false);
     setConfigureMcp(false);
     if (request.data?.status !== "pending") return;
     setError("");
@@ -30294,7 +30306,7 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
       setPreview(value);
       const name = value.request.mcp_server ?? (value.mcp?.names.length === 1 ? value.mcp.names[0] : "");
       setMcpServer(name);
-      setAccountAlias(value.mcp?.configured?.[name]?.account_alias || name);
+      setAccountAlias(accountNickname(value, name));
     }).catch((error2) => {
       if (controller.signal.aborted) return;
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
@@ -30303,7 +30315,7 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
     return () => controller.abort();
   }, [path, selected, connectionVersion, request.data?.revision, request.data?.status]);
   async function apply2() {
-    if (!preview || !confirmed || busy) return;
+    if (!preview || !canApply) return;
     setBusy(true);
     setError("");
     try {
@@ -30316,14 +30328,12 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
         ...configureMcp ? { mcp_server: mcpServer, account_alias: accountAlias } : {}
       });
       setPreview(null);
-      setConfirmed(false);
       await request.refresh();
       onSaved();
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
       setError(errorMessage(error2));
       setPreview(null);
-      setConfirmed(false);
       await request.refresh();
       onSaved();
     } finally {
@@ -30347,7 +30357,7 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
     setBusy(true);
     setError("");
     setPreview(null);
-    setConfirmed(false);
+    setConfigureMcp(false);
     try {
       await credentialRequest(path + "/retry", "POST", { request_revision: request.data.revision });
       setSelected("");
@@ -30362,36 +30372,18 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
     }
   }
   return /* @__PURE__ */ u4("section", { class: "ga-cred access-request-review", "aria-label": "Review access request", children: [
-    /* @__PURE__ */ u4("h3", { children: "Review agent access" }),
-    /* @__PURE__ */ u4(ErrorNotice, { message: request.error || error }),
+    /* @__PURE__ */ u4("h3", { children: "Allow agent access" }),
+    /* @__PURE__ */ u4(ErrorNotice, { message: request.error || (failed ? "Couldn't finish setup. Some changes may have applied." : error) }),
     request.loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading access request\u2026" }) : null,
     request.error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void request.refresh(), children: "Retry" }) : null,
     request.data ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4("p", { children: request.data.reason }),
-      /* @__PURE__ */ u4("p", { children: /* @__PURE__ */ u4("code", { children: request.data.resource_url }) }),
-      request.data.mcp_server ? /* @__PURE__ */ u4("p", { children: [
-        "MCP server: ",
-        request.data.mcp_server
-      ] }) : null,
       /* @__PURE__ */ u4("p", { children: [
-        "Recipient agent: ",
-        request.data.agent_group_name ?? request.data.agent_group_id
+        /* @__PURE__ */ u4("strong", { children: request.data.agent_group_name ?? request.data.agent_group_id }),
+        " \xB7 ",
+        /* @__PURE__ */ u4("code", { children: new URL(request.data.resource_url).host })
       ] }),
-      request.data.authentication ? /* @__PURE__ */ u4("p", { children: [
-        "Requested authentication: ",
-        ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type],
-        request.data.authentication.app_id ? ` \xB7 OAuth app: ${request.data.authentication.app_id}` : "",
-        request.data.authentication.header ? ` \xB7 Header: ${request.data.authentication.header}` : "",
-        request.data.authentication.prefix !== void 0 ? ` \xB7 Public prefix: ${JSON.stringify(request.data.authentication.prefix)}` : "",
-        request.data.authentication.headers?.length ? ` \xB7 Headers: ${request.data.authentication.headers.join(", ")}` : "",
-        ". Review these agent suggestions before using them."
-      ] }) : null,
-      request.data.scopes?.length ? /* @__PURE__ */ u4("p", { children: [
-        "Suggested scopes (not automatically granted): ",
-        request.data.scopes.join(" ")
-      ] }) : null,
       request.data.status !== "pending" ? /* @__PURE__ */ u4("div", { children: [
-        /* @__PURE__ */ u4("p", { role: "status", children: request.data.result?.message ?? request.data.status }),
+        !failed ? /* @__PURE__ */ u4("p", { role: "status", children: STATUS_LABELS[request.data.status] ?? request.data.status }) : null,
         request.data.status === "failed" ? /* @__PURE__ */ u4(
           "button",
           {
@@ -30403,28 +30395,28 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
         ) : null
       ] }) : /* @__PURE__ */ u4(k, { children: [
         /* @__PURE__ */ u4("label", { children: [
-          "Personal connection",
+          "Account",
           /* @__PURE__ */ u4(
             "select",
             {
-              "aria-label": "Connection for access request",
+              "aria-label": "Account",
               value: selected,
               disabled: busy,
               onChange: (event) => setSelected(event.currentTarget.value),
               children: [
-                /* @__PURE__ */ u4("option", { value: "", children: "Choose from your Credentials" }),
+                /* @__PURE__ */ u4("option", { value: "", children: "Choose an account" }),
                 compatible.map((connection2) => /* @__PURE__ */ u4("option", { value: connection2.id, children: [
                   connectionName(connection2),
+                  connection2.account ? ` (${connection2.account})` : "",
                   connection2.status === "ready" ? "" : ` (${connection2.status})`
                 ] }, connection2.id))
               ]
             }
           )
         ] }),
-        /* @__PURE__ */ u4("p", { class: "muted", children: "Only credentials matching this URL and the requested authentication and scopes are listed. Unknown scope grants are not assumed to match." }),
-        !compatible.length ? /* @__PURE__ */ u4("p", { role: "status", children: "No credentials match this destination, authentication mechanism and requested scopes. Create one to continue." }) : null,
+        !compatible.length ? /* @__PURE__ */ u4("p", { role: "status", children: "No matching accounts. Add one to continue." }) : null,
         createdMismatch && !selected ? /* @__PURE__ */ u4("div", { role: "alert", children: [
-          "The new credential was saved, but its destination, authentication or provider-reported scopes do not meet this request. No access was granted.",
+          "This account doesn't match the request. No access was granted.",
           /* @__PURE__ */ u4("button", { type: "button", disabled: busy || signingIn, onClick: () => onManage(created), children: "Review new credential" })
         ] }) : null,
         /* @__PURE__ */ u4(
@@ -30436,27 +30428,13 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
             onClick: () => {
               setSelected("");
               setPreview(null);
-              setConfirmed(false);
               onCreate(request.data);
             },
-            children: "Create new credential"
+            children: "Add account"
           }
         ),
-        /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => void reject(), children: "Reject request" }),
+        /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => void reject(), children: "Decline" }),
         preview ? /* @__PURE__ */ u4(k, { children: [
-          /* @__PURE__ */ u4("h4", { children: connectionName(preview.connection) }),
-          preview.connection.account ? /* @__PURE__ */ u4("p", { children: preview.connection.account }) : null,
-          /* @__PURE__ */ u4("ul", { children: preview.connection.services.map((service) => /* @__PURE__ */ u4("li", { children: [
-            serviceDestination(service),
-            " \xB7 ",
-            service.auth.type
-          ] }, service.name)) }),
-          preview.connection.kind !== "static" ? /* @__PURE__ */ u4("p", { children: [
-            "Provider-reported scopes: ",
-            preview.connection.granted_scopes?.join(" ") || "Not reported; permissions are not verified."
-          ] }) : null,
-          /* @__PURE__ */ u4("p", { children: preview.grantBreadth }),
-          /* @__PURE__ */ u4("p", { children: preview.verification }),
           preview.mcp?.names.length ? /* @__PURE__ */ u4("div", { children: [
             /* @__PURE__ */ u4("label", { children: [
               /* @__PURE__ */ u4(
@@ -30468,21 +30446,22 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
                   onChange: (event) => setConfigureMcp(event.currentTarget.checked)
                 }
               ),
-              "Pin this connection to one named MCP server and restart the requesting session."
+              "Use for ",
+              mcpServer || "an MCP server"
             ] }),
             configureMcp ? /* @__PURE__ */ u4(k, { children: [
-              /* @__PURE__ */ u4("label", { children: [
+              !preview.request.mcp_server ? /* @__PURE__ */ u4("label", { children: [
                 "MCP server",
                 /* @__PURE__ */ u4(
                   "select",
                   {
                     "aria-label": "MCP server for access request",
                     value: mcpServer,
-                    disabled: busy || !!preview.request.mcp_server,
+                    disabled: busy,
                     onChange: (event) => {
                       const name = event.currentTarget.value;
                       setMcpServer(name);
-                      setAccountAlias(preview.mcp?.configured?.[name]?.account_alias || name);
+                      setAccountAlias(accountNickname(preview, name));
                     },
                     children: [
                       /* @__PURE__ */ u4("option", { value: "", children: "Choose one server" }),
@@ -30490,28 +30469,27 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
                     ]
                   }
                 )
-              ] }),
-              /* @__PURE__ */ u4("label", { children: [
-                "Account alias",
-                /* @__PURE__ */ u4(
-                  "input",
-                  {
-                    "aria-label": "MCP account alias",
-                    value: accountAlias,
-                    maxLength: 80,
-                    disabled: busy,
-                    onInput: (event) => setAccountAlias(event.currentTarget.value)
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ u4("p", { children: [
-                "Only ",
-                mcpServer || "the selected server",
-                " will change. Other servers using the same URL keep their own accounts. Manual Authorization is replaced by the host-managed connection."
+              ] }) : null,
+              /* @__PURE__ */ u4("p", { class: "muted", children: "Restarts the requesting session." }),
+              /* @__PURE__ */ u4("details", { children: [
+                /* @__PURE__ */ u4("summary", { children: "Customize name" }),
+                /* @__PURE__ */ u4("label", { children: [
+                  "Nickname",
+                  /* @__PURE__ */ u4(
+                    "input",
+                    {
+                      "aria-label": "Account nickname",
+                      value: accountAlias,
+                      maxLength: 80,
+                      disabled: busy,
+                      onInput: (event) => setAccountAlias(event.currentTarget.value)
+                    }
+                  )
+                ] })
               ] })
             ] }) : null
           ] }) : null,
-          !preview.matches ? /* @__PURE__ */ u4("p", { role: "status", children: "This connection does not cover the requested destination. Do not extend OAuth routing just to match a hostname." }) : null,
+          !preview.matches ? /* @__PURE__ */ u4("p", { role: "status", children: "This account doesn't match the request." }) : null,
           preview.connection.status !== "ready" || !preview.matches ? /* @__PURE__ */ u4(
             "button",
             {
@@ -30521,29 +30499,60 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
               children: "Manage this connection"
             }
           ) : null,
-          /* @__PURE__ */ u4("label", { children: [
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "checkbox",
-                checked: confirmed,
-                disabled: busy || !preview.matches || preview.connection.status !== "ready",
-                onChange: (event) => setConfirmed(event.currentTarget.checked)
-              }
-            ),
-            "Allow this agent to use this connection, including its full permissions and current and future URL patterns."
-          ] }),
           /* @__PURE__ */ u4(
             "button",
             {
               type: "button",
               class: "primary",
-              disabled: busy || !confirmed || !preview.matches || preview.connection.status !== "ready" || preview.request.status !== "pending" || configureMcp && (!mcpServer || !accountAlias.trim()),
+              disabled: !canApply,
               onClick: () => void apply2(),
-              children: busy ? "Applying\u2026" : "Allow access and continue"
+              children: busy ? "Applying\u2026" : "Allow access"
             }
           )
         ] }) : null
+      ] }),
+      /* @__PURE__ */ u4("details", { children: [
+        /* @__PURE__ */ u4("summary", { children: "Details" }),
+        /* @__PURE__ */ u4("p", { children: [
+          "Agent's explanation: ",
+          request.data.reason
+        ] }),
+        /* @__PURE__ */ u4("p", { children: /* @__PURE__ */ u4("code", { children: request.data.resource_url }) }),
+        request.data.mcp_server ? /* @__PURE__ */ u4("p", { children: [
+          "MCP server: ",
+          request.data.mcp_server
+        ] }) : null,
+        request.data.authentication ? /* @__PURE__ */ u4("p", { children: [
+          "Requested authentication: ",
+          ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type],
+          request.data.authentication.app_id ? ` \xB7 OAuth app: ${request.data.authentication.app_id}` : "",
+          request.data.authentication.header ? ` \xB7 Header: ${request.data.authentication.header}` : "",
+          request.data.authentication.prefix !== void 0 ? ` \xB7 Public prefix: ${JSON.stringify(request.data.authentication.prefix)}` : "",
+          request.data.authentication.headers?.length ? ` \xB7 Headers: ${request.data.authentication.headers.join(", ")}` : ""
+        ] }) : null,
+        request.data.scopes?.length ? /* @__PURE__ */ u4("p", { children: [
+          "Suggested scopes: ",
+          request.data.scopes.join(" ")
+        ] }) : null,
+        preview ? /* @__PURE__ */ u4(k, { children: [
+          /* @__PURE__ */ u4("ul", { children: preview.connection.services.map((service) => /* @__PURE__ */ u4("li", { children: [
+            serviceDestination(service),
+            " \xB7 ",
+            service.auth.type
+          ] }, service.name)) }),
+          preview.connection.kind !== "static" ? /* @__PURE__ */ u4("p", { children: [
+            "Provider-reported scopes: ",
+            preview.connection.granted_scopes?.join(" ") || "Not reported; permissions are not verified."
+          ] }) : null,
+          /* @__PURE__ */ u4("p", { children: preview.verification }),
+          configureMcp ? /* @__PURE__ */ u4("p", { children: [
+            "Only ",
+            mcpServer || "the selected server",
+            " changes. Manual Authorization is replaced by this account; other servers are unchanged."
+          ] }) : null
+        ] }) : null,
+        failed && error ? /* @__PURE__ */ u4("p", { children: error }) : null,
+        request.data.result?.message && request.data.result.message !== error ? /* @__PURE__ */ u4("p", { children: request.data.result.message }) : null
       ] })
     ] }) : null
   ] });

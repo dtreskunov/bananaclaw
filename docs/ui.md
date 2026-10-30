@@ -763,6 +763,14 @@ and purpose. The user chooses an existing connection or uses the unified Add
 credential form (key, MCP OAuth or configured OAuth app), then confirms the
 recipient and full current/future connection access. Scope suggestions are
 shown but never selected automatically. Signing in does not grant access.
+The access review uses **Account** and **Allow access**, without an additional
+confirmation checkbox or permission notice. The explicit button click remains
+the authorization step; compatibility, readiness and exact revision checks still
+apply. The destination host and recipient stay visible; the full agent reason,
+URLs, authentication and scope metadata are under **Details**. Named MCP setup
+uses **Use for \<server\>**, with restart information, and hides a fixed server
+selector. **Customize name** optionally overrides the selected credential's
+display name (or its existing nickname for that same connection).
 `request_access` also accepts an optional nonsecret `authentication` suggestion:
 `{type: "mcp_oauth"}` or `{type: "oauth_app", app_id: "google"}`, with desired
 OAuth permissions in the separate `scopes` array; static examples include
