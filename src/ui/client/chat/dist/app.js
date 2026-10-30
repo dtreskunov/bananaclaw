@@ -31823,7 +31823,10 @@ function CredentialsContent({ agent } = {}) {
                 onSaved: refresh
               },
               tableVersion
-            ) : !loading ? /* @__PURE__ */ u4("p", { children: "No credentials yet." }) : null : null,
+            ) : !loading ? agent ? /* @__PURE__ */ u4("div", { children: [
+              /* @__PURE__ */ u4("p", { children: "No personal credentials yet. Add a connection, then explicitly grant this agent access." }),
+              /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Open personal Credentials" })
+            ] }) : /* @__PURE__ */ u4("p", { children: "No credentials yet." }) : null : null,
             !agent && view === "apps" ? /* @__PURE__ */ u4("section", { class: "credentials-apps", "aria-label": "OAuth apps", children: data.apps.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.apps.map((app) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
               /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
                 /* @__PURE__ */ u4("strong", { children: app.label }),

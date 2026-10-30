@@ -45,7 +45,7 @@ vi.mock('./auth.js', () => ({
 
 import { initTestDb, closeDb, runMigrations, getDb } from '../../db/index.js';
 import { createAgentGroup } from '../../db/agent-groups.js';
-import { ensureContainerConfig, getContainerConfig } from '../../db/container-configs.js';
+import { ensureContainerConfig, getContainerConfig, setCredentialBackend } from '../../db/container-configs.js';
 import { insertOidcLink } from '../../modules/permissions/db/oidc-links.js';
 import { isUserOnboarded } from '../../modules/permissions/db/users.js';
 import { userAgentGroupFolder } from '../../modules/permissions/user-approval.js';
@@ -223,13 +223,27 @@ describe('POST /ui/onboarding', () => {
       raw,
     });
     expect(res.status()).toBe(303);
-    expect(res.headers().Location).toBe('/ui/chat/');
+    expect(res.headers().Location).toBe('/ui/chat/#credentials');
 
     const group = getDb().prepare('SELECT name FROM agent_groups WHERE id = ?').get(agentGroupId) as { name: string };
     expect(group.name).toBe('Ada\u2019s Sidekick');
     const cfg = getContainerConfig(agentGroupId);
     expect(cfg?.assistant_name).toBe('Sidekick');
     expect(isUserOnboarded('u4')).toBe(true);
+    expect(cfg?.credential_backend).toBe('agent-vault');
+  });
+
+  it('does not cut over an existing legacy group during profile onboarding', async () => {
+    seedUser('legacy-user', 'Legacy user');
+    const group = seedPerUserGroup('legacy-user', 'google', 'legacy');
+    setCredentialBackend(group, 'onecli');
+    mockUserId = 'legacy-user';
+    const res = await call('POST', '/ui/onboarding', {
+      contentType: 'application/x-www-form-urlencoded',
+      raw: new URLSearchParams({ groupName: 'Existing', assistantName: 'Agent' }).toString(),
+    });
+    expect(res.headers().Location).toBe('/ui/chat/');
+    expect(getContainerConfig(group)?.credential_backend).toBe('onecli');
   });
 
   it('falls back to defaults when form fields are empty strings', async () => {

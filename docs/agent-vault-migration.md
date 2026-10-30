@@ -64,8 +64,25 @@ falls back to the SDK's default cloud endpoint.
 Existing OneCLI groups still require both settings and lazily load their
 shared client on use. The dependency remains installed for those groups and
 the metadata inventory tooling until their reviewed cutovers are complete.
-This isolation does not retire groups, change backends or grants, cancel queued
-messages/tasks, or change the effective default for new groups.
+This isolation does not retire groups, change backends or grants, or cancel
+queued messages/tasks.
+
+### New-group default and owner attachment
+
+New groups now default to AgentVault. No connection is automatically granted,
+including the installation owner's MiniMax connection. Owners add/select their
+own connections in personal Credentials and explicitly attach them to agents.
+First-login onboarding opens personal Credentials for AgentVault groups;
+an empty agent credential view links to that same UI.
+
+The database migration preserves every existing group's effective backend:
+old implicit NULL selections and missing config rows become explicit `onecli`;
+existing AgentVault selections remain unchanged. Only future rows default to
+AgentVault. Legacy selections are stored explicitly, and metadata inventory
+requires the migrated schema rather than misclassifying old NULL defaults.
+Schema rollback requires the matching protected DB snapshot and host files,
+not a binary-only downgrade. No existing group's credentials, grants or queued
+work are changed by this migration.
 
 The Agent Vault canary is working. This tooling advances the remaining
 per-group migration without copying credentials or changing live access.

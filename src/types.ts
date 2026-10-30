@@ -47,7 +47,7 @@ export interface ContainerConfigRow {
   packages_pip: string; // JSON: string[]
   additional_mounts: string; // JSON: AdditionalMountConfig[]
   cli_scope: string; // 'disabled' | 'group' | 'global'
-  /** Where containers get credentials: NULL/'onecli' or 'agent-vault' (host-only setting). */
+  /** Host-only backend. New groups default to AgentVault; legacy selections are explicit. */
   credential_backend?: string | null;
   /** Host-only web microphone backend; null inherits the server default. */
   voice_input_backend?: string | null;

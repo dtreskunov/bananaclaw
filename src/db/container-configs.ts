@@ -42,17 +42,18 @@ export function createContainerConfig(config: ContainerConfigRow): void {
       `INSERT INTO container_configs (
         agent_group_id, provider, model, effort, image_tag, assistant_name,
         max_messages_per_prompt, skills, mcp_servers, packages_apt, packages_npm,
-        packages_pip, additional_mounts, model_params, voice_input_backend, voice_input_enabled, updated_at
+        packages_pip, additional_mounts, model_params, voice_input_backend, voice_input_enabled, credential_backend, updated_at
       ) VALUES (
         @agent_group_id, @provider, @model, @effort, @image_tag, @assistant_name,
         @max_messages_per_prompt, @skills, @mcp_servers, @packages_apt, @packages_npm,
-        @packages_pip, @additional_mounts, @model_params, @voice_input_backend, @voice_input_enabled, @updated_at
+        @packages_pip, @additional_mounts, @model_params, @voice_input_backend, @voice_input_enabled, @credential_backend, @updated_at
       )`,
     )
     .run({
       ...config,
       voice_input_backend: config.voice_input_backend ?? null,
       voice_input_enabled: config.voice_input_enabled ?? 1,
+      credential_backend: config.credential_backend ?? 'agent-vault',
     });
 }
 
@@ -137,13 +138,19 @@ export type CredentialBackend = 'onecli' | 'agent-vault';
 export function setCredentialBackend(agentGroupId: string, backend: CredentialBackend): void {
   getDb()
     .prepare('UPDATE container_configs SET credential_backend = ?, updated_at = ? WHERE agent_group_id = ?')
-    .run(backend === 'onecli' ? null : backend, new Date().toISOString(), agentGroupId);
+    .run(backend, new Date().toISOString(), agentGroupId);
 }
 
-/** Groups whose credential_backend is 'agent-vault'. */
+/** AgentVault is also the default while a newly created group's config is initialized. */
 export function agentVaultBackendGroups(): string[] {
   return (
-    getDb().prepare("SELECT agent_group_id FROM container_configs WHERE credential_backend = 'agent-vault'").all() as {
+    getDb()
+      .prepare(
+        `SELECT g.id AS agent_group_id FROM agent_groups g
+      LEFT JOIN container_configs c ON c.agent_group_id=g.id
+      WHERE c.agent_group_id IS NULL OR c.credential_backend='agent-vault'`,
+      )
+      .all() as {
       agent_group_id: string;
     }[]
   ).map((r) => r.agent_group_id);

@@ -534,6 +534,11 @@ reusable foundations, not acceptance of shared references.
 R1 includes P1-P6. Existing implementation is reused where it meets the target
 contract; these phases are not instructions to undo its working deployment.
 
+New groups default to AgentVault with no automatic credential grants. The owner
+must connect/select personal credentials and explicitly grant each agent access.
+Existing implicit OneCLI selections are preserved as explicit legacy selections;
+changing the new-group default does not authorize or cut over existing groups.
+
 Required acceptance includes:
 
 - Two authorized groups use the same static connection; rotation is visible to
@@ -562,6 +567,8 @@ Required acceptance includes:
   changes require the specified review/reapproval, with no silent scope union.
 - Top-level navigation, owner/group visibility, generic OAuth app setup,
   callback user/state binding and CLI restrictions work on the canonical API.
+- New-group and first-login paths use AgentVault and guide owners to personal
+  Credentials without creating connections or granting existing ones implicitly.
 - No old-fork routes, payload/schema adapters, feature-flagged alternate model,
   legacy lookup aliases or copy/fan-out implementation remain in the release.
 

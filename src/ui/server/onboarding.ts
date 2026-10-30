@@ -11,7 +11,8 @@
  *   3. POST /ui/onboarding applies the answers — display_name on the
  *      user, name on the per-user agent group, assistant_name on its
  *      container_config — then stamps `onboarded_at` and redirects to
- *      `/ui/chat/`.
+ *      the personal Credentials UI for an AgentVault group, or `/ui/chat/`
+ *      for an existing legacy group.
  *
  * Already-onboarded users (or anyone hitting the page without a session)
  * are bounced straight to `/ui/chat/` so refresh / back-button on the
@@ -22,6 +23,7 @@ import http from 'http';
 import { log } from '../../log.js';
 import { updateAgentGroup } from '../../db/agent-groups.js';
 import { updateContainerConfigScalars } from '../../db/container-configs.js';
+import { usesAgentVault } from '../../modules/credentials/agent-vault-client.js';
 import { ensurePerUserAgentGroup } from '../../modules/permissions/user-approval.js';
 import { getUser, isUserOnboarded, markUserOnboarded, updateDisplayName } from '../../modules/permissions/db/users.js';
 
@@ -202,7 +204,7 @@ export async function handleOnboarding(req: http.IncomingMessage, res: http.Serv
     setDisplayName: !!submittedName && submittedName !== user?.display_name,
   });
 
-  redirect(res, LANDING);
+  redirect(res, agentGroupId && usesAgentVault(agentGroupId) ? `${LANDING}#credentials` : LANDING);
 }
 
 // Stand-alone path matcher: server.ts mounts at /ui/onboarding and delegates.

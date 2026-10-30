@@ -12,6 +12,7 @@ import path from 'path';
 
 import { DATA_DIR } from '../../config.js';
 import { agentVaultBackendGroups, getContainerConfig } from '../../db/container-configs.js';
+import { getAgentGroup } from '../../db/agent-groups.js';
 import { readEnvFile } from '../../env.js';
 
 const PROJECT_ROOT = path.dirname(DATA_DIR);
@@ -60,13 +61,17 @@ export function gatewaySettings(): GatewaySettings {
   };
 }
 
-/** Agent group IDs explicitly configured to use the AgentVault gateway. */
+/** Existing AgentVault groups, including new groups awaiting config initialization. */
 export function agentVaultGroups(): Set<string> {
   return new Set(agentVaultBackendGroups());
 }
 
 export function usesAgentVault(agentGroupId: string): boolean {
-  return getContainerConfig(agentGroupId)?.credential_backend === 'agent-vault';
+  const config = getContainerConfig(agentGroupId);
+  if (!config) return !!getAgentGroup(agentGroupId);
+  if (config.credential_backend === 'agent-vault') return true;
+  if (config.credential_backend === 'onecli') return false;
+  throw new Error('Credential backend is not initialized; run the host database migrations');
 }
 
 /** Each agent group has exactly one vault, named after the group. */

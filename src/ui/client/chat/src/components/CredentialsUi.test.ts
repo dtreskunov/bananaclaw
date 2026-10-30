@@ -347,6 +347,16 @@ describe('connection UI safety and ownership', () => {
     expect(descendants(content).some((child) => child.type === 'nav')).toBe(false);
     expect(find(content, MobileDialog)).toBeUndefined();
   });
+  it('guides an empty owner library to personal Credentials without granting anything', () => {
+    hooks.resource.data = { connections: [], groups, apps: [], canEditInstall: false };
+    const node = CredentialsContent({ agent: { id: 'one' } });
+    expect(
+      descendants(node).some(
+        (child) => child.type === 'button' && child.props.children === 'Open personal Credentials',
+      ),
+    ).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('creates OAuth in the same editor and retries a saved draft without duplicating it', async () => {
     const start = vi.fn().mockRejectedValueOnce(new TypeError('Network unavailable')).mockResolvedValueOnce(undefined);
     const draw = newFormRenderer({ onStart: start });

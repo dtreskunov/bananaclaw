@@ -759,6 +759,11 @@ time across settlement. Generated fixture assets are ignored and rebuilt from
 `#credentials` dialog, not a section of Agent Settings or a separate header tab.
 It uses the same desktop dialog and mobile full-screen/back-to-menu chrome as
 My Profile. Keys and connected accounts share one **Credentials** table;
+new groups default to AgentVault and receive no credentials automatically.
+First-login onboarding opens personal Credentials for the owner to connect
+credentials and explicitly select recipient agents. An empty agent credential
+view links to that same private UI. Existing legacy groups are not cut over by
+profile onboarding or the new-group default.
 **OAuth apps** has its own section. Connections are owned by the user's mapped native AgentVault user; the gateway
 stays headless and does not provide another login. The user enters/connects
 once, manages owner-defined service destinations, and grants selected agents

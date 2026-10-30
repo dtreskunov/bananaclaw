@@ -1,7 +1,7 @@
 import './Credentials.css';
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
-import { credentialsIntent, openChat } from '../credentials-navigation';
+import { credentialsIntent, openChat, openCredentials } from '../credentials-navigation';
 import { credentialsOpen, isMobile } from '../state';
 import { returnToUserMenu } from '../actions';
 import { MobileDialog } from './MobileDialog';
@@ -97,7 +97,10 @@ export function CredentialsContent({ agent }: {
             onConnect={(connection) => setDialog({ kind: 'connect', connection })}
             onAction={(connection, action) => setDialog({ kind: 'action', connection, action })}
             onSaved={refresh} />
-            : !loading ? <p>No credentials yet.</p> : null : null}
+            : !loading ? agent ? <div>
+              <p>No personal credentials yet. Add a connection, then explicitly grant this agent access.</p>
+              <button type="button" onClick={() => openCredentials()}>Open personal Credentials</button>
+            </div> : <p>No credentials yet.</p> : null : null}
           {!agent && view === 'apps' ? <section class="credentials-apps" aria-label="OAuth apps">
             {data.apps.length ? <ul class="ga-cred-list">{data.apps.map((app) => <li class="ga-cred-item" key={`${app.source}:${app.id}`}>
               <div class="ga-cred-item-main"><strong>{app.label}</strong><span class="muted">{displayDestination(app.issuer)}</span></div>

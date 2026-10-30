@@ -116,7 +116,7 @@ describe('agent vault egress', () => {
     expect(usesAgentVault('ag-three')).toBe(false);
   });
 
-  it('switches groups whose credential_backend is agent-vault', () => {
+  it('defaults new groups to AgentVault and permits explicit reviewed legacy selections', () => {
     const now = new Date().toISOString();
     getDb()
       .prepare(
@@ -124,7 +124,7 @@ describe('agent vault egress', () => {
       )
       .run(now);
     getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES ('ag-db', ?)`).run(now);
-    expect(usesAgentVault('ag-db')).toBe(false);
+    expect(usesAgentVault('ag-db')).toBe(true);
     setCredentialBackend('ag-db', 'agent-vault');
     expect(usesAgentVault('ag-db')).toBe(true);
     setCredentialBackend('ag-db', 'onecli');

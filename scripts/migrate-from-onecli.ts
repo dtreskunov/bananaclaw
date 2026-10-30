@@ -86,6 +86,18 @@ export function parseArgs(argv: string[]): MigrationArgs {
 export function readGroups(dbPath: string, selected?: string): MigrationGroup[] {
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
+    const backendColumn = db.prepare('PRAGMA table_info(container_configs)').all() as {
+      name: string;
+      notnull: number;
+      dflt_value: string | null;
+    }[];
+    if (
+      !backendColumn.some(
+        (column) =>
+          column.name === 'credential_backend' && column.notnull === 1 && column.dflt_value === "'agent-vault'",
+      )
+    )
+      throw new Error('Apply the host AgentVault-default migration before running credential inventory');
     const rows = db
       .prepare(
         `SELECT g.id, g.name, c.credential_backend AS backend,
@@ -111,7 +123,7 @@ export function readGroups(dbPath: string, selected?: string): MigrationGroup[] 
         return {
           id: g.id,
           name: g.name,
-          backend: g.backend === 'agent-vault' ? 'agent-vault' : 'onecli',
+          backend: g.backend === 'onecli' ? 'onecli' : 'agent-vault',
           provider: g.provider,
           mcpServerCount: Object.keys(servers).length,
           mcpClients: summarizeMcpClients(servers),

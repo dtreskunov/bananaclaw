@@ -81,9 +81,9 @@ describe('local inventory is readonly', () => {
     const file = path.join(directory, 'v2.db');
     const db = new Database(file);
     db.exec(`CREATE TABLE agent_groups (id TEXT, name TEXT);
-      CREATE TABLE container_configs (agent_group_id TEXT, credential_backend TEXT, provider TEXT, mcp_servers TEXT);
+      CREATE TABLE container_configs (agent_group_id TEXT, credential_backend TEXT NOT NULL DEFAULT 'agent-vault', provider TEXT, mcp_servers TEXT);
       INSERT INTO agent_groups VALUES ('ag-1','One'),('ag-2','Two'),('ag-3','Three');
-      INSERT INTO container_configs VALUES ('ag-1',NULL,'native','{"local":{"command":"node","env":{"SECRET":"DO_NOT_EXPORT"}}}');
+      INSERT INTO container_configs VALUES ('ag-1','onecli','native','{"local":{"command":"node","env":{"SECRET":"DO_NOT_EXPORT"}}}');
       INSERT INTO container_configs VALUES ('ag-2','agent-vault','claude','{}');`);
     db.close();
     return file;
@@ -97,7 +97,7 @@ describe('local inventory is readonly', () => {
     expect(groups).toMatchObject([
       { id: 'ag-1', name: 'One', backend: 'onecli', provider: 'native', mcpServerCount: 1 },
       { id: 'ag-2', name: 'Two', backend: 'agent-vault', provider: 'claude', mcpServerCount: 0 },
-      { id: 'ag-3', name: 'Three', backend: 'onecli', provider: null, mcpServerCount: 0 },
+      { id: 'ag-3', name: 'Three', backend: 'agent-vault', provider: null, mcpServerCount: 0 },
     ]);
     expect(groups[0]!.mcpClients).toMatchObject([
       { name: 'local', transport: 'stdio', command: 'node', credentialEnvNames: ['SECRET'] },
