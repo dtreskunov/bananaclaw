@@ -106,6 +106,24 @@ groups. Remaining group configuration and source grant metadata, native
 connections/policies and OAuth state were verified unchanged. OneCLI must remain available for those
 six groups until their reviewed cutovers and the sustained acceptance gate.
 
+Three further groups completed reviewed cutovers on 2026-10-30, bringing the
+active fleet to six AgentVault and three OneCLI groups. Isolated, network-disabled
+containers verified actual model generation and authenticated MCP tool listing
+through AgentVault only. All 158 affected session queues, questions, roles and
+routing were preserved. The approved changes included direct MiniMax routing
+instead of an unfunded OpenRouter route and removal of an unused Apify client;
+the scheduled task remained paused.
+
+The remaining Google-dependent groups require fresh, separate owner consent.
+An identity-only Google grant is not sufficient for API migration. Preserve
+reviewed API capabilities and verify actual granted scopes before cutover.
+Overlapping OAuth destinations now require explicit group-bound
+`Authorization: Bearer av-access:<handle>` selection; runtime discovery exposes
+`access_placeholder` and `selection_required`. Missing or invalid selections
+fail closed, and no caller gains access to another owner's management metadata.
+Static credential destination conflicts remain rejected. Do not silently add
+destination administration merely to make another owner's grant possible.
+
 The Agent Vault canary is working. This tooling advances the remaining
 per-group migration without copying credentials or changing live access.
 Inventory and preparation remain read-only with respect to live access.
