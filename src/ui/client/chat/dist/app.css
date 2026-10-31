@@ -3565,56 +3565,6 @@ nav.tab-bar-strip.group-strip {
   height: 32px;
   flex-shrink: 0;
 }
-.chat-main textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-width: 0;
-  min-height: calc(var(--control-action-size) + 2 * var(--composer-control-inset));
-  max-height: 200px;
-  resize: none;
-  overflow-y: auto;
-  padding: 5px calc(66px + var(--composer-control-inset)) 5px calc(34px + var(--composer-control-inset));
-  font: inherit;
-  font-size: var(--message-input-font-size);
-  border: 0;
-  border-radius: var(--radius-md);
-  outline: none;
-  background: transparent;
-  color: inherit;
-}
-.chat-main .composer-input-wrap.multi-line textarea {
-  padding: 5px 8px 36px 8px;
-}
-.chat-main .composer-input-wrap {
-  --composer-control-inset: 3px;
-  flex: 1;
-  min-width: 0;
-  position: relative;
-  display: flex;
-  align-items: stretch;
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: 0 0 0 4px var(--surface), 0 2px 10px 4px var(--shadow-color);
-  outline: 2px solid color-mix(in srgb, var(--focus-ring) 30%, transparent);
-  outline-offset: 2px;
-  transition: outline-color 0.15s;
-}
-@media (hover: hover) {
-  .chat-main .composer-input-wrap:hover {
-    outline-color: color-mix(in srgb, var(--focus-ring) 55%, transparent);
-  }
-}
-.chat-main .composer-input-wrap:focus-within {
-  outline-color: var(--focus-ring);
-}
-:root[data-theme] .chat-main .composer-input-wrap textarea:focus-visible {
-  outline: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .chat-main .composer-input-wrap {
-    transition: none;
-  }
-}
 .chat-main #chat-send,
 .chat-main .question-response-send {
   position: absolute;
@@ -3829,17 +3779,8 @@ nav.tab-bar-strip.group-strip {
     gap: 8px;
     align-items: flex-end;
   }
-  .chat-main .composer-input-wrap {
-    --composer-control-inset: 2px;
-  }
   .chat-main #chat-mic {
     font-size: 22px;
-  }
-  .chat-main textarea {
-    padding: 10px calc(92px + var(--composer-control-inset)) 10px calc(44px + var(--composer-control-inset));
-  }
-  .chat-main .composer-input-wrap.multi-line textarea {
-    padding: 10px 10px 48px 10px;
   }
   .chat-main .message-action-btn {
     min-height: 44px;
@@ -3904,21 +3845,6 @@ nav.tab-bar-strip.group-strip {
   background: var(--wash);
   border-radius: var(--radius-sm);
   padding: 4px 6px;
-}
-.chat-main .approval-meta {
-  font-size: var(--font-xs);
-  color: var(--muted);
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  margin-top: 4px;
-}
-.chat-main .approval-meta .approval-group {
-  color: var(--fg);
-  font-weight: 500;
-}
-.chat-main .approval-meta .dot {
-  opacity: 0.6;
 }
 .chat-main .approval-actions {
   display: flex;
@@ -4271,21 +4197,80 @@ nav.tab-bar-strip.group-strip {
   flex: 0 0 120px;
 }
 
+/* src/components/ComposerInput.css */
+.composer-input-wrap {
+  --composer-control-inset: 3px;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 0 0 4px var(--surface), 0 2px 10px 4px var(--shadow-color);
+  outline: 2px solid color-mix(in srgb, var(--focus-ring) 30%, transparent);
+  outline-offset: 2px;
+  transition: outline-color 0.15s;
+}
+.composer-input-wrap textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: calc(var(--control-action-size, 28px) + 2 * var(--composer-control-inset));
+  max-height: 200px;
+  resize: none;
+  overflow-y: auto;
+  padding: 5px calc(66px + var(--composer-control-inset)) 5px calc(34px + var(--composer-control-inset));
+  font: inherit;
+  font-size: var(--message-input-font-size, var(--font-base));
+  border: 0;
+  border-radius: var(--radius-md);
+  outline: none;
+  background: transparent;
+  color: inherit;
+}
+.composer-input-wrap.multi-line textarea {
+  padding: 5px 8px 36px;
+}
+.composer-input-wrap.composer-passive textarea {
+  padding: 5px 8px;
+}
+.composer-input-wrap:focus-within {
+  outline-color: var(--focus-ring);
+}
+:root[data-theme] .composer-input-wrap textarea:focus-visible {
+  outline: none;
+}
+@media (hover: hover) {
+  .composer-input-wrap:hover {
+    outline-color: color-mix(in srgb, var(--focus-ring) 55%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-input-wrap {
+    transition: none;
+  }
+}
+@media (max-width: 720px) {
+  .composer-input-wrap {
+    --composer-control-inset: 2px;
+  }
+  .composer-input-wrap textarea {
+    padding: 10px calc(92px + var(--composer-control-inset)) 10px calc(44px + var(--composer-control-inset));
+  }
+  .composer-input-wrap.multi-line textarea {
+    padding: 10px 10px 48px;
+  }
+  .composer-input-wrap.composer-passive textarea {
+    padding: 10px;
+  }
+}
+
 /* src/components/ApprovalMessageInput.css */
 .approval-response-message {
   margin-top: 8px;
-}
-.approval-response-message label {
   display: grid;
   gap: 4px;
-}
-.approval-response-message textarea,
-.chat-main .approval-response-message textarea {
-  box-sizing: border-box;
-  width: 100%;
-  font: inherit;
-  resize: vertical;
-  padding: 8px 10px;
 }
 
 /* src/components/ModalDialog.css */
@@ -6584,7 +6569,7 @@ body.private-web-page,
 .ga-cred-item-actions {
   flex-wrap: wrap;
 }
-.ga-cred-dialog textarea {
+:where(.ga-cred-dialog) textarea {
   width: 100%;
   min-width: 0;
   resize: vertical;
@@ -6911,7 +6896,7 @@ body.private-web-page,
 .ga-cred-dialog select,
 .ga-cred-dialog input[type=text],
 .ga-cred-dialog input[type=url],
-.ga-cred-dialog textarea {
+:where(.ga-cred-dialog) textarea {
   min-width: 0;
   font: inherit;
   padding: var(--control-padding-block) var(--control-padding-inline);

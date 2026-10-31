@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
+// node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
+  "node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
+// node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
+  "node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
+// node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
+// node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
+// node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
+// node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
+// node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
+// node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
+// node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
+// node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
+// node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
+// node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
+// node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
+// node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
+// node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
+// node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
+// node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
+// node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
+// node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
+// node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
+// node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
+// node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
+// node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
+// node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
+// node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
+// node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
+// node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
+// node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
+// node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
+// node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
+// node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
+// node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
+// node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
+// node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
+// node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
+// node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
+// node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
+// node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
+// node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
+  "node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
+// node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
+// node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
+// node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
+// node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -16612,7 +16612,7 @@ function clearApprovalMessage(approvalId) {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
+// node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -19491,7 +19491,7 @@ function playCompletionChime() {
   setTimeout(() => tone(880, 180, 0.05), 110);
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -22665,117 +22665,7 @@ function ThreadsRail() {
   );
 }
 
-// ../../shared/approval-message.ts
-var MAX_APPROVAL_MESSAGE_LENGTH = 4e3;
-
-// src/components/ApprovalMessageInput.tsx
-function ApprovalMessageInput({ approvalId, disabled }) {
-  return /* @__PURE__ */ u4("div", { class: "approval-response-message", children: /* @__PURE__ */ u4("label", { children: [
-    "Message to agent (optional)",
-    /* @__PURE__ */ u4(
-      "textarea",
-      {
-        "aria-label": "Message to agent",
-        rows: 2,
-        maxLength: MAX_APPROVAL_MESSAGE_LENGTH,
-        disabled,
-        value: approvalMessageDrafts.value[approvalId] ?? "",
-        onInput: (event) => {
-          approvalMessageDrafts.value = { ...approvalMessageDrafts.value, [approvalId]: event.currentTarget.value };
-        }
-      }
-    )
-  ] }) });
-}
-
-// src/approval-origin.ts
-function isApprovalThread(origin) {
-  return !!origin && origin.agentGroupId === groupId.value && origin.threadId === threadId.value && origin.channelType === (channelType.value || "web") && (origin.channelType === "web" || origin.messagingGroupId === messagingGroupId.value);
-}
-function approvalThreadHref(origin) {
-  return `#g/${encodeURIComponent(origin.agentGroupId)}/t/${encodeURIComponent(origin.threadId)}`;
-}
-
-// src/components/ApprovalCard.tsx
-function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
-  const status = a4.status ?? a4.stage ?? "pending";
-  const pending4 = status === "pending";
-  const here = isApprovalThread(a4.origin);
-  const labels = {
-    approved: "Approved",
-    rejected: "Declined",
-    applying: "Applying\u2026",
-    failed: "Could not apply",
-    cancelled: "Cancelled",
-    expired: "Expired"
-  };
-  return /* @__PURE__ */ u4("section", { class: "approval-bubble question-prompt", "data-approval-id": a4.approvalId, "aria-label": a4.title || a4.action, children: [
-    /* @__PURE__ */ u4("div", { class: "approval-text", children: [
-      /* @__PURE__ */ u4("div", { class: "approval-title", children: a4.title || a4.action }),
-      a4.packages ? /* @__PURE__ */ u4("div", { class: "approval-packages", children: ["apt", "npm", "pip"].map((manager) => a4.packages[manager].length ? /* @__PURE__ */ u4("div", { class: "approval-package-list", children: [
-        /* @__PURE__ */ u4("span", { class: "approval-package-manager", children: manager }),
-        /* @__PURE__ */ u4("span", { children: a4.packages[manager].join(", ") })
-      ] }, manager) : null) }) : null,
-      a4.details ? /* @__PURE__ */ u4("div", { class: "approval-details", children: a4.details }) : null,
-      /* @__PURE__ */ u4("div", { class: "approval-meta", children: [
-        /* @__PURE__ */ u4("span", { class: "approval-group", children: a4.agentGroupName || "Global" }),
-        /* @__PURE__ */ u4("span", { class: "dot", children: "\xB7" }),
-        /* @__PURE__ */ u4(RelativeTime, { ts: a4.createdAt })
-      ] }),
-      !here ? /* @__PURE__ */ u4("p", { children: a4.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(a4.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : null,
-      !pending4 ? /* @__PURE__ */ u4("div", { class: "approval-decision", role: "status", children: [
-        /* @__PURE__ */ u4("strong", { children: labels[status] ?? status }),
-        a4.respondedBy ? /* @__PURE__ */ u4("span", { children: [
-          " \xB7 ",
-          a4.respondedBy.displayName
-        ] }) : null,
-        a4.resolvedAt ? /* @__PURE__ */ u4(RelativeTime, { ts: a4.resolvedAt }) : null,
-        a4.responseMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", children: a4.responseMessage }) : null,
-        status === "failed" && a4.outcomeMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", role: "alert", children: a4.outcomeMessage }) : null
-      ] }) : null,
-      here && status === "failed" && a4.reviewRequired ? /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "approval-btn",
-          disabled: busy,
-          onClick: () => {
-            if (isApprovalThread(a4.origin)) onReview();
-          },
-          children: "Review failure"
-        }
-      ) : null,
-      here && pending4 && a4.supportsResponseMessage ? /* @__PURE__ */ u4(
-        ApprovalMessageInput,
-        {
-          approvalId: a4.approvalId,
-          disabled: busy || a4.stage === "applying"
-        }
-      ) : null
-    ] }),
-    here && pending4 ? /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: !a4.options.length ? /* @__PURE__ */ u4("span", { class: "approval-disabled", children: "no options" }) : a4.options.map((option) => /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "approval-btn approval-" + (option.value === "approve" ? "approve" : option.value === "reject" ? "reject" : "neutral"),
-        disabled: busy || a4.stage === "applying",
-        onClick: () => {
-          if (!isApprovalThread(a4.origin)) return;
-          if (a4.reviewRequired && option.value === "review") onReview();
-          else {
-            const message2 = a4.supportsResponseMessage ? approvalMessageDrafts.value[a4.approvalId]?.trim() : void 0;
-            if (message2) onRespond(option.value, message2);
-            else onRespond(option.value);
-          }
-        },
-        children: option.label
-      },
-      option.value
-    )) }) : null
-  ] });
-}
-
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
+// node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -23073,13 +22963,13 @@ function ComposerInput({
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: `composer-input-wrap${className ? ` ${className}` : ""}${multiLine ? " multi-line" : ""}${listening ? " voice-listening" : ""}`,
+      class: `composer-input-wrap${!send && !voice2 ? " composer-passive" : ""}${className ? ` ${className}` : ""}${multiLine ? " multi-line" : ""}${listening ? " voice-listening" : ""}`,
       style: hidden ? "display:none" : "",
       children: [
-        /* @__PURE__ */ u4("textarea", { ...textarea, ref: inputRef, rows: 1, onKeyDown: onComposerKeyDown }),
+        /* @__PURE__ */ u4("textarea", { ...textarea, ref: inputRef, rows: 1, onKeyDown: send ? onComposerKeyDown : void 0 }),
         controls,
-        /* @__PURE__ */ u4(VoiceButton, { ...voice2 }),
-        /* @__PURE__ */ u4(
+        voice2 ? /* @__PURE__ */ u4(VoiceButton, { ...voice2 }) : null,
+        send ? /* @__PURE__ */ u4(
           "button",
           {
             type: "submit",
@@ -23092,7 +22982,7 @@ function ComposerInput({
             onMouseDown: (event) => event.preventDefault(),
             children: send.icon ?? "\u2191"
           }
-        )
+        ) : null
       ]
     }
   );
@@ -23937,12 +23827,118 @@ function QuestionPrompt({ question: q5 }) {
   );
 }
 
-// ../../../channels/ask-question.ts
-function formatQuestionResponse(question2, response) {
-  const quote = question2.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
-  return `${quote}
+// src/approval-origin.ts
+function isApprovalThread(origin) {
+  return !!origin && origin.agentGroupId === groupId.value && origin.threadId === threadId.value && origin.channelType === (channelType.value || "web") && (origin.channelType === "web" || origin.messagingGroupId === messagingGroupId.value);
+}
+function approvalThreadHref(origin) {
+  return `#g/${encodeURIComponent(origin.agentGroupId)}/t/${encodeURIComponent(origin.threadId)}`;
+}
 
-${response}`;
+// ../../shared/approval-message.ts
+var MAX_APPROVAL_MESSAGE_LENGTH = 4e3;
+
+// src/components/ApprovalMessageInput.tsx
+function ApprovalMessageInput({ approvalId, disabled }) {
+  const inputRef = A2(null);
+  const value = approvalMessageDrafts.value[approvalId] ?? "";
+  const { autosize, multiLine } = useComposerTextarea(inputRef, value);
+  return /* @__PURE__ */ u4("div", { class: "approval-response-message", children: [
+    /* @__PURE__ */ u4("span", { class: "approval-message-label", children: "Message to agent (optional)" }),
+    /* @__PURE__ */ u4(
+      ComposerInput,
+      {
+        inputRef,
+        multiLine,
+        listening: false,
+        className: "approval-message-composer",
+        textarea: {
+          "aria-label": "Message to agent",
+          placeholder: "Optional message",
+          maxLength: MAX_APPROVAL_MESSAGE_LENGTH,
+          disabled,
+          value,
+          onInput: (event) => {
+            approvalMessageDrafts.value = { ...approvalMessageDrafts.value, [approvalId]: event.currentTarget.value };
+            autosize();
+          }
+        }
+      }
+    )
+  ] });
+}
+
+// src/components/ApprovalCard.tsx
+function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
+  const status = a4.status ?? a4.stage ?? "pending";
+  const pending4 = status === "pending";
+  const here = isApprovalThread(a4.origin);
+  const labels = {
+    approved: "Approved",
+    rejected: "Declined",
+    applying: "Applying\u2026",
+    failed: "Could not apply",
+    cancelled: "Cancelled",
+    expired: "Expired"
+  };
+  return /* @__PURE__ */ u4("section", { class: "approval-bubble question-prompt", "data-approval-id": a4.approvalId, "aria-label": a4.title || a4.action, children: [
+    /* @__PURE__ */ u4("div", { class: "approval-text", children: [
+      /* @__PURE__ */ u4("div", { class: "approval-title", children: a4.title || a4.action }),
+      a4.packages ? /* @__PURE__ */ u4("div", { class: "approval-packages", children: ["apt", "npm", "pip"].map((manager) => a4.packages[manager].length ? /* @__PURE__ */ u4("div", { class: "approval-package-list", children: [
+        /* @__PURE__ */ u4("span", { class: "approval-package-manager", children: manager }),
+        /* @__PURE__ */ u4("span", { children: a4.packages[manager].join(", ") })
+      ] }, manager) : null) }) : null,
+      a4.details ? /* @__PURE__ */ u4("div", { class: "approval-details", children: a4.details }) : null,
+      !here ? /* @__PURE__ */ u4("p", { children: a4.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(a4.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : null,
+      !pending4 ? /* @__PURE__ */ u4("div", { class: "approval-decision", role: "status", children: [
+        /* @__PURE__ */ u4("strong", { children: labels[status] ?? status }),
+        a4.respondedBy ? /* @__PURE__ */ u4("span", { children: [
+          " \xB7 ",
+          a4.respondedBy.displayName
+        ] }) : null,
+        a4.responseMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", children: a4.responseMessage }) : null,
+        status === "failed" && a4.outcomeMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", role: "alert", children: a4.outcomeMessage }) : null
+      ] }) : null,
+      here && status === "failed" && a4.reviewRequired ? /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "approval-btn",
+          disabled: busy,
+          onClick: () => {
+            if (isApprovalThread(a4.origin)) onReview();
+          },
+          children: "Review failure"
+        }
+      ) : null,
+      here && pending4 && a4.supportsResponseMessage ? /* @__PURE__ */ u4(
+        ApprovalMessageInput,
+        {
+          approvalId: a4.approvalId,
+          disabled: busy || a4.stage === "applying"
+        }
+      ) : null
+    ] }),
+    here && pending4 ? /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: !a4.options.length ? /* @__PURE__ */ u4("span", { class: "approval-disabled", children: "no options" }) : a4.options.map((option) => /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "approval-btn approval-" + (option.value === "approve" ? "approve" : option.value === "reject" ? "reject" : "neutral"),
+        disabled: busy || a4.stage === "applying",
+        onClick: () => {
+          if (!isApprovalThread(a4.origin)) return;
+          if (a4.reviewRequired && option.value === "review") onReview();
+          else {
+            const message2 = a4.supportsResponseMessage ? approvalMessageDrafts.value[a4.approvalId]?.trim() : void 0;
+            if (message2) onRespond(option.value, message2);
+            else onRespond(option.value);
+          }
+        },
+        children: option.label
+      },
+      option.value
+    )) }) : null
+  ] });
 }
 
 // src/scroll-edges.ts
@@ -23994,7 +23990,16 @@ function attachScrollEdges(element, axes = {}, onUpdate) {
 }
 
 // src/components/MessageBubble.tsx
-function MessageBubble({ class: className, "data-msg-id": id2, elementRef, reveal, children }) {
+function MessageBubble({
+  class: className,
+  "data-msg-id": id2,
+  elementRef,
+  reveal,
+  from,
+  timestamp,
+  metadata,
+  children
+}) {
   const ownRef = A2(null);
   const ref = elementRef ?? ownRef;
   const scrollRef = A2(null);
@@ -24023,7 +24028,37 @@ function MessageBubble({ class: className, "data-msg-id": id2, elementRef, revea
       bubble.scrollTop += match2.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children }) });
+  const content = from || timestamp || metadata ? /* @__PURE__ */ u4(k, { children: [
+    from ? /* @__PURE__ */ u4("div", { class: "message-author", children: from }) : null,
+    children,
+    timestamp || metadata ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
+      timestamp ? /* @__PURE__ */ u4(RelativeTime, { ts: timestamp }) : null,
+      metadata
+    ] }) : null
+  ] }) : children;
+  return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children: content }) });
+}
+
+// src/components/ApprovalBubble.tsx
+function ApprovalBubble({ approval, busy, onReview, onRespond, messageId, reference }) {
+  return /* @__PURE__ */ u4(
+    MessageBubble,
+    {
+      class: `msg out approval-message${reference ? " approval-reference" : ""}`,
+      "data-msg-id": messageId ?? `approval:${approval.approvalId}`,
+      from: approval.agentGroupName || "Global",
+      timestamp: approval.resolvedAt ?? approval.createdAt,
+      children: /* @__PURE__ */ u4(ApprovalCard, { approval, busy, onReview, onRespond })
+    }
+  );
+}
+
+// ../../../channels/ask-question.ts
+function formatQuestionResponse(question2, response) {
+  const quote = question2.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
+  return `${quote}
+
+${response}`;
 }
 
 // src/components/QuestionAnswerBubble.tsx
@@ -24036,11 +24071,10 @@ function QuestionAnswerBubble({ question: question2, answer }) {
     {
       class: `msg in${md != null ? " markdown" : ""}`,
       "data-msg-id": answer.id,
+      from: answer.author && answer.author.userId !== currentUserId.value ? answer.author.displayName : void 0,
+      timestamp: answer.ts,
       reveal: highlightMessageId.value === answer.id ? searchQuery.value : void 0,
-      children: [
-        md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 }),
-        /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4(RelativeTime, { ts: answer.ts }) })
-      ]
+      children: md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 })
     }
   );
 }
@@ -24982,17 +25016,18 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
     );
   }
   const approval = m6.approval;
-  if (approval) return /* @__PURE__ */ u4(MessageBubble, { class: "msg out approval-message", "data-msg-id": m6.id, children: /* @__PURE__ */ u4(
-    ApprovalCard,
+  if (approval) return /* @__PURE__ */ u4(
+    ApprovalBubble,
     {
       approval,
+      messageId: m6.id,
       busy: respondingApprovalIds.value.has(approval.approvalId),
       onReview: () => openCredentials({ approvalId: approval.approvalId }),
       onRespond: (value, message2) => {
         void respondApproval(approval.approvalId, value, message2).catch(console.error);
       }
     }
-  ) });
+  );
   if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card });
   const md = renderMarkdown(m6.text, groupId.value);
   const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
@@ -25010,12 +25045,28 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
+  const metadata = m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4(k, { children: [
+    inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
+    submission?.status === "sending" && !m6.hideInitialQueuedCaption ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: [
+      "Sending",
+      "\u2026"
+    ] }) : null,
+    showsMidTurnLabel(m6.deliveryOrigin, midTurnUpdate) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
+    /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: m6.submission ? null : groupId.value, children: [
+      !m6.submission ? /* @__PURE__ */ u4(EditMessageButton, { m: m6 }) : null,
+      !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
+      /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => ref.current?.querySelector(".transcript-copy-content") ?? null })
+    ] })
+  ] }) : null;
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
       class: cls,
       "data-msg-id": m6.id,
       elementRef: ref,
+      from: m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? m6.author.displayName : void 0,
+      timestamp: m6.ts,
+      metadata,
       reveal: highlightMessageId.value === m6.id ? searchQuery.value : void 0,
       children: [
         showTechnicalStatus ? /* @__PURE__ */ u4(
@@ -25027,7 +25078,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             live: m6.turnTraceLive
           }
         ) : null,
-        m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? /* @__PURE__ */ u4("div", { class: "message-author", children: m6.author.displayName }) : null,
         /* @__PURE__ */ u4(MessageText, { text: m6.text, md }),
         singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
           singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
@@ -25100,20 +25150,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
               children: "Retry"
             }
           )
-        ] }) : null,
-        m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
-          m6.ts && /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
-          inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
-          submission?.status === "sending" && !m6.hideInitialQueuedCaption ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: [
-            "Sending",
-            "\u2026"
-          ] }) : null,
-          showsMidTurnLabel(m6.deliveryOrigin, midTurnUpdate) ? /* @__PURE__ */ u4(AgentActionLabel, { label: "mid-turn update", title: "Sent during the turn with send_message" }) : m6.deliveryOrigin === "send_file" ? /* @__PURE__ */ u4(AgentActionLabel, { label: "file delivery", title: "Sent during the turn with send_file" }) : null,
-          /* @__PURE__ */ u4(PendingMessageActions, { message: m6, thread: activeThread() ?? null, gid: m6.submission ? null : groupId.value, children: [
-            !m6.submission ? /* @__PURE__ */ u4(EditMessageButton, { m: m6 }) : null,
-            !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
-            /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => ref.current?.querySelector(".transcript-copy-content") ?? null })
-          ] })
         ] }) : null
       ]
     }
@@ -25130,6 +25166,8 @@ function DisplayCardMessage({ message: message2, card }) {
     {
       class: "msg out display-card agent-action",
       "data-msg-id": message2.id,
+      timestamp: message2.ts,
+      metadata: message2.ts || activity.length ? /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }) : null,
       reveal: highlightMessageId.value === message2.id ? searchQuery.value : void 0,
       children: [
         showTechnicalStatus ? /* @__PURE__ */ u4(
@@ -25161,11 +25199,7 @@ function DisplayCardMessage({ message: message2, card }) {
           },
           `${action.label}:${action.url}`
         )) }) : null,
-        message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null,
-        message2.ts || activity.length ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
-          message2.ts ? /* @__PURE__ */ u4(RelativeTime, { ts: message2.ts }) : null,
-          /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" })
-        ] }) : null
+        message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null
       ]
     }
   );
@@ -25252,17 +25286,19 @@ function ApprovalReferences() {
   const list = pendingApprovals.value.filter((a4) => !isApprovalThread(a4.origin));
   if (list.length === 0) return null;
   const busy = respondingApprovalIds.value;
-  return /* @__PURE__ */ u4(k, { children: list.map((a4) => /* @__PURE__ */ u4(MessageBubble, { class: "msg out approval-message approval-reference", children: /* @__PURE__ */ u4(
-    ApprovalCard,
+  return /* @__PURE__ */ u4(k, { children: list.map((a4) => /* @__PURE__ */ u4(
+    ApprovalBubble,
     {
+      reference: true,
       approval: a4,
       busy: busy.has(a4.approvalId),
       onReview: () => openCredentials({ approvalId: a4.approvalId }),
       onRespond: (value, message2) => {
         void respondApproval(a4.approvalId, value, message2).catch(console.error);
       }
-    }
-  ) }, a4.approvalId)) });
+    },
+    a4.approvalId
+  )) });
 }
 function fmtNextShort(iso) {
   if (!iso) return "";
@@ -26926,7 +26962,7 @@ function FilePreviewDialog({ expanded, title, onClose, children }) {
   );
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
+// node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 
