@@ -227,6 +227,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
         {request.data.authentication ? <p>Requested authentication: {ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type]}
           {request.data.authentication.app_id ? ` · OAuth app: ${request.data.authentication.app_id}` : ''}
           {request.data.authentication.header ? ` · Header: ${request.data.authentication.header}` : ''}
+          {request.data.authentication.parameter ? ` · Query parameter: ${request.data.authentication.parameter}` : ''}
           {request.data.authentication.prefix !== undefined ? ` · Public prefix: ${JSON.stringify(request.data.authentication.prefix)}` : ''}
           {request.data.authentication.headers?.length ? ` · Headers: ${request.data.authentication.headers.join(', ')}` : ''}
         </p> : null}
@@ -234,7 +235,6 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
         {preview ? <>
           <ul>{preview.connection.services.map(service => <li key={service.name}>
             {serviceDestination(service)} · {service.auth.type}
-          {request.data.authentication.parameter ? ` · Query parameter: ${request.data.authentication.parameter}` : ''}
           </li>)}</ul>
           {preview.connection.kind !== 'static' ? <p>Provider-reported scopes: {preview.connection.granted_scopes?.join(' ') || 'Not reported; permissions are not verified.'}</p> : null}
           <p>{preview.verification}</p>

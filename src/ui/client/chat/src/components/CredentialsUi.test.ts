@@ -7,7 +7,7 @@ import { showToast } from './Toast';
 import { CredentialsContent, CredentialsPage } from './CredentialsPage';
 import { CredentialsTable } from './CredentialsTable';
 import { MobileDialog } from './MobileDialog';
-import { channelType, credentialsOpen, groupId, isMobile, messagingGroupId, threadId } from '../state';
+import { credentialsOpen, isMobile } from '../state';
 import { CredentialAuthenticationForm, CredentialServiceForm } from './CredentialServiceForm';
 import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
@@ -113,6 +113,10 @@ afterEach(() => {
 });
 
 interface TestProps {
+  busy?: boolean;
+  auth: Service['auth'];
+  savedLabel?: string;
+  preferredKey?: string;
   message?: string;
   'aria-label'?: string;
   open?: boolean;
@@ -126,10 +130,6 @@ interface TestProps {
   type: string;
   disabled: boolean;
   checked: boolean;
-  busy?: boolean;
-  auth: Service['auth'];
-  savedLabel?: string;
-  preferredKey?: string;
   connection: Connection;
   connections: Connection[];
   draft: OAuthAppDraft;
@@ -856,6 +856,91 @@ describe('connection UI safety and ownership', () => {
     });
   });
 
+  it('saves one credential authentication recipe for multiple destination-only rows', async () => {
+    const draw = newFormRenderer();
+    let node = draw();
+    let routes = descendants(node).filter((child) => child.type === CredentialServiceForm);
+    routes[0].props.onChange({ ...routes[0].props.route, pattern: 'https://api.example.com/*' });
+    node = draw();
+    descendants(node)
+      .find((child) => child.type === 'button' && child.props.children === 'Add URL pattern')!
+      .props.onClick();
+    node = draw();
+    routes = descendants(node).filter((child) => child.type === CredentialServiceForm);
+    routes[1].props.onChange({ ...routes[1].props.route, pattern: 'https://uploads.example.com/*' });
+    node = draw();
+    find(node, CredentialAuthenticationForm).props.onChange({
+      type: 'api-key',
+      key: 'TOKEN',
+      location: 'query',
+      parameter: 'api_key',
+    });
+    node = draw();
+    find(node, SecretInput).props.onInput('synthetic-key');
+    node = draw();
+    expect(descendants(node).filter((child) => child.type === CredentialAuthenticationForm)).toHaveLength(1);
+    for (const route of descendants(node).filter((child) => child.type === CredentialServiceForm))
+      expect(descendants(render(route)).some((child) => child.type === 'select')).toBe(false);
+    node = draw();
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(requestBody()).toMatchObject({
+      services: [
+        { host: 'api.example.com/*', auth: { type: 'api-key', key: 'TOKEN', location: 'query', parameter: 'api_key' } },
+        {
+          host: 'uploads.example.com/*',
+          auth: { type: 'api-key', key: 'TOKEN', location: 'query', parameter: 'api_key' },
+        },
+      ],
+      values: { TOKEN: 'synthetic-key' },
+    });
+  });
+
+  it('preserves a saved query substitution on rename and reuses its value for an explicit placement change', async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify(original)));
+    const saved: Connection = {
+      ...original,
+      credentials: ['SAVED_KEY'],
+      services: [
+        {
+          name: 'query',
+          host: 'api.example.com',
+          auth: { type: 'passthrough' },
+          substitutions: [{ key: 'SAVED_KEY', placeholder: '__SAVED_KEY__', in: ['query'] }],
+        },
+      ],
+    };
+    hooks.resource.data = saved;
+    const draw = formRenderer();
+    let node = draw();
+    const auth = find(node, CredentialAuthenticationForm);
+    expect(auth.props.savedLabel).toBe('Saved query authentication');
+    expect(auth.props.preferredKey).toBe('SAVED_KEY');
+    expect(find(node, CredentialServiceForm).props.busy).toBe(true);
+    nameInput(node).props.oninput({ currentTarget: { value: 'Renamed saved query' } });
+    node = draw();
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(requestBody()).toEqual({ label: 'Renamed saved query', revision: original.revision });
+    node = draw();
+    find(node, CredentialAuthenticationForm).props.onChange({
+      type: 'api-key',
+      key: 'SAVED_KEY',
+      location: 'query',
+      parameter: 'api_key',
+    });
+    node = draw();
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(requestBody()).not.toHaveProperty('values');
+    expect(requestBody()).toMatchObject({
+      services: [
+        {
+          name: 'query',
+          auth: { type: 'api-key', key: 'SAVED_KEY', location: 'query', parameter: 'api_key' },
+        },
+      ],
+    });
+    expect((requestBody().services as Service[])[0].substitutions).toBeUndefined();
+  });
+
   it('names new credentials from the first URL until the user edits the name', () => {
     const draw = newFormRenderer();
     let node = draw();
@@ -870,94 +955,6 @@ describe('connection UI safety and ownership', () => {
     nameInput(node).props.oninput({ currentTarget: { value: 'My chosen name' } });
     node = draw();
     routing = find(node, CredentialServiceForm);
-    it('saves one credential authentication recipe for multiple destination-only rows', async () => {
-      const draw = newFormRenderer();
-      let node = draw();
-      let routes = descendants(node).filter((child) => child.type === CredentialServiceForm);
-      routes[0].props.onChange({ ...routes[0].props.route, pattern: 'https://api.example.com/*' });
-      node = draw();
-      descendants(node)
-        .find((child) => child.type === 'button' && child.props.children === 'Add URL pattern')!
-        .props.onClick();
-      node = draw();
-      routes = descendants(node).filter((child) => child.type === CredentialServiceForm);
-      routes[1].props.onChange({ ...routes[1].props.route, pattern: 'https://uploads.example.com/*' });
-      node = draw();
-      find(node, CredentialAuthenticationForm).props.onChange({
-        type: 'api-key',
-        key: 'TOKEN',
-        location: 'query',
-        parameter: 'api_key',
-      });
-      node = draw();
-      find(node, SecretInput).props.onInput('synthetic-key');
-      node = draw();
-      expect(descendants(node).filter((child) => child.type === CredentialAuthenticationForm)).toHaveLength(1);
-      for (const route of descendants(node).filter((child) => child.type === CredentialServiceForm))
-        expect(descendants(render(route)).some((child) => child.type === 'select')).toBe(false);
-      node = draw();
-      await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
-      expect(requestBody()).toMatchObject({
-        services: [
-          {
-            host: 'api.example.com/*',
-            auth: { type: 'api-key', key: 'TOKEN', location: 'query', parameter: 'api_key' },
-          },
-          {
-            host: 'uploads.example.com/*',
-            auth: { type: 'api-key', key: 'TOKEN', location: 'query', parameter: 'api_key' },
-          },
-        ],
-        values: { TOKEN: 'synthetic-key' },
-      });
-    });
-
-    it('preserves a saved query substitution on rename and reuses its value for an explicit placement change', async () => {
-      vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify(original)));
-      const saved: Connection = {
-        ...original,
-        credentials: ['SAVED_KEY'],
-        services: [
-          {
-            name: 'query',
-            host: 'api.example.com',
-            auth: { type: 'passthrough' },
-            substitutions: [{ key: 'SAVED_KEY', placeholder: '__SAVED_KEY__', in: ['query'] }],
-          },
-        ],
-      };
-      hooks.resource.data = saved;
-      const draw = formRenderer();
-      let node = draw();
-      const auth = find(node, CredentialAuthenticationForm);
-      expect(auth.props.savedLabel).toBe('Saved query authentication');
-      expect(auth.props.preferredKey).toBe('SAVED_KEY');
-      expect(find(node, CredentialServiceForm).props.busy).toBe(true);
-      nameInput(node).props.oninput({ currentTarget: { value: 'Renamed saved query' } });
-      node = draw();
-      await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
-      expect(requestBody()).toEqual({ label: 'Renamed saved query', revision: original.revision });
-      node = draw();
-      find(node, CredentialAuthenticationForm).props.onChange({
-        type: 'api-key',
-        key: 'SAVED_KEY',
-        location: 'query',
-        parameter: 'api_key',
-      });
-      node = draw();
-      await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
-      expect(requestBody()).not.toHaveProperty('values');
-      expect(requestBody()).toMatchObject({
-        services: [
-          {
-            name: 'query',
-            auth: { type: 'api-key', key: 'SAVED_KEY', location: 'query', parameter: 'api_key' },
-          },
-        ],
-      });
-      expect((requestBody().services as Service[])[0].substitutions).toBeUndefined();
-    });
-
     routing.props.onChange({ ...routing.props.route, pattern: 'https://third.example.com/api/*' });
     node = draw();
     expect(nameInput(node).props.value).toBe('My chosen name');
