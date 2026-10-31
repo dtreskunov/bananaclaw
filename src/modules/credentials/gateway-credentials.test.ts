@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   isMcpService,
+  injectionFor,
   resourceId,
   sameInjection,
   serviceForUrl,
@@ -42,6 +43,27 @@ const SERVICES: GatewayService[] = [
   { name: 'mcp-abc123', host: 'mcp.linear.app/mcp', auth: { type: 'bearer', token: 'MCP_ABC123' } },
   { name: 'mcp-abc123-children', host: 'mcp.linear.app/mcp/*', auth: { type: 'bearer', token: 'MCP_ABC123' } },
 ];
+
+describe('explicit API-key placement', () => {
+  it('round-trips query parameters without turning them into placeholder rules', () => {
+    const service = serviceFromDestination('query-api', 'KEY', {
+      match: 'api.example.com/v1/*',
+      injection: { type: 'api-key', location: 'query', name: 'api_key' },
+    });
+    expect(service.auth).toEqual({ type: 'api-key', key: 'KEY', location: 'query', parameter: 'api_key' });
+    expect(service.substitutions).toBeUndefined();
+    expect(injectionFor(service, 'KEY')).toEqual({ type: 'api-key', location: 'query', name: 'api_key' });
+    expect(
+      sameInjection(
+        { type: 'api-key', location: 'query', name: 'api_key' },
+        { type: 'api-key', location: 'query', name: 'API_KEY' },
+      ),
+    ).toBe(false);
+    expect(
+      sameInjection({ type: 'api-key', location: 'query', name: 'api_key' }, { type: 'query', name: 'api_key' }),
+    ).toBe(false);
+  });
+});
 
 describe('servicesToKeys', () => {
   const keys = servicesToKeys(SERVICES, [

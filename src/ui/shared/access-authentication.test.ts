@@ -108,6 +108,25 @@ describe('access request authentication compatibility', () => {
       connectionMatchesAccess(custom, { resource_url: url, authentication: { type: 'custom', headers: ['X-Other'] } }),
     ).toBe(false);
   });
+  it('matches exact query placement and parameter names, not an API-key header', () => {
+    const authentication = parseAccessAuthentication({ type: 'api-key', location: 'query', parameter: 'api_key' })!;
+    expect(authentication).toEqual({ type: 'api-key', location: 'query', parameter: 'api_key' });
+    const connection = {
+      kind: 'static' as const,
+      status: 'ready',
+      services: [{ host: 'gmailmcp.example.com', auth: { type: 'api-key', location: 'query', parameter: 'api_key' } }],
+    };
+    expect(connectionMatchesAccess(connection, { resource_url: url, authentication })).toBe(true);
+    expect(
+      connectionMatchesAccess(connection, {
+        resource_url: url,
+        authentication: { ...authentication, parameter: 'API_KEY' },
+      }),
+    ).toBe(false);
+    expect(
+      connectionMatchesAccess(connection, { resource_url: url, authentication: { type: 'api-key', header: 'X-Key' } }),
+    ).toBe(false);
+  });
   it.each([
     { type: 'mcp_oauth', client_secret: 'secret' },
     { type: 'bearer', token: 'secret' },
@@ -120,5 +139,10 @@ describe('access request authentication compatibility', () => {
     { type: 'api-key', header: 'X-AgentVault-Binding' },
     { type: 'api-key', header: 'X-Key', prefix: 'bad\nprefix' },
     { type: 'unknown' },
+    { type: 'api-key', location: 'body', header: 'X-Key' },
+    { type: 'api-key', location: 'query', parameter: 'bad&name' },
+    { type: 'api-key', location: 'query', parameter: 'key', header: 'X-Key' },
+    { type: 'api-key', location: 'query', parameter: 'key', prefix: 'Token ' },
+    { type: 'api-key', parameter: 'key' },
   ])('rejects secret-valued or unsafe hints: %j', (hint) => expect(() => parseAccessAuthentication(hint)).toThrow());
 });

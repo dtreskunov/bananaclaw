@@ -15,6 +15,8 @@ export interface GatewayAuth {
   key?: string;
   header?: string;
   prefix?: string;
+  location?: 'header' | 'query';
+  parameter?: string;
   headers?: Record<string, string>;
 }
 
@@ -44,6 +46,7 @@ export interface InjectionDto {
   name?: string;
   prefix?: string;
   template?: string;
+  location?: 'header' | 'query';
 }
 
 export interface KeyDto {
@@ -148,7 +151,10 @@ function injectionFor(service: GatewayService, key: string): InjectionDto {
     };
   if (a.type === 'bearer') return { type: 'bearer' };
   if (a.type === 'basic') return { type: 'basic' };
-  if (a.type === 'api-key') return { type: 'api-key', name: a.header || 'Authorization', prefix: a.prefix };
+  if (a.type === 'api-key')
+    return a.location === 'query'
+      ? { type: 'api-key', location: 'query', name: a.parameter }
+      : { type: 'api-key', name: a.header || 'Authorization', prefix: a.prefix };
   const header = Object.entries(a.headers ?? {}).find(([, v]) => v.includes(key));
   return { type: 'custom', name: header?.[0], template: header?.[1] };
 }
@@ -254,6 +260,8 @@ export function serviceFromDestination(name: string, key: string, destination: D
     case 'basic':
       return { name, host, auth: { type: 'basic', username: key } };
     case 'api-key': {
+      if (injection.location === 'query')
+        return { name, host, auth: { type: 'api-key', key, location: 'query', parameter: injection.name?.trim() } };
       const auth: GatewayAuth = { type: 'api-key', key, header: injection.name?.trim() || 'Authorization' };
       if (injection.prefix) auth.prefix = injection.prefix;
       return { name, host, auth };
@@ -282,9 +290,17 @@ export function serviceIndexForKey(services: GatewayService[], key: string): num
 /** True when two injections describe the same wire behaviour (ignoring unset optional fields). */
 export function sameInjection(a: InjectionDto, b: InjectionDto): boolean {
   const header = (i: InjectionDto): string =>
-    i.type === 'api-key' || i.type === 'custom' ? (i.name || 'Authorization').toLowerCase() : i.name || '';
+    (i.type === 'api-key' && i.location !== 'query') || i.type === 'custom'
+      ? (i.name || 'Authorization').toLowerCase()
+      : i.name || '';
   const norm = (i: InjectionDto): string =>
-    JSON.stringify([i.type, header(i), i.prefix || '', i.type === 'custom' ? i.template || '' : '']);
+    JSON.stringify([
+      i.type,
+      i.location ?? 'header',
+      header(i),
+      i.prefix || '',
+      i.type === 'custom' ? i.template || '' : '',
+    ]);
   return norm(a) === norm(b);
 }
 

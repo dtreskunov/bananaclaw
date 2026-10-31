@@ -15,6 +15,8 @@ export interface Service {
     key?: string;
     header?: string;
     prefix?: string;
+    location?: 'header' | 'query';
+    parameter?: string;
     headers?: Record<string, string>;
   };
   substitutions?: { key: string; placeholder: string; in?: string[] }[];
@@ -172,7 +174,7 @@ export function parseServices(text: string): Service[] {
       if (service[field] !== undefined && typeof service[field] !== 'boolean')
         throw new CredentialsError(`${field} must be true or false.`);
     }
-    for (const field of ['header', 'prefix']) {
+    for (const field of ['header', 'prefix', 'location', 'parameter']) {
       if (service.auth[field] !== undefined && typeof service.auth[field] !== 'string')
         throw new CredentialsError(`auth.${field} must be a string.`);
     }

@@ -7,6 +7,16 @@ beforeEach(() => initTestSessionDb());
 afterEach(() => closeSessionDb());
 
 describe('request_access MCP tool', () => {
+  it('carries explicit query-key placement without credential values', async () => {
+    const authentication = { type: 'api-key', location: 'query', parameter: 'api_key' };
+    const result = await requestAccess.handler({ resource_url: 'https://api.example.com/data',
+      reason: 'Read the requested data.', authentication });
+    expect(result.isError).not.toBe(true);
+    expect(JSON.parse(getUndeliveredMessages()[0].content)).toMatchObject({ authentication });
+    expect((await requestAccess.handler({ resource_url: 'https://api.example.com/data', reason: 'Read',
+      authentication: { type: 'api-key', location: { value: 'secret' } } })).isError).toBe(true);
+    expect(getUndeliveredMessages()).toHaveLength(1);
+  });
   it('uses the existing host message transport and never claims permission was granted', async () => {
     const result = await requestAccess.handler({ resource_url: 'https://api.example.com/v1/items', reason: 'Finish the report.' });
     const receipt = JSON.parse(result.content[0].text);

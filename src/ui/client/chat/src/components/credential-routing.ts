@@ -40,7 +40,10 @@ export function accessCreationDefaults(
   if (kind === 'static' && hint) {
     routes[0].service.auth = authentication(hint.type, { type: 'unset' }, []);
     if (hint.type === 'api-key')
-      routes[0].service.auth = { ...routes[0].service.auth, header: hint.header, prefix: hint.prefix };
+      routes[0].service.auth =
+        hint.location === 'query'
+          ? { type: 'api-key', key: routes[0].service.auth.key, location: 'query', parameter: hint.parameter }
+          : { ...routes[0].service.auth, header: hint.header, prefix: hint.prefix };
     if (hint.type === 'custom')
       routes[0].service.auth.headers = Object.fromEntries(
         (hint.headers ?? []).map((header, index) => [header, `{{ HEADER_VALUE_${index + 1} }}`]),
@@ -118,33 +121,77 @@ export function unusedKey(keys: string[], prefix: string): string {
   return key;
 }
 
-export function authentication(type: string, previous: Service['auth'], keys: string[]): Service['auth'] {
+export function authentication(
+  type: string,
+  previous: Service['auth'],
+  keys: string[],
+  preferredKey?: string,
+): Service['auth'] {
   if (type === previous.type) return structuredClone(previous);
   switch (type) {
     case 'bearer':
-      return { type, token: unusedKey(keys, 'TOKEN') };
+      return { type, token: previous.token ?? previous.key ?? preferredKey ?? unusedKey(keys, 'TOKEN') };
     case 'api-key':
-      return { type, key: unusedKey(keys, 'API_KEY'), header: 'X-Api-Key' };
+      return {
+        type,
+        key: previous.key ?? previous.token ?? preferredKey ?? unusedKey(keys, 'API_KEY'),
+        header: 'X-Api-Key',
+      };
     case 'basic':
       return { type, username: unusedKey(keys, 'USERNAME'), password: unusedKey(keys, 'PASSWORD') };
     case 'custom':
       return { type, headers: { 'X-Api-Key': `{{ ${unusedKey(keys, 'HEADER_VALUE')} }}` } };
-    case 'passthrough':
-      return { type };
     default:
       throw new CredentialsError('Choose an authentication method.');
   }
 }
 
-export function compileRoutes(routes: RouteDraft[]): Service[] {
+export function sharedAuthentication(services: Service[]): boolean {
+  const recipe = (service: Service): string => {
+    const auth = service.auth;
+    return JSON.stringify([
+      auth.type,
+      auth.token,
+      auth.key,
+      auth.username,
+      auth.password,
+      auth.type === 'api-key' ? (auth.location ?? 'header') : auth.location,
+      auth.type === 'api-key' && auth.location !== 'query'
+        ? (auth.header || 'Authorization').toLowerCase()
+        : auth.header,
+      auth.parameter,
+      auth.prefix ?? '',
+      Object.entries(auth.headers ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+      service.substitutions ?? [],
+    ]);
+  };
+  return services.every((service) => recipe(service) === recipe(services[0]));
+}
+
+export function compileRoutes(routes: RouteDraft[], auth?: Service['auth']): Service[] {
   if (!routes.length) throw new CredentialsError('Add a URL pattern.');
+  if (!auth && !sharedAuthentication(routes.map((route) => route.service)))
+    throw new CredentialsError('All destinations must share the credential authentication.');
   const names = new Set<string>();
-  return routes.map(({ service, pattern }) => {
+  return routes.map(({ service: original, pattern }) => {
+    const service = auth ? { ...original, auth: structuredClone(auth), substitutions: undefined } : original;
     const parsed = parseUrlPattern(pattern);
     if (!service.name || names.has(service.name)) throw new CredentialsError('Duplicate URL routing entry.');
     names.add(service.name);
     const headerName = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
-    if (service.auth.type === 'api-key' && !headerName.test(service.auth.header ?? ''))
+    const query = service.auth.type === 'api-key' && service.auth.location === 'query';
+    if (
+      service.auth.type === 'api-key' &&
+      service.auth.location &&
+      !['header', 'query'].includes(service.auth.location)
+    )
+      throw new CredentialsError('Choose header or query placement.');
+    if (
+      query &&
+      (!/^[A-Za-z0-9._~-]{1,128}$/.test(service.auth.parameter ?? '') || service.auth.header || service.auth.prefix)
+    )
+      throw new CredentialsError('Enter the query parameter name without a header or prefix.');
+    if (service.auth.type === 'api-key' && !query && !headerName.test(service.auth.header ?? ''))
       throw new CredentialsError('Enter the API-key header name.');
     if (service.auth.prefix && /[\r\n]/.test(service.auth.prefix))
       throw new CredentialsError('Header prefixes cannot contain line breaks.');
@@ -168,12 +215,14 @@ export function compileRoutes(routes: RouteDraft[]): Service[] {
       if (substitution.in && !substitution.in.length)
         throw new CredentialsError('Choose where to replace each placeholder.');
     }
-    if (!serviceKeys([service]).length) throw new CredentialsError('Add a credential value or placeholder.');
+    if (!serviceKeys([service]).length) throw new CredentialsError('Add a credential value.');
     return { ...service, host: parsed.host, path: undefined, https_only: true };
   });
 }
 
-export function credentialFields(services: Service[]): { key: string; label: string }[] {
+export function credentialFields<T extends Pick<Service, 'auth' | 'substitutions'>>(
+  services: T[],
+): { key: string; label: string }[] {
   const labels = new Map<string, string>();
   for (const service of services) {
     const auth = service.auth;
@@ -185,7 +234,7 @@ export function credentialFields(services: Service[]): { key: string; label: str
       for (const match of template.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g))
         if (!labels.has(match[1])) labels.set(match[1], `${header || 'Header'} value`);
     for (const substitution of service.substitutions ?? [])
-      if (!labels.has(substitution.key)) labels.set(substitution.key, 'Placeholder value');
+      if (!labels.has(substitution.key)) labels.set(substitution.key, 'Saved value');
   }
   const duplicates = new Map<string, number>();
   return [...labels].map(([key, label]) => {

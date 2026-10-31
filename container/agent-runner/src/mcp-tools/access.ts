@@ -12,7 +12,7 @@ export const requestAccess: McpToolDefinition = {
       properties: {
         resource_url: { type: 'string', description: 'Exact HTTPS destination without credentials, query, fragment or wildcards.' },
         reason: { type: 'string', description: 'Why access is needed for the current request. Never include secret values.' },
-        scopes: { type: 'array', items: { type: 'string' }, description: 'Optional scope suggestions, not automatically selected or granted.' },
+        scopes: { type: 'array', items: { type: 'string' }, description: 'Optional scope suggestions reviewed during sign-in. No access is granted automatically.' },
         mcp_server: { type: 'string', description: 'Exact configured MCP server name when requesting its account connection. Never select all servers by URL.' },
         authentication: { type: 'object', additionalProperties: false,
           description: 'Optional researched authentication requirements, reviewed by the user. No tokens, passwords, client secrets, owner IDs or connection IDs. OAuth permissions go in scopes.',
@@ -20,7 +20,9 @@ export const requestAccess: McpToolDefinition = {
             type: { type: 'string', enum: ['mcp_oauth', 'oauth_app', 'bearer', 'api-key', 'basic', 'custom'] },
             app_id: { type: 'string', description: 'OAuth only: optional configured app identifier, if known.' },
             header: { type: 'string', description: 'api-key only: documented header name, for example X-Api-Key.' },
-            prefix: { type: 'string', description: 'api-key only: documented public prefix, for example "Token ". Never a credential value.' },
+            location: { type: 'string', enum: ['header', 'query'], description: 'api-key only: where the gateway sends the key. Defaults to header.' },
+            parameter: { type: 'string', description: 'Query API keys only: public parameter name, for example api_key. Never the key value.' },
+            prefix: { type: 'string', description: 'API-key headers only: documented public prefix, for example "Token ". Never a credential value.' },
             headers: { type: 'array', items: { type: 'string' }, description: 'custom only: header names, never values.' },
           }, required: ['type'] },
       },
@@ -31,9 +33,10 @@ export const requestAccess: McpToolDefinition = {
   async handler(args) {
     const hint = args.authentication;
     if (hint !== undefined && (!hint || typeof hint !== 'object' || Array.isArray(hint) ||
-      Object.keys(hint).some(key => !['type', 'app_id', 'header', 'prefix', 'headers'].includes(key)) ||
+      Object.keys(hint).some(key => !['type', 'app_id', 'header', 'prefix', 'headers', 'location', 'parameter'].includes(key)) ||
+      Object.entries(hint).some(([key, value]) => ['type', 'app_id', 'header', 'prefix', 'location', 'parameter'].includes(key) && typeof value !== 'string') ||
       ('headers' in hint && (!Array.isArray(hint.headers) || hint.headers.some(header => typeof header !== 'string'))))) {
-      return { isError: true, content: [{ type: 'text', text: 'Authentication suggestions may contain only mechanism, OAuth app ID, header names and a public prefix. Never supply credential values.' }] };
+      return { isError: true, content: [{ type: 'text', text: 'Authentication suggestions may contain only mechanism, OAuth app ID, header/query names and a public header prefix. Never supply credential values.' }] };
     }
     const url = typeof args.resource_url === 'string' ? URL.parse(args.resource_url) : null;
     if (!url || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||

@@ -30244,7 +30244,7 @@ var ACCESS_AUTHENTICATION_LABELS = {
   mcp_oauth: "MCP OAuth",
   oauth_app: "OAuth app",
   bearer: "Bearer token",
-  "api-key": "API-key header",
+  "api-key": "API key",
   basic: "Username and password",
   custom: "Custom headers"
 };
@@ -30267,8 +30267,11 @@ function connectionMatchesAccess(connection2, request) {
   if (!hint || oauthHint) return true;
   return services.some((service) => {
     if (service.auth.type !== hint.type) return false;
-    if (hint.type === "api-key")
-      return service.auth.header?.toLowerCase() === hint.header?.toLowerCase() && (hint.prefix === void 0 || (service.auth.prefix ?? "") === hint.prefix);
+    if (hint.type === "api-key") {
+      if ((service.auth.location ?? "header") !== (hint.location ?? "header")) return false;
+      if (hint.location === "query") return service.auth.parameter === hint.parameter;
+      return (service.auth.header || "Authorization").toLowerCase() === hint.header?.toLowerCase() && (hint.prefix === void 0 || (service.auth.prefix ?? "") === hint.prefix);
+    }
     if (hint.type === "custom") {
       const headers = Object.keys(service.auth.headers ?? {}).map((header) => header.toLowerCase());
       return hint.headers?.every((header) => headers.includes(header.toLowerCase())) ?? false;
@@ -30561,6 +30564,7 @@ function AccessRequestReview({ id: id2, connections, preferredConnectionId, sign
           ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type],
           request.data.authentication.app_id ? ` \xB7 OAuth app: ${request.data.authentication.app_id}` : "",
           request.data.authentication.header ? ` \xB7 Header: ${request.data.authentication.header}` : "",
+          request.data.authentication.parameter ? ` \xB7 Query parameter: ${request.data.authentication.parameter}` : "",
           request.data.authentication.prefix !== void 0 ? ` \xB7 Public prefix: ${JSON.stringify(request.data.authentication.prefix)}` : "",
           request.data.authentication.headers?.length ? ` \xB7 Headers: ${request.data.authentication.headers.join(", ")}` : ""
         ] }) : null,
@@ -30621,7 +30625,7 @@ function accessCreationDefaults(request, apps) {
   if (kind === "static" && hint) {
     routes[0].service.auth = authentication(hint.type, { type: "unset" }, []);
     if (hint.type === "api-key")
-      routes[0].service.auth = { ...routes[0].service.auth, header: hint.header, prefix: hint.prefix };
+      routes[0].service.auth = hint.location === "query" ? { type: "api-key", key: routes[0].service.auth.key, location: "query", parameter: hint.parameter } : { ...routes[0].service.auth, header: hint.header, prefix: hint.prefix };
     if (hint.type === "custom")
       routes[0].service.auth.headers = Object.fromEntries(
         (hint.headers ?? []).map((header, index) => [header, `{{ HEADER_VALUE_${index + 1} }}`])
@@ -30670,32 +30674,57 @@ function unusedKey(keys, prefix) {
   while (keys.includes(key)) key = `${prefix}_${index++}`;
   return key;
 }
-function authentication(type, previous, keys) {
+function authentication(type, previous, keys, preferredKey) {
   if (type === previous.type) return structuredClone(previous);
   switch (type) {
     case "bearer":
-      return { type, token: unusedKey(keys, "TOKEN") };
+      return { type, token: previous.token ?? previous.key ?? preferredKey ?? unusedKey(keys, "TOKEN") };
     case "api-key":
-      return { type, key: unusedKey(keys, "API_KEY"), header: "X-Api-Key" };
+      return { type, key: previous.key ?? previous.token ?? preferredKey ?? unusedKey(keys, "API_KEY"), header: "X-Api-Key" };
     case "basic":
       return { type, username: unusedKey(keys, "USERNAME"), password: unusedKey(keys, "PASSWORD") };
     case "custom":
       return { type, headers: { "X-Api-Key": `{{ ${unusedKey(keys, "HEADER_VALUE")} }}` } };
-    case "passthrough":
-      return { type };
     default:
       throw new CredentialsError("Choose an authentication method.");
   }
 }
-function compileRoutes(routes) {
+function sharedAuthentication(services) {
+  const recipe = (service) => {
+    const auth = service.auth;
+    return JSON.stringify([
+      auth.type,
+      auth.token,
+      auth.key,
+      auth.username,
+      auth.password,
+      auth.type === "api-key" ? auth.location ?? "header" : auth.location,
+      auth.type === "api-key" && auth.location !== "query" ? (auth.header || "Authorization").toLowerCase() : auth.header,
+      auth.parameter,
+      auth.prefix ?? "",
+      Object.entries(auth.headers ?? {}).sort(([a4], [b5]) => a4.localeCompare(b5)),
+      service.substitutions ?? []
+    ]);
+  };
+  return services.every((service) => recipe(service) === recipe(services[0]));
+}
+function compileRoutes(routes, auth) {
   if (!routes.length) throw new CredentialsError("Add a URL pattern.");
+  if (!auth && !sharedAuthentication(routes.map((route) => route.service)))
+    throw new CredentialsError("All destinations must share the credential authentication.");
   const names = /* @__PURE__ */ new Set();
-  return routes.map(({ service, pattern }) => {
+  return routes.map(({ service: original, pattern }) => {
+    const service = auth ? { ...original, auth: structuredClone(auth), substitutions: void 0 } : original;
     const parsed = parseUrlPattern(pattern);
     if (!service.name || names.has(service.name)) throw new CredentialsError("Duplicate URL routing entry.");
     names.add(service.name);
     const headerName = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
-    if (service.auth.type === "api-key" && !headerName.test(service.auth.header ?? ""))
+    const query = service.auth.type === "api-key" && service.auth.location === "query";
+    if (service.auth.type === "api-key" && service.auth.location && !["header", "query"].includes(service.auth.location))
+      throw new CredentialsError("Choose header or query placement.");
+    if (query && (!/^[A-Za-z0-9._~-]{1,128}$/.test(service.auth.parameter ?? "") || service.auth.header || service.auth.prefix))
+      throw new CredentialsError("Enter the query parameter name without a header or prefix.");
+    if (service.auth.type === "api-key" && !query && !headerName.test(service.auth.header ?? ""))
       throw new CredentialsError("Enter the API-key header name.");
     if (service.auth.prefix && /[\r\n]/.test(service.auth.prefix))
       throw new CredentialsError("Header prefixes cannot contain line breaks.");
@@ -30715,7 +30744,7 @@ function compileRoutes(routes) {
       if (substitution.in && !substitution.in.length)
         throw new CredentialsError("Choose where to replace each placeholder.");
     }
-    if (!serviceKeys([service]).length) throw new CredentialsError("Add a credential value or placeholder.");
+    if (!serviceKeys([service]).length) throw new CredentialsError("Add a credential value.");
     return { ...service, host: parsed.host, path: void 0, https_only: true };
   });
 }
@@ -30731,7 +30760,7 @@ function credentialFields(services) {
       for (const match2 of template.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g))
         if (!labels.has(match2[1])) labels.set(match2[1], `${header || "Header"} value`);
     for (const substitution of service.substitutions ?? [])
-      if (!labels.has(substitution.key)) labels.set(substitution.key, "Placeholder value");
+      if (!labels.has(substitution.key)) labels.set(substitution.key, "Saved value");
   }
   const duplicates = /* @__PURE__ */ new Map();
   return [...labels].map(([key, label]) => {
@@ -30986,18 +31015,7 @@ function CredentialName({ connection: connection2, name, busy, onSaved, onBusyCh
 }
 
 // src/components/CredentialServiceForm.tsx
-var LOCATIONS = [
-  ["query", "Query"],
-  ["path", "Path"],
-  ["header", "Headers"],
-  ["body", "Body"],
-  ["websocket", "WebSocket"]
-];
-function CredentialServiceForm({ route, index, keys, busy, firstInput, onChange, onRemove }) {
-  const service = route.service;
-  const update = (patch) => onChange({ ...route, service: { ...service, ...patch } });
-  const updateAuth = (patch) => update({ auth: { ...service.auth, ...patch } });
-  const substitutions = service.substitutions ?? [];
+function CredentialServiceForm({ route, index, busy, firstInput, onChange, onRemove }) {
   return /* @__PURE__ */ u4("section", { class: "credential-route", children: [
     /* @__PURE__ */ u4("div", { class: "ga-cred-head", children: [
       /* @__PURE__ */ u4("strong", { children: index ? `Additional URL ${index + 1}` : "Destination" }),
@@ -31016,119 +31034,97 @@ function CredentialServiceForm({ route, index, keys, busy, firstInput, onChange,
         disabled: busy,
         onInput: (event) => onChange({ ...route, pattern: event.currentTarget.value })
       }
-    ) }),
+    ) })
+  ] });
+}
+function CredentialAuthenticationForm({ auth, keys, busy, preferredKey, savedLabel, onChange }) {
+  const update = (patch) => onChange({ ...auth, ...patch });
+  const query = auth.location === "query";
+  return /* @__PURE__ */ u4("section", { class: "credential-authentication", children: [
     /* @__PURE__ */ u4(GroupAdminField, { label: "Authentication", children: /* @__PURE__ */ u4(
       "select",
       {
-        "aria-label": `Authentication ${index + 1}`,
-        value: service.auth.type,
+        "aria-label": "Authentication",
+        value: savedLabel ? "saved" : auth.type,
         disabled: busy,
-        onChange: (event) => {
-          const type = event.currentTarget.value;
-          const patch = { auth: authentication(type, service.auth, keys) };
-          if (type === "passthrough" && !substitutions.length) {
-            const key = unusedKey(keys, "PLACEHOLDER_VALUE");
-            patch.substitutions = [{ key, placeholder: `__${key}__`, in: ["query"] }];
-          }
-          update(patch);
-        },
+        onChange: (event) => onChange(authentication(event.currentTarget.value, auth, keys, preferredKey)),
         children: [
+          savedLabel ? /* @__PURE__ */ u4("option", { value: "saved", disabled: true, children: savedLabel }) : null,
           /* @__PURE__ */ u4("option", { value: "bearer", children: "Bearer token" }),
-          /* @__PURE__ */ u4("option", { value: "api-key", children: "API-key header" }),
+          /* @__PURE__ */ u4("option", { value: "api-key", children: "API key" }),
           /* @__PURE__ */ u4("option", { value: "basic", children: "Username and password" }),
-          /* @__PURE__ */ u4("option", { value: "custom", children: "Custom headers" }),
-          /* @__PURE__ */ u4("option", { value: "passthrough", children: "Request placeholder" })
+          /* @__PURE__ */ u4("option", { value: "custom", children: "Custom headers" })
         ]
       }
     ) }),
-    service.auth.type === "api-key" ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Header", children: /* @__PURE__ */ u4(
-        "input",
+    auth.type === "api-key" ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(GroupAdminField, { label: "Send in", children: /* @__PURE__ */ u4(
+        "select",
         {
-          "aria-label": `API-key header ${index + 1}`,
-          type: "text",
-          value: service.auth.header ?? "",
-          placeholder: "X-Api-Key",
+          "aria-label": "API key placement",
+          value: auth.location ?? "header",
           disabled: busy,
-          onInput: (event) => updateAuth({ header: event.currentTarget.value })
+          onChange: (event) => {
+            const location2 = event.currentTarget.value;
+            if (location2 !== "header" && location2 !== "query") {
+              showToast("Choose header or query placement.", "err");
+              return;
+            }
+            onChange({
+              ...auth,
+              location: location2,
+              header: location2 === "header" ? "X-Api-Key" : void 0,
+              parameter: location2 === "query" ? "" : void 0,
+              prefix: void 0
+            });
+          },
+          children: [
+            /* @__PURE__ */ u4("option", { value: "header", children: "Header" }),
+            /* @__PURE__ */ u4("option", { value: "query", children: "Query parameter" })
+          ]
         }
       ) }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Prefix", children: /* @__PURE__ */ u4(
+      query ? /* @__PURE__ */ u4(GroupAdminField, { label: "Parameter", children: /* @__PURE__ */ u4(
         "input",
         {
-          "aria-label": `Header prefix ${index + 1}`,
+          "aria-label": "Query parameter",
           type: "text",
-          value: service.auth.prefix ?? "",
-          placeholder: "Optional, including any trailing space",
+          value: auth.parameter ?? "",
+          placeholder: "api_key",
           disabled: busy,
-          onInput: (event) => updateAuth({ prefix: event.currentTarget.value })
+          onInput: (event) => update({ parameter: event.currentTarget.value })
         }
-      ) })
-    ] }) : null,
-    service.auth.type === "custom" ? /* @__PURE__ */ u4(HeaderFields, { service, keys, busy, onChange: (headers) => updateAuth({ headers }) }) : null,
-    substitutions.length ? /* @__PURE__ */ u4("div", { class: "credential-placeholders", children: substitutions.map((substitution, position2) => {
-      const replace = (patch) => update({
-        substitutions: substitutions.map((item, at) => at === position2 ? { ...item, ...patch } : item)
-      });
-      return /* @__PURE__ */ u4("fieldset", { disabled: busy, class: "credential-placeholder", children: [
-        /* @__PURE__ */ u4("legend", { children: [
-          "Request placeholder ",
-          substitutions.length > 1 ? position2 + 1 : ""
-        ] }),
-        /* @__PURE__ */ u4(GroupAdminField, { label: "Value", children: /* @__PURE__ */ u4(
-          "select",
+      ) }) : /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4(GroupAdminField, { label: "Header", children: /* @__PURE__ */ u4(
+          "input",
           {
-            "aria-label": `Value for placeholder ${index + 1}.${position2 + 1}`,
-            value: substitution.key,
-            onChange: (event) => replace({ key: event.currentTarget.value }),
-            children: keys.map((key, at) => /* @__PURE__ */ u4("option", { value: key, children: credentialFields([service]).find((field) => field.key === key)?.label ?? `Saved value ${at + 1}` }, key))
+            "aria-label": "API-key header",
+            type: "text",
+            value: auth.header ?? "",
+            placeholder: "X-Api-Key",
+            disabled: busy,
+            onInput: (event) => update({ header: event.currentTarget.value })
           }
         ) }),
-        /* @__PURE__ */ u4("div", { class: "credential-inline-field", children: [
-          /* @__PURE__ */ u4(
-            "input",
-            {
-              type: "text",
-              "aria-label": `Placeholder ${index + 1}.${position2 + 1}`,
-              value: substitution.placeholder,
-              spellcheck: false,
-              onInput: (event) => replace({ placeholder: event.currentTarget.value })
-            }
-          ),
-          /* @__PURE__ */ u4(CredentialAction, { label: "Copy placeholder", onClick: () => {
-            void navigator.clipboard.writeText(substitution.placeholder).then(
-              () => showToast("Placeholder copied"),
-              () => showToast("Could not copy the placeholder", "err")
-            );
-          }, children: /* @__PURE__ */ u4(CopyIcon, {}) }),
-          /* @__PURE__ */ u4(CredentialAction, { label: "Remove placeholder", onClick: () => update({
-            substitutions: substitutions.filter((_6, at) => at !== position2)
-          }), children: /* @__PURE__ */ u4(TrashIcon, {}) })
-        ] }),
-        /* @__PURE__ */ u4("div", { class: "credential-placeholder-locations", children: LOCATIONS.map(([value, label]) => /* @__PURE__ */ u4("label", { children: [
-          /* @__PURE__ */ u4(
-            "input",
-            {
-              type: "checkbox",
-              checked: (substitution.in ?? ["path", "query"]).includes(value),
-              onChange: (event) => {
-                const selected = substitution.in ?? ["path", "query"];
-                replace({ in: event.currentTarget.checked ? [...selected, value] : selected.filter((item) => item !== value) });
-              }
-            }
-          ),
-          label
-        ] }, value)) })
-      ] }, `${substitution.key}:${position2}`);
-    }) }) : null,
-    /* @__PURE__ */ u4("button", { type: "button", class: "ghost", disabled: busy, onClick: () => {
-      const key = unusedKey(keys, "PLACEHOLDER_VALUE");
-      update({ substitutions: [...substitutions, { key, placeholder: `__${key}__`, in: ["query"] }] });
-    }, children: "Add request placeholder" })
+        /* @__PURE__ */ u4(GroupAdminField, { label: "Prefix", children: /* @__PURE__ */ u4(
+          "input",
+          {
+            "aria-label": "Header prefix",
+            type: "text",
+            value: auth.prefix ?? "",
+            placeholder: "Optional, including any trailing space",
+            disabled: busy,
+            onInput: (event) => update({ prefix: event.currentTarget.value })
+          }
+        ) })
+      ] })
+    ] }) : null,
+    auth.type === "custom" ? /* @__PURE__ */ u4(HeaderFields, { auth, keys, busy, onChange: (headers) => update({ headers }) }) : null,
+    savedLabel ? /* @__PURE__ */ u4("p", { class: "muted", children: "Saved placement is preserved. Choose a new authentication method to edit destinations." }) : null
   ] });
 }
-function HeaderFields({ service, keys, busy, onChange }) {
-  const entries = Object.entries(service.auth.headers ?? {});
+function HeaderFields({ auth, keys, busy, onChange }) {
+  const entries = Object.entries(auth.headers ?? {});
   const set = (position2, header, template) => {
     if (entries.some(([other], at) => at !== position2 && other.toLowerCase() === header.toLowerCase())) {
       showToast("This header already exists.", "err");
@@ -31167,7 +31163,7 @@ function HeaderFields({ service, keys, busy, onChange }) {
         {
           template,
           keys,
-          service,
+          auth,
           busy,
           onChange: (value) => set(position2, header, value)
         }
@@ -31178,13 +31174,13 @@ function HeaderFields({ service, keys, busy, onChange }) {
       let header = "X-Api-Key";
       let number2 = 2;
       while (entries.some(([name]) => name.toLowerCase() === header.toLowerCase())) header = `X-Api-Key-${number2++}`;
-      onChange({ ...service.auth.headers, [header]: `{{ ${key} }}` });
+      onChange({ ...auth.headers, [header]: `{{ ${key} }}` });
     }, children: "Add header" })
   ] });
 }
-function HeaderTemplate({ template, keys, service, busy, onChange }) {
+function HeaderTemplate({ template, keys, auth, busy, onChange }) {
   const matches2 = [...template.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)];
-  const options = credentialFields([service]);
+  const options = credentialFields([{ auth }]);
   const segments = [];
   let start = 0;
   for (const match2 of matches2) {
@@ -31219,7 +31215,7 @@ function HeaderTemplate({ template, keys, service, busy, onChange }) {
         }
       ) : null
     ] }, position2)),
-    /* @__PURE__ */ u4("button", { type: "button", class: "ghost", disabled: busy, onClick: () => onChange(template + `{{ ${unusedKey(keys, "HEADER_VALUE")} }}`), children: "Add value placeholder" })
+    /* @__PURE__ */ u4("button", { type: "button", class: "ghost", disabled: busy, onClick: () => onChange(template + `{{ ${unusedKey(keys, "HEADER_VALUE")} }}`), children: "Add value" })
   ] });
 }
 
@@ -31732,6 +31728,11 @@ function ConnectionForm({ connection: connection2, apps, initialKind = "static",
     return result;
   });
   const [routingChanged, setRoutingChanged] = h2(false);
+  const [auth, setAuth] = h2(() => {
+    const value = structuredClone(connection2?.services[0]?.auth ?? defaults?.routes[0].service.auth ?? routes[0].service.auth);
+    if (value.type === "api-key" && value.location !== "query" && !value.header) value.header = "Authorization";
+    return value;
+  });
   const [values, setValues] = h2({});
   const [busy, setBusy] = h2(false);
   const [error, setError] = h2("");
@@ -31746,18 +31747,23 @@ function ConnectionForm({ connection: connection2, apps, initialKind = "static",
   }, [kind]);
   const isStatic = kind === "static";
   const creatingOAuth = !connection2 && !isStatic;
+  const savedSubstitutions = connection2?.services.flatMap((service) => service.substitutions ?? []) ?? [];
+  const savedKeys = [...new Set(savedSubstitutions.map((substitution) => substitution.key))];
+  const unsupported = !["bearer", "api-key", "basic", "custom"].includes(auth.type);
+  const preserving = !!connection2 && !routingChanged && (unsupported || savedSubstitutions.length > 0);
+  const mixed = isStatic && !!connection2 && !sharedAuthentication(connection2.services);
   let services = [];
   let routingError = "";
   try {
-    services = isStatic ? compileRoutes(routes) : connection2?.services ?? [];
+    services = isStatic && !preserving ? compileRoutes(routes, auth) : connection2?.services ?? [];
   } catch (error2) {
     if (!(error2 instanceof CredentialsError)) throw error2;
     routingError = errorMessage(error2);
   }
   const drafts = routes.map((route) => route.service);
-  const fields = isStatic ? credentialFields(drafts) : [];
+  const fields = isStatic ? credentialFields([{ auth, substitutions: preserving ? savedSubstitutions : void 0 }]) : [];
   const keys = fields.map((field) => field.key);
-  const knownKeys = [.../* @__PURE__ */ new Set([...connection2?.credentials ?? [], ...serviceKeys(drafts)])];
+  const knownKeys = [.../* @__PURE__ */ new Set([...connection2?.credentials ?? [], ...serviceKeys(drafts), ...keys])];
   const supplied = providedValues(values, keys);
   const missingValues = keys.some((key) => !connection2?.credentials.includes(key) && !supplied[key]);
   let resource = "";
@@ -31771,7 +31777,7 @@ function ConnectionForm({ connection: connection2, apps, initialKind = "static",
     }
   }
   const renamed = !connection2 || label.trim() !== connectionName(connection2, apps);
-  const canSave = !busy && !stale && !!label.trim() && (creatingOAuth ? validScopeSelection(scopes, unspecifiedScopes) && (kind === "mcp_oauth" ? !!resource : !!appId) : !routingError && !missingValues && (!connection2 || renamed || routingChanged || Object.keys(supplied).length > 0));
+  const canSave = !busy && !stale && !mixed && !!label.trim() && (creatingOAuth ? validScopeSelection(scopes, unspecifiedScopes) && (kind === "mcp_oauth" ? !!resource : !!appId) : !routingError && !missingValues && (!connection2 || renamed || routingChanged || Object.keys(supplied).length > 0));
   const changeRoute = (index, route) => {
     setRoutes((old) => old.map((item, at) => at === index ? route : item));
     setRoutingChanged(true);
@@ -31895,13 +31901,36 @@ function ConnectionForm({ connection: connection2, apps, initialKind = "static",
       oauthDraft ? /* @__PURE__ */ u4("p", { children: "A draft credential was saved. Retrying uses the same connection." }) : null
     ] }) : null,
     isStatic ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(
+        CredentialAuthenticationForm,
+        {
+          auth,
+          keys: knownKeys,
+          busy: busy || mixed,
+          preferredKey: savedKeys.length === 1 ? savedKeys[0] : void 0,
+          savedLabel: preserving ? savedSubstitutions.length && savedSubstitutions.every((sub) => sub.in?.length === 1 && sub.in[0] === "query") ? "Saved query authentication" : "Saved authentication" : void 0,
+          onChange: (value) => {
+            setAuth(value);
+            setRoutingChanged(true);
+          }
+        }
+      ),
+      fields.map(({ key, label: label2 }) => /* @__PURE__ */ u4(GroupAdminField, { label: label2, children: /* @__PURE__ */ u4(
+        SecretInput,
+        {
+          label: label2,
+          value: values[key] ?? "",
+          disabled: busy,
+          placeholder: connection2?.credentials.includes(key) ? "Keep current value" : "New value",
+          onInput: (value) => setValues((old) => ({ ...old, [key]: value }))
+        }
+      ) }, key)),
       routes.map((route, index) => /* @__PURE__ */ u4(
         CredentialServiceForm,
         {
           route,
           index,
-          keys: knownKeys,
-          busy,
+          busy: busy || preserving || mixed,
           firstInput: index === 0 ? firstUrl : void 0,
           onChange: (value) => changeRoute(index, value),
           onRemove: routes.length > 1 ? () => {
@@ -31912,7 +31941,7 @@ function ConnectionForm({ connection: connection2, apps, initialKind = "static",
         },
         route.service.name
       )),
-      /* @__PURE__ */ u4("button", { type: "button", class: "ghost", disabled: busy, onClick: () => {
+      /* @__PURE__ */ u4("button", { type: "button", class: "ghost", disabled: busy || preserving || mixed, onClick: () => {
         let number2 = routes.length + 1;
         while (routes.some((route) => route.service.name === `route-${number2}`)) number2++;
         const service = structuredClone(routes[0].service);
@@ -31920,6 +31949,7 @@ function ConnectionForm({ connection: connection2, apps, initialKind = "static",
         setRoutes((old) => [...old, { service, pattern: "" }]);
         setRoutingChanged(true);
       }, children: "Add URL pattern" }),
+      mixed ? /* @__PURE__ */ u4(ErrorNotice, { message: "This saved credential uses different authentication per destination. Split it before editing." }) : null,
       /* @__PURE__ */ u4(ErrorNotice, { message: routingError && routes.some((route) => route.pattern) ? routingError : "" })
     ] }) : connection2 ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4("p", { children: connection2.resource_url ?? apps.find((app) => app.id === connection2.app_id)?.label ?? "OAuth app unavailable" }),
@@ -31928,16 +31958,6 @@ function ConnectionForm({ connection: connection2, apps, initialKind = "static",
         connection2.scope_source !== "provider" || connection2.granted_scopes == null ? /* @__PURE__ */ u4("p", { class: "muted", children: "Not reported by the provider." }) : connection2.granted_scopes.length ? /* @__PURE__ */ u4(ScopeList, { scopes: connection2.granted_scopes }) : /* @__PURE__ */ u4("p", { class: "muted", children: "None." })
       ] })
     ] }) : null,
-    fields.map(({ key, label: label2 }) => /* @__PURE__ */ u4(GroupAdminField, { label: label2, children: /* @__PURE__ */ u4(
-      SecretInput,
-      {
-        label: label2,
-        value: values[key] ?? "",
-        disabled: busy,
-        placeholder: connection2?.credentials.includes(key) ? "Keep current value" : "New value",
-        onInput: (value) => setValues((old) => ({ ...old, [key]: value }))
-      }
-    ) }, key)),
     /* @__PURE__ */ u4(ErrorNotice, { message: error }),
     stale ? /* @__PURE__ */ u4("p", { role: "alert", children: "This connection changed or the operation conflicts. Close and reopen it to load the latest revision; your changes were not blindly overwritten." }) : null
   ] }) });

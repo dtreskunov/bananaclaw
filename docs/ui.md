@@ -771,6 +771,14 @@ or checkbox. Functional scope, no-scope-request and agent-access checkboxes rema
 Required-field validation, ownership, write-only secrets and exact revision checks
 are unchanged. The personal dialog is also titled **My Credentials**; existing
 `#credentials` links continue to work.
+Static authentication is configured once per credential, alongside its secret
+values. URL rows contain destinations only and share that recipe. API keys have
+an explicit **Header / Query parameter** placement and a public name; the gateway
+injects query values automatically, without markers in agent requests. The raw
+request-placeholder editor is removed. Saved substitution-based credentials keep
+their existing behavior and value references; choosing a new authentication
+method explicitly replaces that placement. Saved destinations remain read-only
+until that choice, rather than silently dropping their substitution rules.
 Affected-agent and affected-personal-connection sections are omitted. Existing
 OAuth credentials show one always-visible **Scopes** section with actual
 provider-reported grants, or an explicit unknown state; requested scopes remain
@@ -791,6 +799,7 @@ display name (or its existing nickname for that same connection).
 `{type: "mcp_oauth"}` or `{type: "oauth_app", app_id: "google"}`, with desired
 OAuth permissions in the separate `scopes` array; static examples include
 `{type: "api-key", header: "X-Api-Key", prefix: "Token "}` or
+`{type: "api-key", location: "query", parameter: "api_key"}` or
 `{type: "custom", headers: ["X-Api-Key", "X-Client-Id"]}`. Bearer and Basic
 authentication use `type: "bearer"` and `type: "basic"`. Header hints contain
 names/public prefixes only; values, passwords, client secrets and owner/connection

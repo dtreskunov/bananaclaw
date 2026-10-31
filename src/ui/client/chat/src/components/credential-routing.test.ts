@@ -8,6 +8,7 @@ import {
   oauthResourceUrl,
   parseUrlPattern,
   routingDrafts,
+  sharedAuthentication,
 } from './credential-routing';
 import type { Service } from './CredentialsApi';
 
@@ -162,7 +163,7 @@ describe('credential URL pattern form', () => {
   it('generates value references rather than asking users to enter key names', () => {
     expect(authentication('api-key', { type: 'bearer', token: 'KEY' }, ['API_KEY'])).toEqual({
       type: 'api-key',
-      key: 'API_KEY_2',
+      key: 'KEY',
       header: 'X-Api-Key',
     });
     expect(authentication('basic', { type: 'bearer', token: 'KEY' }, [])).toEqual({
@@ -170,5 +171,44 @@ describe('credential URL pattern form', () => {
       username: 'USERNAME',
       password: 'PASSWORD',
     });
+    expect(authentication('api-key', { type: 'unset' }, ['API_KEY']).key).toBe('API_KEY_2');
+    expect(authentication('api-key', { type: 'passthrough' }, ['SAVED'], 'SAVED').key).toBe('SAVED');
+    expect(() => authentication('passthrough', { type: 'bearer' }, [])).toThrow('authentication');
+  });
+  it('applies one authentication recipe to every destination without mutating saved routes', () => {
+    const saved: Service[] = [
+      { name: 'api', host: 'api.example.com', auth: { type: 'bearer', token: 'OLD' } },
+      { name: 'uploads', host: 'uploads.example.com', auth: { type: 'basic', username: 'USER' } },
+    ];
+    const routes = routingDrafts(saved);
+    expect(sharedAuthentication(saved)).toBe(false);
+    expect(() => compileRoutes(routes)).toThrow('share');
+    const auth: Service['auth'] = { type: 'api-key', key: 'KEY', location: 'query', parameter: 'api_key' };
+    const compiled = compileRoutes(routes, auth);
+    expect(compiled.map((service) => service.auth)).toEqual([auth, auth]);
+    expect(sharedAuthentication(compiled)).toBe(true);
+    expect(saved[0].auth.type).toBe('bearer');
+    expect(saved[1].auth.type).toBe('basic');
+  });
+  it('prefills query placement and validates parameter names rather than markers', () => {
+    const defaults = accessCreationDefaults(
+      {
+        resource_url: 'https://api.example.com/v1',
+        authentication: { type: 'api-key', location: 'query', parameter: 'api_key' },
+      },
+      [],
+    );
+    expect(compileRoutes(defaults.routes)[0].auth).toEqual({
+      type: 'api-key',
+      key: 'API_KEY',
+      location: 'query',
+      parameter: 'api_key',
+    });
+    expect(() => compileRoutes(defaults.routes, { ...defaults.routes[0].service.auth, parameter: 'bad&name' })).toThrow(
+      'parameter',
+    );
+    expect(() => compileRoutes(defaults.routes, { ...defaults.routes[0].service.auth, header: 'X-Key' })).toThrow(
+      'parameter',
+    );
   });
 });

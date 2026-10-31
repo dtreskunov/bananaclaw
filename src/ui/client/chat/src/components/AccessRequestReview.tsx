@@ -234,6 +234,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
         {preview ? <>
           <ul>{preview.connection.services.map(service => <li key={service.name}>
             {serviceDestination(service)} · {service.auth.type}
+          {request.data.authentication.parameter ? ` · Query parameter: ${request.data.authentication.parameter}` : ''}
           </li>)}</ul>
           {preview.connection.kind !== 'static' ? <p>Provider-reported scopes: {preview.connection.granted_scopes?.join(' ') || 'Not reported; permissions are not verified.'}</p> : null}
           <p>{preview.verification}</p>

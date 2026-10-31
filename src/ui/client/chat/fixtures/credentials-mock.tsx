@@ -66,6 +66,12 @@ export function resetState(): void {
       grants: [{ vault: 'research', services: ['documents'], status: 'suspended' }] }),
   ];
   apps = [structuredClone(app)];
+  if (new URLSearchParams(location.search).has('saved_query')) {
+    connections.push(connection({ id: 'saved-query', label: 'Saved query API', kind: 'static',
+      services: [{ name: 'query-api', host: 'query.example.com', https_only: true, auth: { type: 'passthrough' },
+        substitutions: [{ key: 'SAVED_KEY', placeholder: '__SAVED_KEY__', in: ['query'] }] }],
+      credentials: ['SAVED_KEY'], grants: [{ vault: 'assistant', services: ['query-api'], status: 'active' }] }));
+  }
   if (new URLSearchParams(location.search).has('fail_access_once'))
     for (const item of connections) item.grants = item.grants.filter(grant => grant.vault !== FIXTURE_GROUP.id);
   signIns.clear();

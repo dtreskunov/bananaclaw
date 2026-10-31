@@ -13,9 +13,9 @@ import {
 import { GroupAdminField as Field } from './GroupAdminField';
 import { showToast } from './Toast';
 import { connectionName } from './credential-presentation';
-import { accessCreationDefaults, compileRoutes, credentialFields, hostnameFromPattern, oauthResourceUrl, routingDrafts, type RouteDraft } from './credential-routing';
+import { accessCreationDefaults, compileRoutes, credentialFields, hostnameFromPattern, oauthResourceUrl, routingDrafts, sharedAuthentication, type RouteDraft } from './credential-routing';
 import type { AccessRequirements } from '../../../../shared/access-authentication';
-import { CredentialServiceForm } from './CredentialServiceForm';
+import { CredentialAuthenticationForm, CredentialServiceForm } from './CredentialServiceForm';
 import { OAuthAppForm } from './OAuthAppForm';
 import { compileOAuthApp, oauthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
@@ -54,6 +54,11 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
     return result;
   });
   const [routingChanged, setRoutingChanged] = useState(false);
+  const [auth, setAuth] = useState<Service['auth']>(() => {
+    const value = structuredClone(connection?.services[0]?.auth ?? defaults?.routes[0].service.auth ?? routes[0].service.auth);
+    if (value.type === 'api-key' && value.location !== 'query' && !value.header) value.header = 'Authorization';
+    return value;
+  });
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -66,17 +71,22 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
   useEffect(() => { if (!connection) firstUrl.current?.focus(); }, [kind]);
   const isStatic = kind === 'static';
   const creatingOAuth = !connection && !isStatic;
+  const savedSubstitutions = connection?.services.flatMap(service => service.substitutions ?? []) ?? [];
+  const savedKeys = [...new Set(savedSubstitutions.map(substitution => substitution.key))];
+  const unsupported = !['bearer', 'api-key', 'basic', 'custom'].includes(auth.type);
+  const preserving = !!connection && !routingChanged && (unsupported || savedSubstitutions.length > 0);
+  const mixed = isStatic && !!connection && !sharedAuthentication(connection.services);
   let services: Service[] = [];
   let routingError = '';
-  try { services = isStatic ? compileRoutes(routes) : connection?.services ?? []; }
+  try { services = isStatic && !preserving ? compileRoutes(routes, auth) : connection?.services ?? []; }
   catch (error) {
     if (!(error instanceof CredentialsError)) throw error;
     routingError = errorMessage(error);
   }
   const drafts = routes.map((route) => route.service);
-  const fields = isStatic ? credentialFields(drafts) : [];
+  const fields = isStatic ? credentialFields([{ auth, substitutions: preserving ? savedSubstitutions : undefined }]) : [];
   const keys = fields.map((field) => field.key);
-  const knownKeys = [...new Set([...(connection?.credentials ?? []), ...serviceKeys(drafts)])];
+  const knownKeys = [...new Set([...(connection?.credentials ?? []), ...serviceKeys(drafts), ...keys])];
   const supplied = providedValues(values, keys);
   const missingValues = keys.some((key) => !connection?.credentials.includes(key) && !supplied[key]);
   let resource = '';
@@ -89,7 +99,7 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
     }
   }
   const renamed = !connection || label.trim() !== connectionName(connection, apps);
-  const canSave = !busy && !stale && !!label.trim() && (creatingOAuth
+  const canSave = !busy && !stale && !mixed && !!label.trim() && (creatingOAuth
     ? validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resource : !!appId)
     : !routingError && !missingValues && (!connection || renamed || routingChanged || Object.keys(supplied).length > 0));
   const changeRoute = (index: number, route: RouteDraft): void => {
@@ -176,14 +186,23 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
         {oauthDraft ? <p>A draft credential was saved. Retrying uses the same connection.</p> : null}
       </> : null}
       {isStatic ? <>
-        {routes.map((route, index) => <CredentialServiceForm key={route.service.name} route={route} index={index} keys={knownKeys}
-          busy={busy} firstInput={index === 0 ? firstUrl : undefined} onChange={(value) => changeRoute(index, value)}
+        <CredentialAuthenticationForm auth={auth} keys={knownKeys} busy={busy || mixed}
+          preferredKey={savedKeys.length === 1 ? savedKeys[0] : undefined}
+          savedLabel={preserving ? savedSubstitutions.length && savedSubstitutions.every(sub =>
+            sub.in?.length === 1 && sub.in[0] === 'query') ? 'Saved query authentication' : 'Saved authentication' : undefined}
+          onChange={value => { setAuth(value); setRoutingChanged(true); }} />
+        {fields.map(({ key, label }) => <Field key={key} label={label}>
+          <SecretInput label={label} value={values[key] ?? ''} disabled={busy} placeholder={connection?.credentials.includes(key) ? 'Keep current value' : 'New value'}
+            onInput={value => setValues(old => ({ ...old, [key]: value }))} />
+        </Field>)}
+        {routes.map((route, index) => <CredentialServiceForm key={route.service.name} route={route} index={index}
+          busy={busy || preserving || mixed} firstInput={index === 0 ? firstUrl : undefined} onChange={(value) => changeRoute(index, value)}
           onRemove={routes.length > 1 ? () => {
             setRoutes((old) => old.filter((_, at) => at !== index));
             setRoutingChanged(true);
             if (index === 0 && automaticName) setLabel(hostnameFromPattern(routes[1].pattern));
           } : undefined} />)}
-        <button type="button" class="ghost" disabled={busy} onClick={() => {
+        <button type="button" class="ghost" disabled={busy || preserving || mixed} onClick={() => {
           let number = routes.length + 1;
           while (routes.some((route) => route.service.name === `route-${number}`)) number++;
           const service = structuredClone(routes[0].service);
@@ -191,6 +210,7 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
           setRoutes((old) => [...old, { service, pattern: '' }]);
           setRoutingChanged(true);
         }}>Add URL pattern</button>
+        {mixed ? <ErrorNotice message="This saved credential uses different authentication per destination. Split it before editing." /> : null}
         <ErrorNotice message={routingError && routes.some((route) => route.pattern) ? routingError : ''} />
       </> : connection ? <>
         <p>{connection.resource_url ?? apps.find(app => app.id === connection.app_id)?.label ?? 'OAuth app unavailable'}</p>
@@ -199,10 +219,6 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
             connection.granted_scopes.length ? <ScopeList scopes={connection.granted_scopes} /> : <p class="muted">None.</p>}
         </fieldset>
       </> : null}
-      {fields.map(({ key, label }) => <Field key={key} label={label}>
-        <SecretInput label={label} value={values[key] ?? ''} disabled={busy} placeholder={connection?.credentials.includes(key) ? 'Keep current value' : 'New value'}
-          onInput={(value) => setValues((old) => ({ ...old, [key]: value }))} />
-      </Field>)}
       <ErrorNotice message={error} />
       {stale ? <p role="alert">This connection changed or the operation conflicts. Close and reopen it to load the
         latest revision; your changes were not blindly overwritten.</p> : null}

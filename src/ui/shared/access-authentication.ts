@@ -5,7 +5,7 @@ export const ACCESS_AUTHENTICATION_LABELS: Record<AccessAuthenticationType, stri
   mcp_oauth: 'MCP OAuth',
   oauth_app: 'OAuth app',
   bearer: 'Bearer token',
-  'api-key': 'API-key header',
+  'api-key': 'API key',
   basic: 'Username and password',
   custom: 'Custom headers',
 };
@@ -14,6 +14,8 @@ export interface AccessAuthenticationHint {
   app_id?: string;
   header?: string;
   prefix?: string;
+  location?: 'header' | 'query';
+  parameter?: string;
   /** Header names only. Values must be entered privately by the user. */
   headers?: string[];
 }
@@ -26,6 +28,7 @@ export interface AccessRequirements {
 export class AccessAuthenticationError extends Error {}
 
 const HEADER = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/;
+const PARAMETER = /^[A-Za-z0-9._~-]{1,128}$/;
 function validHeader(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -40,7 +43,9 @@ export function parseAccessAuthentication(value: unknown): AccessAuthenticationH
     throw new AccessAuthenticationError('Authentication hints must describe a mechanism, never credential values.');
   const hint = value as Record<string, unknown>;
   if (
-    Object.keys(hint).some((key) => !['type', 'app_id', 'header', 'prefix', 'headers'].includes(key)) ||
+    Object.keys(hint).some(
+      (key) => !['type', 'app_id', 'header', 'prefix', 'headers', 'location', 'parameter'].includes(key),
+    ) ||
     !['mcp_oauth', 'oauth_app', 'bearer', 'api-key', 'basic', 'custom'].includes(String(hint.type))
   )
     throw new AccessAuthenticationError(
@@ -48,6 +53,9 @@ export function parseAccessAuthentication(value: unknown): AccessAuthenticationH
     );
   const type = hint.type as AccessAuthenticationType;
   const oauth = type === 'mcp_oauth' || type === 'oauth_app';
+  if (hint.location !== undefined && (type !== 'api-key' || (hint.location !== 'header' && hint.location !== 'query')))
+    throw new AccessAuthenticationError('API-key placement must be header or query.');
+  const query = type === 'api-key' && hint.location === 'query';
   if (
     hint.app_id !== undefined &&
     (!oauth || typeof hint.app_id !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(hint.app_id))
@@ -55,11 +63,19 @@ export function parseAccessAuthentication(value: unknown): AccessAuthenticationH
     throw new AccessAuthenticationError(
       'An OAuth app suggestion must be a configured app identifier, not a credential or client secret.',
     );
-  if ((hint.header !== undefined && type !== 'api-key') || (type === 'api-key' && !validHeader(hint.header)))
+  if (hint.header !== undefined && (type !== 'api-key' || query))
+    throw new AccessAuthenticationError('A header name is only valid for API-key header placement.');
+  if (type === 'api-key' && !query && !validHeader(hint.header))
     throw new AccessAuthenticationError('API-key authentication requires a valid header name.');
+  if (
+    (hint.parameter !== undefined && !query) ||
+    (query && (typeof hint.parameter !== 'string' || !PARAMETER.test(hint.parameter)))
+  )
+    throw new AccessAuthenticationError('Query API keys require a public parameter name, never a value.');
   if (
     hint.prefix !== undefined &&
     (type !== 'api-key' ||
+      query ||
       typeof hint.prefix !== 'string' ||
       hint.prefix.length > 128 ||
       [...hint.prefix].some((char) => char < ' ' || char > '~'))
@@ -82,12 +98,21 @@ export function parseAccessAuthentication(value: unknown): AccessAuthenticationH
     ...(hint.app_id === undefined ? {} : { app_id: hint.app_id as string }),
     ...(hint.header === undefined ? {} : { header: hint.header as string }),
     ...(hint.prefix === undefined ? {} : { prefix: hint.prefix as string }),
+    ...(hint.location === undefined ? {} : { location: hint.location as 'header' | 'query' }),
+    ...(hint.parameter === undefined ? {} : { parameter: hint.parameter as string }),
     ...(hint.headers === undefined ? {} : { headers: [...(hint.headers as string[])] }),
   };
 }
 
 interface AccessService extends ServiceDestination {
-  auth: { type: string; header?: string; prefix?: string; headers?: Record<string, string> };
+  auth: {
+    type: string;
+    header?: string;
+    prefix?: string;
+    location?: string;
+    parameter?: string;
+    headers?: Record<string, string>;
+  };
 }
 interface AccessConnection {
   kind: 'static' | 'mcp_oauth' | 'oauth_app';
@@ -130,11 +155,14 @@ export function connectionMatchesAccess(connection: AccessConnection, request: A
   if (!hint || oauthHint) return true;
   return services.some((service) => {
     if (service.auth.type !== hint.type) return false;
-    if (hint.type === 'api-key')
+    if (hint.type === 'api-key') {
+      if ((service.auth.location ?? 'header') !== (hint.location ?? 'header')) return false;
+      if (hint.location === 'query') return service.auth.parameter === hint.parameter;
       return (
-        service.auth.header?.toLowerCase() === hint.header?.toLowerCase() &&
+        (service.auth.header || 'Authorization').toLowerCase() === hint.header?.toLowerCase() &&
         (hint.prefix === undefined || (service.auth.prefix ?? '') === hint.prefix)
       );
+    }
     if (hint.type === 'custom') {
       const headers = Object.keys(service.auth.headers ?? {}).map((header) => header.toLowerCase());
       return hint.headers?.every((header) => headers.includes(header.toLowerCase())) ?? false;
