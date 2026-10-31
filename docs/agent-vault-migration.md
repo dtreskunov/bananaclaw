@@ -171,14 +171,35 @@ is not a claim of exhaustive network-policy equivalence. There is no automatic
 retirement timer. SDK/config, legacy rollback support, setup/uninstall paths
 and migration tools remain until that gate is explicitly completed.
 
-Release provenance is also an open acceptance gate: the deployed gateway
-reports `gw-v0.2.0+query-placement.2c33abd`, source
+At cutover, release provenance was an additional open acceptance gate: the
+gateway reported `gw-v0.2.0+query-placement.2c33abd`, source
 `2c33abdec211328075b50b9280def06bf51b89d4`, with installed SHA-256
 `3b9b5c0fe6b2d8526f081609f106d0e880e0e969c5f13299fcf49bfad5322f19`.
-It does not match the reviewed `gw-v0.2.0` release. No gateway binary or
-service was changed during these cutovers. Publish and verify a compatible
-coordinated release before final retirement; do not blindly downgrade the
-working canary to make its version agree with the pin.
+It did not match the reviewed `gw-v0.2.0` release. No gateway binary or
+service was changed during the group cutovers.
+
+The operator subsequently approved publication and deployment of
+**`gw-v0.3.0`**, from that exact canary source. Both the mandatory dry-run and
+tagged-release pipelines passed the full suites, race checks, vet,
+telemetry-free builds, all-target vulnerability scans and reproducibility
+checks. Platform checksums and signed tag/source-bound provenance were
+verified before installation.
+
+The reviewed binary was deployed at **2026-10-31 05:50:54 UTC**. Core database
+state, grants, token, CA, configuration and password-input source were preserved.
+Both groups generated the exact verification response through socket sessions
+created before the gateway restart, proving persisted listeners rebound.
+All six retained MCP configurations then passed production-path tool listing.
+A live shared-connection revocation test denied one group, kept the other
+authorized and restored the original grant without disconnecting the account
+or changing unrelated grants. Private matched rollback state and verification
+receipts are retained under
+`data/agent-vault/upgrades/gw-v0.3.0-2026-10-31T05-50-45-483Z/`.
+
+The final sustained acceptance window is anchored to this reviewed deployment:
+**no final OneCLI retirement before 2026-11-07 05:50:54 UTC**. Reconnect and
+revocation checks have passed; sustained workload evidence and the remaining
+host-caller/policy review still gate P6. No automatic retirement is scheduled.
 The separate, explicitly gated provisioning mode creates target key sets;
 **no mode performs a backend cutover or retires OneCLI**.
 

@@ -1,19 +1,48 @@
 # Agent Vault gateway releases and upgrades
 
-## Coordinated release: NanoClaw 2.5.0 and gateway gw-v0.2.0
+## Coordinated release: NanoClaw 2.5.0 and gateway gw-v0.3.0
 
 [Revision 7 of the plan of record](credential-gateway-agent-vault-fork-proposal.md)
-supersedes the published release's group-owned credential-management model.
+defines the native managed-user and user-owned connection model.
 It is a coordinated host/gateway/runner/schema release. The reviewed gateway
-pin is `gw-v0.2.0`, source `9a99f613d54bec30cc3709351277d39de2f3fe6e`.
+pin is `gw-v0.3.0`, source `2c33abdec211328075b50b9280def06bf51b89d4`.
 The former `gw-v0.1.1` binary does not implement this contract.
 
-The release introduces native AgentVault managed users and personal libraries,
+The `gw-v0.2.0` release introduced native AgentVault managed users and personal libraries,
 user-owned static/OAuth connections, connection-scoped OAuth refresh/client
 lifecycle, explicit group grants and a top-level Credentials tab. Native users
 remain non-login authorization principals; the host transport agent and
 effective user are separately authorized/audited. Group proxy sessions must
 not bind personal libraries or inherit the host's owner permissions.
+
+`gw-v0.3.0` includes whole-credential grants covering current and future URL
+rules, exact named-MCP binding selection, explicit overlapping OAuth selectors,
+API-key query placement, flexible destination authentication, owner privacy and
+OAuth scope/disconnection fixes. It releases the exact source of the deployed
+query-placement canary rather than downgrading it.
+
+### Detect / why / fix / verify / rollback
+
+- **Detect:** inspect the running version and private migration ledger. The
+  canary already has `20261030192500_connection_wide_grants` applied. An older
+  service-only-grant installation is not an automatically approved upgrade.
+- **Why:** whole-credential grants authorize all current and future URL rules.
+  Converting a service-only grant can broaden authority even when it currently
+  covers every service; query placement and named bindings also require the
+  matching host contract.
+- **Fix:** before upgrading older state, obtain explicit owner/recipient
+  approval for that authority and preserve a consistent stopped-service
+  database/configuration/binary backup. Complete reviewed offline adoption;
+  do not rely on startup expansion as permission. Already-adopted canary state
+  requires no conversion or repeated OAuth consent.
+- **Verify:** validate signed source/tag provenance, native-user ownership,
+  grants and exact OAuth client/scope bindings; check persisted socket rebind,
+  group-only revocation and real model/MCP workloads. Preserve token, CA,
+  password-input source and network policy.
+- **Rollback:** retain the previous executable and matched state. An unchanged
+  canary schema can use the saved canary executable; older schemas/APIs need
+  their corresponding stopped-service database and host/UI snapshot. Never
+  downgrade the executable alone across incompatible contracts.
 
 Do not ship compatibility adapters for earlier fork iterations: remove the
 old group-owned management routes/DTOs, vault-local ownership/refresh/cleanup
@@ -104,9 +133,9 @@ acceptance. PostgreSQL runtime acceptance remains a separate release check.
 
 | Target      | SHA-256                                                            |
 | ----------- | ------------------------------------------------------------------ |
-| Linux amd64 | `45d49615f380f5b7b0b4e7cec4e4bafbca5a514ccdb594e33b6cb55fd0949633` |
-| Linux arm64 | `187097aed926dae42335112e0b55f3d1f9c3b77a37cccebf7f96e7bbb668df05` |
-| macOS arm64 | `295a0624f52f8df49a68e70746707683aa6f41b0d83d46e680f32f65c3cbe047` |
+| Linux amd64 | `f996ac17b75ff82599c3ad48f9a615dad822b2f7dc7d77f29fdbe2bad8967fb0` |
+| Linux arm64 | `cafa5be915031e7b26d25f68af38a03954570ba579508ce0b5846b5aad911f2a` |
+| macOS arm64 | `5ba45316b406590d4bcf1d41551c4908e73f043d65b54606135c60d7b847ea67` |
 
 `versions.json` and the setup verifier pin these exact assets. Verify the
 published tag-bound provenance before installing. The prior release details

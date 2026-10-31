@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+console.error('[gateway-contract] Validating isolated test inputs');
 const address = process.env.NANOCLAW_TEST_GATEWAY_URL;
 const tokenFile = process.env.NANOCLAW_TEST_GATEWAY_TOKEN_FILE;
 const gateway = address ? URL.parse(address) : null;
@@ -29,6 +30,7 @@ process.chdir(root);
 process.env.NANOCLAW_AGENT_VAULT_URL = gateway.origin;
 process.env.AGENT_VAULT_BOOTSTRAP_TOKEN_FILE = tokenPath;
 
+console.error('[gateway-contract] Loading host modules');
 const { closeDb, initTestDb, runMigrations } = await import('../src/db/index.js');
 const { grantRole } = await import('../src/modules/permissions/db/user-roles.js');
 const { AgentVaultError } = await import('../src/modules/credentials/agent-vault-client.js');
@@ -51,6 +53,7 @@ function denied(error: unknown): boolean {
 }
 
 try {
+  console.error('[gateway-contract] Initializing synthetic host identities');
   const db = initTestDb();
   runMigrations(db);
   const alice = randomUUID(),
@@ -67,6 +70,7 @@ try {
   grantRole({ user_id: bob, role: 'admin', agent_group_id: 'ag-host-two', granted_by: alice, granted_at: now });
   await flushManagedUsers();
 
+  console.error('[gateway-contract] Verifying shared connections and grants');
   const service = {
     name: 'search',
     host: 'api.example.test/search',
@@ -126,6 +130,25 @@ try {
   await assert.rejects(getConnection(alice, privateConnection.id), denied);
   assert(!(await listConnections(alice)).some((connection) => connection.id === privateConnection.id));
 
+  console.error('[gateway-contract] Verifying query credential placement');
+  const queryConnection = await createConnection(alice, {
+    label: 'Query authentication test',
+    kind: 'static',
+    services: [
+      {
+        name: 'query-api',
+        host: 'query.example.test/*',
+        auth: { type: 'api-key', key: 'QUERY_KEY', location: 'query', parameter: 'api_key' },
+      },
+    ],
+    values: { QUERY_KEY: 'synthetic-query-key' },
+  });
+  assert.equal(queryConnection.services[0]?.auth.location, 'query');
+  assert.equal(queryConnection.services[0]?.auth.parameter, 'api_key');
+  assert(!JSON.stringify(queryConnection).includes('synthetic-query-key'));
+  await deleteConnection(alice, queryConnection.id, queryConnection.revision);
+
+  console.error('[gateway-contract] Verifying OAuth app isolation');
   const app = {
     issuer: 'https://auth.example.test',
     client_id: 'synthetic-public-client',
@@ -146,13 +169,14 @@ try {
   assert(!(await listConnections(alice)).some((connection) => connection.id === created.id));
   assert.equal((await getConnection(bob, privateConnection.id)).status, 'ready');
 
+  console.error('[gateway-contract] Verifying identity revocation and deletion');
   db.prepare('DELETE FROM user_roles WHERE user_id=?').run(bob);
   await flushManagedUsers();
   await assert.rejects(groupConnectionAccess(bob, 'ag-host-two'));
   db.prepare('DELETE FROM users WHERE id=?').run(bob);
   await flushManagedUsers();
   console.log(
-    'Real host-to-gateway contract passed: native users, owned libraries, whole-credential grants, automatic URL expansion, rotation, stale writes, detach isolation, private/install apps and role/deletion synchronization.',
+    'Real host-to-gateway contract passed: native users, owned libraries, whole-credential grants, automatic URL expansion, query authentication, rotation, stale writes, detach isolation, private/install apps and role/deletion synchronization.',
   );
 } finally {
   closeDb();

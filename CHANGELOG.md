@@ -4,6 +4,15 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Gateway release `gw-v0.3.0` and whole-credential authority.**
+  Pins the query-placement canary's source with verified platform checksums
+  and signed provenance. Includes whole-credential grants, exact named-MCP
+  bindings, overlapping OAuth selectors and API-key query placement. Existing
+  service-only grants need explicit owner review; a startup migration is not
+  permission to broaden access. Already-adopted canary state needs no repeated
+  consent. Run `/init-agent-vault` using the
+  [detect / why / fix / verify / rollback procedure](docs/agent-vault-upgrades.md#detect--why--fix--verify--rollback).
+
 ## [2.5.0] - 2026-10-29
 
 - **[BREAKING] User-owned shared credentials and OAuth connections.** A
