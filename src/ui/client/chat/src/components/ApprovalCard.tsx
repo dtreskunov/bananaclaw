@@ -1,5 +1,4 @@
 import type { PendingApprovalDto } from '../types';
-import { RelativeTime } from './RelativeTime';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { approvalMessageDrafts } from '../approval-messages';
 import { approvalThreadHref, isApprovalThread } from '../approval-origin';
@@ -26,17 +25,12 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
         </div> : null)}
       </div> : null}
       {a.details ? <div class="approval-details">{a.details}</div> : null}
-      <div class="approval-meta">
-        <span class="approval-group">{a.agentGroupName || 'Global'}</span><span class="dot">{'\u00b7'}</span>
-        <RelativeTime ts={a.createdAt} />
-      </div>
       {!here ? <p>{a.origin
         ? <a href={approvalThreadHref(a.origin)}>Open requesting thread</a>
         : 'Requesting thread unavailable.'}</p> : null}
       {!pending ? <div class="approval-decision" role="status">
         <strong>{labels[status] ?? status}</strong>
         {a.respondedBy ? <span> · {a.respondedBy.displayName}</span> : null}
-        {a.resolvedAt ? <RelativeTime ts={a.resolvedAt} /> : null}
         {a.responseMessage ? <p class="approval-response-text">{a.responseMessage}</p> : null}
         {status === 'failed' && a.outcomeMessage ? <p class="approval-response-text" role="alert">{a.outcomeMessage}</p> : null}
       </div> : null}

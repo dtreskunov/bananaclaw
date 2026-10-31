@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageBubble } from './MessageBubble';
+import { RelativeTime } from './RelativeTime';
+vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 
 class Bubble {
   tabIndex = -1;
@@ -42,6 +44,22 @@ beforeEach(() => {
 });
 
 describe('scrollable message bubble', () => {
+  it('owns the same sender label and RelativeTime footer for every bubble body', () => {
+    const node = MessageBubble({
+      class: 'msg out',
+      from: 'Research agent',
+      timestamp: '2026-10-31T01:00:00Z',
+      metadata: 'Extra status',
+      children: 'Request body',
+    });
+    const [sender, body, footer] = node.props.children.props.children.props.children;
+    expect(sender.props).toEqual({ class: 'message-author', children: 'Research agent' });
+    expect(body).toBe('Request body');
+    expect(footer.props.class).toBe('meta turn-info');
+    expect(footer.props.children[0].type).toBe(RelativeTime);
+    expect(footer.props.children[0].props.ts).toBe('2026-10-31T01:00:00Z');
+    expect(footer.props.children[1]).toBe('Extra status');
+  });
   it('uses shared edge tracking and makes only overflowing messages keyboard focusable', () => {
     const dispose = vi.fn();
     hooks.attach.mockReturnValue(dispose);

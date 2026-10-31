@@ -4,6 +4,7 @@ import type { PendingApprovalDto } from '../types';
 import { approvalMessageDrafts, clearApprovalMessage } from '../approval-messages';
 import { ApprovalCard } from './ApprovalCard';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
+import { ComposerInput } from './ComposerInput';
 import { AccessRequestReview } from './AccessRequestReview';
 import { MAX_APPROVAL_MESSAGE_LENGTH } from '../../../../shared/approval-message';
 import { channelType, groupId, messagingGroupId, threadId } from '../state';
@@ -34,6 +35,7 @@ vi.mock('preact/hooks', () => ({
     return mocks.slots[index];
   },
   useEffect: vi.fn(),
+  useLayoutEffect: vi.fn(),
 }));
 vi.mock('./CredentialsParts', () => ({ ErrorNotice: () => null, useCredentialResource: () => mocks.resource }));
 vi.mock('../actions', () => ({ respondApproval: mocks.respond }));
@@ -49,6 +51,14 @@ interface Node {
     approvalId?: string;
     onClick?: () => void;
     onInput?: (event: { currentTarget: { value: string } }) => void;
+    textarea?: {
+      value?: unknown;
+      disabled?: boolean;
+      maxLength?: number;
+      onInput?: (event: { currentTarget: { value: string } }) => void;
+    };
+    send?: unknown;
+    voice?: unknown;
   };
 }
 function nodes(value: unknown): Node[] {
@@ -179,10 +189,12 @@ describe('optional approval messages', () => {
   it('uses the server message limit, disables during submission, and keeps drafts scoped by approval', () => {
     approvalMessageDrafts.value = { other: 'Other draft' };
     const input = nodes(ApprovalMessageInput({ approvalId: 'approval', disabled: true })).find(
-      (node) => node.type === 'textarea',
+      (node) => node.type === ComposerInput,
     )!;
-    expect(input.props).toMatchObject({ value: '', disabled: true, maxLength: MAX_APPROVAL_MESSAGE_LENGTH });
-    input.props.onInput!({ currentTarget: { value: 'Use read-only operations.' } });
+    expect(input.props.textarea).toMatchObject({ value: '', disabled: true, maxLength: MAX_APPROVAL_MESSAGE_LENGTH });
+    expect(input.props.send).toBeUndefined();
+    expect(input.props.voice).toBeUndefined();
+    input.props.textarea!.onInput!({ currentTarget: { value: 'Use read-only operations.' } });
     expect(approvalMessageDrafts.value).toEqual({ approval: 'Use read-only operations.', other: 'Other draft' });
     clearApprovalMessage('approval');
     expect(approvalMessageDrafts.value).toEqual({ other: 'Other draft' });

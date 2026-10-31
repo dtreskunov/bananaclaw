@@ -1427,6 +1427,12 @@ application keeps its error explanation visible. These administrative details
 retain their existing owner/admin visibility; they are not exposed to ordinary
 conversation members.
 
+Approval bubbles use the same `MessageBubble` sender label and relative-time
+footer as messages, answered questions and display cards. The sender identifies
+the requesting agent; the decision body separately identifies the responder.
+Pending requests show their creation time, and resolved decisions show their
+resolution time without moving the request's transcript position.
+
 Pending requests from another conversation appear as read-only transcript
 references with **Open requesting thread**. Decision buttons and the message
 field are available only in the exact requesting group/thread/channel, including
@@ -1448,6 +1454,12 @@ optional **Message to agent** field on both approval and rejection. Drafts are
 shared between a card and its private review, retained after failed submissions,
 and cleared only after a confirmed response. The limit is 4000 characters; blank
 messages preserve the existing request shape. Do not enter passwords or tokens.
+
+The optional field uses the shared `ComposerInput`, its styling and autosizing,
+including in private credential review. It is a passive composer with no
+standalone send action: Enter adds a newline, and the message is submitted only
+with an explicit approval or rejection. Other composers retain their normal
+send, microphone and keyboard controls.
 
 The message accompanies the decision in the same request and the same agent
 outcome notification, attributed to the authenticated responder. It uses the

@@ -1,7 +1,6 @@
 // Chat main: message log, status, context chip, pending tray, readonly
 // banner, composer.
 import './ChatMain.css';
-import { ApprovalCard } from './ApprovalCard';
 import { openCredentials } from '../credentials-navigation';
 import { signal } from '@preact/signals';
 import type { JSX, RefObject } from 'preact';
@@ -61,6 +60,7 @@ import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { QuestionPrompt } from './QuestionPrompt';
 import { isApprovalThread } from '../approval-origin';
+import { ApprovalBubble } from './ApprovalBubble';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { dockQuestions } from '../question-dock';
 import { RelativeTime } from './RelativeTime';
@@ -760,11 +760,10 @@ function Message(
     );
   }
   const approval = m.approval;
-  if (approval) return <MessageBubble class="msg out approval-message" data-msg-id={m.id}>
-    <ApprovalCard approval={approval} busy={respondingApprovalIds.value.has(approval.approvalId)}
+  if (approval) return <ApprovalBubble approval={approval} messageId={m.id}
+      busy={respondingApprovalIds.value.has(approval.approvalId)}
       onReview={() => openCredentials({ approvalId: approval.approvalId })}
-      onRespond={(value, message) => { void respondApproval(approval.approvalId, value, message).catch(console.error); }} />
-  </MessageBubble>;
+      onRespond={(value, message) => { void respondApproval(approval.approvalId, value, message).catch(console.error); }} />;
   if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
   const md = renderMarkdown(m.text, groupId.value);
   const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
@@ -794,11 +793,28 @@ function Message(
       send.groupId === groupId.value && send.threadId === threadId.value && send.status !== 'failed');
   const midTurnUpdate = m.deliveryOrigin === 'send_message' &&
     !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled');
+  const metadata = m.ts || m.inputState || activity.length ? <>
+    {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
+    {submission?.status === 'sending' && !m.hideInitialQueuedCaption
+      ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
+    {showsMidTurnLabel(m.deliveryOrigin, midTurnUpdate)
+      ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
+      : m.deliveryOrigin === 'send_file'
+        ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
+        : null}
+    <PendingMessageActions message={m} thread={activeThread() ?? null} gid={m.submission ? null : groupId.value}>
+      {!m.submission ? <EditMessageButton m={m} /> : null}
+      {!m.submission ? <ForkButton m={m} isLatest={isLatest} /> : null}
+      <CopyTranscriptButton getContent={() => ref.current?.querySelector<HTMLElement>('.transcript-copy-content') ?? null} />
+    </PendingMessageActions>
+  </> : null;
   return (
     <MessageBubble
       class={cls}
       data-msg-id={m.id}
       elementRef={ref}
+      from={m.direction === 'in' && m.author && m.author.userId !== currentUserId.value ? m.author.displayName : undefined}
+      timestamp={m.ts} metadata={metadata}
       reveal={highlightMessageId.value === m.id ? searchQuery.value : undefined}
     >
       {showTechnicalStatus
@@ -808,9 +824,6 @@ function Message(
             ownerId={traceOwner}
             live={m.turnTraceLive}
           />
-        : null}
-      {m.direction === 'in' && m.author && m.author.userId !== currentUserId.value
-        ? <div class="message-author">{m.author.displayName}</div>
         : null}
       <MessageText text={m.text} md={md} />
       {singleFile && singleMediaKind
@@ -891,22 +904,6 @@ function Message(
           onClick={() => { void retryChatSend(submission.messageId).catch(console.error); }}
         >Retry</button>
       </div> : null}
-      {m.ts || m.inputState || activity.length ? <div class="meta turn-info">
-        {m.ts && <RelativeTime ts={m.ts} />}
-        {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
-        {submission?.status === 'sending' && !m.hideInitialQueuedCaption
-          ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
-        {showsMidTurnLabel(m.deliveryOrigin, midTurnUpdate)
-          ? <AgentActionLabel label="mid-turn update" title="Sent during the turn with send_message" />
-          : m.deliveryOrigin === 'send_file'
-            ? <AgentActionLabel label="file delivery" title="Sent during the turn with send_file" />
-            : null}
-        <PendingMessageActions message={m} thread={activeThread() ?? null} gid={m.submission ? null : groupId.value}>
-          {!m.submission ? <EditMessageButton m={m} /> : null}
-          {!m.submission ? <ForkButton m={m} isLatest={isLatest} /> : null}
-          <CopyTranscriptButton getContent={() => ref.current?.querySelector<HTMLElement>('.transcript-copy-content') ?? null} />
-        </PendingMessageActions>
-      </div> : null}
     </MessageBubble>
   );
 }
@@ -921,6 +918,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return (
     <MessageBubble class="msg out display-card agent-action" data-msg-id={message.id}
+      timestamp={message.ts} metadata={message.ts || activity.length ? <AgentActionLabel label="card" title="Sent with send_card" /> : null}
       reveal={highlightMessageId.value === message.id ? searchQuery.value : undefined}>
       {showTechnicalStatus
         ? <TurnTechnicalDetails turn={message.statsTurn} lines={activity}
@@ -953,10 +951,6 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      {message.ts || activity.length ? <div class="meta turn-info">
-        {message.ts ? <RelativeTime ts={message.ts} /> : null}
-        <AgentActionLabel label="card" title="Sent with send_card" />
-      </div> : null}
     </MessageBubble>
   );
 }
@@ -1065,11 +1059,9 @@ function ApprovalReferences() {
   return (
     <>
         {list.map((a) => (
-          <MessageBubble key={a.approvalId} class="msg out approval-message approval-reference">
-          <ApprovalCard approval={a} busy={busy.has(a.approvalId)}
+          <ApprovalBubble key={a.approvalId} reference approval={a} busy={busy.has(a.approvalId)}
             onReview={() => openCredentials({ approvalId: a.approvalId })}
             onRespond={(value, message) => { void respondApproval(a.approvalId, value, message).catch(console.error); }} />
-          </MessageBubble>
         ))}
     </>
   );

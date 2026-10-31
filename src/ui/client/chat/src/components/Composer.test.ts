@@ -145,7 +145,7 @@ function find(node: any, type: string, label?: string): any {
   if (node.type === ComposerInput) return find(ComposerInput(node.props), type, label);
   if (node.type === type && (!label || node.props['aria-label'] === label || node.props.children === label))
     return node;
-  for (const child of [node.props?.children].flat(Infinity)) {
+  for (const child of [node.props?.children, node.props?.metadata].flat(Infinity)) {
     if (child && typeof child === 'object') {
       const result = find(child, type, label);
       if (result) return result;
@@ -156,7 +156,7 @@ function findComponent(node: any, name: string): any {
   if (!node) return undefined;
   if (typeof node.type === 'function' && node.type.name === name) return node;
   if (node.type === ComposerInput) return findComponent(ComposerInput(node.props), name);
-  for (const child of [node.props?.children].flat(Infinity)) {
+  for (const child of [node.props?.children, node.props?.metadata].flat(Infinity)) {
     if (child && typeof child === 'object') {
       const result = findComponent(child, name);
       if (result) return result;
@@ -987,7 +987,7 @@ describe('main composer pending edits', () => {
           files: null,
         },
       });
-      expect(bubble.props.children[0].props.dangerouslySetInnerHTML.__html).toBe(
+      expect(bubble.props.children.props.dangerouslySetInnerHTML.__html).toBe(
         '<blockquote>\n<p>Choose?</p>\n</blockquote>\n<p>Question skipped</p>\n',
       );
       expect(bubble.props['data-msg-id']).toBe('question-response:q');
@@ -1690,9 +1690,9 @@ describe('main composer pending edits', () => {
         expect(findComponent(info.type(info.props), 'TurnElapsed')).toBeUndefined();
         expect(find(info.type(info.props), 'span', 'Model-call time')).toBeUndefined();
       }
-      const footer = row.props.children.at(-1);
-      expect(footer.props.class).toBe('meta turn-info');
-      expect(findComponent(footer, 'ReplyTurnInfo')).toBeUndefined();
+      expect(row.type.name).toBe('MessageBubble');
+      expect(row.props.timestamp).toEqual(expect.any(String));
+      expect(findComponent(row.props.metadata, 'ReplyTurnInfo')).toBeUndefined();
     },
   );
 

@@ -1,16 +1,23 @@
 import type { ComponentChildren, RefObject } from 'preact';
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { attachScrollEdges } from '../scroll-edges';
+import { RelativeTime } from './RelativeTime';
 
 interface Props {
   class: string;
   'data-msg-id'?: string;
   elementRef?: RefObject<HTMLDivElement>;
   reveal?: string;
+  from?: string;
+  timestamp?: string;
+  metadata?: ComponentChildren;
   children: ComponentChildren;
 }
 
-export function MessageBubble({ class: className, 'data-msg-id': id, elementRef, reveal, children }: Props) {
+export function MessageBubble({
+  class: className, 'data-msg-id': id, elementRef, reveal, from, timestamp, metadata,
+  children,
+}: Props) {
   const ownRef = useRef<HTMLDivElement | null>(null);
   const ref = elementRef ?? ownRef;
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -40,10 +47,18 @@ export function MessageBubble({ class: className, 'data-msg-id': id, elementRef,
         match.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
+  const content = from || timestamp || metadata ? <>
+    {from ? <div class="message-author">{from}</div> : null}
+    {children}
+    {timestamp || metadata ? <div class="meta turn-info">
+      {timestamp ? <RelativeTime ts={timestamp} /> : null}
+      {metadata}
+    </div> : null}
+  </> : children;
   return (
     <div class={className} data-msg-id={id} ref={ref}>
       <div class="message-scroll" ref={scrollRef}>
-        {children}
+        {content}
       </div>
     </div>
   );

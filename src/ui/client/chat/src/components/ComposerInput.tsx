@@ -4,6 +4,7 @@ import { appearance } from '../appearance-state';
 import { isMobile } from '../state';
 import type { VoiceSelection } from '../voice';
 import { VoiceButton } from './VoiceButton';
+import './ComposerInput.css';
 
 type TextareaRef = { current: HTMLTextAreaElement | null };
 
@@ -47,8 +48,8 @@ export function useComposerTextarea(inputRef: TextareaRef, value?: string, maxHe
 interface ComposerInputProps {
   inputRef: TextareaRef;
   textarea: Omit<JSX.TextareaHTMLAttributes<HTMLTextAreaElement>, 'ref' | 'rows' | 'onKeyDown'>;
-  voice: ComponentProps<typeof VoiceButton>;
-  send: {
+  voice?: ComponentProps<typeof VoiceButton>;
+  send?: {
     id?: string;
     className?: string;
     label: string;
@@ -76,13 +77,13 @@ export function ComposerInput({
 }: ComposerInputProps) {
   return (
     <div
-      class={`composer-input-wrap${className ? ` ${className}` : ''}${multiLine ? ' multi-line' : ''}${listening ? ' voice-listening' : ''}`}
+      class={`composer-input-wrap${!send && !voice ? ' composer-passive' : ''}${className ? ` ${className}` : ''}${multiLine ? ' multi-line' : ''}${listening ? ' voice-listening' : ''}`}
       style={hidden ? 'display:none' : ''}
     >
-      <textarea {...textarea} ref={inputRef} rows={1} onKeyDown={onComposerKeyDown} />
+      <textarea {...textarea} ref={inputRef} rows={1} onKeyDown={send ? onComposerKeyDown : undefined} />
       {controls}
-      <VoiceButton {...voice} />
-      <button
+      {voice ? <VoiceButton {...voice} /> : null}
+      {send ? <button
         type="submit"
         id={send.id}
         class={`accent-icon-btn${send.className ? ` ${send.className}` : ''}`}
@@ -93,7 +94,7 @@ export function ComposerInput({
         onMouseDown={(event) => event.preventDefault()}
       >
         {send.icon ?? '\u2191'}
-      </button>
+      </button> : null}
     </div>
   );
 }
