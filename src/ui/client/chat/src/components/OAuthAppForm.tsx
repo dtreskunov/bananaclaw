@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import type { Dispatch, StateUpdater } from 'preact/hooks';
 import { GroupAdminField as Field } from './GroupAdminField';
 import { CredentialAction } from './CredentialsTable';
 import { CopyIcon, TrashIcon } from './ActionIcons';
@@ -7,10 +8,10 @@ import type { OAuthAppDraft } from './oauth-app-form';
 import { displayDestination } from './credential-presentation';
 import { OAuthScopePicker } from './OAuthScopePicker';
 
-export function OAuthAppForm({ draft, busy, onChange }: {
-  draft: OAuthAppDraft; busy: boolean; onChange: (draft: OAuthAppDraft) => void;
+export function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }: {
+  draft: OAuthAppDraft; busy: boolean; onChange: Dispatch<StateUpdater<OAuthAppDraft>>; selectDiscovered?: boolean;
 }): JSX.Element {
-  const update = (patch: Partial<OAuthAppDraft>): void => onChange({ ...draft, ...patch });
+  const update = (patch: Partial<OAuthAppDraft>): void => onChange(current => ({ ...current, ...patch }));
   return <>
     <input class="credential-name-input" type="text" aria-label="App name" placeholder="App name" value={draft.label}
       disabled={busy} onInput={(event) => update({ label: event.currentTarget.value })} />
@@ -36,7 +37,7 @@ export function OAuthAppForm({ draft, busy, onChange }: {
         disabled={busy} spellcheck={false} onInput={(event) => update({ apiHosts: event.currentTarget.value })} />
     </Field>
     <OAuthScopePicker label="Default scopes" issuer={draft.issuer} value={draft.scopes} disabled={busy}
-      onChange={scopes => update({ scopes })} />
+      selectDiscovered={selectDiscovered} onChange={scopes => update({ scopes })} />
     <Field label="Callback URL" info="Register this redirect URL in your provider console.">
       <div class="credential-inline-field"><code class="credential-callback">{`${location.origin}/oauth/callback`}</code>
         <CredentialAction label="Copy callback URL" disabled={busy} onClick={() => {

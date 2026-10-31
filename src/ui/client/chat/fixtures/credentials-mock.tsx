@@ -6,6 +6,7 @@ import {
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
 import { serviceMatchesResource } from '../src/components/GroupCredentialAccess';
 import { connectionMatchesAccess, parseAccessAuthentication } from '../../../shared/access-authentication';
+import { isOAuthScope } from '../../../shared/oauth-app';
 
 export const FIXTURE_GROUP = { id: 'assistant', name: 'Assistant' };
 export interface FixtureOptions {
@@ -177,12 +178,15 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
   }
   if (path === '/ui/chat/api/credentials/scopes' && method === 'POST') {
     const input = body<{ resource_url?: string; issuer?: string; app_id?: string }>(init);
+    const extra = new URLSearchParams(location.search).get('extra_scope');
+    if (extra && !isOAuthScope(extra)) throw new HttpError(400, 'Invalid fixture scope');
+    const discovered = (scopes: string[]): string[] => extra ? [...scopes, extra] : scopes;
     if (input.resource_url?.includes('no-scopes.example'))
       return { scopes: [], source: 'not_advertised', oauth: true, issuer: 'https://no-scopes.example' };
     if (input.resource_url)
-      return { scopes: ['read', 'write'], source: 'resource', oauth: true, issuer: 'https://mcp.example.com' };
+      return { scopes: discovered(['read', 'write']), source: 'resource', oauth: true, issuer: 'https://mcp.example.com' };
     const configured = apps.find(app => app.id === input.app_id);
-    return { scopes: ['read:documents', 'write:documents'], source: 'authorization_server', oauth: true,
+    return { scopes: discovered(['read:documents', 'write:documents']), source: 'authorization_server', oauth: true,
       issuer: input.issuer ?? configured?.issuer ?? 'https://accounts.example.com' };
   }
   if (path === '/ui/chat/api/credentials/connections' && method === 'POST') {

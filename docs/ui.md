@@ -761,14 +761,24 @@ existing Pending approvals banner with **Review access / Reject**. Review
 opens this same private Credentials dialog, prefilled with the exact destination
 and purpose. The user chooses an existing connection or uses the unified Add
 credential form (key, MCP OAuth or configured OAuth app), then confirms the
-recipient and full current/future connection access. Scope suggestions are
-shown but never selected automatically. Signing in does not grant access.
+recipient and full current/future connection access. New credentials and OAuth
+apps initially select all discovered scopes, retaining additional suggested or
+custom values. Saved selections, explicit provider-default choices and manual
+edits are not expanded by discovery. Signing in does not grant access.
 Personal credential creation, reconnect, app configuration and connection actions
 use their explicit action buttons without an additional acknowledgement message
 or checkbox. Functional scope, no-scope-request and agent-access checkboxes remain.
 Required-field validation, ownership, write-only secrets and exact revision checks
 are unchanged. The personal dialog is also titled **My Credentials**; existing
 `#credentials` links continue to work.
+Affected-agent and affected-personal-connection sections are omitted. Existing
+OAuth credentials show one always-visible **Scopes** section with actual
+provider-reported grants, or an explicit unknown state; requested scopes remain
+stored for sign-in and verification, not displayed as a second permissions list.
+Custom scopes use package-style removable entries and a one-scope input instead
+of a textarea; commas remain part of an exact scope value. OAuth app configuration
+shows **App name**, not its internal ID. New app IDs are generated once; existing
+IDs and connection bindings are preserved when names change.
 The access review uses **Account** and **Allow access**, without an additional
 confirmation checkbox or permission notice. The explicit button click remains
 the authorization step; compatibility, readiness and exact revision checks still
@@ -789,12 +799,12 @@ The request picker lists only the user's credentials covering its destination
 and requested mechanism/header details. Requested scopes must be present in
 provider-reported grants for ready OAuth credentials; unknown grants and implied
 scope hierarchies are not assumed. Compatible MCP drafts can finish consent,
-but cannot be granted until ready. With no matches, **Create new credential**
+but cannot be granted until ready. With no matches, **Add account**
 opens the existing form with the exact URL, type, app suggestion and scopes
-prefilled for explicit review; advertised scopes are not auto-selected.
+prefilled for explicit review; new setups also select discovered scopes.
 New matching credentials are selected on return, but access is never granted
 merely by creating or signing in. The general library is hidden during request
-review and remains available through **Manage all Credentials**.
+review and remains available through **My Credentials**.
 If application fails after a partial change, **Review and retry** reopens the
 same unexpired request for fresh selection and explicit confirmation. Reopening
 does not grant access, reconnect credentials, or change MCP configuration.

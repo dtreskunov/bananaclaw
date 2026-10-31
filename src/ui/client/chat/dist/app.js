@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
+// node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
+  "node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
+// node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
+  "node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
+// node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
+// node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
+// node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
+// node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
+// node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
+// node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
+// node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
+// node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
+// node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
+// node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
+// node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
+// node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
+// node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
+// node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
+// node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
+// node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
+// node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
+// node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
+// node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
+// node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
+// node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
+// node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
+// node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
+// node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
+// node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
+// node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
+// node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
+// node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
+// node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
+// node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
+// node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
+// node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
+// node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
+// node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
+// node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
+// node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
+// node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
+  "node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
+// node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
+// node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
+// node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
+// node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -16612,7 +16612,7 @@ function clearApprovalMessage(approvalId) {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
+// node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -19468,7 +19468,7 @@ function playCompletionChime() {
   setTimeout(() => tone(880, 180, 0.05), 110);
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -22713,7 +22713,7 @@ function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
   ] });
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
+// node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -26863,7 +26863,7 @@ function FilePreviewDialog({ expanded, title, onClose, children }) {
   );
 }
 
-// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
+// node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 
@@ -29967,47 +29967,6 @@ function validateAppConfiguration(config) {
   return config;
 }
 
-// src/components/credential-presentation.ts
-var PROVIDERS = {
-  "openrouter.ai": "OpenRouter",
-  "ai-gateway.vercel.sh": "Vercel AI Gateway",
-  "api.anthropic.com": "Anthropic",
-  "api.openai.com": "OpenAI",
-  "api.minimax.io": "MiniMax",
-  "api.minimax.chat": "MiniMax",
-  "mcp.tavily.com": "Tavily",
-  "api.github.com": "GitHub",
-  "api.search.brave.com": "Brave Search",
-  "data.seattle.gov": "Seattle Open Data"
-};
-function serviceDestination(service) {
-  return `https://${displayDestination(service.host + (service.path ?? ""))}`;
-}
-function displayDestination(destination) {
-  return destination.replace(/^((?:https:\/\/)?(?:\[[^\]]+\]|[^/:]+)):443(?=\/|$)/i, "$1");
-}
-function connectionName(connection2, apps = []) {
-  if (connection2.label && !/^(?:ag-[\w-]+\/|onecli-|(?:MCP|OAUTH|CONN)_)/i.test(connection2.label))
-    return connection2.label;
-  const app = apps.find((item) => item.id === connection2.app_id);
-  if (app?.label) return app.label[0].toUpperCase() + app.label.slice(1);
-  if (connection2.app_id) {
-    if (connection2.app_id === "github") return "GitHub";
-    return connection2.app_id[0].toUpperCase() + connection2.app_id.slice(1);
-  }
-  const destination = connection2.resource_url ? URL.parse(connection2.resource_url)?.hostname : connection2.services[0]?.host.split("/")[0].replace(/:\d+$/, "");
-  return destination ? PROVIDERS[destination] ?? destination : "Connection";
-}
-function accessGroups(connections, groups2) {
-  const result = groups2.filter(
-    (group) => group.canAdmin || connections.some((connection2) => connection2.grants.some((grant) => grant.vault === group.id))
-  );
-  const unknown = new Set(
-    connections.flatMap((connection2) => connection2.grants.map((grant) => grant.vault)).filter((id2) => !result.some((group) => group.id === id2))
-  );
-  return [...result, ...[...unknown].map((id2) => ({ id: id2, name: "Unavailable agent", canAdmin: false }))];
-}
-
 // src/components/CredentialsParts.tsx
 function SecretInput({ value, onInput, placeholder = "New value", disabled, label }) {
   const [shown, setShown] = h2(false);
@@ -30055,17 +30014,6 @@ function CredentialDialog({ title, children, onClose, busy, footer }) {
   return /* @__PURE__ */ u4(MobileDialog, { title, onClose, maxWidth: "760px", className: "ga-cred-dialog", closeDisabled: busy, children: [
     /* @__PURE__ */ u4("div", { class: "settings-body ga-cred ga-cred-dialog-body", children }),
     /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-cred-foot", children: footer })
-  ] });
-}
-function Impact({ connection: connection2, groups: groups2 }) {
-  return /* @__PURE__ */ u4("div", { class: "ga-cred-callout ga-cred-impact", children: [
-    /* @__PURE__ */ u4("strong", { children: "Affected agents" }),
-    connection2.grants.length ? /* @__PURE__ */ u4("ul", { children: connection2.grants.map((grant) => /* @__PURE__ */ u4("li", { children: [
-      groups2.find((group) => group.id === grant.vault)?.name ?? "Unavailable agent",
-      " \xB7 ",
-      connection2.services.map(serviceDestination).join(", "),
-      grant.status === "suspended" ? " \xB7 access paused" : ""
-    ] }, grant.vault)) }) : /* @__PURE__ */ u4("p", { children: "No agents currently have access." })
   ] });
 }
 function ErrorNotice({ message: message2 }) {
@@ -30232,6 +30180,47 @@ function useConnectionSignIn(onFinished) {
       finished.current();
     }
   };
+}
+
+// src/components/credential-presentation.ts
+var PROVIDERS = {
+  "openrouter.ai": "OpenRouter",
+  "ai-gateway.vercel.sh": "Vercel AI Gateway",
+  "api.anthropic.com": "Anthropic",
+  "api.openai.com": "OpenAI",
+  "api.minimax.io": "MiniMax",
+  "api.minimax.chat": "MiniMax",
+  "mcp.tavily.com": "Tavily",
+  "api.github.com": "GitHub",
+  "api.search.brave.com": "Brave Search",
+  "data.seattle.gov": "Seattle Open Data"
+};
+function serviceDestination(service) {
+  return `https://${displayDestination(service.host + (service.path ?? ""))}`;
+}
+function displayDestination(destination) {
+  return destination.replace(/^((?:https:\/\/)?(?:\[[^\]]+\]|[^/:]+)):443(?=\/|$)/i, "$1");
+}
+function connectionName(connection2, apps = []) {
+  if (connection2.label && !/^(?:ag-[\w-]+\/|onecli-|(?:MCP|OAUTH|CONN)_)/i.test(connection2.label))
+    return connection2.label;
+  const app = apps.find((item) => item.id === connection2.app_id);
+  if (app?.label) return app.label[0].toUpperCase() + app.label.slice(1);
+  if (connection2.app_id) {
+    if (connection2.app_id === "github") return "GitHub";
+    return connection2.app_id[0].toUpperCase() + connection2.app_id.slice(1);
+  }
+  const destination = connection2.resource_url ? URL.parse(connection2.resource_url)?.hostname : connection2.services[0]?.host.split("/")[0].replace(/:\d+$/, "");
+  return destination ? PROVIDERS[destination] ?? destination : "Connection";
+}
+function accessGroups(connections, groups2) {
+  const result = groups2.filter(
+    (group) => group.canAdmin || connections.some((connection2) => connection2.grants.some((grant) => grant.vault === group.id))
+  );
+  const unknown = new Set(
+    connections.flatMap((connection2) => connection2.grants.map((grant) => grant.vault)).filter((id2) => !result.some((group) => group.id === id2))
+  );
+  return [...result, ...[...unknown].map((id2) => ({ id: id2, name: "Unavailable agent", canAdmin: false }))];
 }
 
 // ../../shared/credential-matching.ts
@@ -31264,6 +31253,22 @@ function scopeDiscoveryInput({
 }
 
 // src/components/OAuthScopePicker.tsx
+function ScopeList({ scopes, disabled, onRemove }) {
+  return /* @__PURE__ */ u4("ul", { class: "ga-package-chips credential-scope-chips", children: scopes.map((scope) => /* @__PURE__ */ u4("li", { class: "ga-package-chip", children: [
+    /* @__PURE__ */ u4("span", { class: "ga-package-chip-label", children: scope }),
+    onRemove ? /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "ga-package-chip-remove",
+        "aria-label": `Remove scope ${scope}`,
+        disabled,
+        onClick: () => onRemove(scope),
+        children: "\u2715"
+      }
+    ) : null
+  ] }, scope)) });
+}
 function OAuthScopePicker({
   value,
   onChange,
@@ -31274,13 +31279,16 @@ function OAuthScopePicker({
   disabled,
   unspecified,
   onUnspecified,
-  label = "Permissions"
+  label = "Scopes",
+  selectDiscovered = false
 }) {
   const input = scopeDiscoveryInput({ resource, appId, issuer });
   const key = input ? JSON.stringify(input) : "";
   const [discovery, setDiscovery] = h2({ key: "", loading: false, data: null, error: "" });
   const [retry, setRetry] = h2(0);
+  const [draft, setDraft] = h2("");
   const sequence = A2(0);
+  const initialized2 = A2(/* @__PURE__ */ new Set());
   y2(() => {
     const request = ++sequence.current;
     const controller = new AbortController();
@@ -31310,17 +31318,36 @@ function OAuthScopePicker({
   const current = discovery.key === key ? discovery : null;
   const selected = scopeValues(value);
   const advertised = current?.data?.scopes ?? [];
-  const choices = [.../* @__PURE__ */ new Set([...advertised, ...configured, ...selected])].sort();
-  const choose = (scope, checked) => onChange((checked ? [...selected, scope] : selected.filter((item) => item !== scope)).sort().join("\n"));
+  const choices = [.../* @__PURE__ */ new Set([...advertised, ...configured])].sort();
+  const custom = selected.filter((scope) => !choices.includes(scope));
+  y2(() => {
+    if (!selectDiscovered || disabled || unspecified || !key || !advertised.length || initialized2.current.has(key)) return;
+    initialized2.current.add(key);
+    const next = [.../* @__PURE__ */ new Set([...selected, ...advertised])].sort().join("\n");
+    if (next !== value) onChange(next);
+  }, [selectDiscovered, disabled, unspecified, key, current?.data]);
+  const choose = (scope, checked) => {
+    initialized2.current.add(key);
+    onChange((checked ? [.../* @__PURE__ */ new Set([...selected, scope])] : selected.filter((item) => item !== scope)).sort().join("\n"));
+  };
+  const trimmed = draft.trim();
+  const duplicate = selected.includes(trimmed);
+  const invalid = !!trimmed && !isOAuthScope(trimmed);
+  const canAdd = !!trimmed && !duplicate && !invalid && !disabled && !unspecified;
+  const add = () => {
+    if (!canAdd) return;
+    choose(trimmed, true);
+    setDraft("");
+  };
   return /* @__PURE__ */ u4("fieldset", { class: "credential-scope-picker", disabled, children: [
     /* @__PURE__ */ u4("legend", { children: label }),
-    key && (!current || current.loading) ? /* @__PURE__ */ u4("p", { class: "muted", role: "status", children: "Discovering scope options\u2026" }) : null,
-    !key ? /* @__PURE__ */ u4("p", { class: "muted", children: "Enter a valid URL or select an OAuth app to discover scope options." }) : null,
+    key && (!current || current.loading) ? /* @__PURE__ */ u4("p", { class: "muted", role: "status", children: "Discovering scopes\u2026" }) : null,
+    !key ? /* @__PURE__ */ u4("p", { class: "muted", children: "Enter a URL or select an OAuth app to discover scopes." }) : null,
     current?.error ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4(ErrorNotice, { message: `Could not discover scope options: ${current.error}` }),
+      /* @__PURE__ */ u4(ErrorNotice, { message: `Could not discover scopes: ${current.error}` }),
       /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => setRetry((value2) => value2 + 1), children: "Retry discovery" })
     ] }) : null,
-    current?.data ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: !current.data.oauth ? "This resource did not advertise an OAuth challenge. Verify whether OAuth is required." : current.data.source === "not_advertised" ? "No scopes were advertised. App defaults and custom scopes are still available." : current.data.source === "resource" ? "Scopes advertised by this MCP resource." : "Scopes advertised by the authorization server; this list may be incomplete." }) : null,
+    current?.data && !choices.length ? /* @__PURE__ */ u4("p", { class: "muted", children: "No scopes advertised." }) : null,
     onUnspecified ? /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
       /* @__PURE__ */ u4(
         "input",
@@ -31329,14 +31356,14 @@ function OAuthScopePicker({
           checked: unspecified,
           "aria-label": "Make no scope request",
           onChange: (event) => {
+            initialized2.current.add(key);
             onUnspecified(event.currentTarget.checked);
             if (event.currentTarget.checked) onChange("");
           }
         }
       ),
-      /* @__PURE__ */ u4("span", { children: "Make no scope request (provider defaults)" })
+      /* @__PURE__ */ u4("span", { children: "Use provider defaults" })
     ] }) : null,
-    unspecified ? /* @__PURE__ */ u4("p", { class: "ga-cred-warn-text", children: "The provider chooses the permissions. This does not mean no access." }) : null,
     choices.length ? /* @__PURE__ */ u4("div", { class: "credential-scope-options", children: choices.map((scope) => /* @__PURE__ */ u4("label", { children: [
       /* @__PURE__ */ u4(
         "input",
@@ -31348,36 +31375,46 @@ function OAuthScopePicker({
           onChange: (event) => choose(scope, event.currentTarget.checked)
         }
       ),
-      /* @__PURE__ */ u4("code", { children: scope }),
-      /* @__PURE__ */ u4("span", { class: "muted", children: advertised.includes(scope) ? "Discovered" : configured.includes(scope) ? "App default" : "Custom" })
+      /* @__PURE__ */ u4("code", { children: scope })
     ] }, scope)) }) : null,
     configured.length && onUnspecified ? /* @__PURE__ */ u4("button", { type: "button", class: "ghost", onClick: () => {
+      initialized2.current.add(key);
       onUnspecified(false);
       onChange([...new Set(configured)].sort().join("\n"));
     }, children: "Use app defaults" }) : null,
-    /* @__PURE__ */ u4("details", { class: "credential-custom-scopes", children: [
-      /* @__PURE__ */ u4("summary", { children: "Custom scopes" }),
-      /* @__PURE__ */ u4(
-        "textarea",
-        {
-          "aria-label": label === "Default scopes" ? "Default scopes" : "Custom scopes",
-          rows: 3,
-          value,
-          disabled: unspecified,
-          spellcheck: false,
-          placeholder: "One exact scope value per line",
-          onInput: (event) => onChange(event.currentTarget.value)
-        }
-      )
+    /* @__PURE__ */ u4("div", { class: "group-admin-stack ga-package-list", children: [
+      custom.length ? /* @__PURE__ */ u4(ScopeList, { scopes: custom, disabled: disabled || unspecified, onRemove: (scope) => choose(scope, false) }) : null,
+      /* @__PURE__ */ u4("div", { class: "ga-package-actions", children: [
+        /* @__PURE__ */ u4(
+          "input",
+          {
+            type: "text",
+            class: "ga-package-input",
+            "aria-label": "Add scope",
+            placeholder: "Scope",
+            value: draft,
+            disabled: unspecified,
+            spellcheck: false,
+            onInput: (event) => setDraft(event.currentTarget.value),
+            onKeyDown: (event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                add();
+              }
+            }
+          }
+        ),
+        /* @__PURE__ */ u4("button", { type: "button", "aria-label": "Add scope", disabled: !canAdd, onClick: add, children: "+ Add" })
+      ] }),
+      /* @__PURE__ */ u4(ErrorNotice, { message: invalid ? "Enter one scope without spaces, quotes or backslashes." : duplicate && trimmed ? "This scope is already selected." : "" })
     ] }),
-    selected.some((scope) => !isOAuthScope(scope)) ? /* @__PURE__ */ u4(ErrorNotice, { message: "Scope values must be printable ASCII without quotes or backslashes." }) : null,
-    onUnspecified && !unspecified && selected.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "Select scopes, enter custom values, or explicitly choose provider defaults." }) : null
+    selected.some((scope) => !isOAuthScope(scope)) ? /* @__PURE__ */ u4(ErrorNotice, { message: "Scope values must be printable ASCII without quotes or backslashes." }) : null
   ] });
 }
 
 // src/components/OAuthAppForm.tsx
-function OAuthAppForm({ draft, busy, onChange }) {
-  const update = (patch) => onChange({ ...draft, ...patch });
+function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }) {
+  const update = (patch) => onChange((current) => ({ ...current, ...patch }));
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(
       "input",
@@ -31451,6 +31488,7 @@ function OAuthAppForm({ draft, busy, onChange }) {
         issuer: draft.issuer,
         value: draft.scopes,
         disabled: busy,
+        selectDiscovered,
         onChange: (scopes) => update({ scopes })
       }
     ),
@@ -31682,7 +31720,7 @@ function ExistingConnectionEditor({ id: id2, ...props }) {
   ] }) });
   return /* @__PURE__ */ g(ConnectionForm, { ...props, key: `${data.id}:${data.revision}`, connection: data });
 }
-function ConnectionForm({ connection: connection2, apps, groups: groups2, initialKind = "static", resourceUrl, accessRequest, onCreated, onStart, onClose, onSaved }) {
+function ConnectionForm({ connection: connection2, apps, initialKind = "static", resourceUrl, accessRequest, onCreated, onStart, onClose, onSaved }) {
   const defaults = accessRequest ? accessCreationDefaults(accessRequest, apps) : void 0;
   const destination = resourceUrl ?? accessRequest?.resource_url;
   const [kind, setKind] = h2(connection2?.kind ?? defaults?.kind ?? initialKind);
@@ -31836,6 +31874,7 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
           kind: kind === "oauth_app" ? "oauth_app" : "mcp_oauth",
           apps,
           appId,
+          selectDiscovered: !oauthDraft,
           resource: routes[0].pattern,
           scopes,
           unspecifiedScopes,
@@ -31882,13 +31921,12 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
         setRoutingChanged(true);
       }, children: "Add URL pattern" }),
       /* @__PURE__ */ u4(ErrorNotice, { message: routingError && routes.some((route) => route.pattern) ? routingError : "" })
-    ] }) : connection2 ? /* @__PURE__ */ u4("details", { children: [
-      /* @__PURE__ */ u4("summary", { children: "Permissions" }),
-      /* @__PURE__ */ u4("p", { children: connection2.resource_url ?? connection2.app_id }),
-      /* @__PURE__ */ u4("p", { children: "Requested scopes" }),
-      connection2.requested_scopes?.length ? /* @__PURE__ */ u4("ul", { children: connection2.requested_scopes.map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) }) : /* @__PURE__ */ u4("p", { class: "muted", children: "No explicit scope request." }),
-      /* @__PURE__ */ u4("p", { children: "Provider-reported scopes" }),
-      connection2.granted_scopes == null ? /* @__PURE__ */ u4("p", { class: "muted", children: "Not reported by the provider." }) : connection2.granted_scopes.length ? /* @__PURE__ */ u4("ul", { children: connection2.granted_scopes.map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) }) : /* @__PURE__ */ u4("p", { class: "muted", children: "None." })
+    ] }) : connection2 ? /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4("p", { children: connection2.resource_url ?? apps.find((app) => app.id === connection2.app_id)?.label ?? "OAuth app unavailable" }),
+      /* @__PURE__ */ u4("fieldset", { class: "credential-scope-picker", children: [
+        /* @__PURE__ */ u4("legend", { children: "Scopes" }),
+        connection2.scope_source !== "provider" || connection2.granted_scopes == null ? /* @__PURE__ */ u4("p", { class: "muted", children: "Not reported by the provider." }) : connection2.granted_scopes.length ? /* @__PURE__ */ u4(ScopeList, { scopes: connection2.granted_scopes }) : /* @__PURE__ */ u4("p", { class: "muted", children: "None." })
+      ] })
     ] }) : null,
     fields.map(({ key, label: label2 }) => /* @__PURE__ */ u4(GroupAdminField, { label: label2, children: /* @__PURE__ */ u4(
       SecretInput,
@@ -31900,15 +31938,11 @@ function ConnectionForm({ connection: connection2, apps, groups: groups2, initia
         onInput: (value) => setValues((old) => ({ ...old, [key]: value }))
       }
     ) }, key)),
-    connection2 ? /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4(Impact, { connection: connection2, groups: groups2 }),
-      routingChanged ? /* @__PURE__ */ u4("p", { children: "These agents automatically receive access to all updated URL patterns." }) : null
-    ] }) : null,
     /* @__PURE__ */ u4(ErrorNotice, { message: error }),
     stale ? /* @__PURE__ */ u4("p", { role: "alert", children: "This connection changed or the operation conflicts. Close and reopen it to load the latest revision; your changes were not blindly overwritten." }) : null
   ] }) });
 }
-function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, busy, firstInput, onResource, onApp, onScopes, onUnspecifiedScopes }) {
+function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, busy, firstInput, onResource, onApp, onScopes, onUnspecifiedScopes, selectDiscovered = false }) {
   return /* @__PURE__ */ u4(k, { children: [
     kind === "mcp_oauth" ? /* @__PURE__ */ u4(GroupAdminField, { label: "URL pattern", children: /* @__PURE__ */ u4(
       "input",
@@ -31951,12 +31985,13 @@ function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, b
         onChange: onScopes,
         disabled: busy,
         unspecified: unspecifiedScopes,
-        onUnspecified: onUnspecifiedScopes
+        onUnspecified: onUnspecifiedScopes,
+        selectDiscovered
       }
     )
   ] });
 }
-function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2, onStart, onClose, onSaved }) {
+function OAuthConnectionDialog({ connection: connection2, apps, onStart, onClose, onSaved }) {
   const kind = connection2.kind === "oauth_app" ? "oauth_app" : "mcp_oauth";
   const [resource, setResource] = h2(connection2.resource_url ?? "");
   const [app, setApp] = h2(connection2.app_id ?? "");
@@ -32021,13 +32056,12 @@ function OAuthConnectionDialog({ connection: connection2, apps, groups: groups2,
       }
     ),
     resource && resourceError ? /* @__PURE__ */ u4(ErrorNotice, { message: resourceError }) : null,
-    /* @__PURE__ */ u4(Impact, { connection: connection2, groups: groups2 }),
     /* @__PURE__ */ u4(ErrorNotice, { message: error })
   ] }) });
 }
-function ConnectionActionDialog({ connection: connection2, groups: groups2, action, onClose, onSaved }) {
+function ConnectionActionDialog({ connection: connection2, action, onClose, onSaved }) {
   const latest = useCredentialResource(connectionPath(connection2.id));
-  if (!latest.data || latest.loading || latest.error) return /* @__PURE__ */ u4(CredentialDialog, { title: "Review connection impact", onClose, children: latest.loading ? /* @__PURE__ */ u4("p", { children: "Loading latest impact\u2026" }) : /* @__PURE__ */ u4(k, { children: [
+  if (!latest.data || latest.loading || latest.error) return /* @__PURE__ */ u4(CredentialDialog, { title: "Load credential", onClose, children: latest.loading ? /* @__PURE__ */ u4("p", { children: "Loading credential\u2026" }) : /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(ErrorNotice, { message: latest.error }),
     /* @__PURE__ */ u4("button", { type: "button", onClick: () => void latest.refresh(), children: "Retry" })
   ] }) });
@@ -32042,20 +32076,16 @@ function ConnectionActionDialog({ connection: connection2, groups: groups2, acti
     );
     onSaved();
     showToast(deleting ? "Connection deleted everywhere" : `Connection ${action === "enable" ? "enabled" : "disabled"}`);
-  }, children: [
-    /* @__PURE__ */ u4(Impact, { connection: current, groups: groups2 }),
-    /* @__PURE__ */ u4("p", { children: deleting ? current.kind === "static" ? "Permanently remove this connection and its keys. Every receiving agent loses access." : "Delete this connection and disconnect the upstream authorization, affecting every receiving agent. Provider-side revocation may also affect other grants; failed remote cleanup is reported." : action === "disable" ? "Stop every receiving agent from using this connection without deleting its saved state." : "Restore access for agents with this credential turned on. Paused grants stay off until explicitly restored." })
-  ] });
+  }, children: /* @__PURE__ */ u4("p", { children: deleting ? current.kind === "static" ? "Permanently remove this connection and its keys. Every receiving agent loses access." : "Delete this connection and disconnect the upstream authorization, affecting every receiving agent. Provider-side revocation may also affect other grants; failed remote cleanup is reported." : action === "disable" ? "Stop every receiving agent from using this connection without deleting its saved state." : "Restore access for agents with this credential turned on. Paused grants stay off until explicitly restored." }) });
 }
-function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onClose, onSaved }) {
-  const [id2, setId] = h2(app?.id ?? "");
+function OAuthAppDialog({ app, canEditInstall, onClose, onSaved }) {
+  const [id2] = h2(() => app?.id ?? `app-${crypto.randomUUID()}`);
   const [scope, setScope] = h2(app?.source ?? "user");
   const [draft, setDraft] = h2(() => oauthAppDraft(app));
   const [secret, setSecret] = h2("");
   const [busy, setBusy] = h2(false);
   const [error, setError] = h2("");
   const [deleting, setDeleting] = h2(false);
-  const affected = connections.filter((connection2) => connection2.app_id === (app?.id ?? id2));
   let config;
   let validationError = "";
   try {
@@ -32066,7 +32096,7 @@ function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onC
   }
   const canManage = !busy && !!id2.trim() && (scope !== "install" || canEditInstall);
   const canSave = canManage && !!config && (draft.token_endpoint_auth_method === "none" ? !secret : !!secret || !!app?.client_secret_set);
-  const showValidation = !!app || [id2, draft.label, draft.issuer, draft.client_id, secret].some((value) => !!value.trim());
+  const showValidation = !!app || [draft.label, draft.issuer, draft.client_id, secret].some((value) => !!value.trim());
   async function save(remove) {
     if (remove ? !canManage : !canSave) return;
     setBusy(true);
@@ -32096,12 +32126,11 @@ function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onC
     }, children: deleting ? "Confirm delete app" : "Delete app" }) : null,
     /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: !canSave || deleting, onClick: () => void save(false), children: busy ? "Saving\u2026" : "Save app" })
   ] }), children: [
-    /* @__PURE__ */ u4(GroupAdminField, { label: "App ID", children: /* @__PURE__ */ u4("input", { type: "text", "aria-label": "App ID", disabled: busy || !!app, value: id2, onInput: (event) => setId(event.currentTarget.value) }) }),
     /* @__PURE__ */ u4(GroupAdminField, { label: "App ownership", children: /* @__PURE__ */ u4("select", { "aria-label": "App ownership", value: scope, disabled: busy || !!app, onChange: (event) => setScope(event.currentTarget.value), children: [
       /* @__PURE__ */ u4("option", { value: "user", children: "Personal app" }),
       canEditInstall ? /* @__PURE__ */ u4("option", { value: "install", children: "Install-wide app" }) : null
     ] }) }),
-    /* @__PURE__ */ u4(OAuthAppForm, { draft, busy, onChange: setDraft }),
+    /* @__PURE__ */ u4(OAuthAppForm, { draft, busy, onChange: setDraft, selectDiscovered: !app }),
     /* @__PURE__ */ u4(GroupAdminField, { label: "Client secret", info: app?.client_secret_set ? "A secret is configured. Blank preserves it." : "Required only for confidential clients; never returned after saving.", children: /* @__PURE__ */ u4(
       SecretInput,
       {
@@ -32112,22 +32141,6 @@ function OAuthAppDialog({ app, canEditInstall, connections, groups: groups2, onC
         onInput: setSecret
       }
     ) }),
-    /* @__PURE__ */ u4("div", { class: "ga-cred-callout", children: [
-      /* @__PURE__ */ u4("strong", { children: [
-        "Affected personal connections \xB7 ",
-        affected.length
-      ] }),
-      affected.map((connection2) => /* @__PURE__ */ u4("div", { children: [
-        /* @__PURE__ */ u4("p", { children: [
-          connectionName(connection2),
-          " \xB7 ",
-          connection2.status
-        ] }),
-        /* @__PURE__ */ u4(Impact, { connection: connection2, groups: groups2 })
-      ] }, connection2.id)),
-      scope === "install" ? /* @__PURE__ */ u4("p", { children: "Install-wide changes can also affect other users and agents not visible here." }) : null,
-      /* @__PURE__ */ u4("p", { children: "Connections pin their issuing client. Saving a different client, issuer, host or scope policy does not automatically rebind existing connections. Secret rotation or deletion can prevent refresh and require reconnect. Review every affected connection before replacing or deleting an app." })
-    ] }),
     /* @__PURE__ */ u4(ErrorNotice, { message: showValidation ? validationError || (draft.token_endpoint_auth_method === "none" && secret ? "Public clients must not have a client secret." : draft.token_endpoint_auth_method !== "none" && !secret && !app?.client_secret_set ? "Enter a client secret." : "") : "" }),
     deleting ? /* @__PURE__ */ u4("p", { role: "alert", children: "Delete this app configuration? Existing client bindings may stop refreshing; this does not detach one agent." }) : null,
     /* @__PURE__ */ u4(ErrorNotice, { message: error })
@@ -32289,7 +32302,6 @@ function CredentialsContent({ agent } = {}) {
         resourceUrl: dialog.resourceUrl,
         accessRequest: dialog.accessRequest,
         apps: data.apps,
-        groups: data.groups,
         onCreated: (connection2) => {
           const requestId = dialog?.kind === "edit" ? dialog.accessRequestId : void 0;
           if (requestId) setCreated({ requestId, connectionId: connection2.id });
@@ -32299,12 +32311,11 @@ function CredentialsContent({ agent } = {}) {
         onSaved: () => void refresh()
       }
     ) : null,
-    dialog?.kind === "connect" && data ? dialog.connection ? /* @__PURE__ */ u4(ReconnectLatest, { id: dialog.connection.id, apps: data.apps, groups: data.groups, onStart: signIn.start, onClose: close, onSaved: () => void refresh() }) : /* @__PURE__ */ u4(
+    dialog?.kind === "connect" && data ? dialog.connection ? /* @__PURE__ */ u4(ReconnectLatest, { id: dialog.connection.id, apps: data.apps, onStart: signIn.start, onClose: close, onSaved: () => void refresh() }) : /* @__PURE__ */ u4(
       ConnectionEditor,
       {
         initialKind: "mcp_oauth",
         apps: data.apps,
-        groups: data.groups,
         resourceUrl: dialog.resourceUrl,
         onStart: signIn.start,
         onClose: close,
@@ -32315,7 +32326,6 @@ function CredentialsContent({ agent } = {}) {
       ConnectionActionDialog,
       {
         connection: dialog.connection,
-        groups: data.groups,
         action: dialog.action,
         onClose: close,
         onSaved: () => void refresh()
@@ -32326,8 +32336,6 @@ function CredentialsContent({ agent } = {}) {
       {
         app: dialog.app,
         canEditInstall: data.canEditInstall,
-        connections: data.connections,
-        groups: data.groups,
         onClose: close,
         onSaved: () => void refresh()
       }

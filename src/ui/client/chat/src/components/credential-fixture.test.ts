@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.hoisted(() => {
+  vi.stubGlobal('location', { pathname: '/fixture', search: '' });
+});
 import { completeSignIn, fixtureRoute, resetState, setOptions } from '../../fixtures/credentials-mock';
 import {
   accessPath,
@@ -21,13 +24,21 @@ function request<T>(path: string, method = 'GET', body?: unknown): T {
   ) as T;
 }
 beforeEach(() => {
+  vi.stubGlobal('location', { pathname: '/fixture', search: '' });
   setOptions({ scenario: 'typical', gatewayDown: false, failNextWrite: false, canAdmin: true, owner: true });
   resetState();
-  vi.stubGlobal('location', { pathname: '/fixture' });
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe('canonical credentials fixture', () => {
+  it('can advertise an extra scope without changing saved profiles', () => {
+    vi.stubGlobal('location', { pathname: '/fixture', search: '?extra_scope=extra%3Apermission' });
+    const before = request<CredentialsOverview>(credentialsPath());
+    expect(request(credentialsPath('/scopes'), 'POST', { resource_url: 'https://mcp.example.com/mcp' })).toMatchObject({
+      scopes: ['read', 'write', 'extra:permission'],
+    });
+    expect(request<CredentialsOverview>(credentialsPath())).toEqual(before);
+  });
   it('inspects scopes without changing credentials or consuming a pending write failure', () => {
     const before = request<CredentialsOverview>(credentialsPath());
     setOptions({ failNextWrite: true });

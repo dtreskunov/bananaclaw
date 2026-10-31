@@ -3,11 +3,11 @@ import type { JSX, RefObject } from 'preact';
 import {
   connectionPath, credentialRequest, credentialsPath, errorMessage, CredentialsError,
   providedValues, serviceKeys,
-  type AppInfo, type Connection, type CredentialGroup, type OAuthAppConfiguration,
+  type AppInfo, type Connection, type OAuthAppConfiguration,
   type OAuthAppScope, type Service, type SignInInput,
 } from './CredentialsApi';
 import {
-  ConfirmCredentialAction, CredentialDialog, ErrorNotice, Impact,
+  ConfirmCredentialAction, CredentialDialog, ErrorNotice,
   SecretInput, useCredentialResource,
 } from './CredentialsParts';
 import { GroupAdminField as Field } from './GroupAdminField';
@@ -18,11 +18,11 @@ import type { AccessRequirements } from '../../../../shared/access-authenticatio
 import { CredentialServiceForm } from './CredentialServiceForm';
 import { OAuthAppForm } from './OAuthAppForm';
 import { compileOAuthApp, oauthAppDraft } from './oauth-app-form';
-import { OAuthScopePicker } from './OAuthScopePicker';
+import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
 import { scopeValues, validScopeSelection } from './oauth-scopes';
 
 interface ConnectionEditorProps {
-  id?: string; apps: AppInfo[]; groups: CredentialGroup[]; initialKind?: Connection['kind']; resourceUrl?: string;
+  id?: string; apps: AppInfo[]; initialKind?: Connection['kind']; resourceUrl?: string;
   accessRequest?: AccessRequirements;
   onCreated?: (connection: Connection) => void;
   onStart: (id: string, input: SignInInput) => Promise<void>; onClose: () => void; onSaved: () => void;
@@ -41,7 +41,7 @@ function ExistingConnectionEditor({ id, ...props }: ConnectionEditorProps & { id
   return <ConnectionForm {...props} key={`${data.id}:${data.revision}`} connection={data} />;
 }
 
-function ConnectionForm({ connection, apps, groups, initialKind = 'static', resourceUrl, accessRequest, onCreated, onStart, onClose, onSaved }:
+function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl, accessRequest, onCreated, onStart, onClose, onSaved }:
   ConnectionEditorProps & { connection?: Connection }): JSX.Element {
   const defaults = accessRequest ? accessCreationDefaults(accessRequest, apps) : undefined;
   const destination = resourceUrl ?? accessRequest?.resource_url;
@@ -162,6 +162,7 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
       </select></Field> : null}
       {creatingOAuth ? <>
         <OAuthFields kind={kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth'} apps={apps} appId={appId}
+          selectDiscovered={!oauthDraft}
           resource={routes[0].pattern} scopes={scopes} unspecifiedScopes={unspecifiedScopes} busy={busy} firstInput={firstUrl}
           onUnspecifiedScopes={setUnspecifiedScopes}
           onResource={(pattern) => changeRoute(0, { ...routes[0], pattern })}
@@ -191,22 +192,17 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
           setRoutingChanged(true);
         }}>Add URL pattern</button>
         <ErrorNotice message={routingError && routes.some((route) => route.pattern) ? routingError : ''} />
-      </> : connection ? <details><summary>Permissions</summary>
-        <p>{connection.resource_url ?? connection.app_id}</p>
-        <p>Requested scopes</p>
-        {connection.requested_scopes?.length ? <ul>{connection.requested_scopes.map(scope => <li key={scope}>{scope}</li>)}</ul> : <p class="muted">No explicit scope request.</p>}
-        <p>Provider-reported scopes</p>
-        {connection.granted_scopes == null ? <p class="muted">Not reported by the provider.</p> :
-          connection.granted_scopes.length ? <ul>{connection.granted_scopes.map(scope => <li key={scope}>{scope}</li>)}</ul> : <p class="muted">None.</p>}
-      </details> : null}
+      </> : connection ? <>
+        <p>{connection.resource_url ?? apps.find(app => app.id === connection.app_id)?.label ?? 'OAuth app unavailable'}</p>
+        <fieldset class="credential-scope-picker"><legend>Scopes</legend>
+          {connection.scope_source !== 'provider' || connection.granted_scopes == null ? <p class="muted">Not reported by the provider.</p> :
+            connection.granted_scopes.length ? <ScopeList scopes={connection.granted_scopes} /> : <p class="muted">None.</p>}
+        </fieldset>
+      </> : null}
       {fields.map(({ key, label }) => <Field key={key} label={label}>
         <SecretInput label={label} value={values[key] ?? ''} disabled={busy} placeholder={connection?.credentials.includes(key) ? 'Keep current value' : 'New value'}
           onInput={(value) => setValues((old) => ({ ...old, [key]: value }))} />
       </Field>)}
-      {connection ? <>
-        <Impact connection={connection} groups={groups} />
-        {routingChanged ? <p>These agents automatically receive access to all updated URL patterns.</p> : null}
-      </> : null}
       <ErrorNotice message={error} />
       {stale ? <p role="alert">This connection changed or the operation conflicts. Close and reopen it to load the
         latest revision; your changes were not blindly overwritten.</p> : null}
@@ -214,10 +210,11 @@ function ConnectionForm({ connection, apps, groups, initialKind = 'static', reso
   </CredentialDialog>;
 }
 
-function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, busy, firstInput, onResource, onApp, onScopes, onUnspecifiedScopes }: {
+function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, busy, firstInput, onResource, onApp, onScopes, onUnspecifiedScopes, selectDiscovered = false }: {
   kind: 'mcp_oauth' | 'oauth_app'; apps: AppInfo[]; resource: string; appId: string; scopes: string; busy: boolean;
   firstInput?: RefObject<HTMLInputElement>; onResource: (value: string) => void; onApp: (value: string) => void; onScopes: (value: string) => void;
   unspecifiedScopes: boolean; onUnspecifiedScopes: (value: boolean) => void;
+  selectDiscovered?: boolean;
 }): JSX.Element {
   return <>
     {kind === 'mcp_oauth' ? <Field label="URL pattern"><input ref={firstInput} type="text" aria-label="URL pattern"
@@ -231,12 +228,13 @@ function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, b
     {kind === 'oauth_app' && !apps.length ? <p>Configure an app in the OAuth apps section first.</p> : null}
     <OAuthScopePicker resource={kind === 'mcp_oauth' ? resource : undefined} appId={appId}
       configured={apps.find(app => app.id === appId)?.default_scopes ?? []}
-      value={scopes} onChange={onScopes} disabled={busy} unspecified={unspecifiedScopes} onUnspecified={onUnspecifiedScopes} />
+      value={scopes} onChange={onScopes} disabled={busy} unspecified={unspecifiedScopes} onUnspecified={onUnspecifiedScopes}
+      selectDiscovered={selectDiscovered} />
   </>;
 }
 
-export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClose, onSaved }: {
-  connection: Connection; apps: AppInfo[]; groups: CredentialGroup[];
+export function OAuthConnectionDialog({ connection, apps, onStart, onClose, onSaved }: {
+  connection: Connection; apps: AppInfo[];
   onStart: (id: string, input: SignInInput) => Promise<void>; onClose: () => void; onSaved: () => void;
 }): JSX.Element {
   const kind = connection.kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth';
@@ -290,19 +288,18 @@ export function OAuthConnectionDialog({ connection, apps, groups, onStart, onClo
           setScopes((apps.find((item) => item.id === value)?.default_scopes ?? []).join('\n'));
         }} onScopes={setScopes} />
       {resource && resourceError ? <ErrorNotice message={resourceError} /> : null}
-      <Impact connection={connection} groups={groups} />
       <ErrorNotice message={error} />
     </form>
   </CredentialDialog>;
 }
 
-export function ConnectionActionDialog({ connection, groups, action, onClose, onSaved }: {
-  connection: Connection; groups: CredentialGroup[]; action: 'disable' | 'enable' | 'delete';
+export function ConnectionActionDialog({ connection, action, onClose, onSaved }: {
+  connection: Connection; action: 'disable' | 'enable' | 'delete';
   onClose: () => void; onSaved: () => void;
 }): JSX.Element {
   const latest = useCredentialResource<Connection>(connectionPath(connection.id));
-  if (!latest.data || latest.loading || latest.error) return <CredentialDialog title="Review connection impact" onClose={onClose}>
-    {latest.loading ? <p>Loading latest impact…</p> : <><ErrorNotice message={latest.error} />
+  if (!latest.data || latest.loading || latest.error) return <CredentialDialog title="Load credential" onClose={onClose}>
+    {latest.loading ? <p>Loading credential…</p> : <><ErrorNotice message={latest.error} />
       <button type="button" onClick={() => void latest.refresh()}>Retry</button></>}
   </CredentialDialog>;
   const current = latest.data;
@@ -315,7 +312,6 @@ export function ConnectionActionDialog({ connection, groups, action, onClose, on
     onSaved();
     showToast(deleting ? 'Connection deleted everywhere' : `Connection ${action === 'enable' ? 'enabled' : 'disabled'}`);
   }}>
-    <Impact connection={current} groups={groups} />
     <p>{deleting ? current.kind === 'static'
       ? 'Permanently remove this connection and its keys. Every receiving agent loses access.'
       : 'Delete this connection and disconnect the upstream authorization, affecting every receiving agent. Provider-side revocation may also affect other grants; failed remote cleanup is reported.'
@@ -324,18 +320,17 @@ export function ConnectionActionDialog({ connection, groups, action, onClose, on
   </ConfirmCredentialAction>;
 }
 
-export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClose, onSaved }: {
-  app?: AppInfo; canEditInstall: boolean; connections: Connection[]; groups: CredentialGroup[];
+export function OAuthAppDialog({ app, canEditInstall, onClose, onSaved }: {
+  app?: AppInfo; canEditInstall: boolean;
   onClose: () => void; onSaved: () => void;
 }): JSX.Element {
-  const [id, setId] = useState(app?.id ?? '');
+  const [id] = useState(() => app?.id ?? `app-${crypto.randomUUID()}`);
   const [scope, setScope] = useState<OAuthAppScope>(app?.source ?? 'user');
   const [draft, setDraft] = useState(() => oauthAppDraft(app));
   const [secret, setSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const affected = connections.filter((connection) => connection.app_id === (app?.id ?? id));
   let config: OAuthAppConfiguration | undefined;
   let validationError = '';
   try { config = compileOAuthApp(draft); }
@@ -346,7 +341,7 @@ export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClo
   const canManage = !busy && !!id.trim() && (scope !== 'install' || canEditInstall);
   const canSave = canManage && !!config &&
     (draft.token_endpoint_auth_method === 'none' ? !secret : !!secret || !!app?.client_secret_set);
-  const showValidation = !!app || [id, draft.label, draft.issuer, draft.client_id, secret].some(value => !!value.trim());
+  const showValidation = !!app || [draft.label, draft.issuer, draft.client_id, secret].some(value => !!value.trim());
   async function save(remove: boolean): Promise<void> {
     if (remove ? !canManage : !canSave) return;
     setBusy(true);
@@ -372,23 +367,14 @@ export function OAuthAppDialog({ app, canEditInstall, connections, groups, onClo
     }}>{deleting ? 'Confirm delete app' : 'Delete app'}</button> : null}
     <button type="button" class="primary" disabled={!canSave || deleting} onClick={() => void save(false)}>{busy ? 'Saving…' : 'Save app'}</button>
   </>}>
-    <Field label="App ID"><input type="text" aria-label="App ID" disabled={busy || !!app} value={id} onInput={(event) => setId(event.currentTarget.value)} /></Field>
     <Field label="App ownership"><select aria-label="App ownership" value={scope} disabled={busy || !!app} onChange={(event) => setScope(event.currentTarget.value as OAuthAppScope)}>
       <option value="user">Personal app</option>{canEditInstall ? <option value="install">Install-wide app</option> : null}
     </select></Field>
-    <OAuthAppForm draft={draft} busy={busy} onChange={setDraft} />
+    <OAuthAppForm draft={draft} busy={busy} onChange={setDraft} selectDiscovered={!app} />
     <Field label="Client secret" info={app?.client_secret_set ? 'A secret is configured. Blank preserves it.' : 'Required only for confidential clients; never returned after saving.'}>
       <SecretInput label="Client secret" value={secret} disabled={busy} placeholder={app?.client_secret_set ? 'Keep current secret' : 'New client secret'}
         onInput={setSecret} />
     </Field>
-    <div class="ga-cred-callout">
-      <strong>Affected personal connections · {affected.length}</strong>
-      {affected.map((connection) => <div key={connection.id}><p>{connectionName(connection)} · {connection.status}</p><Impact connection={connection} groups={groups} /></div>)}
-      {scope === 'install' ? <p>Install-wide changes can also affect other users and agents not visible here.</p> : null}
-      <p>Connections pin their issuing client. Saving a different client, issuer, host or scope policy does not
-        automatically rebind existing connections. Secret rotation or deletion can prevent refresh and require reconnect.
-        Review every affected connection before replacing or deleting an app.</p>
-    </div>
     <ErrorNotice message={showValidation ? validationError ||
       (draft.token_endpoint_auth_method === 'none' && secret ? 'Public clients must not have a client secret.' :
         draft.token_endpoint_auth_method !== 'none' && !secret && !app?.client_secret_set ? 'Enter a client secret.' : '') : ''} />

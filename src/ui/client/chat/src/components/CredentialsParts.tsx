@@ -3,12 +3,11 @@ import type { ComponentChildren, JSX } from 'preact';
 import {
   connectionPath, credentialRequest, credentialsPath, errorMessage,
   CredentialsError,
-  type Connection, type CredentialGroup, type OAuthCompleteMessage, type SignInInput,
+  type OAuthCompleteMessage, type SignInInput,
   type SignInProgress, type SignInStart,
 } from './CredentialsApi';
 import { MobileDialog, MobileDialogFooter } from './MobileDialog';
 import { showToast } from './Toast';
-import { serviceDestination } from './credential-presentation';
 
 export function SecretInput({ value, onInput, placeholder = 'New value', disabled, label }: {
   value: string; onInput: (value: string) => void; placeholder?: string; disabled?: boolean; label?: string;
@@ -43,19 +42,6 @@ export function CredentialDialog({ title, children, onClose, busy, footer }: {
     <div class="settings-body ga-cred ga-cred-dialog-body">{children}</div>
     <MobileDialogFooter className="ga-cred-foot">{footer}</MobileDialogFooter>
   </MobileDialog>;
-}
-
-export function Impact({ connection, groups }: { connection: Connection; groups: CredentialGroup[] }): JSX.Element {
-  return <div class="ga-cred-callout ga-cred-impact">
-    <strong>Affected agents</strong>
-    {connection.grants.length ? <ul>
-      {connection.grants.map((grant) => <li key={grant.vault}>
-        {groups.find((group) => group.id === grant.vault)?.name ?? 'Unavailable agent'}
-        {' · '}{connection.services.map(serviceDestination).join(', ')}
-        {grant.status === 'suspended' ? ' · access paused' : ''}
-      </li>)}
-    </ul> : <p>No agents currently have access.</p>}
-  </div>;
 }
 
 export function ErrorNotice({ message }: { message: string }): JSX.Element | null {

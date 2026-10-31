@@ -6605,12 +6605,17 @@ body.private-web-page,
   flex: none;
   font-size: var(--font-xs);
 }
-.credential-custom-scopes {
-  margin-top: 8px;
+.credential-scope-chips .ga-package-chip {
+  min-width: 0;
+  max-width: 100%;
 }
-.credential-custom-scopes > summary {
-  cursor: pointer;
-  margin-bottom: 6px;
+.credential-scope-chips .ga-package-chip-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.credential-scope-chips .ga-package-chip-remove {
+  flex: none;
 }
 .ga-cred-item-actions {
   flex-wrap: wrap;
@@ -6633,9 +6638,6 @@ body.private-web-page,
   flex-wrap: wrap;
   gap: 10px;
   padding: 8px 0;
-}
-.ga-cred-impact {
-  overflow-wrap: anywhere;
 }
 @media (max-width: 720px) {
   .credentials-matrix .credentials-matrix-name {
@@ -7144,6 +7146,61 @@ body.private-web-page,
   }
 }
 
+/* src/components/GroupAdminPackages.css */
+.ga-package-list {
+  gap: 8px;
+}
+.ga-package-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ga-package-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 12px;
+  background: var(--chip-bg, rgba(127, 127, 127, 0.15));
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--font-sm);
+}
+.ga-package-chip-label {
+  line-height: 1.4;
+}
+.ga-package-chip-remove {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: var(--font-sm);
+  line-height: 1;
+  color: inherit;
+  opacity: 0.7;
+}
+.ga-package-chip-remove:hover {
+  opacity: 1;
+}
+.ga-package-chip-remove:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.ga-package-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ga-package-input {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--font-base);
+}
+
 /* src/components/GroupAdminDestinations.css */
 .ga-id-sub {
   display: block;
@@ -7637,61 +7694,6 @@ body.private-web-page,
     grid-area: remove;
     align-self: center;
   }
-}
-
-/* src/components/GroupAdminPackages.css */
-.ga-package-list {
-  gap: 8px;
-}
-.ga-package-chips {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.ga-package-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px 2px 10px;
-  border-radius: 12px;
-  background: var(--chip-bg, rgba(127, 127, 127, 0.15));
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: var(--font-sm);
-}
-.ga-package-chip-label {
-  line-height: 1.4;
-}
-.ga-package-chip-remove {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  padding: 0 4px;
-  font-size: var(--font-sm);
-  line-height: 1;
-  color: inherit;
-  opacity: 0.7;
-}
-.ga-package-chip-remove:hover {
-  opacity: 1;
-}
-.ga-package-chip-remove:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-.ga-package-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.ga-package-input {
-  flex: 1 1 200px;
-  min-width: 0;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: var(--font-base);
 }
 
 /* src/components/GroupAdminSkills.css */

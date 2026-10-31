@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OAuthScopePicker } from './OAuthScopePicker';
+import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
 import { ErrorNotice } from './CredentialsParts';
 
 const hooks = vi.hoisted(() => {
@@ -32,6 +32,13 @@ interface Node {
     children?: unknown;
     checked?: boolean;
     message?: string;
+    value?: string;
+    disabled?: boolean;
+    scopes?: string[];
+    onRemove?: (scope: string) => void;
+    onInput?: (event: { currentTarget: { value: string } }) => void;
+    onClick?: () => void;
+    onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
     'aria-label'?: string;
     onChange?: (event: { currentTarget: { checked: boolean } }) => void;
   };
@@ -73,7 +80,7 @@ afterEach(() => {
 });
 
 describe('discovered scope picker', () => {
-  it('offers advertised scopes without selecting them or dropping custom values', async () => {
+  it('preserves saved scope selections and custom values', async () => {
     const onChange = vi.fn();
     const props: Props = {
       resource: 'https://mcp.example/mcp',
@@ -90,9 +97,7 @@ describe('discovered scope picker', () => {
     const node = draw(props);
     const inputs = descendants(node).filter((item) => item.type === 'input');
     expect(inputs.find((item) => item.props['aria-label'] === 'Request scope read')?.props.checked).toBe(false);
-    expect(inputs.find((item) => item.props['aria-label'] === 'Request scope custom:existing')?.props.checked).toBe(
-      true,
-    );
+    expect(descendants(node).find((item) => item.type === ScopeList)?.props.scopes).toEqual(['custom:existing']);
     expect(inputs.find((item) => item.props['aria-label'] === 'Request scope configured:read')).toBeDefined();
     expect(onChange).not.toHaveBeenCalled();
     inputs.find((item) => item.props['aria-label'] === 'Request scope write')!.props.onChange!({
@@ -115,7 +120,10 @@ describe('discovered scope picker', () => {
     expect(descendants(node).find((item) => item.type === ErrorNotice)?.props.message).toContain(
       'Provider unavailable',
     );
-    expect(descendants(node).some((item) => item.type === 'textarea')).toBe(true);
+    expect(descendants(node).some((item) => item.type === 'textarea')).toBe(false);
+    expect(descendants(node).some((item) => item.type === 'input' && item.props['aria-label'] === 'Add scope')).toBe(
+      true,
+    );
   });
   it('ignores a stale discovery response after the resource changes', async () => {
     let resolveOld!: (value: Response) => void;
@@ -140,5 +148,138 @@ describe('discovered scope picker', () => {
     const labels = descendants(draw(next)).map((item) => item.props['aria-label']);
     expect(labels).toContain('Request scope new');
     expect(labels).not.toContain('Request scope old');
+  });
+  it('selects all discovered scopes for a new setup without dropping suggested or custom scopes', async () => {
+    const changed = vi.fn();
+    const props: Props = {
+      resource: 'https://mcp.example/mcp',
+      value: 'custom:existing',
+      selectDiscovered: true,
+      disabled: false,
+      onChange: (value) => {
+        props.value = value;
+        changed(value);
+      },
+    };
+    draw(props);
+    hooks.effects[0]();
+    await vi.advanceTimersByTimeAsync(500);
+    draw(props);
+    hooks.effects[1]();
+    expect(changed).toHaveBeenCalledWith('custom:existing\nread\nwrite');
+    let node = draw(props);
+    const inputs = descendants(node).filter((item) => item.type === 'input');
+    expect(inputs.find((item) => item.props['aria-label'] === 'Request scope read')?.props.checked).toBe(true);
+    expect(inputs.find((item) => item.props['aria-label'] === 'Request scope write')?.props.checked).toBe(true);
+    inputs.find((item) => item.props['aria-label'] === 'Request scope write')!.props.onChange!({
+      currentTarget: { checked: false },
+    });
+    node = draw(props);
+    hooks.effects[1]();
+    expect(props.value).toBe('custom:existing\nread');
+    expect(descendants(node).find((item) => item.props['aria-label'] === 'Request scope write')?.props.checked).toBe(
+      false,
+    );
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+  it('does not override a manual choice made before discovery completes', async () => {
+    const changed = vi.fn();
+    const props: Props = {
+      resource: 'https://mcp.example/mcp',
+      value: 'configured:read',
+      configured: ['configured:read'],
+      selectDiscovered: true,
+      disabled: false,
+      onChange: (value) => {
+        props.value = value;
+        changed(value);
+      },
+    };
+    const node = draw(props);
+    hooks.effects[0]();
+    descendants(node).find((item) => item.props['aria-label'] === 'Request scope configured:read')!.props.onChange!({
+      currentTarget: { checked: false },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    draw(props);
+    hooks.effects[1]();
+    expect(props.value).toBe('');
+    expect(changed).toHaveBeenCalledOnce();
+  });
+  it('preserves an explicit provider-default choice rather than selecting advertised scopes', async () => {
+    const changed = vi.fn();
+    const props: Props = {
+      resource: 'https://mcp.example/mcp',
+      value: '',
+      selectDiscovered: true,
+      disabled: false,
+      unspecified: true,
+      onChange: changed,
+      onUnspecified: (value) => {
+        props.unspecified = value;
+      },
+    };
+    draw(props);
+    hooks.effects[0]();
+    await vi.advanceTimersByTimeAsync(500);
+    let node = draw(props);
+    hooks.effects[1]();
+    expect(changed).not.toHaveBeenCalled();
+    descendants(node).find((item) => item.props['aria-label'] === 'Make no scope request')!.props.onChange!({
+      currentTarget: { checked: false },
+    });
+    node = draw(props);
+    hooks.effects[1]();
+    expect(changed).not.toHaveBeenCalled();
+    expect(descendants(node).find((item) => item.props['aria-label'] === 'Request scope read')?.props.checked).toBe(
+      false,
+    );
+  });
+  it('adds and removes exact scope values as package-style entries, preserving commas', () => {
+    const props: Props = {
+      value: '',
+      disabled: false,
+      onChange: (value) => {
+        props.value = value;
+      },
+    };
+    let node = draw(props);
+    descendants(node).find((item) => item.type === 'input' && item.props['aria-label'] === 'Add scope')!.props.onInput!(
+      {
+        currentTarget: { value: 'repo,notifications' },
+      },
+    );
+    node = draw(props);
+    const add = descendants(node).find((item) => item.type === 'button' && item.props['aria-label'] === 'Add scope')!;
+    expect(add.props.disabled).toBe(false);
+    const preventDefault = vi.fn();
+    descendants(node).find((item) => item.type === 'input' && item.props['aria-label'] === 'Add scope')!.props
+      .onKeyDown!({
+      key: 'Enter',
+      preventDefault,
+    });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(props.value).toBe('repo,notifications');
+    node = draw(props);
+    const chips = descendants(node).find((item) => item.type === ScopeList)!;
+    expect(chips.props.scopes).toEqual(['repo,notifications']);
+    chips.props.onRemove!('repo,notifications');
+    expect(props.value).toBe('');
+  });
+  it('blocks duplicate and invalid individual scopes', () => {
+    const props: Props = { value: 'read', disabled: false, onChange: vi.fn() };
+    for (const value of ['read', 'read write', '"quoted"', 'bad\\scope']) {
+      let node = draw(props);
+      descendants(node).find((item) => item.type === 'input' && item.props['aria-label'] === 'Add scope')!.props
+        .onInput!({
+        currentTarget: { value },
+      });
+      node = draw(props);
+      expect(
+        descendants(node).find((item) => item.type === 'button' && item.props['aria-label'] === 'Add scope')?.props
+          .disabled,
+      ).toBe(true);
+    }
+    expect(props.onChange).not.toHaveBeenCalled();
   });
 });

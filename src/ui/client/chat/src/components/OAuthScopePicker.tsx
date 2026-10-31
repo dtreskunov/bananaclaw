@@ -1,3 +1,4 @@
+import './GroupAdminPackages.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { isOAuthScope } from '../../../../shared/oauth-app';
@@ -12,16 +13,29 @@ interface DiscoveryState {
   error: string;
 }
 
+export function ScopeList({ scopes, disabled, onRemove }: {
+  scopes: string[]; disabled?: boolean; onRemove?: (scope: string) => void;
+}): JSX.Element {
+  return <ul class="ga-package-chips credential-scope-chips">{scopes.map(scope => <li class="ga-package-chip" key={scope}>
+    <span class="ga-package-chip-label">{scope}</span>
+    {onRemove ? <button type="button" class="ga-package-chip-remove" aria-label={`Remove scope ${scope}`}
+      disabled={disabled} onClick={() => onRemove(scope)}>{'\u2715'}</button> : null}
+  </li>)}</ul>;
+}
+
 export function OAuthScopePicker({ value, onChange, resource, appId, issuer, configured = [], disabled,
-  unspecified, onUnspecified, label = 'Permissions' }: {
+  unspecified, onUnspecified, label = 'Scopes', selectDiscovered = false }: {
   value: string; onChange: (value: string) => void; resource?: string; appId?: string; issuer?: string;
-  configured?: string[]; disabled: boolean; unspecified?: boolean; onUnspecified?: (value: boolean) => void; label?: string;
+  configured?: string[]; disabled: boolean; unspecified?: boolean; onUnspecified?: (value: boolean) => void;
+  label?: string; selectDiscovered?: boolean;
 }): JSX.Element {
   const input = scopeDiscoveryInput({ resource, appId, issuer });
   const key = input ? JSON.stringify(input) : '';
   const [discovery, setDiscovery] = useState<DiscoveryState>({ key: '', loading: false, data: null, error: '' });
   const [retry, setRetry] = useState(0);
+  const [draft, setDraft] = useState('');
   const sequence = useRef(0);
+  const initialized = useRef(new Set<string>());
   useEffect(() => {
     const request = ++sequence.current;
     const controller = new AbortController();
@@ -44,46 +58,67 @@ export function OAuthScopePicker({ value, onChange, resource, appId, issuer, con
   const current = discovery.key === key ? discovery : null;
   const selected = scopeValues(value);
   const advertised = current?.data?.scopes ?? [];
-  const choices = [...new Set([...advertised, ...configured, ...selected])].sort();
-  const choose = (scope: string, checked: boolean): void =>
-    onChange((checked ? [...selected, scope] : selected.filter(item => item !== scope)).sort().join('\n'));
+  const choices = [...new Set([...advertised, ...configured])].sort();
+  const custom = selected.filter(scope => !choices.includes(scope));
+  useEffect(() => {
+    if (!selectDiscovered || disabled || unspecified || !key || !advertised.length ||
+      initialized.current.has(key)) return;
+    initialized.current.add(key);
+    const next = [...new Set([...selected, ...advertised])].sort().join('\n');
+    if (next !== value) onChange(next);
+  }, [selectDiscovered, disabled, unspecified, key, current?.data]);
+  const choose = (scope: string, checked: boolean): void => {
+    initialized.current.add(key);
+    onChange((checked ? [...new Set([...selected, scope])] : selected.filter(item => item !== scope)).sort().join('\n'));
+  };
+  const trimmed = draft.trim();
+  const duplicate = selected.includes(trimmed);
+  const invalid = !!trimmed && !isOAuthScope(trimmed);
+  const canAdd = !!trimmed && !duplicate && !invalid && !disabled && !unspecified;
+  const add = (): void => {
+    if (!canAdd) return;
+    choose(trimmed, true);
+    setDraft('');
+  };
   return <fieldset class="credential-scope-picker" disabled={disabled}>
     <legend>{label}</legend>
-    {key && (!current || current.loading) ? <p class="muted" role="status">Discovering scope options…</p> : null}
-    {!key ? <p class="muted">Enter a valid URL or select an OAuth app to discover scope options.</p> : null}
+    {key && (!current || current.loading) ? <p class="muted" role="status">Discovering scopes…</p> : null}
+    {!key ? <p class="muted">Enter a URL or select an OAuth app to discover scopes.</p> : null}
     {current?.error ? <>
-      <ErrorNotice message={`Could not discover scope options: ${current.error}`} />
+      <ErrorNotice message={`Could not discover scopes: ${current.error}`} />
       <button type="button" class="ghost" onClick={() => setRetry(value => value + 1)}>Retry discovery</button>
     </> : null}
-    {current?.data ? <p class="group-admin-help">
-      {!current.data.oauth ? 'This resource did not advertise an OAuth challenge. Verify whether OAuth is required.' :
-        current.data.source === 'not_advertised' ? 'No scopes were advertised. App defaults and custom scopes are still available.' :
-          current.data.source === 'resource' ? 'Scopes advertised by this MCP resource.' : 'Scopes advertised by the authorization server; this list may be incomplete.'}
-    </p> : null}
+    {current?.data && !choices.length ? <p class="muted">No scopes advertised.</p> : null}
     {onUnspecified ? <label class="group-admin-check">
       <input type="checkbox" checked={unspecified} aria-label="Make no scope request"
         onChange={event => {
+          initialized.current.add(key);
           onUnspecified(event.currentTarget.checked);
           if (event.currentTarget.checked) onChange('');
         }} />
-      <span>Make no scope request (provider defaults)</span>
+      <span>Use provider defaults</span>
     </label> : null}
-    {unspecified ? <p class="ga-cred-warn-text">The provider chooses the permissions. This does not mean no access.</p> : null}
     {choices.length ? <div class="credential-scope-options">{choices.map(scope => <label key={scope}>
       <input type="checkbox" aria-label={`Request scope ${scope}`} checked={selected.includes(scope)}
         disabled={unspecified} onChange={event => choose(scope, event.currentTarget.checked)} />
       <code>{scope}</code>
-      <span class="muted">{advertised.includes(scope) ? 'Discovered' : configured.includes(scope) ? 'App default' : 'Custom'}</span>
     </label>)}</div> : null}
     {configured.length && onUnspecified ? <button type="button" class="ghost" onClick={() => {
+      initialized.current.add(key);
       onUnspecified(false); onChange([...new Set(configured)].sort().join('\n'));
     }}>Use app defaults</button> : null}
-    <details class="credential-custom-scopes"><summary>Custom scopes</summary>
-      <textarea aria-label={label === 'Default scopes' ? 'Default scopes' : 'Custom scopes'} rows={3} value={value}
-        disabled={unspecified} spellcheck={false} placeholder="One exact scope value per line"
-        onInput={event => onChange(event.currentTarget.value)} />
-    </details>
+    <div class="group-admin-stack ga-package-list">
+      {custom.length ? <ScopeList scopes={custom} disabled={disabled || unspecified} onRemove={scope => choose(scope, false)} /> : null}
+      <div class="ga-package-actions">
+        <input type="text" class="ga-package-input" aria-label="Add scope" placeholder="Scope"
+          value={draft} disabled={unspecified} spellcheck={false}
+          onInput={event => setDraft(event.currentTarget.value)}
+          onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); add(); } }} />
+        <button type="button" aria-label="Add scope" disabled={!canAdd} onClick={add}>+ Add</button>
+      </div>
+      <ErrorNotice message={invalid ? 'Enter one scope without spaces, quotes or backslashes.' :
+        duplicate && trimmed ? 'This scope is already selected.' : ''} />
+    </div>
     {selected.some(scope => !isOAuthScope(scope)) ? <ErrorNotice message="Scope values must be printable ASCII without quotes or backslashes." /> : null}
-    {onUnspecified && !unspecified && selected.length === 0 ? <p class="group-admin-help">Select scopes, enter custom values, or explicitly choose provider defaults.</p> : null}
   </fieldset>;
 }

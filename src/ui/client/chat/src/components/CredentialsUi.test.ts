@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppInfo, Connection, CredentialGroup } from './CredentialsApi';
 import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnectionDialog } from './CredentialsDialogs';
-import { ConfirmCredentialAction, ErrorNotice, Impact, SecretInput, useConnectionSignIn } from './CredentialsParts';
+import { ConfirmCredentialAction, ErrorNotice, SecretInput, useConnectionSignIn } from './CredentialsParts';
 import { GroupCredentials, McpConnectionAccess, serviceMatchesResource } from './GroupCredentialAccess';
 import { showToast } from './Toast';
 import { CredentialsContent, CredentialsPage } from './CredentialsPage';
@@ -12,7 +12,7 @@ import { CredentialServiceForm } from './CredentialServiceForm';
 import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
 import type { OAuthAppDraft } from './oauth-app-form';
-import { OAuthScopePicker } from './OAuthScopePicker';
+import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
 import { ApprovalCard } from './ApprovalCard';
 import { AccessRequestReview } from './AccessRequestReview';
 import { accessApprovalId } from '../credentials-navigation';
@@ -117,7 +117,8 @@ interface TestProps {
   'aria-label'?: string;
   open?: boolean;
   class?: string;
-  scopes?: string;
+  scopes?: string | string[];
+  selectDiscovered?: boolean;
   appId?: string;
   resource?: string;
   footer: unknown;
@@ -553,7 +554,6 @@ function formRenderer(): () => TestNode {
     id: original.id,
     apps: [],
     onStart: vi.fn(),
-    groups,
     onClose: vi.fn(),
     onSaved: vi.fn(),
   });
@@ -561,7 +561,7 @@ function formRenderer(): () => TestNode {
   return () => render(form);
 }
 function newFormRenderer(options: Partial<Parameters<typeof ConnectionEditor>[0]> = {}): () => TestNode {
-  const form = ConnectionEditor({ apps: [], onStart: vi.fn(), groups, onClose: vi.fn(), onSaved: vi.fn(), ...options });
+  const form = ConnectionEditor({ apps: [], onStart: vi.fn(), onClose: vi.fn(), onSaved: vi.fn(), ...options });
   return () => render(form);
 }
 function nameInput(node: unknown): TestNode {
@@ -631,14 +631,14 @@ describe('connection UI safety and ownership', () => {
       return OAuthAppDialog({
         app,
         canEditInstall: false,
-        connections: [],
-        groups,
         onClose: vi.fn(),
         onSaved: vi.fn(),
       }) as TestNode;
     };
     const node = draw();
     expect(find(node, OAuthAppForm)).toBeDefined();
+    expect(find(node, OAuthAppForm).props.selectDiscovered).toBe(false);
+    expect(descendants(node).some((child) => child.props['aria-label'] === 'App ID')).toBe(false);
     expect(find(node, 'textarea')).toBeUndefined();
     expect(find(node, SecretInput).props.value).toBe('');
     expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
@@ -649,16 +649,108 @@ describe('connection UI safety and ownership', () => {
       .props.onClick();
     await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledOnce());
     expect(requestBody()).not.toHaveProperty('clientSecret');
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/ui/chat/api/credentials/oauth-apps/provider?scope=user');
     expect(requestBody()).toMatchObject({
       config: { authorization_params: { access_type: 'offline' }, client_id: 'client' },
     });
   });
 
+  it('does not overwrite a newer app name when asynchronous scope defaults arrive', () => {
+    const dialog = OAuthAppDialog({ canEditInstall: false, onClose: vi.fn(), onSaved: vi.fn() });
+    let current = find(dialog, OAuthAppForm).props.draft;
+    const form = OAuthAppForm({
+      draft: current,
+      busy: false,
+      onChange: (update) => {
+        current = typeof update === 'function' ? update(current) : update;
+      },
+    });
+    const picker = find(form, OAuthScopePicker);
+    current = { ...current, label: 'Name typed during discovery' };
+    picker.props.onChange('discovered:read');
+    expect(current.label).toBe('Name typed during discovery');
+    expect(current.scopes).toBe('discovered:read');
+  });
+
+  it('uses only App name and keeps an automatically generated app ID stable across retries', async () => {
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new TypeError('Network unavailable'))
+      .mockResolvedValueOnce(new Response('{}'));
+    const saved = vi.fn();
+    const draw = (): TestNode => {
+      hooks.cursor = 0;
+      return OAuthAppDialog({ canEditInstall: false, onClose: vi.fn(), onSaved: saved });
+    };
+    let node = draw();
+    expect(descendants(node).some((child) => child.props['aria-label'] === 'App ID')).toBe(false);
+    const form = find(node, OAuthAppForm);
+    expect(form.props.selectDiscovered).toBe(true);
+    form.props.onChange({
+      ...form.props.draft,
+      label: 'Personal app',
+      issuer: 'https://accounts.example.com',
+      client_id: 'public-client',
+      apiHosts: 'api.example.com',
+      token_endpoint_auth_method: 'none',
+    });
+    node = draw();
+    descendants(node)
+      .find((child) => child.type === 'button' && child.props.children === 'Save app')!
+      .props.onClick();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(hooks.slots[4]).toBe(false));
+    node = draw();
+    descendants(node)
+      .find((child) => child.type === 'button' && child.props.children === 'Save app')!
+      .props.onClick();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const first = String(vi.mocked(fetch).mock.calls[0][0]);
+    expect(first).toMatch(/\/oauth-apps\/app-[0-9a-f-]+\?scope=user$/);
+    expect(vi.mocked(fetch).mock.calls[1][0]).toBe(first);
+    expect(requestBody()).toMatchObject({ config: { label: 'Personal app' } });
+  });
+
+  it('shows only actual granted scopes without a Permissions expando or affected sections', () => {
+    hooks.resource.data = {
+      ...original,
+      kind: 'mcp_oauth',
+      resource_url: 'https://mcp.example.com/mcp',
+      requested_scopes: ['requested-only'],
+      granted_scopes: ['read', 'write'],
+      scope_source: 'provider',
+    };
+    const node = formRenderer()();
+    expect(find(node, ScopeList).props.scopes).toEqual(['read', 'write']);
+    expect(
+      descendants(node).some(
+        (child) =>
+          child.props.children === 'Requested scopes' ||
+          child.props.children === 'Provider-reported scopes' ||
+          child.props.children === 'Permissions' ||
+          child.props.children === 'Affected agents',
+      ),
+    ).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not present requested or unknown scopes as granted permissions', () => {
+    hooks.resource.data = {
+      ...original,
+      kind: 'mcp_oauth',
+      resource_url: 'https://mcp.example.com/mcp',
+      requested_scopes: ['requested-only'],
+      granted_scopes: null,
+      scope_source: 'unknown',
+    };
+    const node = formRenderer()();
+    expect(find(node, ScopeList)).toBeUndefined();
+    expect(descendants(node).some((child) => child.props.children === 'Not reported by the provider.')).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('keeps new app validation quiet until editing, and rejects secrets for public clients', () => {
     let node: TestNode = OAuthAppDialog({
       canEditInstall: false,
-      connections: [],
-      groups,
       onClose: vi.fn(),
       onSaved: vi.fn(),
     });
@@ -686,8 +778,6 @@ describe('connection UI safety and ownership', () => {
       return OAuthAppDialog({
         app,
         canEditInstall: false,
-        connections: [],
-        groups,
         onClose: vi.fn(),
         onSaved: vi.fn(),
       }) as TestNode;
@@ -715,7 +805,7 @@ describe('connection UI safety and ownership', () => {
         .filter((child) => child.type === SecretInput)
         .map((child) => child.props.value),
     ).toEqual(['', '']);
-    expect(find(node, Impact).props.connection.grants).toHaveLength(2);
+    expect(descendants(node).some((child) => child.props.children === 'Affected agents')).toBe(false);
     expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(true);
     expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
       0,
@@ -784,13 +874,11 @@ describe('connection UI safety and ownership', () => {
   it('deletes/disconnects the connection with its exact latest revision, never blind DELETE', async () => {
     const node = ConnectionActionDialog({
       connection: original,
-      groups,
       action: 'delete',
       onClose: vi.fn(),
       onSaved: vi.fn(),
     });
     expect(node.type).toBe(ConfirmCredentialAction);
-    expect(find(node, Impact).props.connection.revision).toBe('"reviewed"');
     await node.props.onConfirm();
     expect(vi.mocked(fetch).mock.calls[0][1]!.method).toBe('DELETE');
     expect(requestBody()).toEqual({ revision: '"reviewed"' });
@@ -847,6 +935,11 @@ describe('connection UI safety and ownership', () => {
     });
     expect(requestBody()).not.toHaveProperty('services');
     node = draw();
+    const savedFields = descendants(node).find(
+      (child) => typeof child.type === 'function' && child.type.name === 'OAuthFields',
+    )!;
+    expect(savedFields.props.selectDiscovered).toBe(false);
+    expect(savedFields.props.scopes).toBe('mcp');
     await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
     expect(fetch).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledTimes(2);
@@ -863,7 +956,6 @@ describe('connection UI safety and ownership', () => {
     const node = OAuthConnectionDialog({
       connection,
       apps: [],
-      groups,
       onStart: start,
       onClose: vi.fn(),
       onSaved: vi.fn(),
@@ -884,7 +976,6 @@ describe('connection UI safety and ownership', () => {
     const node = OAuthConnectionDialog({
       connection: { ...original, kind: 'mcp_oauth', resource_url: 'http://insecure.example/mcp' },
       apps: [],
-      groups,
       onStart: vi.fn(),
       onClose: vi.fn(),
       onSaved: vi.fn(),

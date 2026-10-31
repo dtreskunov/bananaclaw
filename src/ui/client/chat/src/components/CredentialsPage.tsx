@@ -125,19 +125,19 @@ export function CredentialsContent({ agent }: {
         </> : null}
       </section>
     </div>
-    {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} resourceUrl={dialog.resourceUrl} accessRequest={dialog.accessRequest} apps={data.apps} groups={data.groups}
+    {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} resourceUrl={dialog.resourceUrl} accessRequest={dialog.accessRequest} apps={data.apps}
       onCreated={connection => { const requestId = dialog?.kind === 'edit' ? dialog.accessRequestId : undefined;
         if (requestId) setCreated({ requestId, connectionId: connection.id }); }}
       onStart={signIn.start} onClose={close} onSaved={() => void refresh()} /> : null}
     {dialog?.kind === 'connect' && data ? dialog.connection
-      ? <ReconnectLatest id={dialog.connection.id} apps={data.apps} groups={data.groups} onStart={signIn.start} onClose={close} onSaved={() => void refresh()} />
-      : <ConnectionEditor initialKind="mcp_oauth" apps={data.apps} groups={data.groups} resourceUrl={dialog.resourceUrl}
+      ? <ReconnectLatest id={dialog.connection.id} apps={data.apps} onStart={signIn.start} onClose={close} onSaved={() => void refresh()} />
+      : <ConnectionEditor initialKind="mcp_oauth" apps={data.apps} resourceUrl={dialog.resourceUrl}
         onStart={signIn.start} onClose={close} onSaved={() => void refresh()} />
       : null}
-    {dialog?.kind === 'action' && data ? <ConnectionActionDialog connection={dialog.connection} groups={data.groups}
+    {dialog?.kind === 'action' && data ? <ConnectionActionDialog connection={dialog.connection}
       action={dialog.action} onClose={close} onSaved={() => void refresh()} /> : null}
     {dialog?.kind === 'app' && data ? <OAuthAppDialog app={dialog.app} canEditInstall={data.canEditInstall}
-      connections={data.connections} groups={data.groups} onClose={close} onSaved={() => void refresh()} /> : null}
+      onClose={close} onSaved={() => void refresh()} /> : null}
   </>;
   return agent ? content : <MobileDialog title="My Credentials" ariaLabel="My Credentials" onClose={openChat}
     onBack={isMobile.value ? () => { openChat(); returnToUserMenu(credentialsOpen); } : undefined}
