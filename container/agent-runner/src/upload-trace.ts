@@ -12,9 +12,9 @@ import type { MessageInRow } from './db/messages-in.js';
  * `~/.claude/projects/<dir>/<sessionId>.jsonl` is already in the format the
  * viewer auto-detects, so this just locates the newest one and pushes it.
  *
- * Auth is the OneCLI gateway's job: curl goes out through the injected
+ * Auth is the credential gateway's job: curl goes out through the injected
  * HTTPS_PROXY, which adds the user's HF token. We never see the raw token, and
- * a 401 from `whoami` is our "not signed in" signal.
+ * a failed `whoami` returns backend-specific access and recovery guidance.
  */
 
 /**
@@ -64,13 +64,26 @@ function curl(args: string[], input?: string): { ok: boolean; out: string } {
 }
 
 /**
- * Setup instructions for when whoami fails. `body` is the gateway's error
- * JSON (when the request was proxied through OneCLI). We surface the URL it
- * hands back — `secret_url` for an unknown host (HF's case), `connect_url`
- * for an OAuth app, `manage_url` when the secret exists but this agent lacks
- * access — so the link always points at the right gateway (local or hosted).
+ * Agent Vault recovery uses personal connections and group grants; only the
+ * legacy backend uses gateway-provided setup URLs.
  */
-function notSignedInMessage(body: string): string {
+export function traceAuthRecoveryMessage(
+  body: string,
+  status: string,
+  agentVault = Boolean(process.env.NANOCLAW_EGRESS_SOCKET),
+): string {
+  if (agentVault) {
+    return [
+      `Can't upload — the Hugging Face account check failed (HTTP ${status}).`,
+      'Endpoint: https://huggingface.co/api/whoami-v2',
+      '',
+      "Check this agent's Access settings and the owner's connection in Credentials.",
+      'If access is missing, connect a Hugging Face credential privately and grant this agent access to https://huggingface.co. Uploads require write permission.',
+      'A 401/403 alone does not establish disconnection; check provider permissions and routing. Never send tokens in chat.',
+      '',
+      'Then run /upload-trace again.',
+    ].join('\n');
+  }
   let setupUrl: string | undefined;
   try {
     const e = JSON.parse(body) as { secret_url?: string; connect_url?: string; manage_url?: string };
@@ -107,16 +120,14 @@ export function uploadTrace(): string {
   if (!file) return 'No transcript to upload for this session yet.';
 
   // whoami, capturing the body + HTTP status (no -f, so the gateway's error
-  // JSON survives a 401). When no token is available the OneCLI gateway
-  // returns a setup URL pre-filled for *this* gateway — so we never hardcode
-  // local-vs-hosted dashboard links, and never have to know which it is.
+  // JSON survives a 401). Legacy setup URLs are used only on that backend.
   const who = curl(['-s', '-w', '\n%{http_code}', 'https://huggingface.co/api/whoami-v2']);
   const nl = who.out.lastIndexOf('\n');
   const body = nl === -1 ? '' : who.out.slice(0, nl);
   const status = nl === -1 ? who.out.trim() : who.out.slice(nl + 1).trim();
 
   if (status !== '200') {
-    return notSignedInMessage(body);
+    return traceAuthRecoveryMessage(body, status);
   }
   let user: string | undefined;
   try {

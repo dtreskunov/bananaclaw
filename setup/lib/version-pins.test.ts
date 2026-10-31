@@ -12,12 +12,23 @@ import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
 
 import { readVersionPin } from './version-pins.js';
+import { gatewayRelease } from '../agent-vault-release.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe('readVersionPin', () => {
   it('resolves the Agent Vault gateway pin from the real versions.json', () => {
-    expect(readVersionPin('agent-vault-gateway')).toBe('gw-v0.1.1');
+    expect(readVersionPin('agent-vault-gateway')).toBe('gw-v0.2.0');
+  });
+
+  it('keeps installation guidance on the reviewed release and user-owned contract', () => {
+    const release = gatewayRelease();
+    const skill = fs.readFileSync(path.join(here, '..', '..', '.claude/skills/init-agent-vault/SKILL.md'), 'utf8');
+    expect(skill).toContain(`The reviewed pin is \`${release.version}\``);
+    expect(skill).toContain(`\`${release.commit}\``);
+    expect(skill).toContain('user-owned connections');
+    expect(skill).toContain('group-bound OAuth placeholders');
+    expect(skill).toContain('pin is not permission to downgrade a newer canary');
   });
 
   it('resolves the onecli-gateway pin from the real versions.json', () => {

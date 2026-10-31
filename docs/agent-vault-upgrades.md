@@ -60,8 +60,7 @@ ncl credentials list --user <user-id>
 ncl credentials create --user <user-id> --label Search --kind static \
   --services '[{"name":"search","host":"api.example.com/search","auth":{"type":"bearer","token":"SEARCH_KEY"}}]' \
   --values-stdin < /secure/search-values.json
-ncl credentials grant --user <user-id> --id <connection-id> --group <group-id> \
-  --services '["search"]'
+ncl credentials grant --user <user-id> --id <connection-id> --group <group-id>
 ncl credentials revoke --user <user-id> --id <connection-id> --group <group-id>
 ncl credentials start --user <user-id> --id <oauth-connection-id>
 ```
@@ -70,7 +69,10 @@ The values file is a private key/value JSON object; do not put values in
 arguments, audit records or examples. Update/delete operations require the
 connection's exact `--revision`. OAuth completion is bound to the initiating
 user, mapped native user and authoritative connection ID; a successful callback
-does not grant an agent access automatically.
+does not grant an agent access automatically. A grant covers the whole
+credential, including future URL patterns; there is no per-service grant flag.
+Review that authority explicitly rather than broadening a legacy service-only
+share implicitly.
 
 The old `credentials set`, vault-local key-set/provision commands and spike-era
 `NANOCLAW_AGENT_VAULT_GROUPS` override are not supported by this contract. Backend

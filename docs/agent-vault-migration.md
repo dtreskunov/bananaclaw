@@ -141,6 +141,44 @@ were exported for validation.
 The Agent Vault canary is working. This tooling advances the remaining
 per-group migration without copying credentials or changing live access.
 Inventory and preparation remain read-only with respect to live access.
+
+### Final group cutovers and sustained acceptance
+
+The final two groups completed operator-approved cutovers at
+**2026-10-31 03:10:38 UTC**. The fleet now has **nine AgentVault and zero OneCLI
+groups**. The operator explicitly removed both groups' personal Google access,
+the remaining BananaBrowse integration and the legacy cross-owner Docs share;
+missing consent was not treated as authorization. Only those groups' legacy
+grants were revoked. Personal connection records, upstream authorizations and
+other groups' source/target grants were preserved.
+
+Both groups passed exact model-generation checks through isolated,
+network-disabled AgentVault containers. All six retained MCP configurations
+passed authenticated tool listing, both against the staged target and through
+the production container launch path. All 86 recorded session queues and turn
+projections were preserved. Private consistent central/gateway backups and
+metadata-only cutover/validation receipts are retained under
+`data/agent-vault/cutovers/last-groups-20261031T030014Z/` (directory 0700,
+files 0600). The unused regional MiniMax endpoint was not copied; configured
+model and MCP workloads use the verified `api.minimax.io` route.
+
+**P6 retirement remains gated:** the seven-day period cannot complete before
+**2026-11-07 03:10:38 UTC**. Elapsed time alone is insufficient: require sustained
+workload/reconnect/revocation acceptance and review remaining host callers and
+policy coverage. Effective source app policies were allow-only with no rate
+limits; the organization-level rule API was unavailable on the source, so this
+is not a claim of exhaustive network-policy equivalence. There is no automatic
+retirement timer. SDK/config, legacy rollback support, setup/uninstall paths
+and migration tools remain until that gate is explicitly completed.
+
+Release provenance is also an open acceptance gate: the deployed gateway
+reports `gw-v0.2.0+query-placement.2c33abd`, source
+`2c33abdec211328075b50b9280def06bf51b89d4`, with installed SHA-256
+`3b9b5c0fe6b2d8526f081609f106d0e880e0e969c5f13299fcf49bfad5322f19`.
+It does not match the reviewed `gw-v0.2.0` release. No gateway binary or
+service was changed during these cutovers. Publish and verify a compatible
+coordinated release before final retirement; do not blindly downgrade the
+working canary to make its version agree with the pin.
 The separate, explicitly gated provisioning mode creates target key sets;
 **no mode performs a backend cutover or retires OneCLI**.
 

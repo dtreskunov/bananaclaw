@@ -29,4 +29,17 @@ Use **`add_mcp_server`** to add an MCP server to your configuration. Browse avai
 add_mcp_server({ name: "memory", command: "pnpm", args: ["dlx", "@modelcontextprotocol/server-memory"] })
 ```
 
-Do not ask the user to give you credentials or tell them how to create credentials (OAuth, API keys, etc.) — NEVER fabricate credential setup instructions. Credentials are handled by the OneCLI gateway. Use `"onecli-managed"` as the placeholder value for any credential env vars or config fields. After the MCP server is installed and the container restarts, load `/onecli-gateway` for the full credential-handling flow (connect URLs, stubs, error recovery).
+Never ask for raw credentials in chat or fabricate credential setup instructions.
+After installation and the deferred restart, load `/onecli-gateway` for the
+configured backend's credential flow before verifying the server.
+
+With Agent Vault (`NANOCLAW_EGRESS_SOCKET` is set), use `request_access` with
+the exact HTTPS resource, purpose and remote `mcp_server` name when access is
+missing. The user privately selects/connects a credential and approves this
+agent's grant. Wait for the host's completion message before retrying.
+Preserve host-managed `av-access:<handle>` / `av-refresh:<handle>` stubs and
+connection references; never invent credential values or replace these with
+legacy sentinels. Do not reconnect an operator-removed account unless asked.
+
+For a legacy backend, follow only that backend's gateway skill instructions;
+do not apply its placeholder or dashboard guidance to Agent Vault.

@@ -9,11 +9,11 @@ This is the `dtreskunov/agent-vault` gateway, not OneCLI. Do not run
 `/init-onecli`, an upstream installer, or a `latest` download for this task.
 Follow [the release and upgrade guide](../../../docs/agent-vault-upgrades.md).
 
-**Compatibility requirement:** this checkout requires catalog-free OAuth and
-conditional atomic key sets. The reviewed pin is `gw-v0.1.1`, source
-`32f233b2ebc53786ab4e74b28fc4ef6d75e674e9`. The historical `gw-v0.1.0` is
-incompatible; `gw-v0.1.1-dev` was an authorized local canary, not an attested
-release. Do not invent release metadata or bypass provenance checks.
+**Compatibility requirement:** this checkout requires the revision-7 native
+managed-user contract, user-owned connections, explicit group grants and
+group-bound OAuth placeholders. The reviewed pin is `gw-v0.2.0`, source
+`9a99f613d54bec30cc3709351277d39de2f3fe6e`. Earlier group-owned gateway releases,
+including `gw-v0.1.1`, are incompatible. Do not invent release metadata or bypass provenance checks.
 Rollback requires the matching previous binary and consistent state backup.
 
 ## 1. Inventory and obtain approval
@@ -30,10 +30,14 @@ Rollback requires the matching previous binary and consistent state backup.
   instance, migrate backends, or switch every group.
 - Obtain explicit approval before replacing the live executable or restarting
   its service. Release publication is not deployment.
+- Compare the running build and deployed-state record with the reviewed pin.
+  A pin is not permission to downgrade a newer canary. If current behavior or
+  state depends on an unreviewed newer build, stop binary replacement and
+  require a compatible, verified coordinated release.
 
 ## 2. Download and verify the sanctioned release
 
-The pin is `agent-vault-gateway` in `versions.json`, currently `gw-v0.1.1`.
+The pin is `agent-vault-gateway` in `versions.json`, currently `gw-v0.2.0`.
 Reviewed source and three platform hashes live in `setup/agent-vault-release.ts`.
 The binaries are standalone executables, not archives.
 
@@ -81,13 +85,20 @@ Retain the previous binary and state backup for rollback.
   and after; check persisted sockets rebind. Do not reveal credential values.
 - Keep headless/reveal-disabled policy enabled and unmatched hosts in tunnel
   mode. Verify the OAuth redirect equals NanoClaw's `/ui/oauth/callback` URL.
-- Old accounts legitimately have `account:null` until another sign-in. Trust
-  the completion's returned key (it may be reused), then reload accounts.
+- Connections can have `account:null`; never infer a verified identity from a
+  label. Trust the completion's authoritative connection ID, then reload its
+  metadata. Consent alone does not grant an agent access.
 - Coordinate Google/GitHub consent with the operator; never claim it passed
   without a real sign-in. F8 stdio token placeholders are separate wiring.
 - Keep OneCLI and existing group backends unchanged unless a separate migration
   was explicitly requested. Test any approved per-group switch with
   `ncl credentials backend`, not an all-groups cutover.
+- For an approved migration, inventory source access and target readiness,
+  preserve private rollback state and validate actual model/MCP workloads
+  before switching. Missing consent or values remain blockers unless the
+  operator explicitly removes those capabilities. Revoke only the removed
+  groups' grants, never shared connections or other groups' access. Keep the
+  seven-day sustained acceptance gate before OneCLI retirement.
 - Report the installed version, checksum/provenance results, rollback paths and
   any pending acceptance steps. Remove temporary download tooling, retaining
   release verification material and license/NOTICE files with the installation.

@@ -6,7 +6,7 @@ import { getPendingMessages } from './db/messages-in.js';
 import type { MessageInRow } from './db/messages-in.js';
 import { MockProvider } from './providers/mock.js';
 import { runPollLoop } from './poll-loop.js';
-import { isUploadTraceCommand } from './upload-trace.js';
+import { isUploadTraceCommand, traceAuthRecoveryMessage } from './upload-trace.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -30,6 +30,66 @@ describe('isUploadTraceCommand', () => {
     expect(isUploadTraceCommand(make('/upload'))).toBe(false);
     expect(isUploadTraceCommand(make('/clear'))).toBe(false);
     expect(isUploadTraceCommand({ content: 'not json' } as MessageInRow)).toBe(false);
+  });
+});
+
+describe('trace authentication recovery', () => {
+  it('selects Agent Vault from the live egress socket environment', () => {
+    const previous = process.env.NANOCLAW_EGRESS_SOCKET;
+    try {
+      process.env.NANOCLAW_EGRESS_SOCKET = '/run/nanoclaw/egress/egress.sock';
+      expect(traceAuthRecoveryMessage('{}', '401')).toContain('Access settings');
+      delete process.env.NANOCLAW_EGRESS_SOCKET;
+      expect(traceAuthRecoveryMessage('{}', '401')).toContain('OneCLI vault');
+    } finally {
+      if (previous === undefined) delete process.env.NANOCLAW_EGRESS_SOCKET;
+      else process.env.NANOCLAW_EGRESS_SOCKET = previous;
+    }
+  });
+
+  it('uses personal connections and agent access for Agent Vault, not legacy setup URLs', () => {
+    const text = traceAuthRecoveryMessage(
+      JSON.stringify({
+        secret_url: 'https://legacy.example/secrets/new',
+        connect_url: 'https://legacy.example/connect',
+      }),
+      '403',
+      true,
+    );
+    expect(text).toContain('HTTP 403');
+    expect(text).toContain('https://huggingface.co/api/whoami-v2');
+    expect(text).toContain('Access settings');
+    expect(text).toContain('Credentials');
+    expect(text).toContain('write permission');
+    expect(text).toContain('does not establish disconnection');
+    expect(text).not.toContain('legacy.example');
+    expect(text).not.toContain('OneCLI');
+  });
+
+  it('handles non-JSON failures without claiming that the account is disconnected', () => {
+    const text = traceAuthRecoveryMessage('connection failed', '000', true);
+    expect(text).toContain('HTTP 000');
+    expect(text).toContain('check provider permissions and routing');
+    expect(text).not.toContain('no Hugging Face token');
+  });
+
+  it('preserves legacy setup links and removes the whoami-only path restriction', () => {
+    const text = traceAuthRecoveryMessage(
+      JSON.stringify({
+        secret_url: 'https://legacy.example/secrets/new?host=huggingface.co&path=%2Fapi%2Fwhoami-v2&name=HF',
+      }),
+      '401',
+      false,
+    );
+    expect(text).toContain('https://legacy.example/secrets/new?host=huggingface.co&path=&name=HF');
+    expect(text).toContain('OneCLI');
+  });
+
+  it('preserves legacy manage links and fallback instructions', () => {
+    expect(
+      traceAuthRecoveryMessage(JSON.stringify({ manage_url: 'https://legacy.example/manage' }), '401', false),
+    ).toContain('https://legacy.example/manage');
+    expect(traceAuthRecoveryMessage('not JSON', '401', false)).toContain('host pattern  huggingface.co');
   });
 });
 
