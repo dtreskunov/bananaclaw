@@ -60,6 +60,7 @@ import { BRANCH_ACTION_EXPLANATION, editBranchActionExplanation } from '../trans
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { QuestionPrompt } from './QuestionPrompt';
+import { isApprovalThread } from '../approval-origin';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { dockQuestions } from '../question-dock';
 import { RelativeTime } from './RelativeTime';
@@ -758,6 +759,12 @@ function Message(
       </button>
     );
   }
+  const approval = m.approval;
+  if (approval) return <MessageBubble class="msg out approval-message" data-msg-id={m.id}>
+    <ApprovalCard approval={approval} busy={respondingApprovalIds.value.has(approval.approvalId)}
+      onReview={() => openCredentials({ approvalId: approval.approvalId })}
+      onRespond={(value, message) => { void respondApproval(approval.approvalId, value, message).catch(console.error); }} />
+  </MessageBubble>;
   if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
   const md = renderMarkdown(m.text, groupId.value);
   const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
@@ -1051,23 +1058,20 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
   );
 }
 
-function ApprovalsBanner() {
-  const list = pendingApprovals.value;
+function ApprovalReferences() {
+  const list = pendingApprovals.value.filter(a => !isApprovalThread(a.origin));
   if (list.length === 0) return null;
   const busy = respondingApprovalIds.value;
   return (
-    <div class="approvals-banner">
-      <div class="approvals-header">
-        Pending approvals <span class="approvals-count">({list.length})</span>
-      </div>
-      <div class="approvals-list">
+    <>
         {list.map((a) => (
-          <ApprovalCard key={a.approvalId} approval={a} busy={busy.has(a.approvalId)}
+          <MessageBubble key={a.approvalId} class="msg out approval-message approval-reference">
+          <ApprovalCard approval={a} busy={busy.has(a.approvalId)}
             onReview={() => openCredentials({ approvalId: a.approvalId })}
             onRespond={(value, message) => { void respondApproval(a.approvalId, value, message).catch(console.error); }} />
+          </MessageBubble>
         ))}
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -1575,6 +1579,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                   );
                 })}
         {!chatLoading.value && queued.map((message) => <MessageRow key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
+        {!chatLoading.value && <ApprovalReferences />}
         <TaskIndicator />
     </div>
   );
@@ -1900,7 +1905,6 @@ export function ChatMain() {
   const reconnectPending = chatStatus.value.startsWith('disconnected \u00b7 reconnecting in ');
   return (
     <section class="chat-main" id="chat-main" ref={ref}>
-      <ApprovalsBanner />
       <MessageLog dockRef={dockRef} />
       <ImageViewer />
       <div class="chat-bottom-dock" ref={dockRef}>

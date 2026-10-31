@@ -14,6 +14,7 @@ export interface ApprovalNotificationOptions {
   afterRestart?: boolean;
   idempotent?: boolean;
   responseMessage?: ApprovalResponseMessage;
+  approvalId?: string;
 }
 
 export function writeApprovalNotification(
@@ -75,6 +76,7 @@ export function writeApprovalNotification(
       senderId: 'system',
       inputHandling: { mode: 'steer' },
       ...(options.responseMessage ? { approvalResponse: options.responseMessage } : {}),
+      ...(options.approvalId ? { approvalId: options.approvalId } : {}),
     }),
     ...(options.afterRestart ? { onWake: 1 as const } : {}),
     ...(options.idempotent ? { idempotent: true } : {}),

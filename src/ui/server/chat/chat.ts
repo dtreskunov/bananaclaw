@@ -95,6 +95,7 @@ import { shortcodeToEmoji } from './emoji.js';
 import { submitWebInbound, WEB_CHANNEL_TYPE } from '../../../channels/web.js';
 import { onConversationChange } from '../../../conversation-events.js';
 import { readConversation } from './conversation.js';
+import { isRepresentedApprovalOutcome } from './approval-transcript.js';
 import { sendConversationFrame, startConversationStream } from './conversation-stream.js';
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from '../../../channels/homeassistant.js';
 import { setResendPendingWebOverride } from '../../../channels/resend.js';
@@ -1176,7 +1177,7 @@ export function readChatHistory(
   groupId: string,
   threadId: string,
   override?: { channelType: string; messagingGroupId: string },
-  options: { includeCancelled?: boolean } = {},
+  options: { includeCancelled?: boolean; hideApprovalOutcomes?: boolean } = {},
 ): HistoryMessage[] {
   const context = resolveTurnContext(userId, groupId, threadId, override);
   if (!context) throw new Error('Conversation is not accessible');
@@ -1221,6 +1222,12 @@ export function readChatHistory(
       // mismatches and the user's own message paints twice on visibility
       // resume. Strip the suffix here so history matches the send id.
       for (const r of rows) {
+        if (
+          options.hideApprovalOutcomes &&
+          r.sender_user_id === null &&
+          isRepresentedApprovalOutcome(userId, groupId, context, r.content)
+        )
+          continue;
         const cancelled = inputStates.get(r.id)?.status === 'cancelled' || isCancelledInputContent(r.content);
         if (cancelled) {
           if (options.includeCancelled) {

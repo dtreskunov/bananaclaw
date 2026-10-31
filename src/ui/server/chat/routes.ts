@@ -30,6 +30,7 @@ import { dispatchResponse } from '../../../response-registry.js';
 import type { PendingApproval } from '../../../types.js';
 import type { QuestionResponse } from '../../shared/question-response.js';
 import { ApprovalMessageError, parseApprovalMessage } from '../../shared/approval-message.js';
+import { approvalOrigin } from './approval-transcript.js';
 import { isVoiceDiagnostic } from '../../shared/voice.js';
 import { presentApproval, type ApprovalPackageLists } from './approval-presentation.js';
 import { getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
@@ -574,6 +575,11 @@ interface ApprovalDto {
   reviewRequired?: boolean;
   stage?: string;
   supportsResponseMessage: boolean;
+  origin: ReturnType<typeof approvalOrigin>;
+}
+
+function approvalGroupId(row: PendingApproval): string | null {
+  return row.agent_group_id ?? (row.session_id ? (getSession(row.session_id)?.agent_group_id ?? null) : null);
 }
 
 function listApprovalsForUser(userId: string): ApprovalDto[] {
@@ -587,9 +593,10 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
   const groupNameCache = new Map<string, string | null>();
   const visible: ApprovalDto[] = [];
   for (const r of rows) {
-    if (r.agent_group_id == null) {
+    const scope = approvalGroupId(r);
+    if (scope == null) {
       if (!elevated) continue;
-    } else if (!hasAdminPrivilege(userId, r.agent_group_id)) {
+    } else if (!hasAdminPrivilege(userId, scope)) {
       continue;
     }
     // Display group: prefer row.agent_group_id; fall back to the session's
@@ -637,6 +644,7 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
       agentGroupName: groupName,
       createdAt: r.created_at,
       supportsResponseMessage: r.session_id !== null,
+      origin: approvalOrigin(userId, r),
       ...(getApprovalWorkflow(r.approval_id)
         ? {
             reviewRequired: true,
@@ -702,9 +710,10 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   // through to the shared handler below.
   if (row) {
     if (row.status !== 'pending') return json(ctx, 409, { error: 'not_pending' });
-    if (row.agent_group_id == null) {
+    const scope = approvalGroupId(row);
+    if (scope == null) {
       if (!isOwner(userId) && !isGlobalAdmin(userId)) return json(ctx, 403, { error: 'forbidden' });
-    } else if (!hasAdminPrivilege(userId, row.agent_group_id)) {
+    } else if (!hasAdminPrivilege(userId, scope)) {
       return json(ctx, 403, { error: 'forbidden' });
     }
   }

@@ -167,6 +167,13 @@ describe('approval response messages', () => {
     expect(notificationRows()).toEqual([]);
     expect(applied).not.toHaveBeenCalled();
   });
+  it('uses the requesting session group for scoped-admin authorization', async () => {
+    getDb().exec(
+      "DELETE FROM user_roles; INSERT INTO user_roles(user_id,role,agent_group_id,granted_at) VALUES('web:member','admin','agent','now')",
+    );
+    expect((await respond({ value: 'approve', message: 'Keep existing work.' }, 'message-approval')).status).toBe(200);
+    expect(applied).toHaveBeenCalledOnce();
+  });
   it('rejects notes for sessionless approvals rather than silently discarding them', async () => {
     getDb().exec("UPDATE pending_approvals SET session_id=NULL WHERE approval_id='message-approval'");
     expect((await respond({ value: 'approve', message: 'A note' }, 'message-approval')).status).toBe(400);

@@ -5,9 +5,12 @@ import { connectionName, serviceDestination } from './credential-presentation';
 import { respondApproval } from '../actions';
 import { approvalMessageDrafts, clearApprovalMessage } from '../approval-messages';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
+import { approvalThreadHref, isApprovalThread } from '../approval-origin';
+import type { ApprovalOrigin } from '../../../../shared/approval';
 import { ACCESS_AUTHENTICATION_LABELS, connectionMatchesAccess, type AccessRequirements } from '../../../../shared/access-authentication';
 
 interface AccessRequest extends AccessRequirements {
+  origin?: ApprovalOrigin | null;
   request_id: string;
   status: string;
   resource_url: string;
@@ -78,7 +81,8 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
   const connectionVersion = JSON.stringify(connections.map(connection => [connection.id, connection.revision, connection.status,
     connection.requested_scopes, connection.granted_scopes, connection.scope_source]));
   const chosen = connections.find(connection => connection.id === selected);
-  const canApply = !busy && !signingIn && chosen?.status === 'ready' && preview?.matches && preview.connection.status === 'ready' &&
+  const here = isApprovalThread(request.data?.origin);
+  const canApply = here && !busy && !signingIn && chosen?.status === 'ready' && preview?.matches && preview.connection.status === 'ready' &&
     preview.connection.id === selected && chosen?.revision === preview.connection.revision &&
     request.data?.status === 'pending' && preview.request.status === 'pending' &&
     preview.request.revision === request.data.revision &&
@@ -108,7 +112,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
   }, [path, selected, connectionVersion, request.data?.revision, request.data?.status]);
 
   async function apply(): Promise<void> {
-    if (!preview || !canApply) return;
+    if (!preview || !canApply || !isApprovalThread(request.data?.origin)) return;
     setBusy(true);
     setError('');
     try {
@@ -134,6 +138,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
   }
 
   async function reject(): Promise<void> {
+    if (!isApprovalThread(request.data?.origin)) return;
     setBusy(true);
     setError('');
     try {
@@ -145,7 +150,7 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
   }
 
   async function retry(): Promise<void> {
-    if (!request.data || busy) return;
+    if (!request.data || busy || !isApprovalThread(request.data.origin)) return;
     setBusy(true);
     setError('');
     setPreview(null);
@@ -171,9 +176,11 @@ export function AccessRequestReview({ id, connections, preferredConnectionId, si
       <p><strong>{request.data.agent_group_name ?? request.data.agent_group_id}</strong> · <code>{new URL(request.data.resource_url).host}</code></p>
       {request.data.status !== 'pending' ? <div>
         {!failed ? <p role="status">{STATUS_LABELS[request.data.status] ?? request.data.status}</p> : null}
-        {request.data.status === 'failed' ? <button type="button" disabled={busy || signingIn}
+        {request.data.status === 'failed' && here ? <button type="button" disabled={busy || signingIn}
           onClick={() => void retry()}>Review and retry</button> : null}
-      </div> : <>
+      </div> : !here ? <p>{request.data.origin
+        ? <a href={approvalThreadHref(request.data.origin)}>Open requesting thread</a>
+        : 'Requesting thread unavailable.'}</p> : <>
         <label>Account
           <select aria-label="Account" value={selected} disabled={busy}
             onChange={event => setSelected(event.currentTarget.value)}>

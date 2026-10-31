@@ -6,6 +6,7 @@ import { ApprovalCard } from './ApprovalCard';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { AccessRequestReview } from './AccessRequestReview';
 import { MAX_APPROVAL_MESSAGE_LENGTH } from '../../../../shared/approval-message';
+import { channelType, groupId, messagingGroupId, threadId } from '../state';
 
 const mocks = vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -44,6 +45,7 @@ interface Node {
     value?: unknown;
     disabled?: boolean;
     maxLength?: number;
+    href?: string;
     approvalId?: string;
     onClick?: () => void;
     onInput?: (event: { currentTarget: { value: string } }) => void;
@@ -80,8 +82,10 @@ const approval: PendingApprovalDto = {
   agentGroupName: 'Group',
   createdAt: '2026-10-30T00:00:00Z',
   supportsResponseMessage: true,
+  origin: { agentGroupId: 'group', threadId: 'thread', channelType: 'web', messagingGroupId: 'web-mg' },
 };
 const request = {
+  origin: approval.origin,
   request_id: 'approval',
   status: 'pending',
   resource_url: 'https://api.example.com/items',
@@ -114,6 +118,10 @@ function accessReview() {
   return { tree, onSaved };
 }
 beforeEach(() => {
+  groupId.value = 'group';
+  threadId.value = 'thread';
+  channelType.value = 'web';
+  messagingGroupId.value = null;
   approvalMessageDrafts.value = {};
   mocks.slots = [];
   mocks.cursor = 0;
@@ -122,11 +130,52 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'completed' }))));
 });
 afterEach(() => {
+  groupId.value = null;
+  threadId.value = null;
   approvalMessageDrafts.value = {};
   vi.unstubAllGlobals();
 });
 
 describe('optional approval messages', () => {
+  it('links off-thread requests without decision controls or a message input', () => {
+    threadId.value = 'another-thread';
+    const tree = ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond: vi.fn() });
+    expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
+    expect(nodes(tree).some((node) => node.type === ApprovalMessageInput)).toBe(false);
+    expect(nodes(tree).find((node) => node.type === 'a')?.props.href).toBe('#g/group/t/thread');
+  });
+  it('does not submit a captured approval callback after navigating away', () => {
+    const onRespond = vi.fn();
+    const tree = ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond });
+    threadId.value = 'another-thread';
+    button(tree, 'Approve').props.onClick!();
+    expect(onRespond).not.toHaveBeenCalled();
+  });
+  it.each(['approved', 'rejected', 'failed', 'expired'] as const)(
+    'retains a read-only %s request and user response',
+    (status) => {
+      const tree = ApprovalCard({
+        approval: {
+          ...approval,
+          status,
+          responseMessage: 'Keep existing work.',
+          respondedBy: { userId: 'owner', displayName: 'Owner' },
+        },
+        busy: false,
+        onReview: vi.fn(),
+        onRespond: vi.fn(),
+      });
+      expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
+      expect(text(tree)).toContain('Keep existing work.');
+      expect(text(tree)).toContain('Owner');
+    },
+  );
+  it('hides private Allow access and Decline in the wrong thread', () => {
+    threadId.value = 'another-thread';
+    const { tree } = accessReview();
+    expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
+    expect(nodes(tree).find((node) => node.type === 'a')?.props.href).toBe('#g/group/t/thread');
+  });
   it('uses the server message limit, disables during submission, and keeps drafts scoped by approval', () => {
     approvalMessageDrafts.value = { other: 'Other draft' };
     const input = nodes(ApprovalMessageInput({ approvalId: 'approval', disabled: true })).find(

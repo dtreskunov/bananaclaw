@@ -174,6 +174,7 @@ export interface DisplayCard {
 export type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface ChatMessage {
+  approval?: import('../../../shared/approval').ConversationApproval;
   questionId?: string;
   questionResponseType?: 'skipped';
   turnId?: string;
@@ -353,24 +354,7 @@ export type PendingWebSend = ChatSendPacket & {
   readonly messageId: string;
 } & WebSendState;
 
-export interface PendingApprovalDto {
-  approvalId: string;
-  action: string;
-  title: string;
-  details: string | null;
-  packages: {
-    apt: string[];
-    npm: string[];
-    pip: string[];
-  } | null;
-  options: { label: string; selectedLabel: string; value: string }[];
-  agentGroupId: string | null;
-  agentGroupName: string | null;
-  createdAt: string;
-  reviewRequired?: boolean;
-  stage?: string;
-  supportsResponseMessage?: boolean;
-}
+export type PendingApprovalDto = import('../../../shared/approval').ConversationApproval;
 
 export interface PendingQuestionDto {
   questionId: string;

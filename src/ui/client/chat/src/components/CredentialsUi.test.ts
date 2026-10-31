@@ -7,7 +7,7 @@ import { showToast } from './Toast';
 import { CredentialsContent, CredentialsPage } from './CredentialsPage';
 import { CredentialsTable } from './CredentialsTable';
 import { MobileDialog } from './MobileDialog';
-import { credentialsOpen, isMobile } from '../state';
+import { channelType, credentialsOpen, groupId, isMobile, messagingGroupId, threadId } from '../state';
 import { CredentialAuthenticationForm, CredentialServiceForm } from './CredentialServiceForm';
 import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
@@ -51,7 +51,16 @@ vi.mock('./CredentialsParts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./CredentialsParts')>()),
   useCredentialResource: (url: string) => {
     hooks.urls.push(url);
-    return hooks.resource;
+    const data = hooks.resource.data;
+    return data && typeof data === 'object' && 'request_id' in data
+      ? {
+          ...hooks.resource,
+          data: {
+            ...data,
+            origin: { agentGroupId: 'one', threadId: 'thread-one', channelType: 'web', messagingGroupId: 'web-one' },
+          },
+        }
+      : hooks.resource;
   },
 }));
 vi.mock('./Toast', () => ({ showToast: vi.fn() }));
@@ -83,6 +92,10 @@ const groups = [
 ];
 
 beforeEach(() => {
+  groupId.value = 'one';
+  threadId.value = 'thread-one';
+  channelType.value = 'web';
+  messagingGroupId.value = null;
   accessApprovalId.value = null;
   hooks.slots = [];
   hooks.cursor = 0;
@@ -235,7 +248,7 @@ describe('assisted credential approval UI', () => {
     descendants(node)
       .find((child) => child.type === 'button' && child.props.children === 'Add account')!
       .props.onClick();
-    expect(onCreate).toHaveBeenCalledWith(request);
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining(request));
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
   it('prefills researched MCP OAuth settings but starts consent only on an explicit action', () => {
@@ -316,6 +329,7 @@ describe('assisted credential approval UI', () => {
       agentGroupId: 'one',
       agentGroupName: 'One',
       createdAt: '2026-01-01',
+      origin: { agentGroupId: 'one', threadId: 'thread-one', channelType: 'web', messagingGroupId: 'web-one' },
       reviewRequired: true,
       stage: 'pending',
     };

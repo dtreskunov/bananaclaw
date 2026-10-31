@@ -4,6 +4,7 @@ import type { Question } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
 import { outboundTimelinePosition } from '../../../input-timeline.js';
 import { conversationTimeline } from './conversation-timeline.js';
+import { approvalTranscript } from './approval-transcript.js';
 import { getTurnInputs, type TurnRow } from '../../../db/turns.js';
 import { readTurnMetadata } from '../../../session-link-durable.js';
 import { getSessionTurnSignals } from '../../../session-link.js';
@@ -293,7 +294,11 @@ export function readConversation(
 ): Conversation {
   const context = resolveTurnContext(userId, groupId, threadId, override);
   if (!context) throw new Error('Conversation is not accessible');
-  const history = readChatHistory(userId, groupId, threadId, override, { includeCancelled: true });
+  const history = readChatHistory(userId, groupId, threadId, override, {
+    includeCancelled: true,
+    hideApprovalOutcomes: true,
+  });
+  history.push(...approvalTranscript(userId, groupId, context));
   const outDb = context.sessionId ? openOutboundDb(groupId, context.sessionId) : null;
   try {
     const questions = context.sessionId

@@ -183,7 +183,9 @@ export async function applyHash(router: RouterApi, options: { newConversation?: 
       : null;
 
   if (routedThread) {
-    router.openChat(parsed.groupId, routedThread, null).catch((err) => console.error('chat open failed', err));
+    router
+      .openChat(parsed.groupId, routedThread, threadCtx(threads.value.find((t) => t.threadId === routedThread)))
+      .catch((err) => console.error('chat open failed', err));
   } else if (groupChanged || parsed.threadId || options.newConversation) {
     const latest = options.newConversation && !parsed.threadId ? null : (threads.value[0] ?? null);
     if (latest)

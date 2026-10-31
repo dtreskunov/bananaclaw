@@ -7,9 +7,11 @@
   gap: 4px;
 }
 
-.approval-response-message textarea {
+.approval-response-message textarea,
+.chat-main .approval-response-message textarea {
   box-sizing: border-box;
   width: 100%;
   font: inherit;
   resize: vertical;
+  padding: 8px 10px;
 }

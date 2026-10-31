@@ -1,0 +1,205 @@
+import fs from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('../../../config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../config.js')>()),
+  DATA_DIR: `/tmp/nanoclaw-approval-transcript-${process.pid}`,
+}));
+vi.mock('../../../container-runner.js', () => ({
+  wakeContainer: vi.fn().mockResolvedValue(true),
+  isContainerRunning: vi.fn(() => false),
+  recoverStoppedSession: vi.fn().mockResolvedValue(true),
+  killContainer: vi.fn(),
+}));
+import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
+import { createPendingApproval, getPendingApproval, deleteSession } from '../../../db/sessions.js';
+import { getApprovalHistory } from '../../../db/approval-history.js';
+import { inboundDbPath, initSessionFolder, openInboundDb, writeSessionMessage } from '../../../session-manager.js';
+import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
+import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
+import { readConversation } from './conversation.js';
+import { readChatHistory } from './chat.js';
+import { approvalOrigin } from './approval-transcript.js';
+import {
+  CONVERSATION_PROTOCOL_VERSION,
+  diffConversation,
+  parseConversationFrame,
+  reduceConversation,
+} from '../../shared/conversation-protocol.js';
+
+const root = `/tmp/nanoclaw-approval-transcript-${process.pid}`;
+beforeEach(() => {
+  runMigrations(initTestDb());
+  getDb().exec(`
+    INSERT INTO users(id,kind,display_name,created_at) VALUES('owner','web','Owner','now'),('member','web','Member','now');
+    INSERT INTO user_roles(user_id,role,granted_at) VALUES('owner','owner','now');
+    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Agent','agent','now');
+    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('member','g','now');
+    INSERT INTO messaging_groups(id,channel_type,platform_id,instance,is_group,created_at)
+      VALUES('web','web','group:g','web',1,'now'),('telegram','telegram','remote','telegram',1,'now');
+    INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
+      VALUES('w-web','web','g','agent-shared','now'),('w-telegram','telegram','g','agent-shared','now');
+    INSERT INTO sessions(id,agent_group_id,messaging_group_id,status,created_at)
+      VALUES('s','g','web','active','now');
+  `);
+  initSessionFolder('g', 's');
+  writeSessionMessage('g', 's', {
+    id: 'source',
+    kind: 'chat',
+    timestamp: new Date(Date.now() - 1000).toISOString(),
+    channelType: 'web',
+    platformId: 'group:g',
+    threadId: 'source-thread',
+    content: '{"text":"Install the requested tool.","senderId":"human"}',
+  });
+  registerApprovalHandler('history-test', async ({ notify }) => {
+    notify('Approved and applied.');
+  });
+});
+afterEach(() => {
+  closeDb();
+  fs.rmSync(root, { recursive: true, force: true });
+});
+function request() {
+  createPendingApproval({
+    approval_id: 'approval',
+    session_id: 's',
+    origin_message_id: 'source',
+    request_id: 'request',
+    action: 'history-test',
+    payload: '{}',
+    title: 'Install tool',
+    options_json:
+      '[{"label":"Approve","selectedLabel":"Approved","value":"approve"},{"label":"Reject","selectedLabel":"Declined","value":"reject"}]',
+    created_at: new Date().toISOString(),
+  });
+}
+const view = (thread = 'source-thread', user = 'owner') => readConversation(user, 'g', thread);
+
+describe('retained approval transcript', () => {
+  it('places a request only in its exact originating thread, even in a shared session', () => {
+    request();
+    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toEqual({
+      agentGroupId: 'g',
+      threadId: 'source-thread',
+      channelType: 'web',
+      messagingGroupId: 'web',
+    });
+    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
+      approvalId: 'approval',
+      status: 'pending',
+      title: 'Install tool',
+    });
+    expect(view('other-thread').messages.filter((message) => message.approval)).toEqual([]);
+    expect(view('source-thread', 'member').messages.filter((message) => message.approval)).toEqual([]);
+  });
+
+  it.each(['approve', 'reject'])(
+    'retains the request, %s decision, actor and message after pending-row deletion and reload',
+    async (value) => {
+      request();
+      const before = view();
+      await handleApprovalsResponse({
+        questionId: 'approval',
+        value,
+        userId: 'owner',
+        channelType: 'web',
+        platformId: 'admin-dm',
+        threadId: null,
+        message: 'Keep existing work.',
+      });
+      expect(getPendingApproval('approval')).toBeUndefined();
+      const after = view();
+      const bubble = after.messages.find((message) => message.id === 'approval:approval');
+      expect(bubble?.approval).toMatchObject({
+        status: value === 'approve' ? 'approved' : 'rejected',
+        decision: value,
+        responseMessage: 'Keep existing work.',
+        respondedBy: { userId: 'owner', displayName: 'Owner' },
+      });
+      expect(bubble?.timestamp).toBe(before.messages.find((message) => message.approval)?.timestamp);
+      expect(after.messages.filter((message) => message.text.includes('User message from'))).toEqual([]);
+      expect(
+        readChatHistory('owner', 'g', 'source-thread').some((message) => message.text.includes('User message from')),
+      ).toBe(true);
+      const db = openInboundDb('g', 's');
+      try {
+        expect(
+          db
+            .prepare("SELECT COUNT(*) FROM messages_in WHERE json_extract(content,'$.approvalId')='approval'")
+            .pluck()
+            .get(),
+        ).toBe(1);
+      } finally {
+        db.close();
+      }
+      const snapshot = {
+        kind: 'snapshot' as const,
+        protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+        streamId: 'approvals',
+        revision: 0,
+        conversation: before,
+      };
+      const settled = reduceConversation(
+        reduceConversation(null, parseConversationFrame(snapshot)),
+        parseConversationFrame({
+          kind: 'update',
+          protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+          streamId: 'approvals',
+          baseRevision: 0,
+          revision: 1,
+          changes: diffConversation(before, after),
+        }),
+      );
+      expect(settled.conversation.messages.find((message) => message.id === bubble?.id)?.approval).toEqual(
+        bubble?.approval,
+      );
+      expect(view().messages.find((message) => message.id === bubble?.id)?.approval).toEqual(bubble?.approval);
+    },
+  );
+
+  it('does not infer an actionable thread when a recorded origin is missing', () => {
+    request();
+    getDb().prepare("UPDATE approval_history SET origin_message_id='missing' WHERE approval_id='approval'").run();
+    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
+    expect(view().messages.filter((message) => message.approval)).toEqual([]);
+  });
+
+  it('does not invent a root thread for legacy unanchored shared sessions', () => {
+    request();
+    getDb().prepare("UPDATE approval_history SET origin_message_id=NULL WHERE approval_id='approval'").run();
+    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
+  });
+
+  it('treats a missing session store as an unavailable origin without creating another database', () => {
+    request();
+    const file = inboundDbPath('g', 's');
+    fs.rmSync(file);
+    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it('retains the failure explanation rather than hiding the only user-visible error', async () => {
+    request();
+    registerApprovalHandler('history-test', async () => {
+      throw new Error('The image build failed');
+    });
+    await handleApprovalsResponse({
+      questionId: 'approval',
+      value: 'approve',
+      userId: 'owner',
+      channelType: 'web',
+      platformId: 'admin-dm',
+      threadId: null,
+    });
+    const approval = view().messages.find((message) => message.approval)?.approval;
+    expect(approval?.status).toBe('failed');
+    expect(approval?.outcomeMessage).toContain('The image build failed');
+  });
+
+  it('deletes retained approval history when its conversation is deleted', () => {
+    request();
+    expect(() => deleteSession('s')).toThrow('approval');
+    deleteSession('s', true);
+    expect(getApprovalHistory('approval')).toBeUndefined();
+  });
+});

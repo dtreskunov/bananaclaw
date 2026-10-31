@@ -22,6 +22,7 @@ export interface ConversationMessage {
   direction: 'in' | 'out' | 'event';
   timestamp: string;
   text: string;
+  approval?: import('./approval.js').ConversationApproval;
   questionId?: string;
   questionResponseType?: 'skipped';
   turnId?: string;

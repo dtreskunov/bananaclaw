@@ -3,6 +3,7 @@ import { getPendingApproval, getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { writeApprovalNotification } from './notification.js';
 import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
+import { updateApprovalHistory } from '../../db/approval-history.js';
 
 export type WorkflowStage = 'pending' | 'applying' | 'completed' | 'rejected' | 'cancelled' | 'expired' | 'failed';
 export interface ApprovalWorkflow {
@@ -61,7 +62,7 @@ export function createApprovalWorkflow(id: string, key: string, origin: Record<s
 export function claimApprovalWorkflow(id: string, revision: number, data: Record<string, unknown>): boolean {
   const previous = getApprovalWorkflow(id);
   const stored = previous ? (JSON.parse(previous.data_json) as Record<string, unknown>) : {};
-  return (
+  const claimed =
     getDb()
       .prepare(
         `UPDATE approval_workflows SET stage='applying',revision=revision+1,data_json=?,updated_at=?
@@ -72,8 +73,14 @@ export function claimApprovalWorkflow(id: string, revision: number, data: Record
         new Date().toISOString(),
         id,
         revision,
-      ).changes === 1
-  );
+      ).changes === 1;
+  if (claimed)
+    updateApprovalHistory(id, 'applying', {
+      userId: typeof data.userId === 'string' ? data.userId : undefined,
+      decision: 'approve',
+      message: (data.responseMessage as ApprovalResponseMessage | undefined)?.message,
+    });
+  return claimed;
 }
 
 export function updateApprovalWorkflowData(id: string, data: Record<string, unknown>): void {
@@ -117,6 +124,7 @@ export function retryApprovalWorkflow(id: string, revision: number, userId: stri
       .run(JSON.stringify(data), new Date().toISOString(), workflow.approval_id, revision).changes;
     if (!changed) return false;
     getDb().prepare("UPDATE pending_approvals SET status='pending' WHERE approval_id=?").run(workflow.approval_id);
+    updateApprovalHistory(workflow.approval_id, 'pending');
     return true;
   })();
 }
@@ -127,6 +135,7 @@ export function finishApprovalWorkflow(
   message: string,
   restart = false,
   responseMessage?: ApprovalResponseMessage,
+  resolvedBy?: string,
 ): void {
   getDb().transaction(() => {
     const workflow = getApprovalWorkflow(id);
@@ -150,6 +159,13 @@ export function finishApprovalWorkflow(
         id,
       );
     if (!updated.changes) return;
+    const data = JSON.parse(workflow.data_json) as { userId?: string };
+    updateApprovalHistory(id, stage === 'completed' ? 'approved' : stage, {
+      userId: resolvedBy ?? responseMessage?.userId ?? data.userId,
+      decision: stage === 'rejected' ? 'reject' : stage === 'completed' || stage === 'failed' ? 'approve' : undefined,
+      message: responseMessage?.message,
+      outcome: message,
+    });
     getDb()
       .prepare('UPDATE pending_approvals SET status=? WHERE approval_id=?')
       .run(stage === 'completed' ? 'approved' : stage === 'expired' ? 'expired' : 'rejected', id);
@@ -174,6 +190,7 @@ export async function notifyApprovalWorkflow(id: string): Promise<void> {
     id: result.notification_id ?? `approval-result-${workflow.approval_id}`,
     idempotent: true,
     timestamp: workflow.updated_at,
+    approvalId: workflow.approval_id,
   };
   writeApprovalNotification(
     session,

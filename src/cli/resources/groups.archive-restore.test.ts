@@ -203,12 +203,19 @@ describe('ncl groups archive ↔ restore round trip', () => {
     const refs = seedGroup('ag-rt-sess', 'rt-sess');
     const db = getDb();
     const seededSession = db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id);
+    db.prepare(
+      `INSERT INTO approval_history(
+      approval_id,session_id,action,payload,title,options_json,created_at,status,decision,responded_by,response_message)
+      VALUES('retained-approval',?,'install_packages','{}','Install package','[]',?,'approved','approve',?,'Keep existing work.')`,
+    ).run(refs.sessionId, NOW(), refs.userId);
+    const approval = db.prepare("SELECT * FROM approval_history WHERE approval_id='retained-approval'").get();
 
     await archive(refs.id);
     const r = await restore('rt-sess', true);
     expect(r.ok).toBe(true);
 
     expect(db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id)).toEqual(seededSession);
+    expect(db.prepare("SELECT * FROM approval_history WHERE approval_id='retained-approval'").get()).toEqual(approval);
   });
 
   it('refuses to restore over a live group with the same folder', async () => {

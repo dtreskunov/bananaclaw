@@ -23,6 +23,8 @@ import {
 import { getSignIn } from '../../../modules/credentials/sign-ins.js';
 import { uiBaseUrl } from '../server.js';
 import { recordAdminAction } from './audit.js';
+import { getApprovalHistory } from '../../../db/approval-history.js';
+import { approvalOrigin } from './approval-transcript.js';
 import {
   applyAccessRequest,
   previewAccessRequest,
@@ -94,7 +96,9 @@ export async function handleCredentialsRequest(
     if (request) {
       const requestId = decode(request[1]);
       if (method === 'GET' && !request[2]) {
-        json(res, 200, reviewAccessRequest(userId, requestId));
+        const status = reviewAccessRequest(userId, requestId);
+        const history = getApprovalHistory(status.request_id);
+        json(res, 200, { ...status, origin: history ? approvalOrigin(userId, history) : null });
       } else if (method === 'POST' && request[2] === 'preview') {
         const body = await readBody(req);
         if (typeof body.connection_id !== 'string' || Object.keys(body).some((key) => key !== 'connection_id'))

@@ -173,6 +173,7 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
         insertRow('questions', q);
         counts.questions += 1;
       }
+      for (const approval of dump.approval_history ?? []) insertRow('approval_history', approval);
     }
   });
   tx();

@@ -43,6 +43,7 @@ export interface ArchiveDump {
   pending_approvals: Array<Record<string, unknown>>;
   sessions: Array<Record<string, unknown>>;
   questions: Array<Record<string, unknown>>;
+  approval_history?: Array<Record<string, unknown>>;
 }
 
 /**
@@ -129,6 +130,13 @@ function dumpRows(
     pending_approvals: pendingApprovals,
     sessions,
     questions,
+    approval_history: hasTable(db, 'approval_history')
+      ? (db
+          .prepare(
+            'SELECT * FROM approval_history WHERE session_id IN (SELECT id FROM sessions WHERE agent_group_id=?)',
+          )
+          .all(groupId) as Array<Record<string, unknown>>)
+      : [],
   } as Omit<ArchiveDump, 'archived_at' | 'archived_by' | 'version'>;
 }
 

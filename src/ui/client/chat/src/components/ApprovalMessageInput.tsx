@@ -11,6 +11,5 @@ export function ApprovalMessageInput({ approvalId, disabled }: { approvalId: str
           approvalMessageDrafts.value = { ...approvalMessageDrafts.value, [approvalId]: event.currentTarget.value };
         }} />
     </label>
-    <small class="muted">Included with the decision. Don't include passwords or tokens.</small>
   </div>;
 }

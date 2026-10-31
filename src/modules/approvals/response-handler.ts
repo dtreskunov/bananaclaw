@@ -27,6 +27,7 @@ import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/use
 import { ONECLI_ACTION, resolveOneCLIApproval } from './onecli-approvals.js';
 import { getApprovalHandler, getInteractiveApprovalHandler, notifyApprovalResolved } from './primitive.js';
 import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
+import { updateApprovalHistory } from '../../db/approval-history.js';
 import {
   ApprovalMessageError,
   parseApprovalMessage,
@@ -96,18 +97,23 @@ async function handleRegisteredApproval(
   }
 
   let responseMessage: ApprovalResponseMessage | undefined = message ? { userId, message } : undefined;
+  const response = { userId, decision: selectedOption, message };
+  let outcomeMessage: string | undefined;
   const notify = (text: string, options?: Pick<ApprovalNotificationOptions, 'afterRestart'>): void => {
     writeApprovalNotification(session, text, {
       originMessageId: approval.origin_message_id,
       ...options,
       responseMessage,
+      approvalId: approval.approval_id,
     });
     responseMessage = undefined;
+    if (!options?.afterRestart || !outcomeMessage) outcomeMessage = text;
   };
 
   if (selectedOption !== 'approve') {
     notify(`Your ${approval.action} request was rejected by admin.`);
     log.info('Approval rejected', { approvalId: approval.approval_id, action: approval.action, userId });
+    updateApprovalHistory(approval.approval_id, 'rejected', { ...response, outcome: outcomeMessage });
     deletePendingApproval(approval.approval_id);
     await notifyApprovalResolved({ approval, session, outcome: 'reject', userId });
     await wakeContainer(session);
@@ -122,6 +128,7 @@ async function handleRegisteredApproval(
       action: approval.action,
     });
     notify(`Your ${approval.action} was approved, but no handler is installed to apply it.`);
+    updateApprovalHistory(approval.approval_id, 'failed', { ...response, outcome: outcomeMessage });
     deletePendingApproval(approval.approval_id);
     await notifyApprovalResolved({ approval, session, outcome: 'approve', userId });
     await wakeContainer(session);
@@ -129,17 +136,21 @@ async function handleRegisteredApproval(
   }
 
   const payload = JSON.parse(approval.payload);
+  updateApprovalHistory(approval.approval_id, 'pending');
+  let outcome: 'approved' | 'failed' = 'approved';
   try {
     await handler({ session, payload, userId, notify, originMessageId: approval.origin_message_id });
     if (responseMessage) notify(`Your ${approval.action} request was approved.`);
     log.info('Approval handled', { approvalId: approval.approval_id, action: approval.action, userId });
   } catch (err) {
+    outcome = 'failed';
     log.error('Approval handler threw', { approvalId: approval.approval_id, action: approval.action, err });
     notify(
       `Your ${approval.action} was approved, but applying it failed: ${err instanceof Error ? err.message : String(err)}.`,
     );
   }
 
+  updateApprovalHistory(approval.approval_id, outcome, { ...response, outcome: outcomeMessage });
   deletePendingApproval(approval.approval_id);
   await notifyApprovalResolved({ approval, session, outcome: 'approve', userId });
   await wakeContainer(session);

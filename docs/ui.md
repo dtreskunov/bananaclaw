@@ -757,7 +757,7 @@ time across settlement. Generated fixture assets are ignored and rebuilt from
 **Credential UI (plan of record, revision 7):** the account menu includes
 **My Credentials** immediately after **My Profile**, opening the user-scoped
 review and management dialog. Agent `request_access` requests appear in the
-existing Pending approvals banner with **Review access / Reject**. Review
+requesting conversation as transcript approval bubbles with **Review access / Reject**. Review
 opens this same private Credentials dialog, prefilled with the exact destination
 and purpose. The user chooses an existing connection or uses the unified Add
 credential form (key, MCP OAuth or configured OAuth app), then confirms the
@@ -1417,6 +1417,29 @@ Streaming uses VAD commits and `noVerbatim: true` (`no_verbatim` in the ElevenLa
 API) to remove filler words and disfluencies. Interim hypotheses may still contain
 fillers until the provider commits the cleaned text; no separate LLM cleanup pass
 or paid fallback is used.
+
+### Approval bubbles in the transcript
+
+Approval requests appear as transcript bubbles, not a global **Pending approvals**
+banner. The request remains at its original position after resolution, showing
+the decision, responder and optional user message as a read-only bubble. Failed
+application keeps its error explanation visible. These administrative details
+retain their existing owner/admin visibility; they are not exposed to ordinary
+conversation members.
+
+Pending requests from another conversation appear as read-only transcript
+references with **Open requesting thread**. Decision buttons and the message
+field are available only in the exact requesting group/thread/channel, including
+the adapter messaging group for non-web channels. Unknown or inaccessible origins
+offer no decision controls. Private credential review applies the same rule, and
+captured callbacks refuse submission after navigating away.
+
+The host still delivers its normal outcome notification to the agent. When a
+retained approval bubble represents that outcome, the UI omits the duplicate
+host-only notification; model context and delivery are unchanged. Retained
+requests survive reload and session-inclusive archive/restore. Existing
+session-bound approvals are backfilled where records still exist; previously
+deleted requests are not reconstructed or guessed.
 
 ### Messages with approval decisions
 

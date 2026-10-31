@@ -139,7 +139,11 @@ describe('file search hash state', () => {
 
       await applyHash(router, { newConversation: true });
 
-      expect(router.openChat).toHaveBeenCalledExactlyOnceWith('agent', 'linked', null);
+      expect(router.openChat).toHaveBeenCalledExactlyOnceWith(
+        'agent',
+        'linked',
+        channelType === 'web' ? null : { channelType, messagingGroupId: 'messaging-group', canSend: true },
+      );
     });
 
     it('leaves group navigation after startup opening the newest thread', async () => {

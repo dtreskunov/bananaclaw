@@ -307,6 +307,23 @@ CREATE INDEX idx_pending_approvals_action_status ON pending_approvals(action, st
   a host notification is never fabricated as an agent-to-agent message to itself.
 - Access layer: `src/db/sessions.ts`; sweep + delivery: `src/onecli-approvals.ts`.
 
+#### Retained approval history
+
+`approval_history` (migration 047) snapshots each session-bound request separately
+from the transient pending row. It retains the originating input, original
+presentation payload, creation timestamp, status, decision, responder, optional
+response message, outcome/error text and resolution time. Removing a pending
+approval does not remove its transcript bubble. Session deletion cascades the
+history; group archives include it and `--with-sessions` restores it.
+
+Only the authorized requesting conversation projects these records as synthetic
+outbound transcript messages. They are UI projections, not new runner inputs.
+Normal handlers expose in-progress execution from the process-local execution
+guard, avoiding an unrecoverable persisted busy state after a host restart;
+credential workflows keep their existing durable application/recovery state.
+The migration backfills surviving session-bound approvals and workflow results.
+Sessionless gateway approvals do not acquire an invented conversation.
+
 ### 1.12 `unregistered_senders`
 
 Audit trail: every time a message gets dropped (unknown sender, strict policy), we increment a counter here so admins can see who's been trying to knock.

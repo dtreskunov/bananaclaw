@@ -491,6 +491,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
       } Safely verify the original operation, then continue the original request with its original dates, timezone and account choice. Do not automatically replay writes or create a recurring poller.`,
       selection.configureMcp,
       selection.responseMessage,
+      userId,
     );
   } catch (error) {
     const reason =
@@ -505,6 +506,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
       `Access approval failed during ${phase}. ${reason} Some changes may have applied. Review and retry this request; existing credentials do not need to be recreated.`,
       false,
       selection.responseMessage,
+      userId,
     );
     log.error('Access approval application failed', { approvalId: id, userId, phase, err: error });
     await notifyApprovalWorkflow(id);
@@ -555,6 +557,7 @@ registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, use
       'Your access request was rejected. No credentials were changed. Do not repeat this request unless the user asks.',
       false,
       responseMessage,
+      userId,
     );
     await notifyApprovalWorkflow(approval.approval_id);
   } else if (response.value === 'review') {
@@ -631,6 +634,7 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
             } Safely verify upstream access before continuing the original request. Preserve its original dates and timezone; do not replay writes automatically.`,
             selection.configureMcp,
             selection.responseMessage,
+            selection.userId,
           );
         } else {
           finishApprovalWorkflow(
@@ -639,6 +643,7 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
             'Access approval was interrupted by restart. Review Credentials; no additional grant was replayed automatically.',
             false,
             selection.responseMessage,
+            selection.userId,
           );
         }
       } else {

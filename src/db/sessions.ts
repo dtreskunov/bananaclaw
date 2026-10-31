@@ -1,6 +1,7 @@
 import type { PendingApproval, Question, Session } from '../types.js';
 import { getDb, hasTable } from './connection.js';
 import { invalidateConversation } from '../conversation-events.js';
+import { archiveApprovalRequest } from './approval-history.js';
 
 // ── Sessions ──
 
@@ -117,6 +118,10 @@ export function endApprovalExecution(approvalId: string): void {
   executingApprovals.delete(approvalId);
 }
 
+export function isApprovalExecuting(approvalId: string): boolean {
+  return executingApprovals.has(approvalId);
+}
+
 export function deleteSession(id: string, cancelApprovals = false): number {
   if ([...executingApprovals.values()].includes(id)) throw new SessionApprovalInProgressError();
   const db = getDb();
@@ -209,9 +214,10 @@ export function createPendingApproval(
       'approval_id' | 'request_id' | 'action' | 'payload' | 'created_at' | 'title' | 'options_json'
     >,
 ): boolean {
-  const result = getDb()
-    .prepare(
-      `INSERT OR IGNORE INTO pending_approvals
+  return getDb().transaction(() => {
+    const result = getDb()
+      .prepare(
+        `INSERT OR IGNORE INTO pending_approvals
          (approval_id, session_id, request_id, action, payload, created_at,
           agent_group_id, channel_type, platform_id, platform_message_id, expires_at, status,
           title, options_json, origin_message_id)
@@ -219,19 +225,21 @@ export function createPendingApproval(
          (@approval_id, @session_id, @request_id, @action, @payload, @created_at,
           @agent_group_id, @channel_type, @platform_id, @platform_message_id, @expires_at, @status,
           @title, @options_json, @origin_message_id)`,
-    )
-    .run({
-      session_id: null,
-      agent_group_id: null,
-      channel_type: null,
-      platform_id: null,
-      platform_message_id: null,
-      expires_at: null,
-      status: 'pending',
-      origin_message_id: null,
-      ...pa,
-    });
-  return result.changes > 0;
+      )
+      .run({
+        session_id: null,
+        agent_group_id: null,
+        channel_type: null,
+        platform_id: null,
+        platform_message_id: null,
+        expires_at: null,
+        status: 'pending',
+        origin_message_id: null,
+        ...pa,
+      });
+    if (result.changes) archiveApprovalRequest(pa.approval_id);
+    return result.changes > 0;
+  })();
 }
 
 export function getPendingApproval(approvalId: string): PendingApproval | undefined {
