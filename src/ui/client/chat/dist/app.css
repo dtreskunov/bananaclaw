@@ -2251,7 +2251,7 @@ nav.tab-bar-strip.group-strip {
 .chat-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   position: relative;
@@ -2263,18 +2263,14 @@ nav.tab-bar-strip.group-strip {
 .chat-main .status,
 .chat-main .context,
 .chat-main .pending,
-.chat-main .approvals-banner,
 .chat-main .readonly-banner,
 .chat-main .chat-subnotice,
 .chat-main form {
   padding-inline: var(--chat-gutter);
 }
-.chat-main > .approvals-banner {
-  grid-row: 1;
-}
 .chat-main > .log,
 .chat-main > .chat-bottom-dock {
-  grid-area: 2 / 1;
+  grid-area: 1 / 1;
 }
 .chat-main .chat-bottom-dock {
   align-self: end;
@@ -3849,43 +3845,26 @@ nav.tab-bar-strip.group-strip {
     min-height: 44px;
   }
 }
-.chat-main .approvals-banner {
-  --approvals-max-height: min(40vh, 360px);
-  --approvals-max-height: min(40dvh, 360px);
-  border-bottom: 1px solid var(--border);
-  background: var(--wash);
-  padding-block: 8px;
+.chat-main .approval-message {
+  width: 100%;
+}
+.chat-main .approval-bubble.question-prompt {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+}
+.chat-main .approval-decision {
+  margin-top: 10px;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
 }
-.chat-main .approvals-header {
-  font-size: var(--font-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-.chat-main .approvals-header .approvals-count {
-  font-weight: 600;
-  color: var(--fg);
-}
-.chat-main .approvals-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: calc(var(--approvals-max-height) - 40px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-.chat-main .approval-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 8px 10px;
+.chat-main .approval-response-text {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  margin: 4px 0 0;
 }
 .chat-main .approval-text {
   flex: 1;
@@ -3943,8 +3922,9 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .approval-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  flex-shrink: 0;
+  margin-top: 10px;
 }
 .chat-main .approval-btn {
   height: 28px;
@@ -3982,15 +3962,8 @@ nav.tab-bar-strip.group-strip {
   font-style: italic;
 }
 @media (max-width: 720px) {
-  .chat-main .approvals-list {
-    padding-inline-end: 10px;
-  }
-  .chat-main .approval-row {
-    flex-wrap: wrap;
-  }
-  .chat-main .approval-actions {
-    width: 100%;
-    justify-content: flex-end;
+  .chat-main .approval-btn {
+    min-height: 44px;
   }
 }
 .chat-main .input-dock {
@@ -4306,11 +4279,13 @@ nav.tab-bar-strip.group-strip {
   display: grid;
   gap: 4px;
 }
-.approval-response-message textarea {
+.approval-response-message textarea,
+.chat-main .approval-response-message textarea {
   box-sizing: border-box;
   width: 100%;
   font: inherit;
   resize: vertical;
+  padding: 8px 10px;
 }
 
 /* src/components/ModalDialog.css */
