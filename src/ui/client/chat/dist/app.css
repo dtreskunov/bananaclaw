@@ -4298,6 +4298,21 @@ nav.tab-bar-strip.group-strip {
   flex: 0 0 120px;
 }
 
+/* src/components/ApprovalMessageInput.css */
+.approval-response-message {
+  margin-top: 8px;
+}
+.approval-response-message label {
+  display: grid;
+  gap: 4px;
+}
+.approval-response-message textarea {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  resize: vertical;
+}
+
 /* src/components/ModalDialog.css */
 .modal-dialog-host {
   position: fixed;
