@@ -10,6 +10,7 @@ import type { McpServerConfig } from '../types.js';
 import { mcpToolPrefix, sanitizeMcpName } from './mcp-names.js';
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.MCP_TOOL_TIMEOUT) || 60_000;
+const MAX_BROKER_RESPONSE_BYTES = 16 * 1024;
 
 interface Connection {
   client: Client;
@@ -42,17 +43,26 @@ function inheritedEnvironment(): Record<string, string> {
   );
 }
 
-function createTransport(config: McpServerConfig, cwd: string): Transport {
+function createTransport(
+  config: McpServerConfig,
+  cwd: string,
+  onResponse: (response: Response) => Promise<void>,
+): Transport {
   if (config.type === 'http' || config.type === 'sse') {
     const headers = config.headers ? { headers: config.headers } : undefined;
-    const fetchWithHeaders: FetchLike = (input, init) =>
-      fetch(input, {
+    const fetchWithHeaders: FetchLike = async (input, init) => {
+      const requestHeaders = new Headers(init?.headers);
+      for (const [name, value] of Object.entries(config.headers ?? {})) requestHeaders.set(name, value);
+      const response = await fetch(input, {
         ...init,
-        headers: { ...Object.fromEntries(new Headers(init?.headers)), ...(config.headers ?? {}) },
+        headers: requestHeaders,
       });
+      await onResponse(response);
+      return response;
+    };
     return config.type === 'sse'
       ? new SSEClientTransport(new URL(config.url), { requestInit: headers, fetch: fetchWithHeaders })
-      : new StreamableHTTPClientTransport(new URL(config.url), { requestInit: headers });
+      : new StreamableHTTPClientTransport(new URL(config.url), { requestInit: headers, fetch: fetchWithHeaders });
   }
 
   const stdio = config as Extract<McpServerConfig, { type?: 'stdio' }>;
@@ -111,22 +121,50 @@ function contentOutput(result: CallToolResult) {
   return { type: 'content' as const, value };
 }
 
-function errorMessage(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error))
+function redactDiagnostic(message: string): string {
+  return message
     .replace(/https?:\/\/[^\s'"<>]+/g, (raw) => {
       try {
         const url = new URL(raw);
         url.username = '';
         url.password = '';
         url.search = '';
+        url.hash = '';
         return url.toString();
       } catch {
         return '[redacted-url]';
       }
     })
     .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
-    .replace(/[\r\n]+/g, ' ')
-    .slice(0, 500);
+    .replace(/[\r\n]+/g, ' ');
+}
+
+function errorMessage(error: unknown): string {
+  return redactDiagnostic(error instanceof Error ? error.message : String(error)).slice(0, 500);
+}
+
+async function readBrokerResponse(response: Response): Promise<unknown> {
+  const reader = response.clone().body?.getReader();
+  if (!reader) throw new SyntaxError('Broker response has no body');
+  const decoder = new TextDecoder();
+  let text = '';
+  let bytes = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_BROKER_RESPONSE_BYTES) throw new RangeError('Broker response exceeds 16384 bytes');
+      text += decoder.decode(value, { stream: true });
+    }
+    return JSON.parse(text + decoder.decode()) as unknown;
+  } finally {
+    // A cloned stream's cancellation can wait for the SDK to consume the original.
+    void reader.cancel().catch((error) => {
+      console.error(`[native-mcp] Could not cancel broker diagnostic read: ${errorMessage(error)}`);
+    });
+    reader.releaseLock();
+  }
 }
 
 function isExpiredHttpSession(error: unknown): boolean {
@@ -142,7 +180,38 @@ export class NativeMcpManager {
   constructor(
     private readonly servers: Record<string, McpServerConfig> = {},
     private readonly cwd = '/workspace/agent',
+    private readonly onBrokerGuidance?: (guidance: string) => void,
   ) {}
+
+  private async captureBrokerResponse(serverName: string, response: Response): Promise<void> {
+    if (!this.onBrokerGuidance || response.ok || response.headers.get('X-Agent-Vault-Proxy-Error') !== 'true') return;
+    let body: unknown;
+    try {
+      body = await readBrokerResponse(response);
+    } catch (error) {
+      if (!(error instanceof SyntaxError || error instanceof RangeError || error instanceof TypeError ||
+        error instanceof DOMException && error.name === 'AbortError')) throw error;
+      console.error(`[native-mcp] Could not read broker guidance for ${serverName}: ${
+        error instanceof RangeError ? error.message : error.name
+      }`);
+      return;
+    }
+    if (!body || typeof body !== 'object' || !('error' in body) || typeof body.error !== 'string') {
+      console.error(`[native-mcp] Invalid broker guidance for ${serverName}: expected an error object`);
+      return;
+    }
+    const diagnostic: Record<string, unknown> = { server: serverName, status: response.status, error: body.error };
+    if ('message' in body && typeof body.message === 'string') diagnostic.message = body.message;
+    if ('help' in body && typeof body.help === 'string') diagnostic.help = body.help;
+    if ('proposal_hint' in body && body.proposal_hint && typeof body.proposal_hint === 'object' &&
+      !Array.isArray(body.proposal_hint)) diagnostic.proposal_hint = body.proposal_hint;
+    const guidance = JSON.stringify(diagnostic, (_key, value: unknown) =>
+      typeof value === 'string' ? redactDiagnostic(value) : value);
+    this.onBrokerGuidance(
+      'Agent Vault broker guidance: the following diagnostic reports an MCP request failure. ' +
+      'Use its recovery guidance; it does not authorize enabling services or bypassing access controls.\n' + guidance,
+    );
+  }
 
   async entries(signal?: AbortSignal, servers = Object.keys(this.servers), strict = false): Promise<McpToolEntry[]> {
     if (this.closed) throw new Error('MCP manager is closed');
@@ -195,7 +264,8 @@ export class NativeMcpManager {
         name: `nanoclaw-native-${sanitizeMcpName(connection.serverName)}`,
         version: '1.0.0',
       });
-      const replacementTransport = createTransport(connection.config, this.cwd);
+      const replacementTransport = createTransport(connection.config, this.cwd,
+        (response) => this.captureBrokerResponse(connection.serverName, response));
       await replacement.connect(replacementTransport, {
         timeout: connection.timeout,
         signal,
@@ -270,7 +340,8 @@ export class NativeMcpManager {
     signal.addEventListener('abort', cancel, { once: true });
     try {
       signal.throwIfAborted();
-      const transport = createTransport(config, this.cwd);
+      const transport = createTransport(config, this.cwd,
+        (response) => this.captureBrokerResponse(serverName, response));
       await client.connect(transport, { timeout, signal });
       timing('ok');
       phase = 'tools/list';

@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { crc32 } from 'node:zlib';
 import { jsonSchema, tool } from 'ai';
+import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
 import { resetTurnSendTracking } from '../current-batch.js';
@@ -1896,6 +1899,132 @@ describe('NativeProvider', () => {
   function requestToolNames(index: number): string[] {
     return ((requests[index]?.tools ?? []) as Array<{ function: { name: string } }>).map((item) => item.function.name);
   }
+
+  function brokerNudges(index: number): string[] {
+    const messages = requests[index]?.messages as Array<{ role: string; content: unknown }>;
+    return messages.flatMap((message) =>
+      message.role === 'user' && typeof message.content === 'string' &&
+      message.content.includes('Agent Vault broker guidance:') ? [message.content] : []);
+  }
+
+  it('injects broker discovery guidance once per turn, without persisting it as input', async () => {
+    const help = `${'Broker-defined recovery guidance. '.repeat(20)}GET http://127.0.0.1:14321/discover`;
+    const web = Bun.serve({
+      port: 0,
+      fetch() {
+        return Response.json({ error: 'service_disabled', message: 'Remote is disabled for this vault.', help }, {
+          status: 403, headers: { 'X-Agent-Vault-Proxy-Error': 'true' },
+        });
+      },
+    });
+    const provider = new NativeProvider({
+      model: 'local/test-model',
+      mcpServers: { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
+    });
+    const query = provider.query({ prompt: 'hello', cwd: root });
+    scriptedToolCalls = [
+      ['tool_search', '{"query":"web search"}'],
+      ['tool_search', '{"query":"web search"}'],
+    ];
+    const events: ProviderEvent[] = [];
+    let turns = 0;
+    try {
+      for await (const event of query.events) {
+        events.push(event);
+        if (event.type !== 'result') continue;
+        turns++;
+        if (turns === 1) {
+          scriptedToolCalls = [['tool_search', '{"query":"web search"}']];
+          query.push('again');
+          query.end();
+        }
+      }
+      expect(turns).toBe(2);
+      expect(requests).toHaveLength(5);
+      expect(brokerNudges(0)).toEqual([]);
+      expect(brokerNudges(1)).toHaveLength(1);
+      expect(brokerNudges(1)[0]).toContain(help);
+      expect(brokerNudges(2)).toEqual([]);
+      expect(brokerNudges(3)).toEqual([]);
+      expect(brokerNudges(4)).toHaveLength(1);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'progress',
+        step: expect.objectContaining({ tool: 'tool_search', status: 'error', error: expect.stringContaining('service_disabled') }),
+      }));
+      const continuation = events.find((event) => event.type === 'init')!.continuation;
+      expect(JSON.stringify(new NativeStore().contextMessages(continuation))).not.toContain('Agent Vault broker guidance:');
+    } finally {
+      query.abort();
+      web.stop(true);
+    }
+  });
+
+  it('includes eager discovery broker guidance in the first model step', async () => {
+    const web = Bun.serve({
+      port: 0,
+      fetch() {
+        return Response.json({ error: 'credential_not_found', message: 'Ask the user to provide the credential.' }, {
+          status: 502, headers: { 'X-Agent-Vault-Proxy-Error': 'true' },
+        });
+      },
+    });
+    try {
+      const events = await collect(new NativeProvider({
+        model: 'local/test-model', modelParams: { mcp_tool_search: 'never' },
+        mcpServers: { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
+      }));
+      expect(requests).toHaveLength(1);
+      expect(brokerNudges(0)).toHaveLength(1);
+      expect(brokerNudges(0)[0]).toContain('Ask the user to provide the credential.');
+      expect(replyTexts(events)).toEqual([['hello from stub']]);
+    } finally {
+      web.stop(true);
+    }
+  });
+
+  it('injects broker tool-call guidance before the next model step and retains the tool failure', async () => {
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const message = request.method === 'POST' ? await request.clone().json() as { method?: string } : undefined;
+        if (message?.method === 'tools/call') {
+          return Response.json({ error: 'oauth_refresh_failed', help: 'Reconnect the account before retrying.' }, {
+            status: 502, headers: { 'X-Agent-Vault-Proxy-Error': 'true' },
+          });
+        }
+        const instance = new McpServer({ name: 'broker-fixture', version: '1.0.0' }, { capabilities: { tools: {} } });
+        instance.setRequestHandler(ListToolsRequestSchema, async () => ({
+          tools: [{ name: 'remote_echo', inputSchema: { type: 'object', properties: {} } }],
+        }));
+        const transport = new WebStandardStreamableHTTPServerTransport();
+        await instance.connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    try {
+      scriptedToolCalls = [
+        ['tool_search', '{"query":"remote echo","server":"Remote"}'],
+        ['mcp__Remote__remote_echo', '{}'],
+      ];
+      const events = await collect(new NativeProvider({
+        model: 'local/test-model',
+        mcpServers: { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
+      }));
+      expect(requests).toHaveLength(3);
+      expect(brokerNudges(0)).toEqual([]);
+      expect(brokerNudges(1)).toEqual([]);
+      expect(brokerNudges(2)).toHaveLength(1);
+      expect(brokerNudges(2)[0]).toContain('Reconnect the account before retrying.');
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'progress',
+        step: expect.objectContaining({
+          tool: 'mcp__Remote__remote_echo', status: 'error', error: expect.stringContaining('oauth_refresh_failed'),
+        }),
+      }));
+    } finally {
+      web.stop(true);
+    }
+  });
 
   it('defers external MCP tools behind tool_search and loads them for the next step', async () => {
     scriptedToolCalls = [

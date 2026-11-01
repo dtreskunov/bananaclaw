@@ -576,6 +576,19 @@ External MCP tools are loaded on demand by default (`native/tool-search.ts`):
   query/container restart, the agent searches again before calling an external
   tool. Known history tools become available as their server is discovered.
 
+Broker-authored HTTP failures marked `X-Agent-Vault-Proxy-Error: true` also
+provide a one-step recovery nudge. The native MCP client captures the broker's
+`error`, `message`, `help`, and optional `proposal_hint` before the transport
+flattens the response into an error string, with the server name and HTTP status.
+The original failure is preserved; duplicate guidance is suppressed within a
+turn, but can be delivered again on a later turn. The nudge is not persisted as
+chat input and does not authorize changing grants or enabling services.
+Only marked non-success responses from HTTP/SSE MCP transports qualify:
+ordinary upstream errors, shell requests, and other providers are unaffected.
+Diagnostic bodies are limited to 16 KiB; malformed or oversized bodies are
+logged without replacing the original error. URL credentials, queries,
+fragments, and bearer values are redacted from guidance.
+
 Runner logs report native preparation time split into model setup, input
 preparation, and eager MCP discovery, plus per-server connection and complete
 paginated `tools/list` timings. These diagnostics contain server names, counts,

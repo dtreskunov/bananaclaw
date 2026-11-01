@@ -48,6 +48,149 @@ async function execute(
 }
 
 describe('NativeMcpManager', () => {
+  it.each([
+    ['http', 403, 'service_disabled'],
+    ['sse', 502, 'oauth_not_connected'],
+  ] as const)('captures broker guidance during %s discovery without replacing the failure', async (type, status, code) => {
+    const guidance: string[] = [];
+    const help = `${'Broker-defined recovery instructions. '.repeat(20)}GET http://127.0.0.1:14321/discover`;
+    const web = Bun.serve({
+      port: 0,
+      fetch() {
+        return Response.json({
+          error: code, message: 'This service is unavailable.', help,
+          proposal_hint: { host: 'api.example.com', endpoint: 'POST /v1/proposals', supported_auth_types: ['bearer'] },
+          unrelated: 'do-not-forward',
+        }, { status, headers: { 'X-Agent-Vault-Proxy-Error': 'true' } });
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager(
+      { Remote: { type, url: `http://127.0.0.1:${web.port}/mcp` } },
+      process.cwd(), (value) => guidance.push(value),
+    );
+    managers.push(manager);
+    await expect(manager.entries(undefined, undefined, true)).rejects.toThrow('MCP discovery incomplete');
+    expect(guidance).toHaveLength(1);
+    expect(JSON.parse(guidance[0].split('\n').at(-1)!)).toEqual({
+      server: 'Remote', status, error: code, message: 'This service is unavailable.', help,
+      proposal_hint: { host: 'api.example.com', endpoint: 'POST /v1/proposals', supported_auth_types: ['bearer'] },
+    });
+    expect(guidance[0]).not.toContain('do-not-forward');
+  });
+
+  it.each([undefined, 'false', 'true'])('ignores unmarked errors and marked successes (%s)', async (marker) => {
+    const guidance: string[] = [];
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        if (marker !== 'true') {
+          return Response.json({ error: 'forbidden', help: 'Not broker guidance' }, {
+            status: 403, headers: marker ? { 'X-Agent-Vault-Proxy-Error': marker } : {},
+          });
+        }
+        const transport = new WebStandardStreamableHTTPServerTransport();
+        await server().connect(transport);
+        const response = await transport.handleRequest(request);
+        response.headers.set('X-Agent-Vault-Proxy-Error', marker);
+        return response;
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager(
+      { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
+      process.cwd(), (value) => guidance.push(value),
+    );
+    managers.push(manager);
+    if (marker === 'true') expect(await manager.entries(undefined, undefined, true)).toHaveLength(1);
+    else await expect(manager.entries(undefined, undefined, true)).rejects.toThrow('MCP discovery incomplete');
+    expect(guidance).toEqual([]);
+  });
+
+  it.each(['not-json-do-not-log', 'null', '[]', '{"message":"missing error"}'])(
+    'logs invalid broker bodies without replacing transport failures (%s)', async (body) => {
+    const guidance: string[] = [];
+    const logs: string[] = [];
+    const logger = spyOn(console, 'error').mockImplementation((message) => { logs.push(String(message)); });
+    const web = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response(body, { status: 403, headers: { 'X-Agent-Vault-Proxy-Error': 'true' } });
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager(
+      { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
+      process.cwd(), (value) => guidance.push(value),
+    );
+    managers.push(manager);
+    try {
+      await expect(manager.entries(undefined, undefined, true)).rejects.toThrow(body);
+      expect(guidance).toEqual([]);
+      const diagnostic = logs.find((line) => line.includes('broker guidance'));
+      expect(diagnostic).toBeDefined();
+      expect(diagnostic).not.toContain(body);
+    } finally {
+      logger.mockRestore();
+    }
+  });
+
+  it.each([16 * 1024, 16 * 1024 + 1])('enforces the exact broker body byte limit (%s)', async (bytes) => {
+    const guidance: string[] = [];
+    const body = JSON.stringify({
+      error: 'forbidden', message: 'a'.repeat(bytes - JSON.stringify({ error: 'forbidden', message: '' }).length),
+    });
+    expect(Buffer.byteLength(body)).toBe(bytes);
+    const web = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response(body, { status: 403, headers: { 'X-Agent-Vault-Proxy-Error': 'true' } });
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager(
+      { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
+      process.cwd(), (value) => guidance.push(value),
+    );
+    managers.push(manager);
+    await expect(manager.entries(undefined, undefined, true)).rejects.toThrow('MCP discovery incomplete');
+    expect(guidance).toHaveLength(bytes === 16 * 1024 ? 1 : 0);
+  });
+
+  it('captures and redacts broker guidance on tool calls while preserving the original error', async () => {
+    const guidance: string[] = [];
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const message = request.method === 'POST' ? await request.clone().json() as { method?: string } : undefined;
+        if (message?.method === 'tools/call') {
+          return Response.json({
+            error: 'oauth_refresh_failed', message: 'Reconnect with Bearer test-credential-value',
+            help: 'Visit https://user:password@example.com/connect?token=query-secret#fragment-secret',
+            proposal_hint: { endpoint: 'https://example.com/propose?token=nested-secret' },
+          }, { status: 502, headers: { 'X-Agent-Vault-Proxy-Error': 'true' } });
+        }
+        const transport = new WebStandardStreamableHTTPServerTransport();
+        await server().connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager(
+      { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
+      process.cwd(), (value) => guidance.push(value),
+    );
+    managers.push(manager);
+    await expect(execute(await manager.tools(), 'mcp__Remote__remote_echo', {})).rejects.toThrow('oauth_refresh_failed');
+    expect(guidance).toHaveLength(1);
+    expect(guidance[0]).toContain('"error":"oauth_refresh_failed"');
+    expect(guidance[0]).toContain('https://example.com/connect');
+    expect(guidance[0]).toContain('"endpoint":"https://example.com/propose"');
+    for (const secret of ['test-credential-value', 'password', 'query-secret', 'fragment-secret', 'nested-secret']) {
+      expect(guidance[0]).not.toContain(secret);
+    }
+  });
+
   it('keeps headers and aliases separate for two accounts on the same endpoint', async () => {
     const seen: string[] = [];
     const web = Bun.serve({
@@ -272,6 +415,51 @@ describe('NativeMcpManager', () => {
     expect(initializationCount).toBe(2);
   });
 
+  it('captures broker guidance when reconnecting an expired HTTP session', async () => {
+    const guidance: string[] = [];
+    const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
+    let expireSession = false;
+    let rejectInitialization = false;
+    const web = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const sessionId = request.headers.get('mcp-session-id');
+        if (sessionId) {
+          const transport = sessions.get(sessionId);
+          if (!transport || expireSession) {
+            expireSession = false;
+            sessions.delete(sessionId);
+            return new Response('expired transport state', { status: 404 });
+          }
+          return transport.handleRequest(request);
+        }
+        if (rejectInitialization) {
+          return Response.json({ error: 'service_disabled', message: 'Service was disabled after connecting.' }, {
+            status: 403, headers: { 'X-Agent-Vault-Proxy-Error': 'true' },
+          });
+        }
+        const transport = new WebStandardStreamableHTTPServerTransport({
+          sessionIdGenerator: () => 'session-1',
+          onsessioninitialized: (id) => sessions.set(id, transport),
+        });
+        await server().connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    bunServers.push(web);
+    const manager = new NativeMcpManager(
+      { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
+      process.cwd(), (value) => guidance.push(value),
+    );
+    managers.push(manager);
+    const tools = await manager.tools();
+    expireSession = true;
+    rejectInitialization = true;
+    await expect(execute(tools, 'mcp__Remote__remote_echo', {})).rejects.toThrow('service_disabled');
+    expect(guidance).toHaveLength(1);
+    expect(guidance[0]).toContain('Service was disabled after connecting.');
+  });
+
   it('does not re-initialize a sessionless Streamable HTTP connection on 404', async () => {
     let rejectCalls = false;
     let initializationCount = 0;
@@ -325,6 +513,45 @@ describe('NativeMcpManager', () => {
     expect(await execute(await manager.tools(), 'mcp__Legacy__remote_echo', {})).toEqual({
       content: [{ type: 'text', text: 'remote:ok' }],
     });
+  });
+
+  it('captures SSE POST broker guidance and sends configured headers exactly once', async () => {
+    const guidance: string[] = [];
+    const seenBindings: string[] = [];
+    let transport: SSEServerTransport | undefined;
+    let denyPosts = false;
+    const http = createServer(async (request, response) => {
+      seenBindings.push(String(request.headers['x-agentvault-binding'] ?? ''));
+      if (request.method === 'GET') {
+        transport = new SSEServerTransport('/messages', response);
+        await server().connect(transport);
+      } else if (denyPosts) {
+        response.writeHead(403, { 'Content-Type': 'application/json', 'X-Agent-Vault-Proxy-Error': 'true' });
+        response.end(JSON.stringify({ error: 'service_disabled', help: 'Ask the user to enable this service.' }));
+      } else if (transport) {
+        await transport.handlePostMessage(request, response);
+      } else {
+        response.writeHead(404).end();
+      }
+    });
+    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
+    httpServers.push(http);
+    const address = http.address();
+    if (!address || typeof address === 'string') throw new Error('SSE fixture failed to bind');
+    const manager = new NativeMcpManager(
+      { Legacy: {
+        type: 'sse', url: `http://127.0.0.1:${address.port}/sse`, headers: { 'X-AgentVault-Binding': 'BIND_LEGACY' },
+      } },
+      process.cwd(), (value) => guidance.push(value),
+    );
+    managers.push(manager);
+    const tools = await manager.tools();
+    denyPosts = true;
+    await expect(execute(tools, 'mcp__Legacy__remote_echo', {})).rejects.toThrow('service_disabled');
+    expect(guidance).toHaveLength(1);
+    expect(guidance[0]).toContain('Ask the user to enable this service.');
+    expect(seenBindings.length).toBeGreaterThan(1);
+    expect(seenBindings.every((binding) => binding === 'BIND_LEGACY')).toBe(true);
   });
 
   it('isolates a failed server and enforces per-server timeouts', async () => {

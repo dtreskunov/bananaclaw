@@ -180,7 +180,11 @@ async function languageModel(model: NativeModel) {
  * MCP tools. The MCP client SDK plus its four transports costs ~19MB resident
  * and most native groups configure no external servers at all.
  */
-function lazyMcpManager(servers: Record<string, McpServerConfig> | undefined, cwd: string) {
+function lazyMcpManager(
+  servers: Record<string, McpServerConfig> | undefined,
+  cwd: string,
+  onBrokerGuidance: (guidance: string) => void,
+) {
   const configured = servers && Object.keys(servers).length > 0 ? servers : null;
   let instance: Promise<import('./native/mcp-client.js').NativeMcpManager> | null = null;
   let closed = false;
@@ -191,7 +195,7 @@ function lazyMcpManager(servers: Record<string, McpServerConfig> | undefined, cw
       if (!configured) return [];
       if (closed) throw new Error('MCP manager is closed');
       instance ??= import('./native/mcp-client.js').then(({ NativeMcpManager }) =>
-        new NativeMcpManager(configured, cwd));
+        new NativeMcpManager(configured, cwd, onBrokerGuidance));
       return (await instance).entries(signal, serverNames, strict);
     },
     async close(): Promise<void> {
@@ -286,7 +290,13 @@ export class NativeProvider implements AgentProvider {
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
-    const mcpManager = lazyMcpManager(options.mcpServers, input.cwd);
+    const seenBrokerGuidance = new Set<string>();
+    const pendingBrokerGuidance = new Set<string>();
+    const mcpManager = lazyMcpManager(options.mcpServers, input.cwd, (guidance) => {
+      if (!active || seenBrokerGuidance.has(guidance)) return;
+      seenBrokerGuidance.add(guidance);
+      pendingBrokerGuidance.add(guidance);
+    });
     const toolSearchMode = mcpToolSearchMode(options.modelParams?.mcp_tool_search);
     let loggedDeferral = false;
     let lazyMcpTools: DeferredMcpTools | null = null;
@@ -316,6 +326,8 @@ export class NativeProvider implements AgentProvider {
 
             const turn = pending.shift()!;
             active = true;
+            seenBrokerGuidance.clear();
+            pendingBrokerGuidance.clear();
             const startedAt = Date.now();
             const callUsages: CallUsage[] = [];
             function* flushCallUsage(): Generator<ProviderEvent> {
@@ -503,8 +515,9 @@ export class NativeProvider implements AgentProvider {
                   yield* compactContext(compactionPolicy.recover('media'));
                 yield* maybeCompactContext();
                 toolMediaPressure = false;
-                const stepNudge: string | null = nudge;
+                const stepNudge: string | null = [nudge, ...pendingBrokerGuidance].filter(Boolean).join('\n\n') || null;
                 nudge = null;
+                pendingBrokerGuidance.clear();
                 const tools = wrappingUp ? {} : stepTools();
                 yield { type: 'model_request' };
                 const result = streamText({
