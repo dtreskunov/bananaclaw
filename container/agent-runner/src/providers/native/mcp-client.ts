@@ -191,21 +191,18 @@ export class NativeMcpManager {
     } catch (error) {
       if (!(error instanceof SyntaxError || error instanceof RangeError || error instanceof TypeError ||
         error instanceof DOMException && error.name === 'AbortError')) throw error;
-      console.error(`[native-mcp] Could not read broker guidance for ${serverName}: ${
-        error instanceof RangeError ? error.message : error.name
-      }`);
+      console.error(`[native-mcp] Could not read broker guidance for ${serverName}: ${error.name}`);
       return;
     }
     if (!body || typeof body !== 'object' || !('error' in body) || typeof body.error !== 'string') {
       console.error(`[native-mcp] Invalid broker guidance for ${serverName}: expected an error object`);
       return;
     }
-    const diagnostic: Record<string, unknown> = { server: serverName, status: response.status, error: body.error };
-    if ('message' in body && typeof body.message === 'string') diagnostic.message = body.message;
-    if ('help' in body && typeof body.help === 'string') diagnostic.help = body.help;
-    if ('proposal_hint' in body && body.proposal_hint && typeof body.proposal_hint === 'object' &&
-      !Array.isArray(body.proposal_hint)) diagnostic.proposal_hint = body.proposal_hint;
-    const guidance = JSON.stringify(diagnostic, (_key, value: unknown) =>
+    const fields = Object.fromEntries(Object.entries(body).filter(([key, value]) =>
+      key === 'proposal_hint'
+        ? value !== null && typeof value === 'object' && !Array.isArray(value)
+        : ['error', 'message', 'help'].includes(key) && typeof value === 'string'));
+    const guidance = JSON.stringify({ server: serverName, status: response.status, ...fields }, (_key, value: unknown) =>
       typeof value === 'string' ? redactDiagnostic(value) : value);
     this.onBrokerGuidance(
       'Agent Vault broker guidance: the following diagnostic reports an MCP request failure. ' +

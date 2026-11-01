@@ -332,6 +332,83 @@ describe('assisted access approvals', () => {
     expect(mocks.grant).not.toHaveBeenCalled();
     expect(getDb().pragma('foreign_key_check')).toEqual([]);
   });
+  it('matches a named query-key MCP endpoint without the credential query and deduplicates trailing slashes', async () => {
+    getDb()
+      .prepare('UPDATE container_configs SET mcp_servers=? WHERE agent_group_id=?')
+      .run(
+        JSON.stringify({
+          tavily: { type: 'http', url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=__TAVILY_API_KEY__' },
+        }),
+        session.agent_group_id,
+      );
+    const request = {
+      resource_url: 'https://mcp.tavily.com/mcp',
+      reason: 'Research BedJet 3.',
+      mcp_server: 'tavily',
+      authentication: { type: 'api-key', location: 'query', parameter: 'tavilyApiKey' },
+    };
+    for (const [index, resource_url] of [request.resource_url, `${request.resource_url}/`].entries()) {
+      await getDeliveryAction('request_access')!(
+        { action: 'request_access', requestId: `appr-access-tavily-${index}`, ...request, resource_url },
+        session,
+        getDb(),
+      );
+    }
+    expect(accessRequestStatus('appr-access-tavily-0')).toMatchObject({
+      status: 'pending',
+      resource_url: 'https://mcp.tavily.com/mcp/',
+    });
+    expect(accessRequestStatus('appr-access-tavily-1').request_id).toBe('appr-access-tavily-0');
+    expect([...mocks.messages.values()]).toEqual([
+      expect.objectContaining({ content: expect.stringContaining('review the pending approval') }),
+    ]);
+    expect(mocks.grant).not.toHaveBeenCalled();
+    connection.services = [
+      {
+        name: 'tavily',
+        host: 'mcp.tavily.com:443',
+        path: '/mcp/*',
+        https_only: true,
+        auth: { type: 'api-key', location: 'query', parameter: 'tavilyApiKey', key: 'TAVILY_API_KEY' },
+      },
+    ];
+    await applyAccessRequest('alice', 'appr-access-tavily-0', {
+      ...selection(),
+      configure_mcp: true,
+      mcp_server: 'tavily',
+      account_alias: 'Research',
+      config_revision: (await previewAccessRequest('alice', 'appr-access-tavily-0', connection.id)).mcp.revision,
+    });
+    const config = getDb()
+      .prepare('SELECT mcp_servers FROM container_configs WHERE agent_group_id=?')
+      .get(session.agent_group_id) as { mcp_servers: string };
+    expect(JSON.parse(config.mcp_servers).tavily).toMatchObject({
+      url: 'https://mcp.tavily.com/mcp/',
+      authentication: { connection_id: connection.id, account_alias: 'Research' },
+    });
+  });
+  it.each(['https://other.example.com/mcp/', 'https://mcp.tavily.com/other/', 'https://mcp.tavily.com/MCP/'])(
+    'rejects a genuinely different named MCP endpoint: %s',
+    async (resource_url) => {
+      getDb()
+        .prepare('UPDATE container_configs SET mcp_servers=? WHERE agent_group_id=?')
+        .run(
+          JSON.stringify({
+            tavily: { type: 'http', url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=__TAVILY_API_KEY__' },
+          }),
+          session.agent_group_id,
+        );
+      await expect(
+        requestAccess(session, {
+          resource_url,
+          reason: 'Research.',
+          mcp_server: 'tavily',
+        }),
+      ).rejects.toThrow('no longer matches');
+      expect(getDb().prepare('SELECT COUNT(*) n FROM pending_approvals').get()).toEqual({ n: 0 });
+      expect(mocks.grant).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     { ...input, owner: 'someone' },
     { ...input, token: 'value' },

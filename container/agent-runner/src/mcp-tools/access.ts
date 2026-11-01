@@ -6,13 +6,13 @@ import type { McpToolDefinition } from './types.js';
 export const requestAccess: McpToolDefinition = {
   tool: {
     name: 'request_access',
-    description: 'Request user-assisted access to an HTTPS service through Credentials (OAuth or static key). The user privately chooses a connection and grants this agent access. No secrets, owner IDs, credential IDs or admin commands. Returns immediately; wait for the host completion message rather than probing token endpoints, searching for credentials or creating a poller. Requested scopes are suggestions requiring user review.',
+    description: 'Request user-assisted access to an HTTPS service through Credentials (OAuth or static key). If no compatible ready account exists, the user first completes account setup: the host reports only setup metadata, not an access grant. Verify that metadata, then submit a separate request_access if access is still needed. A ready account whose agent grant is disabled needs access approval, not account creation. Supply exact documented scopes needed for the task. These are minimum requirements; an access grant allows all enabled permissions on the selected account, not a per-agent subset. No secrets, owner IDs, credential IDs or admin commands. Returns immediately; wait for the host completion message rather than probing token endpoints, searching for credentials or creating a poller.',
     inputSchema: {
       type: 'object',
       properties: {
         resource_url: { type: 'string', description: 'Exact HTTPS destination without credentials, query, fragment or wildcards.' },
         reason: { type: 'string', description: 'Why access is needed for the current request. Never include secret values.' },
-        scopes: { type: 'array', items: { type: 'string' }, description: 'Optional scope suggestions reviewed during sign-in. No access is granted automatically.' },
+        scopes: { type: 'array', items: { type: 'string' }, description: 'Documented OAuth permissions only. Omit for API-key, Basic and custom-header authentication; describe required capabilities in reason instead. Sign-in requests these permissions, and ready accounts must have every scope in their provider-reported grants to match. If omitted, the user chooses permissions before sign-in. Account setup does not grant agent access.' },
         mcp_server: { type: 'string', description: 'Exact already-configured MCP server name when requesting its account connection. For a new server, wait until add_mcp_server is approved and the automatic restart completes; never request access while addition is pending. Never select all servers by URL.' },
         authentication: { type: 'object', additionalProperties: false,
           description: 'Optional researched authentication requirements, reviewed by the user. No tokens, passwords, client secrets, owner IDs or connection IDs. OAuth permissions go in scopes.',
@@ -37,6 +37,10 @@ export const requestAccess: McpToolDefinition = {
       Object.entries(hint).some(([key, value]) => ['type', 'app_id', 'header', 'prefix', 'location', 'parameter'].includes(key) && typeof value !== 'string') ||
       ('headers' in hint && (!Array.isArray(hint.headers) || hint.headers.some(header => typeof header !== 'string'))))) {
       return { isError: true, content: [{ type: 'text', text: 'Authentication suggestions may contain only mechanism, OAuth app ID, header/query names and a public header prefix. Never supply credential values.' }] };
+    }
+    if (Array.isArray(args.scopes) && args.scopes.length && hint && 'type' in hint &&
+      !['mcp_oauth', 'oauth_app', 'bearer'].includes(String(hint.type))) {
+      return { isError: true, content: [{ type: 'text', text: 'scopes contains OAuth permissions only. Omit scopes for API-key, Basic or custom-header authentication; describe required capabilities in reason.' }] };
     }
     const url = typeof args.resource_url === 'string' ? URL.parse(args.resource_url) : null;
     if (!url || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||

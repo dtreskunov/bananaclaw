@@ -175,7 +175,8 @@ export async function requestAccess(
   if (getContainerConfig(session.agent_group_id)?.cli_scope === 'disabled')
     throw new ConnectionInputError('Access requests are disabled for this agent.', 403);
   const input = accessRequestInput(raw);
-  if (input.mcp_server) mcpConfiguration(session.agent_group_id, input.resource_url, input.mcp_server);
+  if (input.mcp_server)
+    input.resource_url = mcpConfiguration(session.agent_group_id, input.resource_url, input.mcp_server).resourceUrl;
   const inbound = openInboundDb(session.agent_group_id, session.id);
   let origin: { id: string; sender_user_id: string } | undefined;
   try {
@@ -269,17 +270,19 @@ function mcpConfiguration(groupId: string, resource: string, target?: string) {
   const row = getContainerConfig(groupId);
   if (!row) throw new ConnectionInputError('Agent configuration no longer exists.', 409);
   const servers = JSON.parse(row.mcp_servers) as Record<string, McpServerConfig>;
-  const names = Object.entries(servers)
-    .filter(([name, server]) => {
-      if (target && name !== target) return false;
-      if (!('url' in server)) return false;
-      const url = URL.parse(server.url);
-      return url?.href === resource;
-    })
-    .map(([name]) => name);
+  const endpoints = Object.entries(servers).flatMap(([name, server]) => {
+    if ((target && name !== target) || !('url' in server)) return [];
+    const url = URL.parse(server.url);
+    if (!url || url.protocol !== 'https:' || url.username || url.password || url.hash) return [];
+    url.search = '';
+    if (url.href.replace(/\/+$/, '') !== resource.replace(/\/+$/, '')) return [];
+    return [{ name, resourceUrl: url.href }];
+  });
+  const names = endpoints.map(({ name }) => name);
   if (target && !names.includes(target))
     throw new ConnectionInputError('The named MCP server no longer matches the requested endpoint.', 409);
   return {
+    resourceUrl: endpoints.find(({ name }) => name === target)?.resourceUrl ?? resource,
     names,
     configured: Object.fromEntries(
       names.map((name) => [name, 'authentication' in servers[name] ? servers[name].authentication : undefined]),
@@ -453,6 +456,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
       if (!('url' in server)) throw new ConnectionInputError('Named MCP transport changed.', 409);
       servers[serverName] = {
         ...server,
+        url: preview.request.resource_url,
         authentication,
         headers: Object.fromEntries(
           Object.entries(server.headers ?? {}).filter(

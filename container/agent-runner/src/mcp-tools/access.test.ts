@@ -28,6 +28,19 @@ describe('request_access MCP tool', () => {
       reason: 'Finish the report.',
     });
   });
+  it.each([
+    { type: 'api-key', location: 'query', parameter: 'tavilyApiKey' },
+    { type: 'basic' },
+    { type: 'custom', headers: ['X-Key'] },
+  ])('rejects OAuth scope suggestions for $type before submitting a host action', async (authentication) => {
+    const result = await requestAccess.handler({
+      resource_url: 'https://mcp.tavily.com/mcp/', reason: 'Research BedJet 3.',
+      authentication, scopes: ['search', 'extract'],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Omit scopes');
+    expect(getUndeliveredMessages()).toEqual([]);
+  });
   it('carries only the named server target, not a credential or binding selector', async () => {
     const result = await requestAccess.handler({ resource_url: 'https://api.example.com/mcp', reason: 'Read personal mail.', mcp_server: 'gmail_personal' });
     expect(result.isError).not.toBe(true);

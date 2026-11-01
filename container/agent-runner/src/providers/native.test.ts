@@ -1907,20 +1907,32 @@ describe('NativeProvider', () => {
       message.content.includes('Agent Vault broker guidance:') ? [message.content] : []);
   }
 
-  it('injects broker discovery guidance once per turn, without persisting it as input', async () => {
-    const help = `${'Broker-defined recovery guidance. '.repeat(20)}GET http://127.0.0.1:14321/discover`;
+  function brokerFixture(body: object, callOnly = false, toolSearch = 'always') {
     const web = Bun.serve({
       port: 0,
-      fetch() {
-        return Response.json({ error: 'service_disabled', message: 'Remote is disabled for this vault.', help }, {
-          status: 403, headers: { 'X-Agent-Vault-Proxy-Error': 'true' },
-        });
+      async fetch(request) {
+        const message = request.method === 'POST' ? await request.clone().json() as { method?: string } : undefined;
+        if (!callOnly || message?.method === 'tools/call')
+          return Response.json(body, { status: 403, headers: { 'X-Agent-Vault-Proxy-Error': 'true' } });
+        const instance = new McpServer({ name: 'broker-fixture', version: '1.0.0' }, { capabilities: { tools: {} } });
+        instance.setRequestHandler(ListToolsRequestSchema, async () => ({
+          tools: [{ name: 'remote_echo', inputSchema: { type: 'object', properties: {} } }],
+        }));
+        const transport = new WebStandardStreamableHTTPServerTransport();
+        await instance.connect(transport);
+        return transport.handleRequest(request);
       },
     });
     const provider = new NativeProvider({
-      model: 'local/test-model',
+      model: 'local/test-model', modelParams: { mcp_tool_search: toolSearch },
       mcpServers: { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
     });
+    return { web, provider };
+  }
+
+  it('injects broker discovery guidance once per turn, without persisting it as input', async () => {
+    const help = `${'Broker-defined recovery guidance. '.repeat(20)}GET http://127.0.0.1:14321/discover`;
+    const { web, provider } = brokerFixture({ error: 'service_disabled', message: 'Remote is disabled for this vault.', help });
     const query = provider.query({ prompt: 'hello', cwd: root });
     scriptedToolCalls = [
       ['tool_search', '{"query":"web search"}'],
@@ -1960,19 +1972,10 @@ describe('NativeProvider', () => {
   });
 
   it('includes eager discovery broker guidance in the first model step', async () => {
-    const web = Bun.serve({
-      port: 0,
-      fetch() {
-        return Response.json({ error: 'credential_not_found', message: 'Ask the user to provide the credential.' }, {
-          status: 502, headers: { 'X-Agent-Vault-Proxy-Error': 'true' },
-        });
-      },
-    });
+    const { web, provider } = brokerFixture(
+      { error: 'credential_not_found', message: 'Ask the user to provide the credential.' }, false, 'never');
     try {
-      const events = await collect(new NativeProvider({
-        model: 'local/test-model', modelParams: { mcp_tool_search: 'never' },
-        mcpServers: { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
-      }));
+      const events = await collect(provider);
       expect(requests).toHaveLength(1);
       expect(brokerNudges(0)).toHaveLength(1);
       expect(brokerNudges(0)[0]).toContain('Ask the user to provide the credential.');
@@ -1983,33 +1986,14 @@ describe('NativeProvider', () => {
   });
 
   it('injects broker tool-call guidance before the next model step and retains the tool failure', async () => {
-    const web = Bun.serve({
-      port: 0,
-      async fetch(request) {
-        const message = request.method === 'POST' ? await request.clone().json() as { method?: string } : undefined;
-        if (message?.method === 'tools/call') {
-          return Response.json({ error: 'oauth_refresh_failed', help: 'Reconnect the account before retrying.' }, {
-            status: 502, headers: { 'X-Agent-Vault-Proxy-Error': 'true' },
-          });
-        }
-        const instance = new McpServer({ name: 'broker-fixture', version: '1.0.0' }, { capabilities: { tools: {} } });
-        instance.setRequestHandler(ListToolsRequestSchema, async () => ({
-          tools: [{ name: 'remote_echo', inputSchema: { type: 'object', properties: {} } }],
-        }));
-        const transport = new WebStandardStreamableHTTPServerTransport();
-        await instance.connect(transport);
-        return transport.handleRequest(request);
-      },
-    });
+    const { web, provider } = brokerFixture(
+      { error: 'oauth_refresh_failed', help: 'Reconnect the account before retrying.' }, true);
     try {
       scriptedToolCalls = [
         ['tool_search', '{"query":"remote echo","server":"Remote"}'],
         ['mcp__Remote__remote_echo', '{}'],
       ];
-      const events = await collect(new NativeProvider({
-        model: 'local/test-model',
-        mcpServers: { Remote: { type: 'http', url: `http://127.0.0.1:${web.port}/mcp` } },
-      }));
+      const events = await collect(provider);
       expect(requests).toHaveLength(3);
       expect(brokerNudges(0)).toEqual([]);
       expect(brokerNudges(1)).toEqual([]);

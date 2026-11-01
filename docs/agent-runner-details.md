@@ -589,6 +589,13 @@ Diagnostic bodies are limited to 16 KiB; malformed or oversized bodies are
 logged without replacing the original error. URL credentials, queries,
 fragments, and bearer values are redacted from guidance.
 
+`request_access` rejects OAuth scopes paired with non-OAuth authentication in
+the tool result, before submitting a host action. Named MCP access requests
+match the configured HTTPS endpoint without its credential query or trailing
+slash, preserving host and case-sensitive path identity. The request records
+the configured public path; only an explicit approved MCP binding replaces
+the legacy credential-query URL with that public endpoint.
+
 Runner logs report native preparation time split into model setup, input
 preparation, and eager MCP discovery, plus per-server connection and complete
 paginated `tools/list` timings. These diagnostics contain server names, counts,
