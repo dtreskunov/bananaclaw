@@ -150,16 +150,16 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
       if (error instanceof Error && 'status' in error && (error.status === 412 || error.status === 409)) setStale(true);
     } finally { setBusy(false); }
   }
-  return <CredentialDialog title={connection ? `Edit ${connectionName(connection)}` : 'Add credential'} onClose={onClose} busy={busy} footer={<>
+  return <CredentialDialog title={connection ? `Edit ${connectionName(connection)} account` : accessRequest?.mcp_server ? `Add an account for ${accessRequest.mcp_server} tools` : 'Add an account'} onClose={onClose} busy={busy} footer={<>
     <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
     <button type="submit" form="personal-connection" class="primary" disabled={!canSave}>
       {busy ? creatingOAuth ? 'Starting…' : 'Saving…' : creatingOAuth ? oauthDraft ? 'Retry sign-in' : 'Start sign-in' : 'Save'}
     </button>
   </>}>
     <form id="personal-connection" onSubmit={save}>
-      <input type="text" class="credential-name-input" aria-label="Credential name" placeholder="Credential name" value={label} disabled={busy || !!oauthDraft}
+      <input type="text" class="credential-name-input" aria-label="Account name" placeholder="Account name" value={label} disabled={busy || !!oauthDraft}
         onInput={(event) => { setLabel(event.currentTarget.value); setAutomaticName(false); }} />
-      {!connection ? <Field label="Credential type"><select aria-label="Credential type" value={kind} disabled={busy || !!oauthDraft}
+      {!connection ? <Field label="Sign-in method"><select aria-label="Account type" value={kind} disabled={busy || !!oauthDraft}
         onChange={(event) => {
           const next = event.currentTarget.value;
           if (next !== 'static' && next !== 'mcp_oauth' && next !== 'oauth_app') { showToast('Choose a credential type.', 'err'); return; }
@@ -168,7 +168,7 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
           setUnspecifiedScopes(false);
           if (automaticName) setLabel(next === 'oauth_app' ? apps.find((app) => app.id === appId)?.label ?? '' : hostnameFromPattern(routes[0].pattern));
         }}>
-        <option value="static">Key</option><option value="mcp_oauth">MCP server OAuth</option><option value="oauth_app">OAuth app</option>
+        <option value="static">Key</option><option value="mcp_oauth">Tools sign-in</option><option value="oauth_app">App sign-in</option>
       </select></Field> : null}
       {creatingOAuth ? <>
         <OAuthFields kind={kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth'} apps={apps} appId={appId}
@@ -233,16 +233,16 @@ function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, b
   selectDiscovered?: boolean;
 }): JSX.Element {
   return <>
-    {kind === 'mcp_oauth' ? <Field label="URL pattern"><input ref={firstInput} type="text" aria-label="URL pattern"
+    {kind === 'mcp_oauth' ? <Field label="Tools website"><input ref={firstInput} type="text" aria-label="Tools website"
       value={resource} disabled={busy} placeholder="https://mcp.example.com/mcp" spellcheck={false}
       onInput={(event) => onResource(event.currentTarget.value)} /></Field> : null}
-    <Field label="OAuth app"><select aria-label="OAuth app" value={appId} disabled={busy}
+    <Field label="Sign-in app"><select aria-label="Sign-in app" value={appId} disabled={busy}
       onChange={(event) => onApp(event.currentTarget.value)}>
-      <option value="">{kind === 'mcp_oauth' ? 'Automatic discovery / dynamic registration' : 'Select a configured app'}</option>
+      <option value="">{kind === 'mcp_oauth' ? 'Choose automatically' : 'Choose an app'}</option>
       {apps.map((app) => <option key={`${app.source}:${app.id}`} value={app.id}>{app.label} · {app.source === 'user' ? 'Personal' : 'Install'}</option>)}
     </select></Field>
     {kind === 'oauth_app' && !apps.length ? <p>Configure an app in the OAuth apps section first.</p> : null}
-    <OAuthScopePicker resource={kind === 'mcp_oauth' ? resource : undefined} appId={appId}
+    <OAuthScopePicker label="Permissions" resource={kind === 'mcp_oauth' ? resource : undefined} appId={appId}
       configured={apps.find(app => app.id === appId)?.default_scopes ?? []}
       value={scopes} onChange={onScopes} disabled={busy} unspecified={unspecifiedScopes} onUnspecified={onUnspecifiedScopes}
       selectDiscovered={selectDiscovered} />

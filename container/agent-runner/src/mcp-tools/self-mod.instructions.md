@@ -23,20 +23,46 @@ that genuinely are system packages (codecs, fonts, native libraries, daemons).
 
 ### MCP servers (`add_mcp_server`)
 
-Use **`add_mcp_server`** to add an MCP server to your configuration. Browse available servers at https://mcp.so — it's a curated directory of high-quality MCP servers. Most Node.js servers run via `pnpm dlx`, e.g.:
+Use **`add_mcp_server`** for both stdio and remote HTTP/SSE servers in your
+own configuration. It is the only agent-facing MCP addition operation;
+`ncl groups config add-mcp-server` is host-only, even with global CLI scope.
+You cannot use this tool to change another agent's configuration.
+
+Discover existing servers at the official MCP Registry
+(https://registry.modelcontextprotocol.io/) or https://mcp.so. Catalog entries
+are discovery hints, not permission to install or proof of trust. Verify the
+publisher's documentation for the exact command or endpoint, transport and
+authentication requirements; do not guess endpoint or OAuth paths.
+
+Examples:
 
 ```
 add_mcp_server({ name: "memory", command: "pnpm", args: ["dlx", "@modelcontextprotocol/server-memory"] })
+add_mcp_server({ name: "example", url: "https://mcp.example.com/mcp", transport: "http" })
 ```
 
 Never ask for raw credentials in chat or fabricate credential setup instructions.
-After installation and the deferred restart, load `/agent-vault` for the
-credential flow before verifying the server.
+Only use documented nonsecret headers and environment settings or existing
+approved credential placeholders. Do not construct authentication or binding
+headers. Optional `instructions` and `timeout` (1000–600000 milliseconds) are
+supported for either transport.
 
-Use `request_access` with
-the exact HTTPS resource, purpose and remote `mcp_server` name when access is
-missing. The user privately selects/connects a credential and approves this
-agent's grant. Wait for the host's completion message before retrying.
+1. Submit the addition **once**. Submission is not approval or installation.
+2. Tell the user approval is pending and **finish the turn**. Do not poll,
+   resubmit, switch to the CLI, or manually restart to work around a pending
+   approval. The host notifies you when an admin approves or rejects.
+3. On approval, the host applies the configuration and automatically restarts
+   your container after the active response finishes. No image rebuild is
+   needed for MCP wiring.
+4. **Only after approval and restart**, load `/agent-vault` and request missing
+   credentials with `request_access`: exact HTTPS destination, purpose and
+   configured remote `mcp_server` name. Never request named-server access while
+   its addition is pending; it is not configured yet.
+5. If access is requested, finish that turn and wait for the host's completion
+   message before verifying the server's tools and reporting the result.
+
+Rejection ends the setup unless the user asks again.
+The user privately selects/connects a credential and approves this agent's grant.
 Preserve host-managed `av-access:<handle>` / `av-refresh:<handle>` stubs and
 connection references; never invent credential values or replace these with
 invented sentinels. Do not reconnect an operator-removed account unless asked.

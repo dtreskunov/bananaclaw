@@ -27,39 +27,40 @@ export function McpConnectionAccess({ gid, resourceUrl, onOpenCredentials, authe
     .map((service) => ({ grant, service }))) ?? [];
   const choices = [...new Map(matches.map(item => [item.grant.connection_id, item.grant])).values()];
   return <div class="ga-cred-mcp-auth">
-    <span class="ga-mcp-row-label">Connection access</span>
-    {loading ? <span class="muted">Loading granted bindings…</span> : null}
+    <span class="ga-mcp-row-label">Account</span>
+    {loading ? <span class="muted">Loading available accounts…</span> : null}
     <ErrorNotice message={error} />
     {onAuthenticationChange && !loading && !error ? <>
-      <label>Credential connection
-        <select class="ga-mcp-input" disabled={disabled} aria-label={`Credential connection for ${serverName ?? 'MCP server'}`} value={authentication?.connection_id ?? ''}
+      {choices.length ? (
+        <select class="ga-mcp-input" disabled={disabled} aria-label={`Account for ${serverName ? `${serverName} tools` : 'these tools'}`} value={authentication?.connection_id ?? ''}
           onChange={event => {
             const selected = choices.find(choice => choice.connection_id === event.currentTarget.value);
             onAuthenticationChange(selected ? { connection_id: selected.connection_id,
               account_alias: authentication?.account_alias || serverName || 'Account' } : undefined);
           }}>
-          <option value="">Automatic destination matching (no pinned account)</option>
+          <option value="">Choose an account automatically</option>
           {authentication && !choices.some(choice => choice.connection_id === authentication.connection_id)
-            ? <option value={authentication.connection_id}>Configured connection — unavailable in your personal grants</option> : null}
+            ? <option value={authentication.connection_id}>Saved account — not available to this agent</option> : null}
           {choices.map(choice => <option key={choice.connection_id} value={choice.connection_id} disabled={choice.status !== 'active'}>
             {choice.label}{choice.status === 'active' ? '' : ` (${choice.status})`}
           </option>)}
         </select>
-      </label>
-      {authentication ? <label>Account alias
-        <input class="ga-mcp-input" disabled={disabled} aria-label={`Account alias for ${serverName ?? 'MCP server'}`} value={authentication.account_alias} maxLength={80}
+      ) : null}
+      {authentication && !choices.length
+        ? <p class="muted">Your saved account is not available to this agent.</p> : null}
+      {authentication ? <label>Name for this account in these tools
+        <input class="ga-mcp-input" disabled={disabled} aria-label={`Account name for ${serverName ? `${serverName} tools` : 'these tools'}`} value={authentication.account_alias} maxLength={80}
           onInput={event => onAuthenticationChange({ ...authentication, account_alias: event.currentTarget.value })} />
-        <span class="muted">Shown to the agent to distinguish accounts. The host manages the binding header; this reference does not grant access.</span>
+        <span class="muted">Helps the agent tell your accounts apart. Selecting an account does not give the agent permission to use it.</span>
       </label> : null}
     </> : null}
     {error ? <button type="button" onClick={() => void refresh()}>Retry access</button> : null}
     {!loading && !error ? matches.length ? <ul>{matches.map(({ grant, service }) =>
       <li key={`${grant.connection_id}:${service.name}`}>{grant.label} / {service.name} · {grant.status}
         {' · Owner: '}{grant.owner.label ?? grant.owner.id}{service.enabled === false ? ' · service disabled' : ''}</li>)}</ul>
-      : <span class="muted">No matching granted service. Public servers may not need authentication.</span> : null}
+      : <span class="muted">No matching account is available to this agent. Some tools do not need an account.</span> : null}
     <button type="button" disabled={loading || !!error} onClick={() => onOpenCredentials(!matches.length, matches.length === 1 ? matches[0].grant.connection_id : undefined)}>
-      {matches.length ? 'Manage personal connections' : 'Connect in personal Credentials'}
+      {matches.length ? 'Manage your accounts' : 'Add an account'}
     </button>
-    <span class="muted">Connect once as yourself, then grant services in Agent Settings → Credentials. No group-owned sign-in is created here.</span>
   </div>;
 }

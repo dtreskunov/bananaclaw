@@ -758,11 +758,13 @@ time across settlement. Generated fixture assets are ignored and rebuilt from
 **Credential UI (plan of record, revision 7):** the account menu includes
 **My Credentials** immediately after **My Profile**, opening the user-scoped
 review and management dialog. Agent `request_access` requests appear in the
-requesting conversation as transcript approval bubbles with **Review access / Reject**. Review
-opens this same private Credentials dialog, prefilled with the exact destination
-and purpose. The user chooses an existing connection or uses the unified Add
-credential form (key, MCP OAuth or configured OAuth app), then confirms the
-recipient and full current/future connection access. New credentials and OAuth
+requesting conversation as interactive transcript approval bubbles. Account
+selection, access review and **Allow access / Decline** use the same message
+bubble and approval-card framing as other approvals; there is no second review
+screen. Existing private `?access_request=…#credentials` links redirect to the
+requesting chat without applying access. Account creation and sign-in reuse the
+existing private account dialogs, prefilled with the exact destination and purpose.
+Adding or signing in to an account is not approval. New credentials and OAuth
 apps initially select all discovered scopes, retaining additional suggested or
 custom values. Saved selections, explicit provider-default choices and manual
 edits are not expanded by discovery. Signing in does not grant access.
@@ -791,11 +793,27 @@ IDs and connection bindings are preserved when names change.
 The access review uses **Account** and **Allow access**, without an additional
 confirmation checkbox or permission notice. The explicit button click remains
 the authorization step; compatibility, readiness and exact revision checks still
-apply. The destination host and recipient stay visible; the full agent reason,
-URLs, authentication and scope metadata are under **Details**. Named MCP setup
-uses **Use for \<server\>**, with restart information, and hides a fixed server
-selector. **Customize name** optionally overrides the selected credential's
-display name (or its existing nickname for that same connection).
+apply. The recipient and explanation are shown like a normal message. **Tools** and
+**Account** labels distinguish a tool connection from a saved account, even when
+their names match; account identity and readiness are displayed beside radio choices.
+**More information** is always visible and includes the exact website, sign-in
+requirements and permission metadata. There is no extra permission-notice section.
+**Use this account with \<name\> tools** remains an explicit configuration choice:
+unchecked grants access only; checked also assigns that account to the named tools
+and schedules a restart. A plain-language summary explains the choice before
+approval. The account nickname is editable without a disclosure. Fixed tool names
+do not show a selector, and revision/readiness checks still gate approval.
+Visible MCP-server terminology is now **Tools** across agent settings, account
+screens, approval cards and activity labels; underlying tab IDs, configuration
+keys, protocol values and API routes are unchanged.
+In Tools settings, switching type preserves command-based and web settings
+separately while the panel is open; HTTP and SSE share their web settings.
+Only the selected type is saved. Switching tools or closing the mobile editor
+does not discard these drafts, while removing a tool clears its saved drafts.
+The add-tools form likewise preserves its command and website across type
+changes. The **Account** section omits the selector when no accounts match,
+keeps unavailable saved accounts explicit, and uses **Add an account**.
+Removal buttons and confirmations name the selected tools.
 `request_access` also accepts an optional nonsecret `authentication` suggestion:
 `{type: "mcp_oauth"}` or `{type: "oauth_app", app_id: "google"}`, with desired
 OAuth permissions in the separate `scopes` array; static examples include

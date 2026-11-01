@@ -21,6 +21,19 @@ the approval handler itself — there is no separate "request rebuild" step.
     No image rebuild — bun runs TS directly, so the new MCP wiring is
     picked up on the next container start.
 
+`add_mcp_server` is the only agent-facing addition operation for stdio,
+HTTP and SSE. It only modifies the requesting agent's configuration.
+The host/admin CLI remains available, but agents cannot invoke its addition
+command, even with global CLI scope; help omits that host-only verb.
+Both paths use `src/mcp-server-config.ts` for validation, merging and updates.
+Native additions preserve unrelated servers and existing compatible metadata;
+headers are not carried to a changed endpoint.
+
+Submission is not installation. Instructions direct the agent to submit once
+and finish the turn, then request missing named-server credentials only after
+approval and restart. Catalog discovery points to the MCP Registry and mcp.so,
+with publisher documentation required before submission.
+
 ## Dependency
 
 Self-mod depends on the approvals default module for:

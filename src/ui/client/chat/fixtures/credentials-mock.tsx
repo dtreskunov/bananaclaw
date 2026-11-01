@@ -81,6 +81,10 @@ export function resetState(): void {
     nextcloud: { type: 'http', url: 'https://nextcloud.example.org/mcp/tools' },
     new_server: { type: 'http', url: 'https://new.example.com/mcp' },
   };
+  if (new URLSearchParams(location.search).has('same_names')) {
+    const account = connections.find(item => item.id === 'mcp-account');
+    if (account) account.label = 'browser';
+  }
   if (new URLSearchParams(location.search).has('dual_accounts')) {
     mcpServers.browser_work = { type: 'http', url: 'https://mcp.example.com/mcp',
       authentication: { connection_id: 'other-account', account_alias: 'Work' } };
@@ -133,6 +137,7 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
     const authentication = params.has('request_auth') ? parseAccessAuthentication(JSON.parse(params.get('request_auth')!)) : undefined;
     const scopes: string[] | undefined = params.has('request_scopes') ? JSON.parse(params.get('request_scopes')!) : undefined;
     const request = { request_id: 'fixture-access', status: accessStage, resource_url: resource,
+      origin: { agentGroupId: FIXTURE_GROUP.id, threadId: 'fixture-thread', channelType: 'web', messagingGroupId: 'fixture-web' },
       authentication, scopes, mcp_server: params.get('request_server') || undefined,
       reason: 'Finish the requested report.', revision: accessRevision, agent_group_id: FIXTURE_GROUP.id, agent_group_name: FIXTURE_GROUP.name,
       result: accessStage === 'completed' ? { message: 'Access granted. The agent will safely verify the original operation.' } :

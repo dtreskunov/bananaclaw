@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 import { ApprovalBubble } from './ApprovalBubble';
 import { ApprovalCard } from './ApprovalCard';
+import { AccessRequestCard } from './AccessRequestCard';
+import { groupId, threadId, channelType } from '../state';
 import { MessageBubble } from './MessageBubble';
 import type { PendingApprovalDto } from '../types';
 
@@ -30,5 +32,63 @@ describe('shared approval bubble chrome', () => {
     const node = ApprovalBubble({ approval: resolved, busy: false, onReview: vi.fn(), onRespond: vi.fn() });
     expect(node.props.timestamp).toBe(resolved.resolvedAt);
     expect(node.props.from).toBe('Research agent');
+  });
+  it.each(['pending', 'applying', 'failed'] as const)(
+    'renders access controls in the requesting transcript for status=%s',
+    (status) => {
+      groupId.value = 'agent';
+      threadId.value = 'requesting-thread';
+      channelType.value = 'web';
+      const access = {
+        ...approval,
+        action: 'request_access',
+        reviewRequired: true,
+        status,
+        origin: {
+          agentGroupId: 'agent',
+          threadId: 'requesting-thread',
+          channelType: 'web',
+          messagingGroupId: 'web-agent',
+        },
+      };
+      const node = ApprovalBubble({ approval: access, busy: false, onReview: vi.fn(), onRespond: vi.fn() });
+      expect(node.type).toBe(MessageBubble);
+      expect(node.props.class).toContain('markdown access-approval-message');
+      expect(node.props.children.type).toBe(AccessRequestCard);
+      expect(node.props.children.props.id).toBe(approval.approvalId);
+      expect(node.props.children.props.disabled).toBe(status === 'applying');
+    },
+  );
+  it('keeps off-thread and resolved approvals as ordinary cards without loading private accounts', () => {
+    groupId.value = 'agent';
+    threadId.value = 'another-thread';
+    channelType.value = 'web';
+    const access = {
+      ...approval,
+      action: 'request_access',
+      reviewRequired: true,
+      origin: {
+        agentGroupId: 'agent',
+        threadId: 'requesting-thread',
+        channelType: 'web',
+        messagingGroupId: 'web-agent',
+      },
+    };
+    const reference = ApprovalBubble({
+      approval: access,
+      busy: false,
+      onReview: vi.fn(),
+      onRespond: vi.fn(),
+      reference: true,
+    });
+    expect(reference.props.children.type).toBe(ApprovalCard);
+    threadId.value = 'requesting-thread';
+    const resolved = ApprovalBubble({
+      approval: { ...access, status: 'approved' },
+      busy: false,
+      onReview: vi.fn(),
+      onRespond: vi.fn(),
+    });
+    expect(resolved.props.children.type).toBe(ApprovalCard);
   });
 });

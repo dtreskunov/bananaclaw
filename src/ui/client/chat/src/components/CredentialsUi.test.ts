@@ -4,7 +4,7 @@ import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnecti
 import { ConfirmCredentialAction, ErrorNotice, SecretInput, useConnectionSignIn } from './CredentialsParts';
 import { GroupCredentials, McpConnectionAccess, serviceMatchesResource } from './GroupCredentialAccess';
 import { showToast } from './Toast';
-import { CredentialsContent, CredentialsPage } from './CredentialsPage';
+import { AccessRequestRedirect, CredentialsContent, CredentialsPage } from './CredentialsPage';
 import { CredentialsTable } from './CredentialsTable';
 import { MobileDialog } from './MobileDialog';
 import { channelType, credentialsOpen, groupId, isMobile, messagingGroupId, threadId } from '../state';
@@ -13,9 +13,11 @@ import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
 import type { OAuthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
-import { ApprovalCard } from './ApprovalCard';
+import { ApprovalCard, ApprovalCardFrame } from './ApprovalCard';
 import { AccessRequestReview } from './AccessRequestReview';
+import { AccessRequestCard } from './AccessRequestCard';
 import { accessApprovalId } from '../credentials-navigation';
+import type { AccessRequirements } from '../../../../shared/access-authentication';
 
 const hooks = vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -158,6 +160,10 @@ interface TestProps {
   title?: string;
   onConfirm(): Promise<void>;
   onSubmit(event: { preventDefault(): void }): Promise<void>;
+  onCreate(request: AccessRequirements): void;
+  onCreated(connection: Connection): void;
+  accessRequest?: AccessRequirements;
+  preferredConnectionId?: string;
 }
 interface TestNode {
   type: unknown;
@@ -201,11 +207,11 @@ describe('assisted credential approval UI', () => {
     });
     expect(
       descendants(node)
-        .filter((child) => child.type === 'option')
+        .filter((child) => child.type === 'input' && child.props.type === 'radio')
         .map((child) => child.props.value),
-    ).toEqual(['']);
+    ).toEqual([]);
     descendants(node)
-      .find((child) => child.type === 'button' && child.props.children === 'Review new credential')!
+      .find((child) => child.type === 'button' && child.props.children === 'Review the new account')!
       .props.onClick();
     expect(onManage).toHaveBeenCalledWith(created);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
@@ -242,9 +248,9 @@ describe('assisted credential approval UI', () => {
     });
     expect(
       descendants(node)
-        .filter((child) => child.type === 'option')
+        .filter((child) => child.type === 'input' && child.props.type === 'radio')
         .map((child) => child.props.value),
-    ).toEqual(['', original.id]);
+    ).toEqual([original.id]);
     descendants(node)
       .find((child) => child.type === 'button' && child.props.children === 'Add account')!
       .props.onClick();
@@ -263,7 +269,7 @@ describe('assisted credential approval UI', () => {
     const kind = descendants(node).find(
       (child) =>
         child.type === 'select' &&
-        (child.props as TestProps & { 'aria-label'?: string })['aria-label'] === 'Credential type',
+        (child.props as TestProps & { 'aria-label'?: string })['aria-label'] === 'Account type',
     )!;
     expect(kind.props.value).toBe('mcp_oauth');
     const oauth = descendants(node).find(
@@ -276,11 +282,12 @@ describe('assisted credential approval UI', () => {
     ).toBe(false);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
-  it('keeps the general credential table out of access-review mode', () => {
+  it('routes legacy review links to the chat instead of rendering a second review screen', () => {
     hooks.resource.data = { connections: [original], groups, apps: [], canEditInstall: true };
     accessApprovalId.value = 'access-one';
     const node = CredentialsContent();
-    expect(descendants(node).some((child) => child.type === AccessRequestReview)).toBe(true);
+    expect(descendants(node).some((child) => child.type === AccessRequestRedirect)).toBe(true);
+    expect(descendants(node).some((child) => child.type === AccessRequestReview)).toBe(false);
     expect(descendants(node).some((child) => child.type === CredentialsTable)).toBe(false);
   });
   it('lets the user pin a private granted connection and an account alias without copying headers', () => {
@@ -312,6 +319,34 @@ describe('assisted credential approval UI', () => {
     });
     expect(JSON.stringify(onAuthenticationChange.mock.calls)).not.toContain('Authorization');
     expect(JSON.stringify(onAuthenticationChange.mock.calls)).not.toContain('BIND_');
+  });
+  it('hides the account selector with no matches without dropping an unavailable saved account', () => {
+    hooks.resource.data = { grants: [] };
+    const onAuthenticationChange = vi.fn();
+    const onOpenCredentials = vi.fn();
+    const node = McpConnectionAccess({
+      gid: 'one',
+      resourceUrl: 'https://other.example.com/mcp',
+      serverName: 'tavily',
+      authentication: { connection_id: 'saved-account', account_alias: 'Personal' },
+      onAuthenticationChange,
+      onOpenCredentials,
+    });
+    expect(descendants(node).some((child) => child.type === 'select')).toBe(false);
+    expect(descendants(node).some((child) => child.type === 'span' && child.props.children === 'Account')).toBe(true);
+    expect(
+      descendants(node).some(
+        (child) => child.type === 'p' && child.props.children === 'Your saved account is not available to this agent.',
+      ),
+    ).toBe(true);
+    expect(descendants(node).find((child) => child.type === 'input')!.props.value).toBe('Personal');
+    descendants(node)
+      .find((child) => child.type === 'button' && child.props.children === 'Add an account')!
+      .props.onClick();
+    expect(onOpenCredentials).toHaveBeenCalledWith(true, undefined);
+    expect(onAuthenticationChange).not.toHaveBeenCalled();
+    expect(JSON.stringify(node)).not.toContain('Sign in as yourself');
+    expect(JSON.stringify(node)).not.toContain('Account for these tools');
   });
   it('uses a non-authorizing review action while retaining ordinary approval buttons', () => {
     const onReview = vi.fn(),
@@ -426,14 +461,16 @@ describe('assisted credential approval UI', () => {
     let node = draw();
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     descendants(node)
-      .find((child) => child.type === 'select')!
+      .find((child) => child.type === 'input' && child.props.type === 'radio')!
       .props.onChange({ currentTarget: { value: original.id } });
     node = draw();
     for (const effect of hooks.effects) effect();
     await vi.waitFor(() => expect(hooks.slots[1]).toMatchObject({ matches: true }));
     node = draw();
     const allow = (): TestNode =>
-      descendants(node).find((child) => child.type === 'button' && child.props.class === 'primary')!;
+      descendants(node).find(
+        (child) => child.type === 'button' && child.props.class === 'approval-btn approval-approve primary',
+      )!;
     expect(allow().props.disabled).toBe(false);
     expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
       0,
@@ -521,7 +558,9 @@ describe('assisted credential approval UI', () => {
       }) as TestNode;
     };
     let node = draw();
-    find(node, 'select').props.onChange({ currentTarget: { value: original.id } });
+    descendants(node)
+      .find((child) => child.type === 'input' && child.props.type === 'radio')!
+      .props.onChange({ currentTarget: { value: original.id } });
     node = draw();
     for (const effect of hooks.effects) effect();
     await vi.waitFor(() => expect(hooks.slots[1]).toMatchObject({ matches: true }));
@@ -530,15 +569,14 @@ describe('assisted credential approval UI', () => {
     expect(checkboxes).toHaveLength(1);
     checkboxes[0].props.onChange({ currentTarget: { checked: true } });
     node = draw();
-    expect(descendants(node).filter((child) => child.type === 'select')).toHaveLength(1);
+    expect(descendants(node).filter((child) => child.type === 'select')).toHaveLength(0);
     const nickname = descendants(node).find(
-      (child) => child.type === 'input' && child.props['aria-label'] === 'Account nickname',
+      (child) => child.type === 'input' && child.props['aria-label'] === 'Account name shown to agent',
     )!;
     expect(nickname.props.value).toBe(original.label);
+    expect(descendants(node).filter((child) => child.type === 'details')).toHaveLength(0);
     expect(
-      descendants(node)
-        .filter((child) => child.type === 'details')
-        .every((child) => !child.props.open),
+      descendants(node).some((child) => child.type === 'section' && child.props['aria-label'] === 'More information'),
     ).toBe(true);
     const allow = (): TestNode =>
       descendants(node).find((child) => child.type === 'button' && child.props.children === 'Allow access')!;
@@ -556,6 +594,108 @@ describe('assisted credential approval UI', () => {
       account_alias: 'Personal account',
       config_revision: 'mcp-r1',
     });
+  });
+});
+
+describe('transcript access review presentation', () => {
+  it('reuses approval-card framing and distinguishes identically named tools and accounts', () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      status: 'pending',
+      revision: 1,
+      resource_url: 'https://api.example.com/',
+      reason: 'Finish the report',
+      agent_group_name: 'My Agent',
+      mcp_server: 'SnapTrade',
+      result: null,
+    };
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [{ ...original, label: 'SnapTrade', account: 'you@example.com' }],
+      onCreate: vi.fn(),
+      onManage: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(node.type).toBe(ApprovalCardFrame);
+    expect(node.props.title).toBe('Let My Agent use an account?');
+    const labels = descendants(node)
+      .filter((child) => child.type === 'strong')
+      .map((child) => child.props.children);
+    expect(labels).toContain('Tools:');
+    expect(labels).toContain('Account:');
+    expect(
+      descendants(node).some((child) => child.type === 'blockquote' && child.props.children === 'Finish the report'),
+    ).toBe(true);
+    expect(descendants(node).filter((child) => child.type === 'details')).toHaveLength(0);
+  });
+
+  it('reuses account creation and sign-in without granting access when an account is added', () => {
+    hooks.resource.data = { connections: [original], groups, apps: [], canEditInstall: true };
+    const draw = () => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestCard({ id: 'access-one' }) as TestNode;
+    };
+    let node = draw();
+    const review = descendants(node).find((child) => child.type === AccessRequestReview)!;
+    review.props.onCreate({ resource_url: 'https://api.example.com/', mcp_server: 'SnapTrade' });
+    node = draw();
+    const editor = descendants(node).find((child) => child.type === ConnectionEditor)!;
+    expect(editor.props.accessRequest).toMatchObject({ mcp_server: 'SnapTrade' });
+    editor.props.onCreated({ ...original, id: 'new-account' });
+    node = draw();
+    expect(descendants(node).find((child) => child.type === AccessRequestReview)!.props.preferredConnectionId).toBe(
+      'new-account',
+    );
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('keeps loading failures retryable without enabling approval', () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      status: 'pending',
+      revision: 1,
+      resource_url: 'https://api.example.com/',
+      reason: 'Read',
+      result: null,
+    };
+    const onReloadAccounts = vi.fn();
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [],
+      accountsError: 'Could not load accounts',
+      onReloadAccounts,
+      onCreate: vi.fn(),
+      onManage: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    const fields = descendants(node).find((child) => child.type === 'fieldset')!;
+    expect(fields.props.disabled).not.toBe(true);
+    descendants(node)
+      .find((child) => child.type === 'button' && child.props.children === 'Try again')!
+      .props.onClick();
+    expect(onReloadAccounts).toHaveBeenCalledOnce();
+    expect(
+      descendants(node).find((child) => child.type === 'button' && child.props.children === 'Allow access')!.props
+        .disabled,
+    ).toBe(true);
+  });
+
+  it('opens the original chat from an existing private review link without applying access', () => {
+    hooks.resource.data = { request_id: 'access-one' };
+    vi.stubGlobal('location', {
+      href: 'https://nanoclaw.example/?access_request=access-one#credentials',
+      hash: '#credentials',
+    });
+    vi.stubGlobal('history', { state: null, replaceState: vi.fn() });
+    credentialsOpen.value = true;
+    accessApprovalId.value = 'access-one';
+    AccessRequestRedirect({ id: 'access-one' });
+    for (const effect of hooks.effects) effect();
+    expect(location.hash).toBe('#g/one/t/thread-one');
+    expect(credentialsOpen.value).toBe(false);
+    expect(accessApprovalId.value).toBe(null);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 });
 function descendants(value: unknown): TestNode[] {
@@ -585,8 +725,7 @@ function newFormRenderer(options: Partial<Parameters<typeof ConnectionEditor>[0]
 function nameInput(node: unknown): TestNode {
   return descendants(node).find(
     (child) =>
-      child.type === 'input' &&
-      (child.props as TestProps & { 'aria-label'?: string })['aria-label'] === 'Credential name',
+      child.type === 'input' && (child.props as TestProps & { 'aria-label'?: string })['aria-label'] === 'Account name',
   )!;
 }
 function requestBody(): Record<string, unknown> {
@@ -1019,7 +1158,7 @@ describe('connection UI safety and ownership', () => {
       .find((child) => child.type === 'select')!
       .props.onChange({ currentTarget: { value: 'mcp_oauth' } });
     node = draw();
-    expect(node.props.title).toBe('Add credential');
+    expect(node.props.title).toBe('Add an account');
     expect(nameInput(node).props.value).toBe('My browser');
     const fields = descendants(node).find(
       (child) => typeof child.type === 'function' && child.type.name === 'OAuthFields',
@@ -1120,7 +1259,7 @@ describe('connection UI safety and ownership', () => {
       onOpenCredentials: open,
     });
     descendants(node)
-      .find((child) => child.type === 'button' && child.props.children === 'Manage personal connections')!
+      .find((child) => child.type === 'button' && child.props.children === 'Manage your accounts')!
       .props.onClick();
     expect(open).toHaveBeenCalledWith(false, 'pair');
     expect(fetch).not.toHaveBeenCalled();

@@ -1,10 +1,10 @@
 ## Self-modification tools (require admin approval)
 
-Three fire-and-forget tools change your container image or config. Each sends an approval card to an admin's DM; you get notified via system chat on approve/reject.
+Two fire-and-forget tools change your container image or config. Each requests admin approval; you get notified via system chat on approve/reject.
 
 ### install_packages
 
-Add apt and/or npm packages to your container image. On approval, the config is updated AND the image is rebuilt in the same step — you'll get a follow-up prompt ~5s after rebuild telling you to verify the packages are available.
+Add apt and/or npm packages to your container image. On approval, the config is updated AND the image is rebuilt in the same step; a follow-up after the deferred restart asks you to verify the packages.
 
 ```
 install_packages({
@@ -20,23 +20,33 @@ install_packages({
 
 ### add_mcp_server
 
-Wire an EXISTING third-party MCP server into your runtime config. You must already know the exact `command` and `args`.
+Add an existing third-party MCP server to your own runtime using this tool,
+for either stdio or HTTP/SSE. The configuration CLI is host-only.
+Use https://registry.modelcontextprotocol.io/ or https://mcp.so for discovery,
+then verify the publisher's exact command, endpoint and authentication docs.
 
 ```
 add_mcp_server({
-  name: "github",
-  command: "npx",
-  args: ["@modelcontextprotocol/server-github"],
-  env: { GITHUB_TOKEN: "..." }
+  name: "memory",
+  command: "pnpm",
+  args: ["dlx", "@modelcontextprotocol/server-memory"]
 })
+add_mcp_server({ name: "example", url: "https://mcp.example.com/mcp", transport: "http" })
 ```
 
 - Does NOT install packages. Use `install_packages` first if the command isn't already available.
-- On approval, the container is killed and the next message wakes it with the new server wired up. No image rebuild — bun runs TS directly.
+- Submit once and finish the turn. Do not poll, resubmit or switch to the CLI.
+- Approval applies the configuration and schedules an automatic restart after
+  the current response finishes. No image rebuild is needed for MCP wiring.
+- Never request access for a new named server before addition approval and
+  restart. Afterward, load `/agent-vault` if credentials are needed.
 
 ### How approval works
 
-You won't see the admin's response in your current turn. After approval, the container is killed and next time a message arrives your container starts fresh on the new image. If a follow-up system prompt fires (as with `install_packages`), you'll see it and should act on it — verify the change, report to the user.
+Submission is not approval. Tell the user approval is pending and finish
+the turn. The outcome can steer an active response, but restart waits until
+that response finishes. Verify the change only after the replacement runtime
+starts; its follow-up system message asks you to verify and report.
 
 If denied, you'll get a chat message telling you the request was rejected. Do not retry automatically; explain to the user what was denied.
 

@@ -16,7 +16,8 @@ import { getAgentGroup } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { notifyAgent, requestApproval } from '../approvals/index.js';
-import { McpAuthenticationError, parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
+import { McpAuthenticationError } from '../../ui/shared/mcp-authentication.js';
+import { McpServerConfigError, parseMcpServerConfig } from '../../mcp-server-config.js';
 
 export async function handleInstallPackages(
   content: Record<string, unknown>,
@@ -95,63 +96,38 @@ export async function handleAddMcpServer(
     notify('add_mcp_server failed: agent group not found.');
     return;
   }
-  const serverName = content.name as string;
-  const command = content.command as string | undefined;
-  const url = content.url as string | undefined;
-  if (!serverName) {
+  const serverName = content.name;
+  if (typeof serverName !== 'string' || !serverName.trim()) {
     notify('add_mcp_server failed: name is required.');
     return;
   }
-  if (!command && !url) {
+  if (!content.command && !content.url) {
     notify('add_mcp_server failed: either command (stdio) or url (remote) is required.');
     return;
   }
-  if (command && url) {
+  if (content.command && content.url) {
     notify('add_mcp_server failed: provide either command (stdio) or url (remote), not both.');
     return;
   }
 
-  if (url) {
-    // Basic URL sanity — must be http(s)
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        notify(`add_mcp_server failed: url must be http(s), got "${parsed.protocol}".`);
-        return;
-      }
-    } catch {
-      notify(`add_mcp_server failed: invalid url "${url}".`);
-      return;
-    }
-    const transport = (content.transport as string) === 'sse' ? 'sse' : 'http';
-    let authentication;
-    try {
-      authentication = parseMcpAuthentication(content.authentication, url);
-    } catch (error) {
-      if (!(error instanceof McpAuthenticationError)) throw error;
-      notify(`add_mcp_server failed: ${error.message}`);
-      return;
-    }
-    await requestApproval({
-      session,
-      originMessageId: context?.originMessageId,
-      agentName: agentGroup.name,
-      action: 'add_mcp_server',
-      payload: {
-        name: serverName,
-        url,
-        transport,
-        headers: (content.headers as Record<string, string>) || {},
-        authentication,
-      },
-      title: 'Add MCP Request',
-      question: `Agent "${agentGroup.name}" is attempting to add a remote MCP server:\n${serverName} (${transport.toUpperCase()} ${url})`,
-    });
-    return;
-  }
-
-  if (content.authentication !== undefined) {
-    notify('add_mcp_server failed: connection references require HTTP/SSE transport.');
+  const payload = {
+    name: serverName,
+    command: content.command,
+    args: content.args,
+    env: content.env,
+    url: content.url,
+    transport: content.url ? (content.transport ?? 'http') : undefined,
+    headers: content.headers,
+    authentication: content.authentication,
+    instructions: content.instructions,
+    timeout: content.timeout,
+  };
+  let server;
+  try {
+    server = parseMcpServerConfig(payload);
+  } catch (error) {
+    if (!(error instanceof McpServerConfigError) && !(error instanceof McpAuthenticationError)) throw error;
+    notify(`add_mcp_server failed: ${error.message}`);
     return;
   }
   await requestApproval({
@@ -159,13 +135,11 @@ export async function handleAddMcpServer(
     originMessageId: context?.originMessageId,
     agentName: agentGroup.name,
     action: 'add_mcp_server',
-    payload: {
-      name: serverName,
-      command,
-      args: (content.args as string[]) || [],
-      env: (content.env as Record<string, string>) || {},
-    },
-    title: 'Add MCP Request',
-    question: `Agent "${agentGroup.name}" is attempting to add a new MCP server:\n${serverName} (${command})`,
+    payload,
+    title: 'Add tools',
+    question:
+      'url' in server
+        ? `Agent "${agentGroup.name}" wants to add ${serverName} tools:\n${server.url}`
+        : `Agent "${agentGroup.name}" wants to add ${serverName} tools:\n${server.command}`,
   });
 }

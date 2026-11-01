@@ -29,7 +29,10 @@ register({
     }
     // Commands grouped under a resource without a table (e.g. `credentials`) are listed here, host only.
     const commands = listCommands().filter(
-      (c) => c.access !== 'hidden' && (!c.resource || (ctx.caller === 'host' && !getResource(c.resource))),
+      (c) =>
+        c.access !== 'hidden' &&
+        (c.access !== 'host' || ctx.caller === 'host') &&
+        (!c.resource || (ctx.caller === 'host' && !getResource(c.resource))),
     );
 
     const lines: string[] = [];
@@ -48,7 +51,12 @@ register({
         if (r.operations.create) ops.push('create');
         if (r.operations.update) ops.push('update');
         if (r.operations.delete) ops.push('delete');
-        if (r.customOperations) ops.push(...Object.keys(r.customOperations));
+        if (r.customOperations)
+          ops.push(
+            ...Object.entries(r.customOperations)
+              .filter(([, op]) => op.access !== 'host' || ctx.caller === 'host')
+              .map(([verb]) => verb),
+          );
         lines.push(`  ${r.plural.padEnd(20)} ${r.description}`);
         lines.push(`  ${''.padEnd(20)} verbs: ${ops.join(', ')}`);
       }
@@ -106,6 +114,7 @@ export function registerResourceHelpCommands(): void {
           if (res.operations.delete) verbs.push(`delete${idHint} [approval]`);
           if (res.customOperations) {
             for (const [verb, op] of Object.entries(res.customOperations)) {
+              if (op.access === 'host' && ctx.caller !== 'host') continue;
               verbs.push(`${verb} [${op.access}] — ${op.description}`);
             }
           }

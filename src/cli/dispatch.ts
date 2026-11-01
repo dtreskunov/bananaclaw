@@ -47,6 +47,14 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
       return err(req.id, 'forbidden', 'CLI access is disabled for this agent group.');
     }
 
+    if (cmd.access === 'host') {
+      return err(
+        req.id,
+        'forbidden',
+        `${req.command} is host-only. To add an MCP server to yourself, use the add_mcp_server tool for stdio, HTTP or SSE. Submit once and finish the turn; wait for approval and the automatic restart before requesting access or verifying the server.`,
+      );
+    }
+
     // Restore is host-only regardless of scope — even a `global`-scope
     // agent must not be able to rehydrate an archived group. The archive
     // contains historical user data; restore is an operator action.

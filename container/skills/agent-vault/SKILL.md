@@ -54,6 +54,11 @@ bypass the gateway.
   tools matching the user's intended account; ask when ambiguous. The host
   resolves current group handles and transport headers. Do not copy binding
   headers into configuration or switch to another account when one is blocked.
+- For a new server, use `add_mcp_server` first (stdio or HTTP/SSE), submit once
+  and finish the turn. Do not request named-server access until its addition
+  is approved and the automatic restart completes. A pending addition is not
+  a configured server; do not retry access or use the host-only MCP-add CLI
+  to work around it.
 - When documentation or discovery identifies the required mechanism, include
   optional `authentication` hints in `request_access`: `type` is `mcp_oauth`,
   `oauth_app`, `bearer`, `api-key`, `basic` or `custom`. OAuth may suggest a

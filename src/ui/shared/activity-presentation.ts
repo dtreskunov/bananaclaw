@@ -252,13 +252,7 @@ export const BUILTIN_TOOL_PRESENTATIONS = new Map<string, BuiltinVerbs>([
   ],
   [
     'add_mcp_server',
-    [
-      'Requesting MCP server setup',
-      'Requested MCP server setup',
-      'request MCP server setup',
-      'MCP server setup request',
-      'for',
-    ],
+    ['Requesting tools setup', 'Requested tools setup', 'request tools setup', 'Tools setup request', 'for'],
   ],
   ['set_thread_title', ['Setting title', 'Set title', 'set title', 'Title change', 'to']],
   [

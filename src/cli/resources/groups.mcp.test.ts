@@ -11,11 +11,19 @@ vi.mock('../../modules/approvals/index.js', () => ({
 }));
 
 import { closeDb, createAgentGroup, initTestDb, runMigrations } from '../../db/index.js';
-import { ensureContainerConfig, getContainerConfig, updateContainerConfigJson } from '../../db/container-configs.js';
+import {
+  ensureContainerConfig,
+  getContainerConfig,
+  updateContainerConfigJson,
+  updateContainerConfigScalars,
+} from '../../db/container-configs.js';
 import { createSession } from '../../db/sessions.js';
 import { requestApproval } from '../../modules/approvals/index.js';
 import { dispatch } from '../dispatch.js';
+import { registerResourceHelpCommands } from '../commands/help.js';
 import './groups.js';
+
+registerResourceHelpCommands();
 
 const GROUP = 'ag-mcp';
 const URL = 'https://bananabrowse.example/mcp/t_aaaaaaaaaaaaaaaaaaaaaa';
@@ -167,31 +175,57 @@ describe('groups config add-mcp-server transports', () => {
     expect(getContainerConfig(GROUP)!.mcp_servers).toBe(before);
   });
 
-  it('agent requests still require approval and cannot modify another group', async () => {
-    createSession({
-      id: 'mcp-session',
-      agent_group_id: GROUP,
-      messaging_group_id: null,
-      thread_id: null,
-      agent_provider: null,
-      status: 'active',
-      container_status: 'stopped',
-      last_active: null,
-      created_at: new Date().toISOString(),
-    });
-    const frame = {
-      id: 'agent-request',
-      command: 'groups-config-add-mcp-server',
-      args: { name: 'bananabrowse', type: 'http', url: URL },
-    };
-    const ctx = { caller: 'agent' as const, agentGroupId: GROUP, sessionId: 'mcp-session', messagingGroupId: '' };
-    const result = await dispatch(frame, ctx);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('approval-pending');
-    expect(requestApproval).toHaveBeenCalledOnce();
-    expect(servers().bananabrowse).toBeUndefined();
-    const cross = await dispatch({ ...frame, args: { ...frame.args, id: 'another-group' } }, ctx);
-    expect(cross.ok).toBe(false);
-    if (!cross.ok) expect(cross.error.code).toBe('forbidden');
+  it.each(['group', 'global', 'disabled'])(
+    'blocks agent CLI additions in %s scope without creating approval cards',
+    async (scope) => {
+      updateContainerConfigScalars(GROUP, { cli_scope: scope });
+      createSession({
+        id: 'mcp-session',
+        agent_group_id: GROUP,
+        messaging_group_id: null,
+        thread_id: null,
+        agent_provider: null,
+        status: 'active',
+        container_status: 'stopped',
+        last_active: null,
+        created_at: new Date().toISOString(),
+      });
+      const frame = {
+        id: 'agent-request',
+        command: 'groups-config-add-mcp-server',
+        args: { name: 'bananabrowse', type: 'http', url: URL },
+      };
+      const ctx = { caller: 'agent' as const, agentGroupId: GROUP, sessionId: 'mcp-session', messagingGroupId: '' };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const result = await dispatch({ ...frame, id: `attempt-${attempt}` }, ctx);
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.code).toBe('forbidden');
+          if (scope !== 'disabled') {
+            expect(result.error.message).toContain('host-only');
+            expect(result.error.message).toContain('add_mcp_server');
+          }
+        }
+      }
+      expect(requestApproval).not.toHaveBeenCalled();
+      expect(servers().bananabrowse).toBeUndefined();
+      const cross = await dispatch({ ...frame, args: { ...frame.args, id: 'another-group' } }, ctx);
+      expect(cross.ok).toBe(false);
+      if (!cross.ok) expect(cross.error.code).toBe('forbidden');
+      expect(requestApproval).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['group', 'global'])('omits the host-only addition from agent help in %s scope', async (scope) => {
+    updateContainerConfigScalars(GROUP, { cli_scope: scope });
+    const ctx = { caller: 'agent' as const, agentGroupId: GROUP, sessionId: 'session', messagingGroupId: '' };
+    for (const command of ['help', 'groups-help']) {
+      const agent = await dispatch({ id: 'help', command, args: {} }, ctx);
+      expect(agent.ok).toBe(true);
+      if (agent.ok) expect(agent.data).not.toContain('config add-mcp-server');
+      const host = await dispatch({ id: 'host-help', command, args: {} }, { caller: 'host' });
+      expect(host.ok).toBe(true);
+      if (host.ok) expect(host.data).toContain('config add-mcp-server');
+    }
   });
 });

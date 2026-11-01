@@ -12,9 +12,8 @@
 import { buildAgentGroupImage } from '../../container-runner.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { getContainerConfig, updateContainerConfigJson } from '../../db/container-configs.js';
-import type { McpServerConfig } from '../../container-config.js';
 import { log } from '../../log.js';
-import { parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
+import { addMcpServerConfig } from '../../mcp-server-config.js';
 import type { ApprovalHandler } from '../approvals/index.js';
 
 export const applyInstallPackages: ApprovalHandler = async ({ session, payload, userId, notify }) => {
@@ -90,31 +89,10 @@ export const applyAddMcpServer: ApprovalHandler = async ({ session, payload, use
     return;
   }
 
-  // Add the new MCP server to the existing map in the DB
-  const servers = JSON.parse(configRow.mcp_servers) as Record<string, McpServerConfig>;
-  if (payload.url) {
-    const transport = payload.transport === 'sse' ? 'sse' : 'http';
-    const previous = servers[payload.name as string];
-    const reference =
-      payload.authentication === undefined && previous && 'url' in previous
-        ? previous.authentication
-        : payload.authentication;
-    servers[payload.name as string] = {
-      type: transport,
-      url: payload.url as string,
-      authentication: parseMcpAuthentication(reference, payload.url as string),
-      ...(payload.headers && Object.keys(payload.headers as Record<string, string>).length > 0
-        ? { headers: payload.headers as Record<string, string> }
-        : {}),
-    };
-  } else {
-    servers[payload.name as string] = {
-      command: payload.command as string,
-      args: (payload.args as string[]) || [],
-      env: (payload.env as Record<string, string>) || {},
-    };
-  }
-  updateContainerConfigJson(agentGroup.id, 'mcp_servers', servers);
+  addMcpServerConfig(agentGroup.id, {
+    ...payload,
+    type: payload.url ? (payload.transport ?? 'http') : 'stdio',
+  });
 
   notify(
     `MCP server "${payload.name}" approved. Finish the current response; the new server will be available after the automatic restart.`,

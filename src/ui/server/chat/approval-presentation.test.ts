@@ -2,6 +2,28 @@ import { describe, expect, it } from 'vitest';
 import { presentApproval } from './approval-presentation.js';
 
 describe('approval presentation', () => {
+  it('uses Tools in access requests without changing the requested destination', () => {
+    expect(
+      presentApproval(
+        'request_access',
+        JSON.stringify({ reason: 'Read the report', resource_url: 'https://example.com/mcp', mcp_server: 'SnapTrade' }),
+      ),
+    ).toEqual({
+      details: 'Read the report\nhttps://example.com/mcp\nTools: SnapTrade',
+      packages: null,
+    });
+  });
+  it('presents new tools without exposing transport terminology', () => {
+    expect(
+      presentApproval(
+        'add_mcp_server',
+        JSON.stringify({ name: 'SnapTrade', url: 'https://example.com/mcp', transport: 'http' }),
+      ),
+    ).toEqual({
+      details: 'SnapTrade tools · https://example.com/mcp',
+      packages: null,
+    });
+  });
   it('keeps requested packages grouped by package manager', () => {
     expect(
       presentApproval(

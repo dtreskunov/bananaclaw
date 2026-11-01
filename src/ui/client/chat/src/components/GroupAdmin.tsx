@@ -32,7 +32,7 @@ const TAB_ITEMS: TabItem[] = [
   { id: 'settings', label: 'Settings', sublabel: 'Image, scope, website, email' },
   { id: 'models', label: 'Models', sublabel: 'Provider, model, voice' },
   { id: 'packages', label: 'Packages', sublabel: 'apt / npm / pip in the image' },
-  { id: 'mcp', label: 'MCP servers', sublabel: 'External tools wired to the agent' },
+  { id: 'mcp', label: 'Tools', sublabel: 'Extra tools this agent can use' },
   { id: 'skills', label: 'Skills', sublabel: 'Container skills mounted at runtime' },
   { id: 'credentials', label: 'Credentials', sublabel: 'Keys and accounts available to this agent' },
   { id: 'members', label: 'Members', sublabel: 'Who can use this group' },

@@ -7,13 +7,13 @@ export class McpAuthenticationError extends Error {}
 export function parseMcpAuthentication(value: unknown, resourceUrl?: string): McpAuthentication | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'object' || Array.isArray(value))
-    throw new McpAuthenticationError('MCP authentication must be a connection reference.');
+    throw new McpAuthenticationError('Choose a saved account for these tools.');
   const record = value as Record<string, unknown>;
   if (resourceUrl !== undefined) {
     const url = URL.parse(resourceUrl);
     if (!url || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
       throw new McpAuthenticationError(
-        'MCP connection references require an exact HTTPS URL without embedded credentials, query or fragment.',
+        'Tools sign-in needs an exact secure website address, without passwords, extra parameters or a # section.',
       );
   }
   if (

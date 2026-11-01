@@ -2,7 +2,8 @@ import './Credentials.css';
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { accessApprovalId, clearAccessApproval, credentialsIntent, openChat, openCredentials } from '../credentials-navigation';
-import { AccessRequestReview } from './AccessRequestReview';
+import { approvalThreadHref } from '../approval-origin';
+import type { ApprovalOrigin } from '../../../../shared/approval';
 import { credentialsOpen, isMobile } from '../state';
 import { returnToUserMenu } from '../actions';
 import { MobileDialog } from './MobileDialog';
@@ -13,10 +14,9 @@ import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnecti
 import { CredentialAction, CredentialsTable } from './CredentialsTable';
 import { showToast } from './Toast';
 import { displayDestination } from './credential-presentation';
-import type { AccessRequirements } from '../../../../shared/access-authentication';
 
 type Dialog =
-  | { kind: 'edit'; id?: string; resourceUrl?: string; accessRequest?: AccessRequirements; accessRequestId?: string }
+  | { kind: 'edit'; id?: string; resourceUrl?: string }
   | { kind: 'connect'; connection?: Connection; resourceUrl?: string }
   | { kind: 'action'; connection: Connection; action: 'disable' | 'enable' | 'delete' }
   | { kind: 'app'; app?: AppInfo };
@@ -32,7 +32,6 @@ export function CredentialsContent({ agent }: {
   const [view, setView] = useState<'credentials' | 'apps'>('credentials');
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [tableVersion, setTableVersion] = useState(0);
-  const [created, setCreated] = useState<{ requestId: string; connectionId: string } | null>(null);
   const signIn = useConnectionSignIn(() => void refresh());
   const intent = agent ? null : credentialsIntent.value;
   useEffect(() => {
@@ -67,16 +66,7 @@ export function CredentialsContent({ agent }: {
   const content = <>
     <div class={agent ? 'ga-cred' : 'credentials-page settings-body'} id={agent ? 'agent-credentials' : 'credentials-page'}
       role="region" aria-label={agent ? 'Agent credentials' : 'Personal credentials'}>
-      {!agent && accessApprovalId.value && data ? <><AccessRequestReview key={accessApprovalId.value} id={accessApprovalId.value}
-        connections={connections}
-        preferredConnectionId={created?.requestId === accessApprovalId.value ? created.connectionId : undefined}
-        signingIn={!!signIn.waiting}
-        onCreate={request => setDialog({ kind: 'edit', resourceUrl: request.resource_url, accessRequest: request, accessRequestId: accessApprovalId.value ?? undefined })}
-        onManage={connection => setDialog(connection.status === 'disabled'
-          ? { kind: 'action', connection, action: 'enable' }
-          : connection.kind === 'static' ? { kind: 'edit', id: connection.id } : { kind: 'connect', connection })}
-        onSaved={() => { void refresh(); }} />
-        <button type="button" class="ghost" onClick={clearAccessApproval}>My Credentials</button></> : null}
+      {!agent && accessApprovalId.value ? <AccessRequestRedirect id={accessApprovalId.value} /> : null}
       <section class="ga-cred">
         {!agent && !reviewing ? <div class="credentials-toolbar">
           <nav class="ga-cred-segments" aria-label="Credentials sections">
@@ -125,9 +115,7 @@ export function CredentialsContent({ agent }: {
         </> : null}
       </section>
     </div>
-    {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} resourceUrl={dialog.resourceUrl} accessRequest={dialog.accessRequest} apps={data.apps}
-      onCreated={connection => { const requestId = dialog?.kind === 'edit' ? dialog.accessRequestId : undefined;
-        if (requestId) setCreated({ requestId, connectionId: connection.id }); }}
+    {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} resourceUrl={dialog.resourceUrl} apps={data.apps}
       onStart={signIn.start} onClose={close} onSaved={() => void refresh()} /> : null}
     {dialog?.kind === 'connect' && data ? dialog.connection
       ? <ReconnectLatest id={dialog.connection.id} apps={data.apps} onStart={signIn.start} onClose={close} onSaved={() => void refresh()} />
@@ -142,6 +130,24 @@ export function CredentialsContent({ agent }: {
   return agent ? content : <MobileDialog title="My Credentials" ariaLabel="My Credentials" onClose={openChat}
     onBack={isMobile.value ? () => { openChat(); returnToUserMenu(credentialsOpen); } : undefined}
     backLabel="Back to account menu" maxWidth="1100px" className="credentials-dialog">{content}</MobileDialog>;
+}
+
+export function AccessRequestRedirect({ id }: { id: string }) {
+  const request = useCredentialResource<{ origin?: ApprovalOrigin | null }>(credentialsPath(`/access-requests/${encodeURIComponent(id)}`));
+  const origin = request.data?.origin;
+  const href = origin ? approvalThreadHref(origin) : null;
+  useEffect(() => {
+    if (!href) return;
+    clearAccessApproval();
+    credentialsOpen.value = false;
+    location.hash = href;
+  }, [href]);
+  return <div role="status">
+    {request.loading ? <p>Opening the request in your chat…</p> : null}
+    <ErrorNotice message={request.error} />
+    {request.error ? <button type="button" onClick={() => void request.refresh()}>Try again</button> :
+      href ? <a href={href}>Open requesting chat</a> : !request.loading ? <p>The requesting chat is no longer available.</p> : null}
+  </div>;
 }
 
 function ReconnectLatest(props: Omit<Parameters<typeof OAuthConnectionDialog>[0], 'connection'> & { id: string }): JSX.Element {

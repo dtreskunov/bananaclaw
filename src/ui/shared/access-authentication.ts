@@ -2,8 +2,8 @@ import { serviceMatchesResource, type ServiceDestination } from './credential-ma
 
 export type AccessAuthenticationType = 'mcp_oauth' | 'oauth_app' | 'bearer' | 'api-key' | 'basic' | 'custom';
 export const ACCESS_AUTHENTICATION_LABELS: Record<AccessAuthenticationType, string> = {
-  mcp_oauth: 'MCP OAuth',
-  oauth_app: 'OAuth app',
+  mcp_oauth: 'Tools sign-in',
+  oauth_app: 'App sign-in',
   bearer: 'Bearer token',
   'api-key': 'API key',
   basic: 'Username and password',
@@ -49,7 +49,7 @@ export function parseAccessAuthentication(value: unknown): AccessAuthenticationH
     !['mcp_oauth', 'oauth_app', 'bearer', 'api-key', 'basic', 'custom'].includes(String(hint.type))
   )
     throw new AccessAuthenticationError(
-      'Choose MCP OAuth, OAuth app, bearer, api-key, basic or custom authentication. Never include secrets.',
+      'Choose a supported sign-in method. Never include passwords or access keys in this request.',
     );
   const type = hint.type as AccessAuthenticationType;
   const oauth = type === 'mcp_oauth' || type === 'oauth_app';

@@ -7,7 +7,7 @@
  */
 import type { CallerContext } from './frame.js';
 
-export type Access = 'open' | 'approval' | 'hidden';
+export type Access = 'open' | 'approval' | 'host' | 'hidden';
 
 export type CommandDef<TArgs = unknown, TData = unknown> = {
   name: string;

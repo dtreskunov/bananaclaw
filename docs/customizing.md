@@ -30,6 +30,39 @@ Always upgrade by running `/update-nanoclaw`. **Don't just `git pull`.** The com
 
 We keep the core small and stable, and every breaking change ships with its migration. You keep your changes as skills, with tests. Do that, and upgrades won't break you. Changes edited directly into the core are the one thing the model can't protect.
 
+## MCP server additions
+
+Agents use `add_mcp_server` for both stdio and HTTP/SSE servers, modifying only
+their own agent. The host-only `ncl groups config add-mcp-server` command remains
+available to operators for any target group; its flags and explicit restart
+behavior are unchanged. Both use the same configuration implementation.
+
+### Detect / why / fix / verify / rollback
+
+- **Detect:** Look for agent instructions or scripts using
+  `ncl groups config add-mcp-server`, especially with another agent's `--id`.
+  The command now returns `forbidden` to agents, including global-scope agents.
+- **Why:** The CLI's separate approval/restart flow competed with the native
+  MCP tool and encouraged retries and duplicate approvals. Agents now have
+  one setup operation. Catalog hints are available at the
+  [MCP Registry](https://registry.modelcontextprotocol.io/) and [mcp.so](https://mcp.so);
+  verify publisher documentation before submitting an addition.
+- **Fix:** Replace agent-side CLI additions with `add_mcp_server`. Submit once,
+  tell the user approval is pending, and finish the turn. After approval and
+  automatic restart, request missing credentials for the configured server,
+  then verify its tools. Cross-agent additions must be performed by an operator
+  on the host. Deploy the host and runner changes together, and let containers
+  restart normally so refreshed built-in instructions are composed.
+  Existing pending approvals are not cancelled, converted or resubmitted;
+  review them explicitly and reject unwanted duplicates.
+- **Verify:** Agent help omits the CLI addition verb, and attempting that
+  command creates no approval. Native additions still require approval and
+  schedule their own deferred restart; the host CLI still accepts its original
+  stdio, HTTP/SSE, metadata and connection-reference flags.
+- **Rollback:** Restore the previous host/runner revision and its instructions
+  using the normal deployment rollback procedure. No database migration or
+  credential change is required.
+
 ## Go deeper
 
 - **[The skills model in full](skills-model.md)**: how skills, recipes, tests, and upgrades work under the hood.

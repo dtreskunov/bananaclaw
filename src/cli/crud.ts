@@ -16,7 +16,7 @@ import type { CallerContext } from './frame.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export type Access = 'open' | 'approval' | 'hidden';
+export type Access = 'open' | 'approval' | 'host' | 'hidden';
 
 export interface ColumnDef {
   name: string;

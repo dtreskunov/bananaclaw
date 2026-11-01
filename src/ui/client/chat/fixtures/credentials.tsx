@@ -7,6 +7,8 @@ import { useEffect, useState } from 'preact/hooks';
 import { GroupAdmin } from '../src/components/GroupAdmin';
 import { CredentialsPage } from '../src/components/CredentialsPage';
 import { Header } from '../src/components/Header';
+import { ApprovalBubble } from '../src/components/ApprovalBubble';
+import '../src/components/ChatMain.css';
 import { openCredentials } from '../src/credentials-navigation';
 import { Toast } from '../src/components/Toast';
 import { initAppearance } from '../src/appearance-state';
@@ -17,6 +19,8 @@ import {
   groupAdminOpen,
   groupAdminTabRequest,
   groupId,
+  threadId,
+  channelType,
   groups,
   isMobile,
   me,
@@ -136,7 +140,7 @@ function Controls(): preact.JSX.Element {
         <div class="cred-fixture-buttons">
           <button type="button" onClick={() => openCredentials()}>Personal Credentials</button>
           <button type="button" onClick={() => reopen('credentials')}>Agent Credentials</button>
-          <button type="button" onClick={() => reopen('mcp')}>MCP servers</button>
+        <button type="button" onClick={() => reopen('mcp')}>Tools</button>
           <button type="button" onClick={() => { resetState(); fixtureRevision.value++; if (groupAdminOpen.value) reopen('credentials'); }}>Reset</button>
         </div>
         <details class="cred-fixture-log">
@@ -159,8 +163,14 @@ function Fixture(): preact.JSX.Element {
   return (
     <>
       <Header />
-      {credentialsOpen.value ? <CredentialsPage key={fixtureRevision.value} /> : <main class="cred-fixture-page">
-        <p>Chat fixture. Use personal Credentials or Agent Settings → Credentials.</p>
+      {credentialsOpen.value ? <CredentialsPage key={fixtureRevision.value} /> : <main class="cred-fixture-page chat-main">
+        {params.has('access_request') ? <div class="chat-log"><ApprovalBubble key={fixtureRevision.value}
+          approval={{ approvalId: 'fixture-access', action: 'request_access', title: 'Allow access', details: null,
+            packages: null, options: [], agentGroupId: FIXTURE_GROUP.id, agentGroupName: FIXTURE_GROUP.name,
+            createdAt: new Date().toISOString(), reviewRequired: true,
+            origin: { agentGroupId: FIXTURE_GROUP.id, threadId: 'fixture-thread', channelType: 'web', messagingGroupId: 'fixture-web' } }}
+          busy={false} onReview={() => {}} onRespond={() => {}} /></div> :
+          <p>Chat fixture. Use personal Credentials or Agent Settings → Credentials.</p>}
         <button type="button" onClick={() => reopen()}>Open Agent Settings</button>
       </main>}
       <GroupAdmin />
@@ -195,8 +205,10 @@ if (consentState) {
   currentUserId.value = 'fixture-alex';
   groups.value = [{ id: FIXTURE_GROUP.id, name: FIXTURE_GROUP.name, isAdmin: true, hasContent: true }];
   groupId.value = FIXTURE_GROUP.id;
-  credentialsOpen.value = true;
-  location.hash = '#credentials';
+  threadId.value = 'fixture-thread';
+  channelType.value = 'web';
+  credentialsOpen.value = !params.has('access_request');
+  location.hash = credentialsOpen.value ? '#credentials' : `#g/${FIXTURE_GROUP.id}/t/fixture-thread`;
   window.addEventListener('hashchange', () => { credentialsOpen.value = location.hash === '#credentials'; });
   if (params.get('tab')) {
     groupAdminTabRequest.value = params.get('tab');

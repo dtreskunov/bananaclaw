@@ -20,13 +20,17 @@ Run `ncl help` for the full list. Common resources:
 
 | Resource | Verbs | What it is |
 |----------|-------|------------|
-| groups | list, get, archive, update, restart, config get/update, config add-mcp-server/remove-mcp-server, config add-package/remove-package, config set-param/unset-param | Agent groups (workspace, personality, container config) |
+| groups | list, get, archive, update, restart, config get/update, config remove-mcp-server, config add-package/remove-package, config set-param/unset-param | Agent groups (workspace, personality, container config) |
 | sessions | list, get, search | Active sessions + message history search |
 | destinations | list, add, remove | Where an agent group can send messages |
 | members | list, add, remove | Unprivileged access gate for an agent group |
 
 Additional resources (available under `global` scope only): messaging-groups, wirings, users, roles, user-dms, dropped-messages, approvals.
 The verbs `groups create` and `groups delete` also require `global` scope.
+`groups config add-mcp-server` is **host-only**, even with global scope.
+Use `add_mcp_server` for stdio and HTTP/SSE additions to your own agent.
+Submit once and finish the turn; wait for addition approval and the automatic
+restart before requesting access for the new named server.
 
 ### Archive vs. delete vs. restore
 
@@ -84,7 +88,6 @@ ncl groups restart
 ncl groups restart --rebuild --message "Config updated."
 ncl groups archive                              # archive yourself (--id auto-fills)
 ncl groups config update --model claude-sonnet-4-5-20250514
-ncl groups config add-mcp-server --name rss --command npx --args '["some-rss-mcp"]'
 ncl groups config add-package --npm some-package
 ncl groups config set-param --key max_tokens --value 8192     # cap output length
 ncl groups config set-param --key temperature --value 0.3     # OpenCode only
@@ -93,6 +96,7 @@ ncl members add --user telegram:jane
 
 # Host-only — DO NOT attempt; ask the operator instead
 # ncl groups restore --folder some-archived-group
+# ncl groups config add-mcp-server ...
 ```
 
 ### Important

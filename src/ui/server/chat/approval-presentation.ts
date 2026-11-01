@@ -38,7 +38,7 @@ export function presentApproval(action: string, payloadJson: string): ApprovalPr
   if (action === 'request_access') {
     const url = typeof payload.resource_url === 'string' ? payload.resource_url : '';
     const reason = typeof payload.reason === 'string' ? payload.reason : '';
-    const server = typeof payload.mcp_server === 'string' ? `\nMCP server: ${payload.mcp_server}` : '';
+    const server = typeof payload.mcp_server === 'string' ? `\nTools: ${payload.mcp_server}` : '';
     return { details: `${reason}\n${url}${server}`, packages: null };
   }
 
@@ -46,9 +46,8 @@ export function presentApproval(action: string, payloadJson: string): ApprovalPr
     const name = typeof payload.name === 'string' ? payload.name : '';
     const url = typeof payload.url === 'string' ? payload.url : '';
     const command = typeof payload.command === 'string' ? payload.command : '';
-    const transport = typeof payload.transport === 'string' ? payload.transport.toUpperCase() : '';
-    if (url) return { details: `${name} (${transport} ${url})`, packages: null };
-    if (command) return { details: `${name} (stdio: ${command})`, packages: null };
+    if (url) return { details: `${name} tools · ${url}`, packages: null };
+    if (command) return { details: `${name} tools · ${command}`, packages: null };
     return { details: name || null, packages: null };
   }
 

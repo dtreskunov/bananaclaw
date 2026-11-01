@@ -4,6 +4,15 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] One agent-facing MCP addition operation.** Agents use
+  `add_mcp_server` for their own stdio or HTTP/SSE servers. The configuration
+  CLI addition is host-only, including for global-scope agents; cross-agent
+  additions are now operator actions. Both adapters share configuration
+  validation and updates. Guidance includes catalog discovery, submit-once
+  semantics and credential requests only after addition approval and restart.
+  Existing approvals are left untouched. See
+  [detect / why / fix / verify / rollback](docs/customizing.md#detect--why--fix--verify--rollback).
+
 - **[BREAKING] Agent Vault-only runtime and setup.** The legacy gateway SDK,
   approval poller, agent provisioning, Docker egress network, backend-switching
   CLI and temporary importer are removed. Containers always use the scoped Unix

@@ -1,7 +1,17 @@
+import type { ComponentChildren } from 'preact';
 import type { PendingApprovalDto } from '../types';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { approvalMessageDrafts } from '../approval-messages';
 import { approvalThreadHref, isApprovalThread } from '../approval-origin';
+
+export function ApprovalCardFrame({ approvalId, title, children }: {
+  approvalId: string; title: string; children: ComponentChildren;
+}) {
+  return <section class="approval-bubble question-prompt" data-approval-id={approvalId} aria-label={title}>
+    <div class="approval-title">{title}</div>
+    {children}
+  </section>;
+}
 
 export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
   approval: PendingApprovalDto;
@@ -16,9 +26,8 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
     approved: 'Approved', rejected: 'Declined', applying: 'Applying…', failed: 'Could not apply',
     cancelled: 'Cancelled', expired: 'Expired',
   };
-  return <section class="approval-bubble question-prompt" data-approval-id={a.approvalId} aria-label={a.title || a.action}>
+  return <ApprovalCardFrame approvalId={a.approvalId} title={a.action === 'add_mcp_server' ? 'Add tools' : a.title || a.action}>
     <div class="approval-text">
-      <div class="approval-title">{a.title || a.action}</div>
       {a.packages ? <div class="approval-packages">
         {(['apt', 'npm', 'pip'] as const).map(manager => a.packages![manager].length ? <div class="approval-package-list" key={manager}>
           <span class="approval-package-manager">{manager}</span><span>{a.packages![manager].join(', ')}</span>
@@ -55,5 +64,5 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
           {option.label}
         </button>)}
     </div> : null}
-  </section>;
+  </ApprovalCardFrame>;
 }

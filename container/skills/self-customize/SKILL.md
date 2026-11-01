@@ -13,11 +13,25 @@ You can modify your own environment. Different kinds of changes have different w
 
 - **`CLAUDE.local.md` or files in your workspace** → Edit directly, no approval needed. Your workspace (`/workspace/agent/`) is persisted on the host. (Note: the composed `CLAUDE.md` itself is read-only and regenerated every spawn — write to `CLAUDE.local.md` instead.)
 - **System package (apt) or global npm package** → `install_packages`. Requires admin approval. On approval, image rebuild + container restart happen automatically.
-- **Command-based MCP server** → `add_mcp_server`. Requires admin approval. On approval, container restarts with the new server wired up (no rebuild — bun runs TS directly).
-- **HTTP/SSE MCP server** → `ncl groups config add-mcp-server --name <name> --type http --url <url>` (or `--type sse`). Optional `--headers '<json-object>'` contains verified credential placeholders only, never raw secrets. Requires admin approval; restart the group afterward to load the new entry.
+- **Any MCP server (stdio or HTTP/SSE)** → `add_mcp_server`, for your own agent only. Requires admin approval and automatically restarts after your response finishes; no rebuild is needed. The MCP configuration CLI is host-only, even with global CLI scope. Follow the MCP tool's setup instructions below.
 - **Model behavior knob** (output length cap, sampling temperature, reasoning/thinking budget, …) → `ncl groups config set-param --key <k> --value <v>`. Requires admin approval. On approve, the container restarts so the new value takes effect. Use `ncl groups config get` first to see what's already set; use `unset-param` to revert to provider defaults.
 - **Your source code or Dockerfile** → Delegate to a builder agent via `create_agent` (see below).
 - **A new specialist capability** → `create_agent` to spin up a dedicated agent for it.
+
+## MCP server setup
+
+Discover existing servers at https://registry.modelcontextprotocol.io/ or
+https://mcp.so, then verify the publisher's command or endpoint, transport and
+authentication documentation. Use `add_mcp_server` for both stdio and remote
+servers; never use the CLI as a second setup path.
+
+Submit once, tell the user approval is pending, and **finish the turn**.
+Do not poll, resubmit or manually restart while waiting. Only after addition
+approval and the automatic restart, load `/agent-vault` and use `request_access`
+for the configured remote server if credentials are missing. Never request
+access for a server whose addition is still pending. Wait for the access
+completion message before verifying authenticated tools. If rejected, stop
+unless the user asks again.
 
 ## Worked example: model behavior knobs
 
@@ -87,8 +101,8 @@ The limits are **per builder task**, not per session. A 500-line feature is fine
 
 User: "Can you add a tool for reading RSS feeds?"
 
-1. Check [mcp.so](https://mcp.so) for an existing RSS MCP server
-2. If one exists → `add_mcp_server({ name: "rss", command: "npx", args: ["some-rss-mcp"] })` → admin approves → container restarts with the new server → done
+1. Check the [MCP Registry](https://registry.modelcontextprotocol.io/) or [mcp.so](https://mcp.so) for an existing RSS MCP server; verify the publisher's documented setup
+2. If one exists → `add_mcp_server` using its verified command or endpoint → finish the turn → admin approves → automatic restart → request missing credentials if needed → verify and report
 3. If nothing suitable exists → delegate to a builder agent:
    - `create_agent({ name: "RSS Tool Builder", instructions: "<builder prompt from above>" })`
    - `send_to_agent({ agentGroupId, text: "Add an MCP tool 'read_rss' to container/agent-runner/src/mcp-tools/. It should fetch an RSS URL and return the latest N items. Register it in mcp-tools/index.ts. Target: <200 new lines." })`

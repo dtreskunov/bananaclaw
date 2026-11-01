@@ -7,7 +7,7 @@ import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import { archiveAgentGroup } from '../../modules/archive/archive-group.js';
-import { parseMcpAuthentication } from '../../ui/shared/mcp-authentication.js';
+import { addMcpServerConfig } from '../../mcp-server-config.js';
 import { deleteVault, usesAgentVault } from '../../modules/credentials/agent-vault-client.js';
 import { restoreAgentGroup } from '../../modules/archive/restore-group.js';
 import { createGroup, GroupCreateError } from '../../modules/groups/create.js';
@@ -42,29 +42,6 @@ function presentConfig(row: ContainerConfigRow): Record<string, unknown> {
     model_params: JSON.parse(row.model_params),
     updated_at: row.updated_at,
   };
-}
-
-function parseMcpStringMap(value: unknown, flag: string): Record<string, string> {
-  if (typeof value !== 'string') throw new Error(`${flag} must be a JSON object of strings`);
-  const parsed: unknown = JSON.parse(value);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${flag} must be a JSON object of strings`);
-  }
-  return Object.fromEntries(
-    Object.entries(parsed).map(([key, item]) => {
-      if (typeof item !== 'string') throw new Error(`${flag} values must be strings`);
-      return [key, item];
-    }),
-  );
-}
-
-function parseMcpArgs(value: unknown): string[] {
-  if (typeof value !== 'string') throw new Error('--args must be a JSON array of strings');
-  const parsed: unknown = JSON.parse(value);
-  if (!Array.isArray(parsed) || !parsed.every((item): item is string => typeof item === 'string')) {
-    throw new Error('--args must be a JSON array of strings');
-  }
-  return parsed;
 }
 
 registerResource({
@@ -314,9 +291,9 @@ registerResource({
       },
     },
     'config add-mcp-server': {
-      access: 'approval',
+      access: 'host',
       description:
-        'Add an MCP server to a group. Requires `ncl groups restart` to take effect. ' +
+        'Host-only: add an MCP server to a group. Agents must use the add_mcp_server tool for their own group. Requires `ncl groups restart` to take effect. ' +
         'Use --id <group-id> --name <server-name> [--type stdio] --command <cmd> ' +
         '[--args <json-array>] [--env <json-object>], or --type http|sse --url <url> ' +
         '[--headers <json-object>]. --transport is an alias for --type. ' +
@@ -325,84 +302,7 @@ registerResource({
       handler: async (args) => {
         const id = args.id as string;
         if (!id) throw new Error('--id is required');
-        const name = args.name as string;
-        if (!name) throw new Error('--name is required');
-        if (args.type !== undefined && args.transport !== undefined && args.type !== args.transport) {
-          throw new Error('--type and --transport must agree');
-        }
-        const type = args.type ?? args.transport ?? 'stdio';
-        if (type !== 'stdio' && type !== 'http' && type !== 'sse') {
-          throw new Error('--type must be stdio, http, or sse');
-        }
-        if (args.instructions !== undefined && typeof args.instructions !== 'string') {
-          throw new Error('--instructions must be text');
-        }
-
-        const row = getContainerConfig(id);
-        if (!row) throw new Error(`No container config for group: ${id}`);
-
-        const servers = JSON.parse(row.mcp_servers) as Record<string, McpServerConfig>;
-        const previous = servers[name];
-        const instructions = args.instructions === undefined ? {} : { instructions: args.instructions };
-        if (args.timeout !== undefined && typeof args.timeout !== 'string' && typeof args.timeout !== 'number') {
-          throw new Error('--timeout must be milliseconds');
-        }
-        const timeout = args.timeout === undefined ? undefined : Number(args.timeout);
-        if (timeout !== undefined && (!Number.isInteger(timeout) || timeout < 1000 || timeout > 600000)) {
-          throw new Error('--timeout must be an integer between 1000 and 600000 milliseconds');
-        }
-        const metadata = { ...instructions, ...(timeout === undefined ? {} : { timeout }) };
-        if (type === 'http' || type === 'sse') {
-          if (args.command !== undefined || args.args !== undefined || args.env !== undefined) {
-            throw new Error('--command, --args, and --env are only valid for stdio');
-          }
-          if (typeof args.url !== 'string' || !args.url.trim()) throw new Error('--url is required for http or sse');
-          const url = args.url.trim();
-          const parsed = new URL(url);
-          if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash) {
-            throw new Error('--url must be an HTTP(S) URL without credentials or a fragment');
-          }
-          const keep = previous && 'url' in previous ? previous : undefined;
-          const connection = args.connection === undefined ? keep?.authentication?.connection_id : args.connection;
-          if (connection === undefined && args.account_alias !== undefined)
-            throw new Error('--account-alias requires --connection or an existing pinned connection.');
-          const authentication =
-            connection === '' || connection === undefined
-              ? undefined
-              : parseMcpAuthentication(
-                  {
-                    connection_id: connection,
-                    account_alias: args.account_alias ?? keep?.authentication?.account_alias,
-                  },
-                  url,
-                );
-          // Do not carry credential headers to a newly selected endpoint.
-          const headers =
-            args.headers === undefined
-              ? keep?.url === url
-                ? keep.headers
-                : undefined
-              : parseMcpStringMap(args.headers, '--headers');
-          servers[name] = { ...keep, type, url, headers, authentication, ...metadata };
-        } else {
-          if (args.connection !== undefined || args.account_alias !== undefined)
-            throw new Error('--connection and --account-alias require HTTP/SSE transport.');
-          if (args.url !== undefined || args.headers !== undefined) {
-            throw new Error('--url and --headers require --type http or sse');
-          }
-          if (typeof args.command !== 'string' || !args.command.trim()) throw new Error('--command is required');
-          const keep = previous && !('url' in previous) ? previous : undefined;
-          servers[name] = {
-            ...keep,
-            command: args.command,
-            args: args.args === undefined ? (keep?.args ?? []) : parseMcpArgs(args.args),
-            env: args.env === undefined ? (keep?.env ?? {}) : parseMcpStringMap(args.env, '--env'),
-            ...metadata,
-          };
-        }
-        updateContainerConfigJson(id, 'mcp_servers', servers);
-
-        return { added: name, servers };
+        return addMcpServerConfig(id, args);
       },
     },
     'config remove-mcp-server': {

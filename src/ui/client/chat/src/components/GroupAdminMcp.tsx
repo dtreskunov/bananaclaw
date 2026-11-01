@@ -28,6 +28,11 @@ interface McpHttpServerDto {
 
 export type McpServerConfigDto = McpStdioServerDto | McpHttpServerDto;
 
+interface McpTransportDrafts {
+  stdio?: McpStdioServerDto;
+  remote?: McpHttpServerDto;
+}
+
 export interface McpProbeResultDto {
   ok: boolean;
   latencyMs: number;
@@ -63,6 +68,8 @@ export function McpServersSection({
   const [newType, setNewType] = useState<'stdio' | 'http' | 'sse'>('stdio');
   const [newConnection, setNewConnection] = useState('');
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
+  const transportDrafts = useRef(new Map<string, McpTransportDrafts>());
+  const newConnections = useRef({ stdio: '', remote: '' });
   const trimmedNew = newName.trim();
   const trimmedConnection = newConnection.trim();
   const newNameInvalid = trimmedNew !== '' && !MCP_NAME_RE.test(trimmedNew);
@@ -91,6 +98,7 @@ export function McpServersSection({
     const config: McpServerConfigDto = newType === 'stdio'
       ? { type: 'stdio', command: trimmedConnection }
       : { type: newType, url: trimmedConnection };
+    transportDrafts.current.delete(trimmedNew);
     onChange({ ...value, [trimmedNew]: config });
     setSelectedName(trimmedNew);
     setNewName('');
@@ -100,6 +108,7 @@ export function McpServersSection({
   }
 
   function removeServer(name: string): void {
+    transportDrafts.current.delete(name);
     const next = { ...value };
     delete next[name];
     onChange(next);
@@ -112,6 +121,18 @@ export function McpServersSection({
     onChange({ ...value, [name]: patch });
   }
 
+  function changeServerType(name: string, current: McpServerConfigDto, next: 'stdio' | 'http' | 'sse'): void {
+    if (next === mcpServerType(current)) return;
+    const drafts = transportDrafts.current.get(name) ?? {};
+    if ('url' in current) drafts.remote = current;
+    else drafts.stdio = current;
+    transportDrafts.current.set(name, drafts);
+    const shared = { instructions: current.instructions, timeout: current.timeout };
+    updateServer(name, next === 'stdio'
+      ? { ...drafts.stdio, type: 'stdio', command: drafts.stdio?.command ?? '', ...shared }
+      : { ...drafts.remote, type: next, url: drafts.remote?.url ?? '', ...shared });
+  }
+
   function selectServer(name: string): void {
     setSelectedName(name);
     setAddOpen(false);
@@ -119,6 +140,7 @@ export function McpServersSection({
   }
 
   function beginAdd(): void {
+    newConnections.current = { stdio: '', remote: '' };
     setNewName('');
     setNewType('stdio');
     setNewConnection('');
@@ -143,8 +165,9 @@ export function McpServersSection({
       canAdd={canAdd}
       onNameChange={setNewName}
       onTypeChange={(type) => {
+        newConnections.current[newType === 'stdio' ? 'stdio' : 'remote'] = newConnection;
         setNewType(type);
-        setNewConnection('');
+        setNewConnection(newConnections.current[type === 'stdio' ? 'stdio' : 'remote']);
       }}
       onConnectionChange={setNewConnection}
       onAdd={addServer}
@@ -159,6 +182,7 @@ export function McpServersSection({
       value={selectedValue}
       disabled={busy}
       onChange={(next) => updateServer(selectedName, next)}
+      onTypeChange={(next) => changeServerType(selectedName, selectedValue, next)}
       onRemove={() => removeServer(selectedName)}
       onTest={() => onTest(selectedName, selectedValue)}
       auth={credentialsGid && mcpServerType(selectedValue) !== 'stdio' ? (
@@ -181,12 +205,10 @@ export function McpServersSection({
     <div class="ga-mcp-section">
       <div class="ga-mcp-section-head">
         <p class="group-admin-help">
-          MCP (Model Context Protocol) servers wired into this group's agents. Restart required to
-          take effect — the SDK builds the MCP map at session start. Mirrors{' '}
-          <code>ncl groups config add-mcp-server / remove-mcp-server</code>.
+          Extra tools this agent can use. Changes take effect after the agent restarts.
         </p>
         <button ref={addButtonRef} type="button" class="ga-mcp-add" disabled={busy} onClick={beginAdd}>
-          + Add server
+          + Add tools
         </button>
       </div>
 
@@ -198,9 +220,9 @@ export function McpServersSection({
           <div class="ga-mcp-editor-pane">
             {addOpen ? addForm : editor ?? (
               <div class="ga-mcp-empty">
-                <strong>No MCP servers configured</strong>
-                <span>Add a server to expose external tools to this agent.</span>
-                <button type="button" disabled={busy} onClick={beginAdd}>+ Add server</button>
+                <strong>No extra tools yet</strong>
+                <span>Add tools for this agent to use.</span>
+                <button type="button" disabled={busy} onClick={beginAdd}>+ Add tools</button>
               </div>
             )}
           </div>
@@ -209,16 +231,16 @@ export function McpServersSection({
 
       {mobile && addOpen ? (
         <MobileDialog
-          title="Add MCP server"
+          title="Add tools"
           onBack={cancelAdd}
-          backLabel="Back to MCP servers"
+          backLabel="Back to Tools"
           onClose={cancelAdd}
         >
           <div class="settings-body ga-mcp-mobile-editor">{addForm}</div>
           <MobileDialogFooter>
             <button type="button" onClick={cancelAdd}>Cancel</button>
             <button type="submit" form="ga-mcp-add-server-form" class="primary" disabled={busy || !canAdd}>
-              Add server
+              Add tools
             </button>
           </MobileDialogFooter>
         </MobileDialog>
@@ -226,9 +248,9 @@ export function McpServersSection({
 
       {mobile && editorOpen && editor ? (
         <MobileDialog
-          title={selectedName ?? 'MCP server'}
+          title={selectedName ? `${selectedName} tools` : 'Tools'}
           onBack={() => setEditorOpen(false)}
-          backLabel="Back to MCP servers"
+          backLabel="Back to Tools"
           onClose={() => setEditorOpen(false)}
         >
           <div class="settings-body ga-mcp-mobile-editor">{editor}</div>
@@ -280,9 +302,9 @@ function McpServerList({
   onSelect: (name: string) => void;
 }): JSX.Element {
   return (
-    <nav class="ga-mcp-list" aria-label="Configured MCP servers">
+    <nav class="ga-mcp-list" aria-label="Configured tools">
       {names.length === 0 ? (
-        <p class="ga-mcp-list-empty">No servers yet.</p>
+        <p class="ga-mcp-list-empty">No extra tools yet.</p>
       ) : names.map((name) => {
         const config = value[name]!;
         const issue = mcpServerIssue(config);
@@ -341,7 +363,7 @@ function McpAddServerForm({
   const nameError = invalid
     ? 'Start with a letter or _, then use letters, digits, _, ., or -.'
     : duplicate
-      ? `A server named "${name.trim()}" already exists.`
+      ? `Tools named "${name.trim()}" already exist.`
       : null;
   const connectionLabel = type === 'stdio' ? 'Command' : 'URL';
   const connectionPlaceholder = type === 'stdio'
@@ -367,11 +389,11 @@ function McpAddServerForm({
       }}
     >
       {!mobile ? <div>
-        <h3>Add MCP server</h3>
+        <h3>Add tools</h3>
         <p class="group-admin-help">Configure the connection now; advanced settings remain available after adding.</p>
       </div> : null}
       <label class="ga-mcp-row">
-        <span class="ga-mcp-row-label">Server name</span>
+        <span class="ga-mcp-row-label">Tools name</span>
         <input
           type="text"
           class={`ga-mcp-input${nameError ? ' ga-mcp-input-invalid' : ''}`}
@@ -409,7 +431,7 @@ function McpAddServerForm({
       {!mobile ? (
         <div class="ga-mcp-form-actions">
           <button type="button" onClick={onCancel}>Cancel</button>
-          <button type="submit" class="primary" disabled={disabled || !canAdd}>Add server</button>
+          <button type="submit" class="primary" disabled={disabled || !canAdd}>Add tools</button>
         </div>
       ) : null}
     </form>
@@ -421,6 +443,7 @@ function McpServerEditor({
   value,
   disabled,
   onChange,
+  onTypeChange,
   onRemove,
   onTest,
   auth,
@@ -429,6 +452,7 @@ function McpServerEditor({
   value: McpServerConfigDto;
   disabled: boolean;
   onChange: (next: McpServerConfigDto) => void;
+  onTypeChange: (next: 'stdio' | 'http' | 'sse') => void;
   onRemove: () => void;
   onTest: () => Promise<McpProbeResultDto>;
   auth?: JSX.Element | null;
@@ -450,34 +474,10 @@ function McpServerEditor({
         ok: false,
         latencyMs: 0,
         phase: 'container',
-        error: error instanceof Error ? error.message : 'Unable to start MCP test',
+        error: error instanceof Error ? error.message : 'Unable to check these tools',
       });
     } finally {
       setTesting(false);
-    }
-  }
-
-  function setType(next: 'stdio' | 'http' | 'sse'): void {
-    if (next === 'stdio') {
-      const stdio = value as McpStdioServerDto;
-      onChange({
-        type: 'stdio',
-        command: stdio.command ?? '',
-        ...(stdio.args ? { args: stdio.args } : {}),
-        ...(stdio.env ? { env: stdio.env } : {}),
-        ...(value.instructions ? { instructions: value.instructions } : {}),
-        ...(value.timeout ? { timeout: value.timeout } : {}),
-      });
-    } else {
-      const http = value as McpHttpServerDto;
-      onChange({
-        type: next,
-        url: http.url ?? '',
-        ...(http.headers ? { headers: http.headers } : {}),
-        ...(http.authentication ? { authentication: http.authentication } : {}),
-        ...(value.instructions ? { instructions: value.instructions } : {}),
-        ...(value.timeout ? { timeout: value.timeout } : {}),
-      });
     }
   }
 
@@ -485,10 +485,10 @@ function McpServerEditor({
     <div class="ga-mcp-editor">
       <div class="ga-mcp-editor-head">
         <div>
-          <h3>{name}</h3>
-          <p class="group-admin-help">Configure how the agent connects to this server.</p>
+          <h3>{name} tools</h3>
+          <p class="group-admin-help">Choose how the agent connects to these tools.</p>
         </div>
-        <McpTransportControl value={type} disabled={disabled} onChange={setType} />
+        <McpTransportControl value={type} disabled={disabled} onChange={onTypeChange} />
       </div>
 
       {type === 'stdio' ? (
@@ -586,7 +586,7 @@ function McpServerEditor({
           {testing ? 'Testing…' : 'Test connection'}
         </button>
         <div class={`ga-mcp-test-result${testResult?.ok ? ' success' : testResult ? ' error' : ''}`} role="status" aria-live="polite">
-          {testing ? 'Starting a disposable probe container…' : testResult?.ok ? (
+          {testing ? 'Checking whether these tools are available…' : testResult?.ok ? (
             <>
               Connected · {testResult.tools?.length ?? 0} tool{testResult.tools?.length === 1 ? '' : 's'} · {testResult.latencyMs} ms
               {testResult.serverInfo ? <span>{testResult.serverInfo.name} {testResult.serverInfo.version}</span> : null}
@@ -598,24 +598,24 @@ function McpServerEditor({
       </div>
 
       <div class="ga-mcp-editor-danger">
-        <button type="button" class="danger" disabled={disabled} onClick={() => setRemoveOpen(true)}>Remove server…</button>
+        <button type="button" class="danger" disabled={disabled} onClick={() => setRemoveOpen(true)}>Remove {name} tools…</button>
       </div>
 
       {removeOpen ? (
         <MobileDialog
-          title="Remove MCP server?"
+          title={`Remove ${name} tools?`}
           role="alertdialog"
           maxWidth="420px"
           onClose={() => setRemoveOpen(false)}
         >
           <div class="settings-body">
             <p class="group-admin-help">
-              Remove <code>{name}</code> from this agent's MCP configuration?
+              Remove <strong>{name} tools</strong> from this agent?
             </p>
           </div>
           <MobileDialogFooter>
             <button type="button" onClick={() => setRemoveOpen(false)}>Cancel</button>
-            <button type="button" class="danger" onClick={onRemove}>Remove server</button>
+            <button type="button" class="danger" onClick={onRemove}>Remove {name} tools</button>
           </MobileDialogFooter>
         </MobileDialog>
       ) : null}

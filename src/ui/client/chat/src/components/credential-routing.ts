@@ -92,7 +92,9 @@ export function oauthResourceUrl(value: string): string {
     url.host.includes('*') ||
     url.pathname.includes('*')
   )
-    throw new CredentialsError('Enter an HTTPS MCP URL without wildcards, embedded credentials or a fragment.');
+    throw new CredentialsError(
+      'Enter the exact HTTPS address for these tools, without wildcards, passwords or a # section.',
+    );
   return source;
 }
 

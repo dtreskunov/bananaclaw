@@ -13,7 +13,7 @@ export const requestAccess: McpToolDefinition = {
         resource_url: { type: 'string', description: 'Exact HTTPS destination without credentials, query, fragment or wildcards.' },
         reason: { type: 'string', description: 'Why access is needed for the current request. Never include secret values.' },
         scopes: { type: 'array', items: { type: 'string' }, description: 'Optional scope suggestions reviewed during sign-in. No access is granted automatically.' },
-        mcp_server: { type: 'string', description: 'Exact configured MCP server name when requesting its account connection. Never select all servers by URL.' },
+        mcp_server: { type: 'string', description: 'Exact already-configured MCP server name when requesting its account connection. For a new server, wait until add_mcp_server is approved and the automatic restart completes; never request access while addition is pending. Never select all servers by URL.' },
         authentication: { type: 'object', additionalProperties: false,
           description: 'Optional researched authentication requirements, reviewed by the user. No tokens, passwords, client secrets, owner IDs or connection IDs. OAuth permissions go in scopes.',
           properties: {
