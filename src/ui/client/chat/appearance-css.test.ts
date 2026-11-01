@@ -218,14 +218,14 @@ describe('theme CSS contract', () => {
     expect(card).toContain('gap: 8px');
   });
 
-  it('fades bubble edges with static full-width overlays instead of masking the scroller', () => {
+  it('uses two-line non-linear bubble fades with static overlays instead of masking the scroller', () => {
     const css = read('./components/ChatMain.css');
     const content = css.match(/\.chat-main \.message-scroll \{([^}]+)\}/)?.[1];
     expect(content).not.toContain('mask');
     expect(css).not.toMatch(/\.message-scroll\.scroll-fade-(top|bottom) \{/);
     const size = css.match(/\.chat-main \.msg:is\(\.in, \.out\) \{([^}]+)\}/)?.[1];
     expect(size).toContain(
-      '--message-edge-fade: min(3lh, calc((100% - var(--message-padding-top) - var(--message-padding-block)) * 0.3))',
+      '--message-edge-fade: min(2lh, calc((100% - var(--message-padding-top) - var(--message-padding-block)) * 0.3))',
     );
     expect(size).toContain('isolation: isolate');
     const shared = css.match(
@@ -253,7 +253,7 @@ describe('theme CSS contract', () => {
         expect(rule).toContain(`border-${corner}-radius: 0`);
       expect(rule).toContain(`height: calc(var(--message-padding-${padding}) + var(--message-edge-fade))`);
       for (const color of ['--bubble-tint', '--surface'])
-        expect(rule).toContain(`linear-gradient(${direction}, var(${color}), transparent)`);
+        expect(rule).toContain(`linear-gradient(${direction}, var(${color}), 25%, transparent)`);
     }
     expect(css).toContain('.chat-main .msg:has(> .message-scroll.scroll-fade-top)::before');
     expect(css).toContain('.chat-main .msg:has(> .message-scroll.scroll-fade-bottom)::after { opacity: 1; }');

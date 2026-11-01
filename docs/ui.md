@@ -226,9 +226,10 @@ distinct from scrolling the transcript.
 
 Only the inset content scrolls and receives edge fades; the bubble's padding,
 solid background, and rounded corners stay unchanged when scrolling starts.
-Edge fades span up to three text lines, capped at 30% of the content viewport
-per edge. This keeps truncation visible across blank-line and paragraph gaps
-while leaving a clear reading area in small bubbles. The fades are static,
+Edge fades span up to two text lines, capped at 30% of the content viewport
+per edge. A non-linear gradient reaches half opacity at 25% of its span,
+keeping more edge text readable while still marking truncation across blank-line
+and paragraph gaps. The fades are static,
 full-width gradient overlays above the content, with no masks: masking the
 scroller re-composites the whole moving bubble on every frame, and even masking
 the overlays visibly costs smoothness on phones. Each overlay repeats the

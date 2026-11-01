@@ -2340,7 +2340,7 @@ nav.tab-bar-strip.group-strip {
   scrollbar-width: thin;
 }
 .chat-main .msg:is(.in, .out) {
-  --message-edge-fade: min(3lh, calc((100% - var(--message-padding-top) - var(--message-padding-block)) * 0.3));
+  --message-edge-fade: min(2lh, calc((100% - var(--message-padding-top) - var(--message-padding-block)) * 0.3));
   isolation: isolate;
 }
 .chat-main .msg:is(.in, .out)::before,
@@ -2363,10 +2363,12 @@ nav.tab-bar-strip.group-strip {
     linear-gradient(
       to bottom,
       var(--bubble-tint),
+      25%,
       transparent),
     linear-gradient(
       to bottom,
       var(--surface),
+      25%,
       transparent);
 }
 .chat-main .msg:is(.in, .out)::after {
@@ -2378,10 +2380,12 @@ nav.tab-bar-strip.group-strip {
     linear-gradient(
       to top,
       var(--bubble-tint),
+      25%,
       transparent),
     linear-gradient(
       to top,
       var(--surface),
+      25%,
       transparent);
 }
 .chat-main .msg:has(> .message-scroll.scroll-fade-top)::before,

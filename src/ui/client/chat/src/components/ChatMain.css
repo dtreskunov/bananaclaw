@@ -131,9 +131,10 @@
    phones, and even masking the overlays costs visible smoothness there. Each
    overlay is a plain gradient that repeats the bubble's tint-over-surface stack,
    fading from the bubble edge into the content, with the bubble's
-   corners and provenance rail so the edge itself stays unchanged. */
+   corners and provenance rail so the edge itself stays unchanged. The 25% color
+   hints make opacity fall faster near the edge, keeping more text readable. */
 .chat-main .msg:is(.in, .out) {
-  --message-edge-fade: min(3lh, calc((100% - var(--message-padding-top) - var(--message-padding-block)) * 0.3));
+  --message-edge-fade: min(2lh, calc((100% - var(--message-padding-top) - var(--message-padding-block)) * 0.3));
   isolation: isolate;
 }
 .chat-main .msg:is(.in, .out)::before,
@@ -153,8 +154,8 @@
   border-end-start-radius: 0;
   border-end-end-radius: 0;
   background:
-    linear-gradient(to bottom, var(--bubble-tint), transparent),
-    linear-gradient(to bottom, var(--surface), transparent);
+    linear-gradient(to bottom, var(--bubble-tint), 25%, transparent),
+    linear-gradient(to bottom, var(--surface), 25%, transparent);
 }
 .chat-main .msg:is(.in, .out)::after {
   bottom: 0;
@@ -162,8 +163,8 @@
   border-start-start-radius: 0;
   border-start-end-radius: 0;
   background:
-    linear-gradient(to top, var(--bubble-tint), transparent),
-    linear-gradient(to top, var(--surface), transparent);
+    linear-gradient(to top, var(--bubble-tint), 25%, transparent),
+    linear-gradient(to top, var(--surface), 25%, transparent);
 }
 .chat-main .msg:has(> .message-scroll.scroll-fade-top)::before,
 .chat-main .msg:has(> .message-scroll.scroll-fade-bottom)::after { opacity: 1; }
