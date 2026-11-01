@@ -5,7 +5,7 @@ registerResource({
   plural: 'approvals',
   table: 'pending_approvals',
   description:
-    'Pending approval — in-flight approval cards waiting for an admin response. Created by requestApproval() (self-mod install_packages/add_mcp_server) and OneCLI credential approval flow. Rows are deleted after the admin approves/rejects or the request expires.',
+    'Pending approval — in-flight approval cards waiting for an admin response. Created by requestApproval() (self-mod install_packages/add_mcp_server) and credential access requests. Rows are deleted after the admin approves/rejects or the request expires.',
   idColumn: 'approval_id',
   columns: [
     {
@@ -16,18 +16,18 @@ registerResource({
     {
       name: 'session_id',
       type: 'string',
-      description: 'Session that requested the approval. Null for OneCLI credential approvals.',
+      description: 'Session that requested the approval. Null for sessionless administrative approvals.',
     },
     {
       name: 'request_id',
       type: 'string',
-      description: 'Original request identifier (OneCLI request UUID or same as approval_id).',
+      description: 'Original request identifier (source request UUID or same as approval_id).',
     },
     {
       name: 'action',
       type: 'string',
       description:
-        'Action type — matches the registered approval handler (e.g. install_packages, add_mcp_server, onecli_credential).',
+        'Action type — matches the registered approval handler (e.g. install_packages, add_mcp_server, request_access).',
     },
     { name: 'payload', type: 'json', description: 'JSON payload carried through to the approval handler.' },
     { name: 'created_at', type: 'string', description: 'Auto-set.' },
@@ -39,7 +39,7 @@ registerResource({
       type: 'string',
       description: 'Platform message ID of the delivered card (for editing on expiry).',
     },
-    { name: 'expires_at', type: 'string', description: 'When this approval expires (OneCLI gateway TTL).' },
+    { name: 'expires_at', type: 'string', description: 'When this approval expires (request TTL).' },
     {
       name: 'status',
       type: 'string',

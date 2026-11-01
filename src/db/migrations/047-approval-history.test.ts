@@ -7,7 +7,7 @@ it('backfills existing session-bound decisions without inventing conversations f
   const db = initTestDb();
   runMigrations(
     db,
-    migrations.filter((migration) => migration.name !== migration047.name),
+    migrations.filter((migration) => migration.version < 47),
   );
   db.exec(`
     INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Agent','agent','created');
@@ -19,7 +19,7 @@ it('backfills existing session-bound decisions without inventing conversations f
       VALUES('access','access','{"messageId":"original-input"}','completed','{"userId":"owner"}',
         '{"response_message":{"userId":"owner","message":"Use read-only operations."}}','resolved');
   `);
-  runMigrations(db);
+  runMigrations(db, [migration047]);
   expect(
     db
       .prepare(
@@ -36,6 +36,6 @@ it('backfills existing session-bound decisions without inventing conversations f
       resolved_at: 'resolved',
     },
   ]);
-  runMigrations(db);
+  runMigrations(db, [migration047]);
   expect(db.prepare('SELECT COUNT(*) FROM approval_history').pluck().get()).toBe(1);
 });

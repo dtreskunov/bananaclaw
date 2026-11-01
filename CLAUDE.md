@@ -86,12 +86,12 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/host-sweep.ts`                            | 60s sweep: `processing_ack` sync, stale detection, due-message wake, recurrence                                                                                                                                                                                                                                             |
 | `src/session-manager.ts`                       | Resolves sessions and opens `inbound.db` / `outbound.db`                                                                                                                                                                                                                                                                    |
 | `src/session-link.ts`                          | Per-session Unix socket for validated live and durable runner state                                                                                                                                                                                                                                                         |
-| `src/container-runner.ts`                      | Spawns per-agent-group Docker containers with session DB + outbox mounts, OneCLI `ensureAgent`                                                                                                                                                                                                                              |
+| `src/container-runner.ts`                      | Spawns per-agent-group Docker containers with session DB + outbox mounts, Agent Vault scoped egress                                                                                                                                                                                                                              |
 | `src/container-runtime.ts`                     | Runtime selection (Docker vs Apple containers), orphan cleanup                                                                                                                                                                                                                                                              |
 | `src/modules/permissions/access.ts`            | `canAccessAgentGroup` — owner / global admin / scoped admin / member resolution against `user_roles` + `agent_group_members`                                                                                                                                                                                                |
 | `src/modules/approvals/primitive.ts`           | `pickApprover`, `pickApprovalDelivery`, `requestApproval`, approval-handler registry                                                                                                                                                                                                                                        |
 | `src/command-gate.ts`                          | Router-side admin command gate — queries `user_roles` directly (no env var, no container-side check)                                                                                                                                                                                                                        |
-| `src/modules/approvals/onecli-approvals.ts`    | OneCLI credentialed-action approval bridge                                                                                                                                                                                                                                                                                  |
+| `src/modules/credentials/access-requests.ts` | Durable user-owned credential access approval and recovery |
 | `src/modules/permissions/user-dm.ts`           | Cold-DM resolution + `user_dms` cache                                                                                                                                                                                                                                                                                       |
 | `src/group-init.ts`                            | Per-agent-group filesystem scaffold (CLAUDE.md, skills, agent-runner-src overlay)                                                                                                                                                                                                                                           |
 | `src/db/container-configs.ts`                  | CRUD for `container_configs` table (per-group container runtime config)                                                                                                                                                                                                                                                     |
@@ -101,11 +101,11 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/channels/`                                | Channel adapter infra (registry, Chat SDK bridge); specific channel adapters are skill-installed from the `channels` branch                                                                                                                                                                                                 |
 | `src/providers/`                               | Host-side provider container-config (`claude` baked in; `opencode` etc. installed from the `providers` branch)                                                                                                                                                                                                              |
 | `container/agent-runner/src/`                  | Agent-runner: poll loop, formatter, provider abstraction, MCP tools, destinations                                                                                                                                                                                                                                           |
-| `container/skills/`                            | Container skills mounted into every agent session (`onecli-gateway`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`)                                                                                                                                                                                      |
+| `container/skills/`                            | Container skills mounted into every agent session (`agent-vault`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`)                                                                                                                                                                                      |
 | `groups/<folder>/`                             | Per-agent-group filesystem (CLAUDE.md, skills, per-group `agent-runner-src/` overlay)                                                                                                                                                                                                                                       |
 | `scripts/init-first-agent.ts`                  | Bootstrap the first DM-wired agent (used by `/init-first-agent` skill)                                                                                                                                                                                                                                                      |
 | `migrate-v2.sh` + `setup/migrate-v2/`          | v1→v2 migration. Standalone script: `bash migrate-v2.sh`. Seeds DB, copies groups/sessions, installs channels, builds container, offers service switchover, then hands off to `/migrate-from-v1` skill for owner setup and CLAUDE.md cleanup. See [docs/migration-dev.md](docs/migration-dev.md).                           |
-| `nanoclaw.sh --uninstall` + `setup/uninstall/` | Uninstall this copy only (slug-scoped): service, containers + image, `data/`, `logs/`, `groups/`, this copy's OneCLI agents. Confirms per group; `--dry-run` previews, `--yes` skips prompts. Other copies and the shared OneCLI app are untouched. Bypasses bootstrap entirely; `uninstall.sh` is a pointer that execs it. |
+| `nanoclaw.sh --uninstall` + `setup/uninstall/` | Uninstall this copy only (slug-scoped): service, containers + image, `data/`, `logs/`, `groups/`, this copy's optional Agent Vault group access. Confirms per group; `--dry-run` previews, `--yes` skips prompts. Other copies and personal connections are untouched. Bypasses bootstrap entirely; `uninstall.sh` is a pointer that execs it. |
 
 ## Admin CLI (`ncl`)
 
@@ -174,37 +174,22 @@ The `on_wake` column on `messages_in` ensures wake messages are only picked up b
 
 Key files: `src/container-restart.ts`, `src/container-runner.ts` (`killContainer`), `container/agent-runner/src/db/messages-in.ts` (`getPendingMessages`).
 
-## Secrets / Credentials / OneCLI
+## Secrets / Credentials / Agent Vault
 
-API keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway. Secrets are injected into per-agent containers at request time — none are passed in env vars or through chat context. The container agent sees this via the `onecli-gateway` container skill (`container/skills/onecli-gateway/SKILL.md`), which teaches it how the proxy works, how to handle auth errors, and to never ask for raw credentials. Host-side wiring: `src/modules/approvals/onecli-approvals.ts`, `ensureAgent()` in `container-runner.ts`. Run `onecli --help`.
+Agent Vault is the only credential backend. Users own personal static/OAuth
+connections, agents receive explicit whole-credential grants and private
+per-session Unix sockets provide their only egress. Real values, host tokens
+and OAuth credentials never enter containers or chat. See
+`container/skills/agent-vault/SKILL.md`.
 
-### Agent credential grants
+Use the personal Credentials page and agent Access settings, or the host-only
+`ncl credentials` commands with an explicit existing `--user`.
+Never copy credentials between groups or automatically broaden grants.
+Credential access approvals use `request_access`; they are not per-request
+API approvals. The old gateway approval bridge and backend-switching CLI are
+removed. Installation uses `/init-agent-vault` with pinned checksum and signed
+source/tag verification.
 
-New OneCLI agents start with no credential grants. NanoClaw can attach an
-operator allow-list at creation time: set `ONECLI_NEW_AGENT_SECRET_IDS` in
-`.env` to comma-separated IDs from `onecli secrets list`. This affects only
-agents created afterward and never reconciles or removes existing grants.
-
-For an existing agent, use the OneCLI web UI or the current grants CLI:
-
-```bash
-onecli agents grants list --id <agent-id>
-onecli agents grants attach-secret --id <agent-id> --secret-id <secret-id>
-onecli agents grants detach-secret --id <agent-id> --secret-id <secret-id>
-```
-
-Grant changes take effect immediately; no container restart is needed. The
-retired `set-secret-mode` and `set-secrets` commands return `410 Gone` on
-current gateways.
-
-### Requiring approval for credential use
-
-Approval-gating credentialed actions is a **two-sided** flow:
-
-- **Server-side** (OneCLI gateway): decides _when_ to hold a request and emit a pending approval. As of `onecli@1.3.0`, the CLI does **not** expose this — `rules create --action` only accepts `block` or `rate_limit`, and `secrets create` has no approval flag. Approval policies must be configured via the OneCLI web UI at `http://127.0.0.1:10254`. If/when the CLI grows an `approve` action, this section needs updating.
-- **Host-side** (nanoclaw): receives pending approvals and routes them to a human. `src/modules/approvals/onecli-approvals.ts` registers a callback via `onecli.configureManualApproval(cb)` (long-polls `GET /api/approvals/pending`). The callback uses `pickApprover` + `pickApprovalDelivery` from `src/modules/approvals/primitive.ts` to DM an approver. Approvers are resolved from the `user_roles` table — preference order: scoped admins for the agent group → global admins → owners. There is no env var like `NANOCLAW_ADMIN_USER_IDS`; roles are persisted in the central DB only.
-
-If approvals are configured server-side but the host callback isn't running (or throws), every credentialed call hangs until the gateway times out. Conversely, if the gateway has no rule asking for approval, the host callback never fires regardless of how it's wired.
 
 ## Skills
 
@@ -212,8 +197,8 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 
 - **Channel/provider install skills** — copy the relevant module(s) in from the `channels` or `providers` branch, wire imports, install pinned deps (e.g. `/add-discord`, `/add-slack`, `/add-whatsapp`, `/add-opencode`).
 - **Utility skills** — ship code files alongside `SKILL.md` (e.g. a `scripts/` CLI or helper).
-- **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/init-onecli`, `/update-nanoclaw`).
-- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `onecli-gateway`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`).
+- **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/init-agent-vault`, `/update-nanoclaw`).
+- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `agent-vault`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`).
 
 ### Container skills: roots, spec, catalogs
 
@@ -238,7 +223,7 @@ A **catalog** is a git repo, either a Claude Code plugin marketplace (`.claude-p
 | `/customize`        | Adding channels, integrations, behavior changes                                       |
 | `/debug`            | Container issues, logs, troubleshooting                                               |
 | `/update-nanoclaw`  | Bring upstream updates into a customized install                                      |
-| `/init-onecli`      | Install OneCLI Agent Vault and migrate `.env` credentials                             |
+| `/init-agent-vault`      | Install or upgrade the verified Agent Vault gateway                             |
 | `/migrate-memory`   | Carry a group's agent memory across a provider switch (operator-run, both directions) |
 
 ## Contributing
@@ -293,7 +278,7 @@ Check these first when something goes wrong:
 | What        | Where                                                                                                                                                                               |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Host logs   | `logs/nanoclaw.error.log` first (delivery failures, crash-loop backoff, warnings), then `logs/nanoclaw.log` for the full routing chain                                              |
-| Setup logs  | `logs/setup.log` (overall), `logs/setup-steps/*.log` (per-step: bootstrap, environment, container, onecli, mounts, service, etc.)                                                   |
+| Setup logs  | `logs/setup.log` (overall), `logs/setup-steps/*.log` (per-step: bootstrap, environment, container, agent-vault, mounts, service, etc.)                                                   |
 | Session DBs | `data/v2-sessions/<agent-group>/<session>/` — `inbound.db` (`messages_in`: did the message reach the container?), `outbound.db` (`messages_out`: did the agent produce a response?) |
 
 Note: container logs are lost after the container exits (`--rm` flag). If the agent silently failed inside the container, there's no persistent log to inspect.

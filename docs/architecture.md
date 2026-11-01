@@ -405,7 +405,7 @@ This is documented as a pattern, not a built-in feature.
 
 ## Core Properties
 - Container isolation via filesystem mounts
-- Credential proxy (OneCLI)
+- Credential proxy (Agent Vault)
 - Per-agent-group workspace (folder, CLAUDE.md, skills)
 - Durable messages remain polling-based; live runner status is event-driven
 - Per-agent-group agent-runner recompilation on container startup (agent can modify its own source, request rebuild/restart, changes persist across teardowns)

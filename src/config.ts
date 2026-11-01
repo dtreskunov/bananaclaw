@@ -9,9 +9,6 @@ import { isValidTimezone } from './timezone.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
-  'ONECLI_URL',
-  'ONECLI_API_KEY',
-  'ONECLI_NEW_AGENT_SECRET_IDS',
   'CONTAINER_MEMORY_LIMIT',
   'CONTAINER_CPU_LIMIT',
   'TZ',
@@ -51,16 +48,6 @@ export const CONTAINER_MEMORY_LIMIT = (
   '1536m'
 ).trim();
 export const CONTAINER_CPU_LIMIT = (process.env.CONTAINER_CPU_LIMIT || envConfig.CONTAINER_CPU_LIMIT || '2').trim();
-export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
-export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
-export const ONECLI_NEW_AGENT_SECRET_IDS = [
-  ...new Set(
-    (process.env.ONECLI_NEW_AGENT_SECRET_IDS || envConfig.ONECLI_NEW_AGENT_SECRET_IDS || '')
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean),
-  ),
-];
 // Base domain for per-agent-group static websites. When set, a group with
 // `site_enabled` is reachable at `<site_slug>.<PAGES_BASE_DOMAIN>`. Unset
 // disables the website feature entirely. Lower-cased, no leading dot.

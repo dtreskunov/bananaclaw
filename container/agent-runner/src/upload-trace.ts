@@ -63,55 +63,17 @@ function curl(args: string[], input?: string): { ok: boolean; out: string } {
   return { ok: r.status === 0, out: (r.stdout ?? '') + (r.stderr ?? '') };
 }
 
-/**
- * Agent Vault recovery uses personal connections and group grants; only the
- * legacy backend uses gateway-provided setup URLs.
- */
-export function traceAuthRecoveryMessage(
-  body: string,
-  status: string,
-  agentVault = Boolean(process.env.NANOCLAW_EGRESS_SOCKET),
-): string {
-  if (agentVault) {
-    return [
-      `Can't upload — the Hugging Face account check failed (HTTP ${status}).`,
-      'Endpoint: https://huggingface.co/api/whoami-v2',
-      '',
-      "Check this agent's Access settings and the owner's connection in Credentials.",
-      'If access is missing, connect a Hugging Face credential privately and grant this agent access to https://huggingface.co. Uploads require write permission.',
-      'A 401/403 alone does not establish disconnection; check provider permissions and routing. Never send tokens in chat.',
-      '',
-      'Then run /upload-trace again.',
-    ].join('\n');
-  }
-  let setupUrl: string | undefined;
-  try {
-    const e = JSON.parse(body) as { secret_url?: string; connect_url?: string; manage_url?: string };
-    if (e.secret_url) {
-      // The pre-filled `path` defaults to the failing request path
-      // (/api/whoami-v2), which scopes the secret to that one endpoint. Blank
-      // it so the secret matches all of huggingface.co — the upload endpoints
-      // included, not just whoami.
-      setupUrl = e.secret_url.replace(/([?&]path=)[^&]*/, '$1');
-    } else {
-      setupUrl = e.connect_url ?? e.manage_url;
-    }
-  } catch {
-    /* non-JSON body (e.g. HF's own error, or no gateway) — generic fallback */
-  }
-  const lines = [
-    "Can't upload — no Hugging Face token is available to this agent. To set it up:",
+export function traceAuthRecoveryMessage(status: string): string {
+  return [
+    `Can't upload — the Hugging Face account check failed (HTTP ${status}).`,
+    'Endpoint: https://huggingface.co/api/whoami-v2',
     '',
-    '1. Create a token with WRITE access at https://huggingface.co/settings/tokens',
-    '   (New token → type "Write" → copy it).',
-    '',
-    setupUrl
-      ? `2. Add it to OneCLI here: ${setupUrl}`
-      : '2. Add it to the OneCLI vault as a secret with host pattern  huggingface.co',
+    "Check this agent's Access settings and the owner's connection in Credentials.",
+    'If access is missing, connect a Hugging Face credential privately and grant this agent access to https://huggingface.co. Uploads require write permission.',
+    'A 401/403 alone does not establish disconnection; check provider permissions and routing. Never send tokens in chat.',
     '',
     'Then run /upload-trace again.',
-  ];
-  return lines.join('\n');
+  ].join('\n');
 }
 
 /** Returns a user-facing status line. Never throws. */
@@ -119,15 +81,14 @@ export function uploadTrace(): string {
   const file = newestTranscript();
   if (!file) return 'No transcript to upload for this session yet.';
 
-  // whoami, capturing the body + HTTP status (no -f, so the gateway's error
-  // JSON survives a 401). Legacy setup URLs are used only on that backend.
+  // Capture HTTP status without treating a provider error as disconnection.
   const who = curl(['-s', '-w', '\n%{http_code}', 'https://huggingface.co/api/whoami-v2']);
   const nl = who.out.lastIndexOf('\n');
   const body = nl === -1 ? '' : who.out.slice(0, nl);
   const status = nl === -1 ? who.out.trim() : who.out.slice(nl + 1).trim();
 
   if (status !== '200') {
-    return traceAuthRecoveryMessage(body, status);
+    return traceAuthRecoveryMessage(status);
   }
   let user: string | undefined;
   try {

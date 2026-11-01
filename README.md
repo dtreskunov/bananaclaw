@@ -134,7 +134,7 @@ The shared **Add credential** dialog supports keys and OAuth accounts.
 Names and HTTPS URL patterns size to their contents without wrapping.
 New groups use AgentVault and receive no credentials automatically. Their owner
 selects or connects personal credentials and explicitly grants the new agent
-access. Existing OneCLI groups retain their backend until reviewed cutover.
+access. Agent Vault is the only supported credential backend; grants are explicit and user-owned.
 
 NanoClaw maps its stable user identities to native AgentVault managed users
 with personal library vaults. These users cannot log in to the gateway.

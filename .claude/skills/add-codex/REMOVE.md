@@ -63,7 +63,7 @@ node -e '
 
 ## 5. Vault secret (optional)
 
-The ChatGPT/OpenAI secret in the OneCLI vault grants nothing once the provider is gone. To remove it: `onecli secrets list`, then `onecli secrets delete --id <id>` for the `chatgpt.com` / `api.openai.com` entry.
+Revoke only the selected group’s credential grant in Credentials. Do not delete a personal connection or disconnect upstream OAuth while other groups use it; global disconnection requires explicit owner approval.
 
 ## 6. Rebuild and verify
 

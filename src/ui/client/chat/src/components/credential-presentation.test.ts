@@ -4,13 +4,13 @@ import type { Connection } from './CredentialsApi';
 
 const connection: Connection = {
   id: 'key',
-  label: 'ag-1779840987143-r0nb8p/onecli-6826e53ef9c6a79285bf',
+  label: 'ag-1779840987143-r0nb8p/imported-6826e53ef9c6a79285bf',
   kind: 'static',
   status: 'ready',
   revision: '"one"',
   owner: { id: 'owner' },
   services: [
-    { name: 'onecli-6826e53ef9c6a79285bf', host: 'ai-gateway.vercel.sh/*', auth: { type: 'bearer', token: 'KEY' } },
+    { name: 'imported-6826e53ef9c6a79285bf', host: 'ai-gateway.vercel.sh/*', auth: { type: 'bearer', token: 'KEY' } },
   ],
   credentials: ['KEY'],
   grants: [],
@@ -27,7 +27,7 @@ describe('credential display names', () => {
   });
   it('uses the service instead of migration IDs without changing stored names', () => {
     expect(connectionName(connection)).toBe('Vercel AI Gateway');
-    expect(connection.label).toContain('onecli-');
+    expect(connection.label).toContain('imported-');
     expect(serviceDestination(connection.services[0])).toBe('https://ai-gateway.vercel.sh/*');
   });
   it('preserves useful user-assigned labels', () => {

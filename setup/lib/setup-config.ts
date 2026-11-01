@@ -59,53 +59,9 @@ interface IntEntry extends BaseEntry {
 
 export type Entry = StringEntry | EnumEntry | BoolEntry | IntEntry;
 
-const httpUrl = (v: string): string | undefined =>
-  /^https?:\/\/\S+/.test(v) ? undefined : 'Must be http(s)://…';
+const httpUrl = (v: string): string | undefined => (/^https?:\/\/\S+/.test(v) ? undefined : 'Must be http(s)://…');
 
 export const CONFIG: Entry[] = [
-  {
-    key: 'onecliApiHost',
-    label: 'OneCLI vault URL',
-    help: 'Use a remote OneCLI vault instead of installing one locally.',
-    surface: 'flag+ui',
-    group: 'OneCLI',
-    type: 'url',
-    default: 'https://api.onecli.sh',
-    placeholder: 'https://api.onecli.sh',
-    validate: httpUrl,
-  },
-  {
-    key: 'onecliApiToken',
-    label: 'OneCLI access token',
-    help: 'Bearer token for the remote vault. Required if --onecli-api-host is set.',
-    surface: 'flag+ui',
-    group: 'OneCLI',
-    type: 'string',
-    secret: true,
-    placeholder: 'oc_…',
-    validate: (v) => (v.startsWith('oc_') ? undefined : 'Must start with oc_'),
-  },
-  {
-    key: 'anthropicBaseUrl',
-    label: 'Anthropic API base URL',
-    help: 'Use a proxy or alternative endpoint instead of api.anthropic.com.',
-    surface: 'flag+ui',
-    group: 'Anthropic',
-    type: 'url',
-    placeholder: 'https://api.anthropic.com',
-    validate: httpUrl,
-  },
-  {
-    key: 'anthropicAuthToken',
-    label: 'Anthropic auth token',
-    help: 'Bearer token for the custom Anthropic endpoint. Used together with --anthropic-base-url.',
-    surface: 'flag+ui',
-    group: 'Anthropic',
-    type: 'string',
-    secret: true,
-    validate: (v) => (v.trim() ? undefined : 'Required'),
-  },
-
   // Existing env-var knobs — flag-only so they don't clutter the UI screen.
   {
     key: 'skip',
@@ -137,7 +93,7 @@ export const CONFIG: Entry[] = [
   {
     key: 'uninstall',
     label: 'Uninstall',
-    help: 'Remove this NanoClaw copy (service, containers, data, vault agents). Asks per group.',
+    help: 'Remove this NanoClaw copy (service, containers, data, optional group access). Asks per group.',
     surface: 'flag',
     type: 'boolean',
     default: false,
@@ -153,7 +109,7 @@ export const CONFIG: Entry[] = [
   {
     key: 'yes',
     label: 'Uninstall without prompts',
-    help: 'With --uninstall: delete everything found without asking (orphan vault agents are still kept).',
+    help: 'With --uninstall: delete this copy’s selected resources without asking; personal connections stay intact.',
     surface: 'flag',
     type: 'boolean',
     default: false,

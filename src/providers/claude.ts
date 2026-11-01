@@ -5,14 +5,14 @@
  * standard installs hitting api.anthropic.com don't need this file
  * loaded.
  *
- * The real auth token never enters the container. Setup creates an
- * OneCLI generic secret (host-pattern = base URL hostname, header-name
- * = Authorization, value-format = "Bearer {value}") so the proxy
+ * The real auth token never enters the container. The owner creates a
+ * personal connection for the exact API host and documented auth recipe
+ * and grants the selected agent access, so the proxy
  * rewrites the Authorization header on the wire. The container only
  * needs:
  *   - ANTHROPIC_BASE_URL — so the SDK knows where to call
  *   - ANTHROPIC_AUTH_TOKEN=placeholder — so the SDK adds an
- *     Authorization: Bearer header for OneCLI to overwrite
+ *     Authorization: Bearer header for Agent Vault to overwrite
  */
 import { readEnvFile } from '../env.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';

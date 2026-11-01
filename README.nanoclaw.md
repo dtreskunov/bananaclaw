@@ -31,7 +31,7 @@ cd nanoclaw-v2
 bash nanoclaw.sh
 ```
 
-`nanoclaw.sh` walks you from a fresh machine to a named agent you can message. It installs Node, pnpm, and Docker if missing, registers your Anthropic credential with OneCLI, builds the agent container, and pairs your first channel (Telegram, Discord, WhatsApp, or a local CLI). If a step fails, Claude Code is invoked automatically to diagnose and resume from where it broke.
+`nanoclaw.sh` walks you from a fresh machine to a named agent you can message. It installs Node, pnpm, and Docker if missing, registers your Anthropic credential with Agent Vault, builds the agent container, and pairs your first channel (Telegram, Discord, WhatsApp, or a local CLI). If a step fails, Claude Code is invoked automatically to diagnose and resume from where it broke.
 
 <details>
 <summary><strong>Migrating from NanoClaw v1?</strong></summary>
@@ -46,7 +46,7 @@ bash migrate-v2.sh
 
 `migrate-v2.sh` finds your v1 install (sibling directory, or `NANOCLAW_V1_PATH=/path/to/nanoclaw`), migrates state into the v2 checkout, then `exec`s into Claude Code to finish the parts that need judgment (owner seeding, CLAUDE.local.md cleanup, fork-customisation replay).
 
-Run the script directly, not from inside a Claude session — the deterministic side needs interactive prompts and real shell I/O for Node/pnpm bootstrap, Docker, OneCLI, and the container build.
+Run the script directly, not from inside a Claude session — the deterministic side needs interactive prompts and real shell I/O for Node/pnpm bootstrap, Docker, Agent Vault, and the container build.
 
 **What it does:** merges `.env`, seeds the v2 DB from `registered_groups`, copies group folders + session data + scheduled tasks, installs the channel adapters you select, copies channel auth state (including Baileys keystore + LID mappings for WhatsApp), builds the agent container.
 
@@ -80,7 +80,7 @@ See [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md) for what's different an
 - **Scheduled tasks** — recurring jobs that run Claude and can message you back
 - **Web access** — search and fetch content from the web
 - **Container isolation** — agents are sandboxed in Docker (macOS/Linux/WSL2), with optional [Docker Sandboxes](docs/docker-sandboxes.md) micro-VM isolation or Apple Container as a macOS-native opt-in
-- **Credential security** — agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
+- **Credential security** — agents never hold raw API keys. Outbound requests route through [Agent Vault](https://github.com/dtreskunov/agent-vault), using explicit user-owned grants and per-session Unix sockets. Access grants are not per-request approvals.
 
 ## Usage
 
@@ -152,7 +152,7 @@ Key files:
 - `src/delivery.ts` — polls `outbound.db`, delivers via adapter, handles system actions
 - `src/host-sweep.ts` — 60s sweep: stale detection, due-message wake, recurrence
 - `src/session-manager.ts` — resolves sessions, opens `inbound.db` / `outbound.db`
-- `src/container-runner.ts` — spawns per-agent-group containers, OneCLI credential injection
+- `src/container-runner.ts` — spawns per-agent-group containers, Agent Vault credential injection
 - `src/db/` — central DB (users, roles, agent groups, messaging groups, wiring, migrations)
 - `src/channels/` — channel adapter infra (adapters installed via `/add-<channel>` skills)
 - `src/providers/` — host-side provider config (`claude` baked in; others via skills)
@@ -171,7 +171,7 @@ Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via W
 
 **Is this secure?**
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. Credentials never enter the container — outbound API requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects authentication at the proxy level and supports rate limits and access policies. You should still review what you're running, but the codebase is small enough that you actually can. See the [security documentation](https://docs.nanoclaw.dev/concepts/security) for the full security model.
+Agents run in network-disabled containers with explicitly mounted directories. Credentials never enter the container — outbound API requests route through [Agent Vault](https://github.com/dtreskunov/agent-vault), which injects authentication using user-owned connections and explicit group grants. You should still review what you're running. See [the security documentation](docs/SECURITY.md) for the current model.
 
 **Why no configuration files?**
 

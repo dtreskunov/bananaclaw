@@ -37,6 +37,8 @@ export function getAllContainerConfigs(): ContainerConfigRow[] {
 
 /** Insert a new config row. Caller must supply all JSON fields (use defaults for empty). */
 export function createContainerConfig(config: ContainerConfigRow): void {
+  if (config.credential_backend != null && config.credential_backend !== 'agent-vault')
+    throw new Error('Unsupported credential backend; review the archived group before restoring its access');
   getDb()
     .prepare(
       `INSERT INTO container_configs (
@@ -130,15 +132,6 @@ export function updateContainerConfigJson(
 
 export function deleteContainerConfig(agentGroupId: string): void {
   getDb().prepare('DELETE FROM container_configs WHERE agent_group_id = ?').run(agentGroupId);
-}
-
-export type CredentialBackend = 'onecli' | 'agent-vault';
-
-/** Host-only: moves a group between OneCLI and the Agent Vault gateway. Takes effect on the next container start. */
-export function setCredentialBackend(agentGroupId: string, backend: CredentialBackend): void {
-  getDb()
-    .prepare('UPDATE container_configs SET credential_backend = ?, updated_at = ? WHERE agent_group_id = ?')
-    .run(backend, new Date().toISOString(), agentGroupId);
 }
 
 /** AgentVault is also the default while a newly created group's config is initialized. */

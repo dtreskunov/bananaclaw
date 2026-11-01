@@ -21,8 +21,7 @@ const STEPS: Record<
   mounts: () => import('./mounts.js'),
   service: () => import('./service.js'),
   verify: () => import('./verify.js'),
-  onecli: () => import('./onecli.js'),
-  auth: () => import('./auth.js'),
+  'agent-vault': () => import('./agent-vault.js'),
   'provider-auth': () => import('./provider-auth.js'),
   'cli-agent': () => import('./cli-agent.js'),
 };

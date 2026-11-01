@@ -13,7 +13,6 @@ import {
   usesAgentVault,
 } from './agent-vault-egress.js';
 import { closeDb, initTestDb, runMigrations } from './db/index.js';
-import { setCredentialBackend } from './db/container-configs.js';
 import { getDb } from './db/connection.js';
 
 const CA = '-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----';
@@ -116,7 +115,7 @@ describe('agent vault egress', () => {
     expect(usesAgentVault('ag-three')).toBe(false);
   });
 
-  it('defaults new groups to AgentVault and permits explicit reviewed legacy selections', () => {
+  it('uses Agent Vault for every existing group and rejects unsupported backend writes', () => {
     const now = new Date().toISOString();
     getDb()
       .prepare(
@@ -125,10 +124,8 @@ describe('agent vault egress', () => {
       .run(now);
     getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES ('ag-db', ?)`).run(now);
     expect(usesAgentVault('ag-db')).toBe(true);
-    setCredentialBackend('ag-db', 'agent-vault');
+    expect(() => getDb().prepare("UPDATE container_configs SET credential_backend='unsupported'").run()).toThrow();
     expect(usesAgentVault('ag-db')).toBe(true);
-    setCredentialBackend('ag-db', 'onecli');
-    expect(usesAgentVault('ag-db')).toBe(false);
   });
 
   it('opens a socket session and mounts the socket directory and CA bundle', async () => {
@@ -196,7 +193,7 @@ describe('agent vault egress', () => {
     expect(fs.readdirSync(process.env.AGENT_VAULT_SOCKET_ROOT)).toEqual([]);
   });
 
-  it('release is a no-op for OneCLI containers and survives a gateway outage', async () => {
+  it('release is a no-op for Agent Vault containers and survives a gateway outage', async () => {
     await releaseAgentVaultEgress('never-applied');
     expect(requests).toEqual([]);
     await applyAgentVaultEgress([], { containerName: 'c-down', agentGroupId: 'ag-one', label: 'd' });

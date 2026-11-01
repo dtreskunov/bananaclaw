@@ -575,7 +575,7 @@ export function buildOpenCodeConfig(options: ProviderOptions): Record<string, un
   const smallModel = process.env.OPENCODE_SMALL_MODEL;
   // Base URL for the upstream gateway. Normally unset — OpenCode's models.dev
   // catalog already knows each provider's API base (e.g. openrouter.ai/api/v1,
-  // api.minimax.io/anthropic/v1), and OneCLI injects credentials on the wire.
+  // api.minimax.io/anthropic/v1), and Agent Vault injects credentials on the wire.
   // Only override for a non-standard endpoint.
   const proxyUrl = process.env.OPENCODE_BASE_URL || process.env.ANTHROPIC_BASE_URL;
 

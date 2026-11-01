@@ -93,7 +93,7 @@ The sender's address didn't match any regex. Check the regexes — remember they
 Check `data/v2-sessions/<agentGroupId>/<sessionId>/inbound.db` for a `messages_in` row. If it's there but no spawn, host-sweep should pick it up within 60s. If still nothing, check `logs/nanoclaw.error.log` for container-runtime errors.
 
 **Container spawns but no reply arrives.**
-First-time senders may be held by the approval flow — check `ncl approvals list`. If the agent group is fresh and OneCLI is in use, also check `onecli agents secrets --id <agentGroupId>` — newly-created agents start in `selective` secret mode with no secrets assigned (the API call returns 401 silently). Fix: `onecli agents set-secret-mode --id <agentGroupId> --mode all`.
+First-time senders may be held by the approval flow — check `ncl approvals list`. For a new agent, review its Access and the owner’s Credentials. No credentials are granted automatically; use the existing request_access workflow rather than broadening access to every connection.
 
 **Container name issues / docker error about invalid characters.**
 The host sanitizes `@` → `_at_` in container names, so `groups/leet@bot.example.com/` becomes `nanoclaw-v2-leet_at_bot.example.com-<ts>`. If you see another character cause problems (rare — only `[a-zA-Z0-9_.-]` is allowed), report it.

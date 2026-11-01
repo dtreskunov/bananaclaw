@@ -28,7 +28,6 @@ import { readEnvFile } from './env.js';
 import {
   CONTAINER_RUNTIME_BIN,
   dumpContainerProcesses,
-  hostGatewayArgs,
   isRootlessPodman,
   readonlyMountArgs,
   stopContainer,
@@ -37,9 +36,7 @@ import {
   agentVaultEnvKeys,
   applyAgentVaultEgress,
   releaseAgentVaultEgress,
-  usesAgentVault,
 } from './agent-vault-egress.js';
-import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from './egress-lockdown.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -48,7 +45,6 @@ import { defaultSkillRoots, groupSkillRoots, listSkills, type SkillRoot } from '
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
-import { ensureOneCliAgent, getOneCliClient } from './onecli-agent.js';
 import {
   SESSION_LINK_VERSION,
   sessionLinkDir,
@@ -93,7 +89,7 @@ export interface McpProbeResult {
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
  * `wakeContainer` calls while the first spawn is still mid-setup (async
- * buildContainerArgs, OneCLI gateway apply, etc.) — otherwise a second
+ * buildContainerArgs, Agent Vault gateway apply, etc.) — otherwise a second
  * wake in that window passes the `activeContainers.has` check and spawns
  * a duplicate container against the same session directory, producing
  * racy double-replies.
@@ -116,7 +112,7 @@ export function isContainerRunning(sessionId: string): boolean {
  * The container runs the v2 agent-runner which polls the session DB.
  *
  * Contract: never throws. Returns `true` on successful spawn, `false` on
- * transient spawn failure (e.g. OneCLI gateway unreachable). Callers don't
+ * transient spawn failure (e.g. Agent Vault gateway unreachable). Callers don't
  * need to wrap — the inbound row stays pending and host-sweep retries on
  * its next tick. Callers that care (e.g. the router's typing indicator)
  * can branch on the boolean.
@@ -192,7 +188,6 @@ async function runRecoveryContainer(session: Session): Promise<boolean> {
     config,
     'native',
     {},
-    undefined,
     session.id,
     'recovery',
   );
@@ -365,9 +360,6 @@ async function spawnContainer(session: Session): Promise<void> {
   // folder (those tolerate `@`).
   const folderSlug = agentGroup.folder.replace(/@/g, '_at_').replace(/[^a-zA-Z0-9_.-]/g, '-');
   const containerName = `nanoclaw-v2-${folderSlug}-${Date.now()}`;
-  // OneCLI agent identifier is always the agent group id — stable across
-  // sessions and reversible via getAgentGroup() for approval routing.
-  const agentIdentifier = agentGroup.id;
   const args = await buildContainerArgs(
     mounts,
     containerName,
@@ -375,7 +367,6 @@ async function spawnContainer(session: Session): Promise<void> {
     containerConfig,
     provider,
     contribution,
-    agentIdentifier,
     session.id,
   );
 
@@ -481,7 +472,6 @@ export async function runMcpProbeContainer(
       containerConfig,
       provider,
       contribution,
-      agentGroup.id,
       probeId,
       'mcp-probe',
     );
@@ -995,7 +985,6 @@ export async function buildContainerArgs(
   containerConfig: import('./container-config.js').ContainerConfig,
   _provider: string,
   providerContribution: ProviderContainerContribution,
-  agentIdentifier: string | undefined,
   sessionId: string,
   launchMode: 'agent' | 'mcp-probe' | 'recovery' = 'agent',
 ): Promise<string[]> {
@@ -1074,10 +1063,8 @@ export async function buildContainerArgs(
     if (ksm) args.push('-e', `KSM_MERGE=${ksm}`);
   }
 
-  // AgentVault groups replace OneCLI and its
-  // network setup; their egress env must win over provider contributions.
-  const agentVault = usesAgentVault(agentGroup.id);
-  const reservedEnv = agentVault ? agentVaultEnvKeys() : new Set<string>();
+  // The gateway's egress settings must win over provider contributions.
+  const reservedEnv = agentVaultEnvKeys();
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
@@ -1087,18 +1074,9 @@ export async function buildContainerArgs(
     }
   }
 
-  // Egress lockdown when enabled — throws if it can't be established, aborting
-  // the spawn rather than running with open egress. Otherwise the host gateway.
   // Agent Vault containers have no network at all: the mounted gateway socket
   // is their only way out.
-  if (agentVault) {
-    args.push('--network=none');
-  } else if (ensureEgressNetwork()) {
-    args.push(...egressNetworkArgs());
-    log.info('Egress lockdown active', { containerName, network: EGRESS_NETWORK });
-  } else {
-    args.push(...hostGatewayArgs());
-  }
+  args.push('--network=none');
 
   // User mapping
   const hostUid = process.getuid?.();
@@ -1117,37 +1095,12 @@ export async function buildContainerArgs(
     }
   }
 
-  // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
-  // are routed through the agent vault for credential injection, and mounts
-  // any credential stubs the gateway serves (e.g. a sentinel auth file).
-  // Runs AFTER the volume mounts so a stub nested inside one of our mounts
-  // (a parent dir mounted RW above it) lands later in the args and isn't
-  // shadowed by it. Treated as a transient hard failure: if we can't wire
-  // the gateway, we don't spawn. The caller (router or host-sweep) catches
-  // the throw, leaves the inbound message pending, and the next sweep tick
-  // retries.
-  if (agentVault) {
-    await applyAgentVaultEgress(args, {
-      containerName,
-      agentGroupId: agentGroup.id,
-      label: `${launchMode}:${sessionId}`,
-    });
-  } else {
-    const onecli = await getOneCliClient();
-    if (agentIdentifier) {
-      await ensureOneCliAgent(onecli, agentGroup.name, agentIdentifier);
-    }
-    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-    if (!onecliApplied) {
-      throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
-    }
-    // The SDK sets SSL_CERT_FILE (OpenSSL/Node) but git/curl read their CA
-    // bundle from CURL_CA_BUNDLE / GIT_SSL_CAINFO. Without these, `git clone`
-    // through the OneCLI HTTPS proxy fails with "server certificate verification failed".
-    args.push('-e', 'CURL_CA_BUNDLE=/tmp/onecli-combined-ca.pem');
-    args.push('-e', 'GIT_SSL_CAINFO=/tmp/onecli-combined-ca.pem');
-    log.info('OneCLI gateway applied', { containerName });
-  }
+  // Failure aborts the spawn; the host leaves input pending for recovery.
+  await applyAgentVaultEgress(args, {
+    containerName,
+    agentGroupId: agentGroup.id,
+    label: `${launchMode}:${sessionId}`,
+  });
 
   // Override entrypoint: run v2 entry point directly via Bun (no tsc, no stdin).
   args.push('--entrypoint', 'bash');

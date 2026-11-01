@@ -153,92 +153,27 @@ These variables are read **on the host** and passed into the container only when
 - `OPENCODE_PROVIDER` — OpenCode provider id, e.g. `openrouter`, `anthropic`, `deepseek`.
 - `OPENCODE_MODEL` — full model id in `provider/model` form, e.g. `deepseek/deepseek-chat`.
 - `OPENCODE_SMALL_MODEL` — optional second model for lighter tasks; defaults to `OPENCODE_MODEL` if unset.
-- `ANTHROPIC_BASE_URL` — **required for non-`anthropic` providers.** The opencode container provider passes this as the `baseURL` for the upstream provider config so requests route through OneCLI's credential proxy or directly to the provider's API. Set it to the provider's API base URL (e.g. `https://api.deepseek.com/v1`, `https://openrouter.ai/api/v1`).
+- `ANTHROPIC_BASE_URL` — **required for non-`anthropic` providers.** The opencode container provider passes this as the `baseURL` for the upstream provider config so requests route through Agent Vault's credential proxy or directly to the provider's API. Set it to the provider's API base URL (e.g. `https://api.deepseek.com/v1`, `https://openrouter.ai/api/v1`).
 
-Credentials: register provider API keys in OneCLI with the matching `--host-pattern` (e.g. `api.deepseek.com`, `openrouter.ai`). OneCLI injects them via `HTTPS_PROXY` in the container — the key never lives in `.env` or the container environment.
+Credentials belong to a NanoClaw user’s personal Agent Vault library. Configure
+the exact HTTPS endpoint and documented authentication recipe in Credentials,
+then grant only the intended groups. Values arrive through the write-only UI or
+host stdin, never provider env or chat. A grant covers the whole credential,
+including future URL rules.
 
-After adding a secret, **grant the agent access** — agents in `selective` mode only receive secrets they've been explicitly assigned:
+Use `ncl credentials list --user <owner-id>` and
+`ncl credentials grant --user <owner-id> --id <connection-id> --group <group-id>`.
+For DeepSeek/OpenRouter use their documented bearer recipe; OpenCode Zen uses
+`x-api-key`. Do not guess the header or broaden another owner’s grants.
+Keep the socket gateway and CA enabled; there is no direct-network fallback.
 
-Use the safe merge pattern — `set-secrets` replaces the entire list, so always read first:
-
-```bash
-AGENT_ID=$(onecli agents list | jq -r '.data[] | select(.identifier=="<agentGroupId>") | .id')
-CURRENT=$(onecli agents secrets --id "$AGENT_ID" | jq -r '[.data[]] | join(",")')
-MERGED=$(printf '%s' "$CURRENT,<new-secret-id>" | tr ',' '\n' | sort -u | paste -sd ',' -)
-onecli agents set-secrets --id "$AGENT_ID" --secret-ids "$MERGED"
-onecli agents secrets --id "$AGENT_ID"
-```
-
-#### Example: DeepSeek
-
-```env
-OPENCODE_PROVIDER=deepseek
-OPENCODE_MODEL=deepseek/deepseek-chat
-OPENCODE_SMALL_MODEL=deepseek/deepseek-chat
-ANTHROPIC_BASE_URL=https://api.deepseek.com/v1
-```
-
-Register the key:
-```bash
-onecli secrets create --name "DeepSeek" --type generic \
-  --value YOUR_KEY --host-pattern "api.deepseek.com" \
-  --header-name "Authorization" --value-format "Bearer {value}"
-```
-
-#### Example: OpenRouter
-
-```env
-OPENCODE_PROVIDER=openrouter
-OPENCODE_MODEL=openrouter/anthropic/claude-sonnet-4
-OPENCODE_SMALL_MODEL=openrouter/anthropic/claude-haiku-4.5
-ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1
-```
-
-Register the key:
-```bash
-onecli secrets create --name "OpenRouter" --type generic \
-  --value YOUR_KEY --host-pattern "openrouter.ai" \
-  --header-name "Authorization" --value-format "Bearer {value}"
-```
-
-#### Example: Anthropic (no ANTHROPIC_BASE_URL needed)
-
-When `OPENCODE_PROVIDER` is `anthropic`, OpenCode uses normal Anthropic env inside the container — the proxy + placeholder key pattern is unchanged and `ANTHROPIC_BASE_URL` is not required.
-
-```env
-OPENCODE_PROVIDER=anthropic
-OPENCODE_MODEL=anthropic/claude-sonnet-4-20250514
-OPENCODE_SMALL_MODEL=anthropic/claude-haiku-4-5-20251001
-```
-
-#### OpenCode Zen (`x-api-key`, not Bearer)
-
-Zen's HTTP API (e.g. `POST …/zen/v1/messages`) expects the key in the **`x-api-key`** header. If OneCLI injects **`Authorization: Bearer …`** only, Zen often returns **401 / "Missing API key"** even though the gateway is working.
-
-**Naming:** NanoClaw **`AGENT_PROVIDER=opencode`** (DB `agent_provider`) means "run the **OpenCode agent provider**." Separately, **`OPENCODE_PROVIDER=opencode`** in `.env` is OpenCode's **Zen provider id** inside the OpenCode config (see [Zen docs](https://opencode.ai/docs/zen/)).
-
-**Host `.env` (typical Zen shape):**
-
-```env
-OPENCODE_PROVIDER=opencode
-OPENCODE_MODEL=opencode/big-pickle
-OPENCODE_SMALL_MODEL=opencode/big-pickle
-ANTHROPIC_BASE_URL=https://opencode.ai/zen/v1
-```
-
-Use a real Zen model id from the docs; `big-pickle` is one example.
-
-**OneCLI:** register the Zen key with **`x-api-key`**, not Bearer:
-
-```bash
-onecli secrets create --name "OpenCode Zen" --type generic \
-  --value YOUR_ZEN_KEY --host-pattern opencode.ai \
-  --header-name "x-api-key" --value-format "{value}"
-```
 
 ### Per group / per session
 
-Set `"provider": "opencode"` in the group's **`container.json`** (`groups/<folder>/container.json`) — the in-container runner reads `provider` from there, not from the DB. The DB columns **`agent_groups.agent_provider`** and **`sessions.agent_provider`** (session overrides group) only drive host-side provider contribution — per-session XDG mount, `OPENCODE_*` env passthrough — and do not propagate into `container.json` at spawn time. Set both, or just edit `container.json`; if they disagree, the runner uses `container.json` and the host-side resolver falls back through session → group → `container.json` → `'claude'`.
+Set the group provider with `ncl groups config update --id <group-id>
+--provider opencode`. `container.json` is materialized from central
+configuration on spawn; hand edits do not persist. Preserve approved credentials
+and memory when switching providers.
 
 Extra MCP servers still come from **`NANOCLAW_MCP_SERVERS`** / `container_config.mcpServers` on the host; the runner merges them into the same `mcpServers` object passed to **both** Claude and OpenCode providers.
 
@@ -246,10 +181,10 @@ Extra MCP servers still come from **`NANOCLAW_MCP_SERVERS`** / `container_config
 
 - OpenCode keeps a local **`opencode serve`** process and SSE subscription; the provider tears down with **`stream.return`** and **SIGKILL** on the server process on **`abort()`** / shared runtime reset to avoid MCP/zombie hangs.
 - Session continuation uses UUID format (SDK 1.4.x / CLI 1.4.x). Stale sessions are cleared by `isSessionInvalid` on OpenCode-specific error patterns. If you see UUID-related errors after an accidental CLI upgrade, clear `session_state` in `outbound.db` and wipe the `opencode-xdg` directory under the session folder.
-- **`NO_PROXY`** for localhost matters when the OpenCode client talks to `127.0.0.1` inside the container while HTTP(S)_PROXY is set (e.g. OneCLI).
+- **`NO_PROXY`** for localhost matters when the OpenCode client talks to `127.0.0.1` inside the container while HTTP(S)_PROXY is set (e.g. Agent Vault).
 
 ## Next Steps
 
-The registration and Dockerfile guards in step 7 verify the wiring. To confirm an end-to-end round-trip, set `agent_provider = 'opencode'` (or `"provider": "opencode"` in the group's `container.json`) on a test group, register the matching provider key in OneCLI, and send a message. A clean exchange returns the model's reply with no `Unknown provider: opencode` error and no UUID/session warnings in the logs.
+The registration and Dockerfile guards in step 7 verify the wiring. To confirm an end-to-end round-trip, set `agent_provider = 'opencode'` (or `"provider": "opencode"` in the group's `container.json`) on a test group, register the matching provider key in Agent Vault, and send a message. A clean exchange returns the model's reply with no `Unknown provider: opencode` error and no UUID/session warnings in the logs.
 
 To remove this provider, see [REMOVE.md](REMOVE.md).

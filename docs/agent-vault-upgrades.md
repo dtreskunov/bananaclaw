@@ -104,8 +104,9 @@ Review that authority explicitly rather than broadening a legacy service-only
 share implicitly.
 
 The old `credentials set`, vault-local key-set/provision commands and spike-era
-`NANOCLAW_AGENT_VAULT_GROUPS` override are not supported by this contract. Backend
-cutover remains an explicit operator action until OneCLI retirement is complete.
+`NANOCLAW_AGENT_VAULT_GROUPS` override are not supported by this contract.
+Agent Vault is now the only supported backend; the temporary backend-switching
+CLI and migration importer have been retired.
 
 ### Real host-to-gateway contract check
 
@@ -190,7 +191,8 @@ permissions still apply. MCP authorizations retain resource-scoped routing.
 
 Existing account keys, encrypted tokens, issuing-app bindings and F8 files
 survive the gateway migration. An endpoint 401/403 alone is not proof of
-disconnection. Agent Vault groups must not be sent to the OneCLI dashboard.
+disconnection. Direct users to their personal Credentials and agent Access,
+not a retired gateway dashboard.
 
 ### Rollout and rollback
 
@@ -397,7 +399,7 @@ GitHub token outside that vault's scoped proxy.
 Keep the normal scoped socket, gateway CA and proxy environment. The F8 token
 endpoint derives interception from account-pinned metadata and the persistent
 authority registry, even in unmatched-host tunnel mode. Do not disable TLS validation, give a test container unrestricted
-network access or route these clients back through OneCLI.
+network access or use a retired credential backend.
 
 Back up existing files privately before changes. If they contain real tokens
 rather than known placeholders, stop and coordinate migration instead of

@@ -4,10 +4,10 @@
  * Everything NanoClaw creates is tagged with the per-checkout install slug
  * (sha1(projectRoot)[:8]), so several copies can coexist on one machine.
  * The scan reports ONLY things belonging to the given project root; shared
- * tools (the OneCLI app/vault, shell PATH lines, host-wide config) are
+ * tools (the Agent Vault service, shell PATH lines, host-wide config) are
  * never inventoried.
  *
- * External commands (docker, onecli) go through the injected `runCommand`
+ * External container commands go through the injected `runCommand`
  * so tests can fake them; filesystem checks are real — tests use temp dirs.
  * A missing/down docker daemon degrades to an empty result plus a note with
  * manual cleanup commands; it never throws.
@@ -18,19 +18,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import {
-  getContainerImageBase,
-  getInstallSlug,
-  getLaunchdLabel,
-  getSystemdUnit,
-} from '../../src/install-slug.js';
-import {
-  listVaultAgents,
-  readAgentGroupIds,
-  splitVaultAgents,
-  type RunCommand,
-  type VaultAgent,
-} from './onecli-agents.js';
+import { getContainerImageBase, getInstallSlug, getLaunchdLabel, getSystemdUnit } from '../../src/install-slug.js';
+export type RunCommand = (command: string, args: string[]) => { status: number | null; stdout: string };
 
 export interface PathItem {
   /** Human label, e.g. "Database & conversations". */
@@ -51,13 +40,6 @@ export interface ServiceInventory {
   nclSymlink?: string;
 }
 
-export interface OnecliInventory {
-  mine: VaultAgent[];
-  orphans: VaultAgent[];
-  /** False when agent_groups couldn't be read — orphan labels are then unreliable. */
-  idsKnown: boolean;
-}
-
 export interface Inventory {
   slug: string;
   projectRoot: string;
@@ -72,7 +54,6 @@ export interface Inventory {
   runtime: PathItem[];
   /** Group 3: groups/ and store/ — user content, unrecoverable. */
   user: PathItem[];
-  onecli: OnecliInventory;
   notes: string[];
 }
 
@@ -88,7 +69,7 @@ export function tilde(p: string, home: string): string {
 }
 
 export function scanInstall(deps: ScanDeps): Inventory {
-  const { projectRoot, home, runCommand } = deps;
+  const { projectRoot, home } = deps;
   const slug = getInstallSlug(projectRoot);
   const containerRuntime = process.env.CONTAINER_RUNTIME ?? 'docker';
   const notes: string[] = [];
@@ -113,8 +94,6 @@ export function scanInstall(deps: ScanDeps): Inventory {
     { rel: 'store', what: 'Migrated data store' },
   ]);
 
-  const onecli = scanOnecli(projectRoot, runCommand, notes);
-
   return {
     slug,
     projectRoot,
@@ -123,22 +102,19 @@ export function scanInstall(deps: ScanDeps): Inventory {
     data,
     runtime,
     user,
-    onecli,
     notes,
   };
 }
 
 /**
  * Cheap existing-install probe for mid-setup detection: service registration
- * (per-platform) or a central DB. No docker or onecli calls.
+ * (per-platform) or a central DB. No external commands.
  */
 export function detectExistingInstall(projectRoot: string): boolean {
   if (fs.existsSync(path.join(projectRoot, 'data', 'v2.db'))) return true;
   const home = os.homedir();
   if (process.platform === 'darwin') {
-    return fs.existsSync(
-      path.join(home, 'Library', 'LaunchAgents', `${getLaunchdLabel(projectRoot)}.plist`),
-    );
+    return fs.existsSync(path.join(home, 'Library', 'LaunchAgents', `${getLaunchdLabel(projectRoot)}.plist`));
   }
   if (process.platform === 'linux') {
     const unit = getSystemdUnit(projectRoot);
@@ -150,22 +126,12 @@ export function detectExistingInstall(projectRoot: string): boolean {
   return false;
 }
 
-function scanService(
-  deps: ScanDeps,
-  slug: string,
-  containerRuntime: string,
-  notes: string[],
-): ServiceInventory {
+function scanService(deps: ScanDeps, slug: string, containerRuntime: string, notes: string[]): ServiceInventory {
   const { projectRoot, home, platform, runCommand } = deps;
   const service: ServiceInventory = { containerIds: [] };
 
   if (platform === 'darwin') {
-    const plist = path.join(
-      home,
-      'Library',
-      'LaunchAgents',
-      `${getLaunchdLabel(projectRoot)}.plist`,
-    );
+    const plist = path.join(home, 'Library', 'LaunchAgents', `${getLaunchdLabel(projectRoot)}.plist`);
     if (fs.existsSync(plist)) service.launchdPlist = plist;
   } else if (platform === 'linux') {
     const unit = getSystemdUnit(projectRoot);
@@ -182,12 +148,7 @@ function scanService(
   const image = `${getContainerImageBase(projectRoot)}:latest`;
   let runtimeOk = true;
   try {
-    const ps = runCommand(containerRuntime, [
-      'ps',
-      '-aq',
-      '--filter',
-      `label=${installLabel}`,
-    ]);
+    const ps = runCommand(containerRuntime, ['ps', '-aq', '--filter', `label=${installLabel}`]);
     if (ps.status === 0) {
       service.containerIds = ps.stdout
         .split('\n')
@@ -230,33 +191,11 @@ function scanService(
     if (path.resolve(target) === path.join(projectRoot, 'bin', 'ncl')) {
       service.nclSymlink = link;
     } else {
-      notes.push(
-        `ncl command ${tilde(link, home)} points to another NanoClaw copy; left untouched.`,
-      );
+      notes.push(`ncl command ${tilde(link, home)} points to another NanoClaw copy; left untouched.`);
     }
   }
 
   return service;
-}
-
-function scanOnecli(
-  projectRoot: string,
-  runCommand: RunCommand,
-  notes: string[],
-): OnecliInventory {
-  const vault = listVaultAgents(runCommand);
-  if (!vault.available || vault.agents.length === 0) {
-    return { mine: [], orphans: [], idsKnown: false };
-  }
-
-  const { ids, known } = readAgentGroupIds(path.join(projectRoot, 'data', 'v2.db'));
-  const { mine, orphans } = splitVaultAgents(vault.agents, ids, known);
-  if (!known && orphans.length > 0) {
-    notes.push(
-      "Couldn't read agent_groups from data/v2.db; OneCLI agents shown as 'orphan' may actually belong to this copy.",
-    );
-  }
-  return { mine, orphans, idsKnown: known };
 }
 
 function existingItems(

@@ -14,6 +14,7 @@ import Database from 'better-sqlite3';
 import { DATA_DIR } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { log } from '../src/log.js';
+import { gatewayJson } from '../src/modules/credentials/agent-vault-client.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import {
   getPlatform,
@@ -136,12 +137,11 @@ export async function run(_args: string[]): Promise<void> {
 
   // 3. Check credentials
   let credentials = 'missing';
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ONECLI_URL)=/m.test(envContent)) {
-      credentials = 'configured';
-    }
+  try {
+    await gatewayJson('GET', '/v1/vaults', 'setup credential gateway verification');
+    credentials = 'gateway-ready';
+  } catch (error) {
+    log.error('Credential gateway verification failed', { error });
   }
 
   // 4. Check channel auth (detect configured channels by credentials)

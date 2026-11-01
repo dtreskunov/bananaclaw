@@ -5,7 +5,7 @@
  * (vault vs .env) and the cron → v2 recurrence mapping. They guard the skill's
  * two real integration assumptions about NanoClaw v2:
  *
- *   1. Container-facing credentials go to the OneCLI vault — never threaded
+ *   1. Container-facing credentials go to the Agent Vault vault — never threaded
  *      into a container env var. Channel tokens stay in `.env` for the host.
  *   2. Recurring tasks are `messages_in` rows carrying a cron `recurrence`
  *      plus a `process_after` first-run timestamp — the exact shape the host
@@ -80,7 +80,7 @@ describe('maskCredential', () => {
 });
 
 describe('classifyCredential — vault vs .env routing', () => {
-  it('routes container-facing Anthropic credentials to the OneCLI vault', () => {
+  it('routes container-facing Anthropic credentials to the Agent Vault vault', () => {
     const d = classifyCredential('anthropic');
     expect(d).toEqual({
       destination: 'vault',
@@ -123,11 +123,13 @@ describe('classifyCredential — vault vs .env routing', () => {
 });
 
 describe('vaultCreateCommand', () => {
-  it('renders the onecli secrets create command for a vault plan', () => {
+  it('renders a user-owned connection command with values supplied only on stdin', () => {
     const plan = { name: 'Anthropic', type: 'anthropic' as const, hostPattern: 'api.anthropic.com' };
-    expect(vaultCreateCommand(plan, 'sk-ant-xyz')).toBe(
-      'onecli secrets create --name Anthropic --type anthropic --value sk-ant-xyz --host-pattern api.anthropic.com',
-    );
+    const command = vaultCreateCommand(plan, 'owner-id');
+    expect(command).toContain("ncl credentials create --user 'owner-id'");
+    expect(command).toContain('--values-stdin');
+    expect(command).toContain('"header":"x-api-key"');
+    expect(command).not.toContain('--value ');
   });
 });
 

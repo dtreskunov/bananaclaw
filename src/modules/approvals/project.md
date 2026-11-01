@@ -1,33 +1,25 @@
 ## Approvals module
 
-Admin-gated approval flow for agent self-modification and OneCLI credential access. Lives in `src/modules/approvals/`.
-
-### Two flows
-
-**Agent-initiated (durable, fire-and-forget).** The runner journals a
-`system`-kind outbound event with one of two actions — `install_packages`,
-`add_mcp_server`. The host validates and commits it before delivery-action
-handlers route to the approver and persist `pending_approvals`.
-
-**OneCLI credential (long-poll).** The OneCLI gateway holds an HTTP connection open when it needs credential approval. `onecli-approvals.ts` delivers a card, persists a `pending_approvals` row (action = `onecli_credential`), and waits on an in-memory Promise that resolves on click or expiry timer. Survives host restart: the startup sweep edits stale cards to "Expired (host restarted)" and drops the rows.
+Admin-gated durable approval flow for self-modification and credential access.
+Agent requests are committed to the host before delivery and stored in
+`pending_approvals`. `approval_history` retains request and resolution records.
 
 ### Wiring
 
-- **Delivery actions:** `install_packages`, `add_mcp_server` via `registerDeliveryAction`.
-- **Response handler:** single handler claims both agent-initiated and OneCLI approvals. OneCLI is tried first (in-memory Promise); falls through to `pending_approvals` lookup.
-- **Adapter-ready hook (`onDeliveryAdapterReady`):** starts the OneCLI manual-approval handler once the delivery adapter is set.
-- **Shutdown hook (`onShutdown`):** stops the OneCLI handler.
+- Delivery actions `install_packages` and `add_mcp_server` use registered
+  handlers. `request_access` uses the durable credential-access workflow.
+- The response handler authorizes the authenticated user for the requesting
+  group, dispatches registered handlers and preserves the originating route.
+- Optional user messages travel with the approval outcome through existing
+  steering; they do not change the approved operation.
+- Runtime changes schedule a restart after the active turn commits. Outcomes
+  never terminate a response mid-turn.
+
+Credential access grants are user-owned references, not per-request API
+approvals. There is no external gateway approval poller or in-memory resolver.
 
 ### Tables
 
-`pending_approvals` (created by `module-approvals-pending-approvals.ts`). Columns for both DB-backed and OneCLI-tracking rows. Not dropped on uninstall — approvals in flight aren't lost on reinstall.
-
-### Core integration
-
-The module depends on host-side infra but does not reach into core decision paths beyond the registered hooks:
-- `buildAgentGroupImage`, `killContainer` from container-runner (image rebuilds)
-- `updateContainerConfig` from container-config (apt/npm/mcp edits)
-- `pickApprover`, `pickApprovalDelivery` from access
-- `getDeliveryAdapter` in request-approval.ts and the adapter-ready callback in OneCLI handler
-
-No core code imports from this module. Removing it: delete `src/modules/approvals/`, remove the import from `src/modules/index.ts`. Delivery actions will log "Unknown system action"; button clicks on approval cards will log "Unclaimed response". Stale rows remain in `pending_approvals` until reinstall or manual cleanup.
+`pending_approvals`, `approval_workflows` and `approval_history` persist requests,
+recovery stages and transcript outcomes. Historical schema fields are retained
+for audit and archive compatibility; removing runtime code does not erase data.

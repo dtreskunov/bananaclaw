@@ -5,7 +5,7 @@
  * per-session Unix socket.
  *
  * Config is read from /workspace/agent/container.json (mounted RO).
- * Only TZ and OneCLI networking vars come from env.
+ * Only TZ and Agent Vault networking vars come from env.
  *
  * Mount structure:
  *   /workspace/

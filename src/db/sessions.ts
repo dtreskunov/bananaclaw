@@ -267,7 +267,7 @@ type AskQuestionRender = {
 /**
  * Resolve ask_question render metadata (question or approval title + options) for any
  * card, regardless of whether it was persisted as a question (generic
- * ask_user_question) or a pending_approval (self-mod / OneCLI credential).
+ * ask_user_question) or a pending_approval (self-mod / Agent Vault credential).
  */
 export function getAskQuestionRender(id: string): AskQuestionRender | undefined {
   const q = getQuestion(id);

@@ -23,7 +23,7 @@
 
 Breaking changes are allowed; **silent** ones are not. NanoClaw does not migrate user installs at runtime — the user's coding agent is the migrator, so every breaking change must ship a migration path that agent can execute without a human reverse-engineering the diff:
 
-1. **Every `[BREAKING]` CHANGELOG entry must reference its migration path** — either a skill to run (`Run /<skill-name> to <action>`) or a `docs/` page covering **detect / why / fix / verify / rollback** (see [docs/onecli-upgrades.md](docs/onecli-upgrades.md) for the shape). `/update-nanoclaw` surfaces these entries after every update and walks the user through them.
+1. **Every `[BREAKING]` CHANGELOG entry must reference its migration path** — either a skill to run (`Run /<skill-name> to <action>`) or a `docs/` page covering **detect / why / fix / verify / rollback** (see [docs/agent-vault-upgrades.md](docs/agent-vault-upgrades.md) for the shape). `/update-nanoclaw` surfaces these entries after every update and walks the user through them.
 2. **If the change moves an external component's sanctioned version** (gateway, pinned CLI binary, …), update its pin in [`versions.json`](versions.json). The changelog stays human-narrative; `versions.json` is the machine-checkable signal — `/update-nanoclaw` diffs it across the update and routes the user to the linked doc for any pin that moved.
 
 ## Skills

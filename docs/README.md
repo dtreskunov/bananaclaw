@@ -23,8 +23,8 @@ The files in this directory are original design documents and developer referenc
 - [Agent Vault releases and safe upgrades](agent-vault-upgrades.md): pinned
   binaries, checksum/provenance verification, preserved state and rollback via
   `/init-agent-vault`, plus the coordinated clean-break release requirements.
-- [OneCLI migration inventory and preparation](agent-vault-migration.md):
-  metadata-only source access evidence, the deployed vault-local tooling, and
+- [Gateway retirement and migration history](agent-vault-migration.md):
+  reviewed source access evidence, protected rollback records, and
   the target shared-reference adoption/retirement contract.
 
 - [Native credential gateway](credential-gateway-proposal.md): historical

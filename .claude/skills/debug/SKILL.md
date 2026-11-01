@@ -41,7 +41,7 @@ src/container-runner.ts                    container/agent-runner/src/
 |-----|----------|---------|
 | **Host errors** | `logs/nanoclaw.error.log` | Delivery failures, crash-loop backoff, warnings — check this first |
 | **Host app log** | `logs/nanoclaw.log` | Full routing chain: inbound routing, container spawn/exit, delivery |
-| **Setup logs** | `logs/setup.log`, `logs/setup-steps/*.log` | Per-step install output (bootstrap, container, onecli, mounts, service) |
+| **Setup logs** | `logs/setup.log`, `logs/setup-steps/*.log` | Per-step install output (bootstrap, container, agent-vault, mounts, service) |
 | **Session inbound** | `data/v2-sessions/<group>/<session>/inbound.db` (`messages_in`) | Did the message reach the container? |
 | **Session outbound** | `data/v2-sessions/<group>/<session>/outbound.db` (`messages_out`) | Did the agent produce a reply? |
 
@@ -142,12 +142,14 @@ Messages marked delivered with a null `platform_message_id` are not automaticall
 
 A spawned container that exits without writing to `outbound.db` shows up in `logs/nanoclaw.log` as a `Container exited` line with a non-zero `code`, often preceded by streamed `container=<folder>` stderr (at debug level).
 
-**Authentication errors:** secrets are injected per request by the OneCLI gateway — none are passed in env vars or chat context. A `401` from an API whose credential is in the vault usually means the agent is in `selective` secret mode and that secret was never assigned:
-```bash
-onecli agents list                                        # check secretMode
-onecli agents set-secret-mode --id <agent-id> --mode all  # inject all matching secrets
-```
-If the gateway itself is unreachable, the container runner refuses to spawn (`OneCLI gateway not applied — refusing to spawn container without credentials` in the host log). Confirm the gateway is up at `http://127.0.0.1:10254`.
+**Authentication errors:** Agent Vault injects credentials on the wire through a
+group-scoped Unix socket. Check the exact endpoint/error, selected named MCP
+account and group Access. A 401/403 alone does not establish disconnection.
+Use Credentials to review the owner’s connection and actual granted scopes.
+Never broaden all groups’ access, invent placeholders or bypass TLS/isolation.
+If the gateway is unavailable, spawning fails closed and input remains queued.
+Check `systemctl --user status agent-vault.service` and the configured
+`NANOCLAW_AGENT_VAULT_URL` (default localhost:14321).
 
 **MCP server failures:** a misconfigured MCP server can abort the agent run. Look for MCP initialization errors in the streamed container stderr (`LOG_LEVEL=debug`).
 
@@ -286,8 +288,8 @@ docker info &>/dev/null && echo "OK" || echo "NOT RUNNING - start Docker Desktop
 echo -e "\n2. Agent image exists?"
 docker run --rm --entrypoint /bin/echo nanoclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
 
-echo -e "\n3. OneCLI gateway reachable?"
-curl -fsS http://127.0.0.1:10254/ >/dev/null 2>&1 && echo "OK" || echo "CHECK - gateway not responding on 127.0.0.1:10254"
+echo -e "\n3. Agent Vault gateway reachable?"
+curl -fsS http://127.0.0.1:14321/health >/dev/null 2>&1 && echo "OK" || echo "CHECK - gateway not responding on 127.0.0.1:14321"
 
 echo -e "\n4. Central DB present?"
 [ -f data/v2.db ] && echo "OK" || echo "MISSING - run setup"

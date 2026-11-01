@@ -3,7 +3,7 @@
  *
  * The env helper is skill-owned and could be unit-tested directly, but that does not prove
  * buildContainerArgs actually uses it — a direct unit test stays green even if the reach-in
- * is deleted. buildContainerArgs is entangled with OneCLI and not cheaply invocable, so we
+ * is deleted. buildContainerArgs is entangled with Agent Vault and not cheaply invocable, so we
  * assert the integration structurally: inside buildContainerArgs there is an
  * `args.push(...ollamaEnvArgs())` call. Delete the reach-in and this goes red.
  */

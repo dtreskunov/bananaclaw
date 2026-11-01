@@ -40,6 +40,11 @@ You won't see the admin's response in your current turn. After approval, the con
 
 If denied, you'll get a chat message telling you the request was rejected. Do not retry automatically; explain to the user what was denied.
 
-## Credential approvals (OneCLI)
+## Credential access approvals
 
-When you call an external API that requires credentials, OneCLI may prompt an admin for approval before releasing the token. This happens transparently: the HTTP call blocks until admin approves or denies. No action needed from you — just make the call. If it errors out with a credential failure, tell the user and stop.
+Use `request_access` with the exact HTTPS destination and purpose, and the
+configured `mcp_server` name for remote MCP. The user privately selects/connects
+a personal credential and approves this agent's access. Wait for the host's
+completion message before retrying. A grant is not approval for every subsequent
+API request. Do not reconnect an operator-removed account or replay writes.
+Load `/agent-vault` for binding placeholders, scope review and error recovery.

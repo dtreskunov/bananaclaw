@@ -18,7 +18,7 @@ const VERSIONS_FILE = path.resolve(
 
 /**
  * Returns the pinned version for a component, e.g.
- * `readVersionPin('onecli-gateway')`. Throws when the file or the pin is
+ * `readVersionPin('agent-vault')`. Throws when the file or the pin is
  * missing — a missing pin is an install-tree defect, not a runtime condition.
  */
 export function readVersionPin(component: string): string {

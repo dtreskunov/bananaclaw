@@ -39,7 +39,7 @@ MIGRATE_LOG="$LOGS_DIR/migrate-v2.log"
 # Defaults for variables that may not be set if we exit early
 V1_PATH=""
 V1_VERSION="unknown"
-ONECLI_OK=false
+AGENT_VAULT_OK=false
 SERVICE_SWITCHED=false
 SELECTED_CHANNELS=()
 ABORTED_AT=""
@@ -87,7 +87,7 @@ write_handoff() {
   "aborted_at": "$ABORTED_AT",
   "source": "migrate-v2.sh",
   "channels_installed": [$(printf '"%s",' "${SELECTED_CHANNELS[@]}" 2>/dev/null | sed 's/,$//')],
-  "onecli_healthy": $ONECLI_OK,
+  "agent_vault_healthy": $AGENT_VAULT_OK,
   "service_switched": $SERVICE_SWITCHED,
   "steps": $steps_json,
   "step_logs_dir": "logs/migrate-steps",
@@ -429,7 +429,7 @@ echo
 echo "$(bold 'Phase 3: Infrastructure')"
 echo
 
-# 3a. Docker — install if missing (OneCLI needs it)
+# 3a. Docker — install if missing (Agent Vault needs it)
 if command -v docker >/dev/null 2>&1; then
   DOCKER_V=$(docker --version 2>/dev/null | head -1)
   step_ok "Docker available $(dim "($DOCKER_V)")"
@@ -449,56 +449,21 @@ else
   fi
 fi
 
-# 3b. OneCLI — detect or install via setup step (requires Docker)
-ONECLI_OK=false
-ONECLI_URL_FROM_ENV=$(grep '^ONECLI_URL=' .env 2>/dev/null | head -1 | sed 's/^ONECLI_URL=//')
-ONECLI_URL_CHECK="${ONECLI_URL_FROM_ENV:-http://127.0.0.1:10254}"
-
-if curl -sf "${ONECLI_URL_CHECK}/api/health" >/dev/null 2>&1; then
-  step_ok "OneCLI running at $(dim "$ONECLI_URL_CHECK")"
-  ONECLI_OK=true
-  log "OneCLI: running at $ONECLI_URL_CHECK"
-elif command -v docker >/dev/null 2>&1; then
-  step_info "Setting up OneCLI…"
-  ONECLI_LOG="$STEPS_DIR/3b-onecli.log"
-  ONECLI_ERR="$STEPS_DIR/3b-onecli.err"
-  if pnpm exec tsx setup/index.ts --step onecli > "$ONECLI_LOG" 2>"$ONECLI_ERR"; then
-    step_ok "OneCLI ready"
-    ONECLI_OK=true
-    record_step "3b-onecli" "success"
-    log "OneCLI: installed/configured"
-  else
-    step_fail "OneCLI setup failed $(dim "(see $ONECLI_LOG)")"
-    record_step "3b-onecli" "failed"
-    log "OneCLI: FAILED"
-  fi
+# 3b. Verify the reviewed credential gateway without installing or rotating state.
+AGENT_VAULT_OK=false
+GATEWAY_LOG="$STEPS_DIR/3b-agent-vault.log"
+GATEWAY_ERR="$STEPS_DIR/3b-agent-vault.err"
+if pnpm exec tsx setup/index.ts --step agent-vault > "$GATEWAY_LOG" 2>"$GATEWAY_ERR"; then
+  step_ok "Agent Vault ready"
+  AGENT_VAULT_OK=true
+  record_step "3b-agent-vault" "success"
 else
-  step_fail "OneCLI needs Docker $(dim "(install Docker first)")"
-  record_step "3b-onecli" "failed"
-  log "OneCLI: skipped (no Docker)"
+  step_fail "Agent Vault needs configuration (run /init-agent-vault; see $GATEWAY_LOG)"
+  record_step "3b-agent-vault" "failed"
 fi
+# Model credentials remain user-owned. Do not import tokens into container env.
+step_info "Connect credentials privately, then grant selected agents Access after owner setup."
 
-# 3c. Anthropic credential — run the auth setup step if no credential found
-if grep -qE '^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)=' .env 2>/dev/null; then
-  step_ok "Anthropic credential found in .env"
-  log "Anthropic credential: found in .env"
-elif [ "$ONECLI_OK" = "true" ]; then
-  step_info "Registering Anthropic credential…"
-  AUTH_LOG="$STEPS_DIR/3c-auth.log"
-  AUTH_ERR="$STEPS_DIR/3c-auth.err"
-  if pnpm exec tsx setup/index.ts --step auth > "$AUTH_LOG" 2>"$AUTH_ERR"; then
-    step_ok "Anthropic credential registered"
-    record_step "3c-auth" "success"
-    log "Anthropic credential: registered via auth step"
-  else
-    step_fail "Auth setup failed $(dim "(see $AUTH_LOG)")"
-    record_step "3c-auth" "failed"
-    log "Anthropic credential: FAILED"
-  fi
-else
-  step_info "No Anthropic credential $(dim "(OneCLI not available — add manually to .env)")"
-  log "Anthropic credential: skipped (no OneCLI)"
-fi
 
 # 3d. Copy container skills from v1 that v2 doesn't have
 V1_SKILLS_DIR="$V1_PATH/container/skills"
@@ -717,11 +682,11 @@ fi
 fi
 echo
 echo "  $(bold 'What still needs a human:')"
-if [ "$ONECLI_OK" = "false" ]; then
-echo "    $(dim '·')  Set up OneCLI: pnpm exec tsx setup/index.ts --step onecli"
+if [ "$AGENT_VAULT_OK" = "false" ]; then
+echo "    $(dim '·')  Run /init-agent-vault, then verify with: pnpm exec tsx setup/index.ts --step agent-vault"
 fi
 if ! grep -qE '^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)=' .env 2>/dev/null; then
-echo "    $(dim '·')  Add Anthropic credential to .env or OneCLI vault"
+echo "    $(dim '·')  Connect model credentials privately in Credentials and grant selected agents Access"
 fi
 echo "    $(dim '·')  Run $(bold '/migrate-from-v1') in Claude to finish:"
 echo "       $(dim '- Seed your owner account')"

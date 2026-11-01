@@ -2,7 +2,7 @@
 
 This skill copies a small, fixed set of files into the project tree. Removal
 deletes exactly those. It does **not** undo the migration itself — the agents,
-messaging groups, wirings, roles, `.env` channel tokens, and OneCLI vault
+messaging groups, wirings, roles, `.env` channel tokens, and Agent Vault vault
 secrets the migration created are your live NanoClaw install, not skill files.
 Undoing those is a separate decision (see the last section).
 
@@ -41,7 +41,7 @@ only the ones you no longer want — review each first.
 - Memories: `groups/*/memories.md`, `groups/*/daily-memories/`
 - Copied OpenClaw skills: directories you added under `container/skills/`
   (compare against the stock set before removing — do not delete
-  `onecli-gateway`, `welcome`, `self-customize`, `agent-browser`,
+  `agent-vault`, `welcome`, `self-customize`, `agent-browser`,
   `slack-formatting`, or other shipped container skills).
 
 If you edited shared instructions, the relevant edits live in
@@ -80,6 +80,6 @@ ncl roles list
 
 Then delete what the migration added with the matching `ncl ... delete` /
 `ncl roles revoke` / `ncl members remove` verbs. Remove migrated channel tokens
-from `.env`, and remove vault secrets with `onecli secrets delete` (list them
-with `onecli secrets list`). There is no automatic rollback — delete only the
+from `.env`, and revoke only selected group grants with `ncl credentials revoke`.
+Do not delete personal connections or shared OAuth accounts. There is no automatic rollback — delete only the
 entities you recognize as migration output.

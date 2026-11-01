@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 describe('public OpenRouter catalog', () => {
-  it('fetches public metadata without OneCLI or credential headers', async () => {
+  it('fetches public metadata without Agent Vault or credential headers', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: models })));
     vi.stubGlobal('fetch', fetch);
     const { listModelsForProvider } = await import('./models-catalog.js');

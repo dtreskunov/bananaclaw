@@ -7,7 +7,7 @@
  *   1. resolveSecretInput + classifyCredential — turn an OpenClaw config
  *      credential (plain string, "${ENV}" template, or SecretRef object) into
  *      a resolved value plus a routing decision: container-facing credentials
- *      go to the OneCLI vault (a `secrets create` plan); host-side channel
+ *      go to the Agent Vault vault (a `secrets create` plan); host-side channel
  *      tokens stay in `.env` (the NanoClaw host process reads them to connect
  *      to the messaging platform). Credentials are never threaded into a
  *      container via env vars.
@@ -122,21 +122,20 @@ export function maskCredential(value: string): string {
  * Where a resolved credential belongs in NanoClaw v2.
  *
  *   - 'vault'   → a container-facing credential the agent uses for outbound
- *                 HTTPS (Anthropic, OpenAI, etc.). It goes to the OneCLI Agent
+ *                 HTTPS (Anthropic, OpenAI, etc.). It goes to Agent
  *                 Vault, which injects it per-request — never into the
- *                 container env. The plan field carries the `onecli secrets
- *                 create` argument set.
+ *                 container env. The plan describes a user-owned connection.
  *   - 'env'     → a host-side channel token (Telegram/Discord/Slack bot
  *                 tokens). The NanoClaw *host* process reads it from `.env` to
  *                 connect to the messaging platform; it never enters a
  *                 container, so the vault is not involved.
  */
 export interface VaultPlan {
-  /** `onecli secrets create --name` */
+  /** User-owned connection label. */
   name: string;
-  /** `onecli secrets create --type` — 'anthropic' or 'api_key'. */
+  /** Credential mechanism. */
   type: 'anthropic' | 'api_key';
-  /** `onecli secrets create --host-pattern` — the API host the agent calls. */
+  /** Exact API destination the agent calls. */
   hostPattern: string;
 }
 
@@ -144,12 +143,12 @@ export interface CredentialDestination {
   destination: 'vault' | 'env';
   /** For 'env' destinations: the NanoClaw .env variable name. */
   envVar?: string;
-  /** For 'vault' destinations: the `onecli secrets create` plan. */
+  /** For 'vault' destinations: the personal connection plan. */
   plan?: VaultPlan;
 }
 
 /**
- * Container-facing credentials → OneCLI vault. Keyed by a stable credential
+ * Container-facing credentials → Agent Vault vault. Keyed by a stable credential
  * kind the caller derives from the OpenClaw provider/profile (e.g. an
  * Anthropic auth profile, an OpenAI plugin key).
  */
@@ -197,18 +196,15 @@ export function channelEnvVars(channel: string): string[] {
 }
 
 /**
- * Render a OneCLI vault plan into the exact command the operator runs.
- * The credential value is passed through unmasked here because the caller
- * runs the command directly — it must never be echoed to a chat transcript.
+ * Render a nonsecret host command; the value arrives separately on stdin.
  */
-export function vaultCreateCommand(plan: VaultPlan, value: string): string {
-  return [
-    'onecli secrets create',
-    `--name ${plan.name}`,
-    `--type ${plan.type}`,
-    `--value ${value}`,
-    `--host-pattern ${plan.hostPattern}`,
-  ].join(' ');
+export function vaultCreateCommand(plan: VaultPlan, ownerId: string): string {
+  const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+  const auth = plan.type === 'anthropic'
+    ? { type: 'api-key', key: 'API_KEY', header: 'x-api-key' }
+    : { type: 'bearer', token: 'API_KEY' };
+  const services = [{ name: 'api', host: plan.hostPattern, auth }];
+  return `ncl credentials create --user ${quote(ownerId)} --label ${quote(plan.name)} --kind static --services ${quote(JSON.stringify(services))} --values-stdin`;
 }
 
 // ---------------------------------------------------------------------------

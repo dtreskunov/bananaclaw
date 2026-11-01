@@ -104,7 +104,7 @@ Add an `ollama` entry alongside `nanoclaw`:
 
 ### Forward host env vars into the container
 
-The container receives `TZ` and OneCLI networking vars by default; any other host env
+The container receives `TZ` and Agent Vault networking vars by default; any other host env
 var the MCP subprocess needs must be forwarded explicitly. The forwarding logic lives in
 the copied `src/ollama-env.ts` (`ollamaEnvArgs()`) — `OLLAMA_HOST` (the daemon base URL)
 and `OLLAMA_ADMIN_TOOLS` (the library-management opt-in flag). Both are configuration, not

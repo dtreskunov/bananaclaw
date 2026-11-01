@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChildProcess, spawn } from 'child_process';
 
-const { applyContainerConfig, getAgentGroup, getContainerConfig, materializeContainerJson, admission } = vi.hoisted(() => ({
-  applyContainerConfig: vi.fn(),
+const { applyAgentVaultEgress, getAgentGroup, getContainerConfig, materializeContainerJson, admission } = vi.hoisted(() => ({
+  applyAgentVaultEgress: vi.fn(),
   getAgentGroup: vi.fn(),
   getContainerConfig: vi.fn(),
   materializeContainerJson: vi.fn(),
@@ -13,10 +13,10 @@ const { applyContainerConfig, getAgentGroup, getContainerConfig, materializeCont
     decideAdmission: vi.fn(),
   },
 }));
-vi.mock('@onecli-sh/sdk', () => ({
-  OneCLI: class {
-    applyContainerConfig = applyContainerConfig;
-  },
+vi.mock('./agent-vault-egress.js', () => ({
+  agentVaultEnvKeys: () => new Set<string>(),
+  applyAgentVaultEgress,
+  releaseAgentVaultEgress: vi.fn(),
 }));
 
 vi.mock('./container-runtime.js', async (importOriginal) => ({
@@ -118,7 +118,6 @@ it('runs recovery with only the provided mounts, no networking, and no gateway c
     config,
     'native',
     {},
-    'must-not-be-provisioned',
     'session-test',
     'recovery',
   );
@@ -129,7 +128,7 @@ it('runs recovery with only the provided mounts, no networking, and no gateway c
   expect(args.at(-1)).toBe('exec bun run /app/src/recover-main.ts');
   expect(args.at(-3)).toBe(CONTAINER_IMAGE);
   expect(args).not.toContain('-d');
-  expect(applyContainerConfig).not.toHaveBeenCalled();
+  expect(applyAgentVaultEgress).not.toHaveBeenCalled();
 });
 
 it('runs recovery in the agent group image, like agent containers', async () => {
@@ -148,7 +147,7 @@ it('runs recovery in the agent group image, like agent containers', async () => 
     disabledSkills: [],
     imageTag: 'nanoclaw-agent:recovery-group',
   };
-  const args = await buildContainerArgs([], 'recovery-test', group, config, 'native', {}, undefined, 'session-test', 'recovery');
+  const args = await buildContainerArgs([], 'recovery-test', group, config, 'native', {}, 'session-test', 'recovery');
   expect(args.slice(-4)).toEqual(['bash', 'nanoclaw-agent:recovery-group', '-c', 'exec bun run /app/src/recover-main.ts']);
   expect(args).not.toContain(CONTAINER_IMAGE);
 });

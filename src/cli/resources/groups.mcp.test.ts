@@ -46,7 +46,7 @@ describe('groups config add-mcp-server transports', () => {
     const result = await add({
       type: 'http',
       url: URL,
-      headers: '{"Authorization":"Bearer onecli-placeholder"}',
+      headers: '{"Authorization":"Bearer placeholder"}',
       instructions: 'Use the browser',
     });
     expect(result.ok).toBe(true);
@@ -55,7 +55,7 @@ describe('groups config add-mcp-server transports', () => {
       bananabrowse: {
         type: 'http',
         url: URL,
-        headers: { Authorization: 'Bearer onecli-placeholder' },
+        headers: { Authorization: 'Bearer placeholder' },
         instructions: 'Use the browser',
       },
     });
@@ -98,14 +98,14 @@ describe('groups config add-mcp-server transports', () => {
       bananabrowse: {
         type: 'http',
         url: URL,
-        headers: { Authorization: 'Bearer onecli-placeholder' },
+        headers: { Authorization: 'Bearer placeholder' },
         instructions: 'Keep',
         timeout: 30000,
       },
     });
     await add({ type: 'http', url: URL });
     expect(servers().bananabrowse).toMatchObject({
-      headers: { Authorization: 'Bearer onecli-placeholder' },
+      headers: { Authorization: 'Bearer placeholder' },
       instructions: 'Keep',
       timeout: 30000,
     });

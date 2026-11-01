@@ -6,7 +6,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { getLaunchdLabel, getSystemdUnit } from '../../src/install-slug.js';
-import type { RunCommand } from './onecli-agents.js';
+import type { RunCommand } from './scan.js';
 import { detectExistingInstall, scanInstall, type ScanDeps } from './scan.js';
 
 let root: string;
@@ -23,9 +23,7 @@ afterEach(() => {
 });
 
 /** Fake runCommand: unhandled commands fail (binary missing / daemon down). */
-function fakeRun(
-  handlers: Record<string, (args: string[]) => { status: number | null; stdout: string }>,
-): RunCommand {
+function fakeRun(handlers: Record<string, (args: string[]) => { status: number | null; stdout: string }>): RunCommand {
   return (cmd, args) => (handlers[cmd] ?? (() => ({ status: 1, stdout: '' })))(args);
 }
 
@@ -58,16 +56,8 @@ describe('scanInstall path groups', () => {
 
     const inv = scanInstall(deps());
 
-    expect(inv.data.map((i) => path.basename(i.path))).toEqual([
-      'data',
-      'logs',
-      '.env',
-      'start-nanoclaw.sh',
-    ]);
-    expect(inv.runtime.map((i) => path.basename(i.path))).toEqual([
-      'dist',
-      'node_modules',
-    ]);
+    expect(inv.data.map((i) => path.basename(i.path))).toEqual(['data', 'logs', '.env', 'start-nanoclaw.sh']);
+    expect(inv.runtime.map((i) => path.basename(i.path))).toEqual(['dist', 'node_modules']);
     expect(inv.user.map((i) => path.basename(i.path))).toEqual(['groups', 'store']);
   });
 
@@ -83,12 +73,7 @@ describe('scanInstall path groups', () => {
 
 describe('scanInstall service artifacts', () => {
   it('detects the launchd plist on macOS', () => {
-    const plist = path.join(
-      home,
-      'Library',
-      'LaunchAgents',
-      `${getLaunchdLabel(root)}.plist`,
-    );
+    const plist = path.join(home, 'Library', 'LaunchAgents', `${getLaunchdLabel(root)}.plist`);
     fs.mkdirSync(path.dirname(plist), { recursive: true });
     fs.writeFileSync(plist, '<plist/>');
 
@@ -98,13 +83,7 @@ describe('scanInstall service artifacts', () => {
   });
 
   it('detects systemd user unit and pidfile on Linux', () => {
-    const unit = path.join(
-      home,
-      '.config',
-      'systemd',
-      'user',
-      `${getSystemdUnit(root)}.service`,
-    );
+    const unit = path.join(home, '.config', 'systemd', 'user', `${getSystemdUnit(root)}.service`);
     fs.mkdirSync(path.dirname(unit), { recursive: true });
     fs.writeFileSync(unit, '[Unit]');
     fs.writeFileSync(path.join(root, 'nanoclaw.pid'), '12345');
@@ -148,37 +127,6 @@ describe('scanInstall ncl symlink', () => {
     const inv = scanInstall(deps());
     expect(inv.service.nclSymlink).toBeUndefined();
     expect(inv.notes.some((n) => n.includes('points to another NanoClaw copy'))).toBe(true);
-  });
-});
-
-describe('scanInstall OneCLI agents', () => {
-  const vault = JSON.stringify({
-    data: [
-      { id: 'u-1', identifier: 'ag-mine', name: 'Mine', isDefault: false },
-      { id: 'u-2', identifier: 'ag-other', name: 'Other', isDefault: false },
-    ],
-  });
-  const onecliUp = fakeRun({ onecli: () => ({ status: 0, stdout: vault }) });
-
-  it('splits mine vs orphans against the central DB', () => {
-    fs.mkdirSync(path.join(root, 'data'));
-    const db = new Database(path.join(root, 'data', 'v2.db'));
-    db.exec('CREATE TABLE agent_groups (id TEXT PRIMARY KEY)');
-    db.prepare('INSERT INTO agent_groups (id) VALUES (?)').run('ag-mine');
-    db.close();
-
-    const inv = scanInstall(deps({ runCommand: onecliUp }));
-    expect(inv.onecli.idsKnown).toBe(true);
-    expect(inv.onecli.mine.map((a) => a.identifier)).toEqual(['ag-mine']);
-    expect(inv.onecli.orphans.map((a) => a.identifier)).toEqual(['ag-other']);
-  });
-
-  it('flags orphan labels as unreliable when the DB is unreadable', () => {
-    const inv = scanInstall(deps({ runCommand: onecliUp }));
-    expect(inv.onecli.idsKnown).toBe(false);
-    expect(inv.onecli.mine).toEqual([]);
-    expect(inv.onecli.orphans.map((a) => a.identifier)).toEqual(['ag-mine', 'ag-other']);
-    expect(inv.notes.some((n) => n.includes("Couldn't read agent_groups"))).toBe(true);
   });
 });
 

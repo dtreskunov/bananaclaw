@@ -8,7 +8,7 @@
  *
  * Lives in its own file so the reach-in in `container-runner.ts` is a single
  * call (`args.push(...ollamaEnvArgs())`) and this logic is behavior-testable in
- * isolation, without invoking the OneCLI-entangled `buildContainerArgs`.
+ * isolation, without invoking the Agent Vault-entangled `buildContainerArgs`.
  */
 export function ollamaEnvArgs(): string[] {
   const args: string[] = [];

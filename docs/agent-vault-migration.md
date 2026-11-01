@@ -1,5 +1,53 @@
 # OneCLI migration inventory, private preparation and target provisioning
 
+## Agent Vault-only retirement
+
+**Current contract:** Agent Vault is the only runtime credential backend. The
+operator explicitly waived the remaining seven-day acceptance window on
+2026-10-31 and authorized early removal, commit and deployment after all nine
+groups had cut over. The historical sections below are audit evidence, not
+instructions to run the removed importer or backend-switching CLI.
+
+The retirement implementation is committed, but deployment is paused at the
+operator's request pending the unrelated appearance/OAuth UI work. Migration
+048, live environment cleanup and retirement of old generated host artifacts
+must run only during the approved safe deployment window.
+
+### Detect / migrate / verify / rollback
+
+- **Detect:** confirm every `container_configs.credential_backend` is
+  `agent-vault` and no pending retired gateway approvals exist. Migration 048
+  rejects unsupported state rather than silently converting it or deleting
+  approvals. Complete reviewed owner/group cutovers with the previous release
+  first if any legacy selection remains.
+- **Migrate:** preserve matched private central/session/configuration backups,
+  then apply the Agent Vault-only host. Migration 048 restricts the backend
+  column and renames both selected and disabled `onecli-gateway` skill entries
+  to `agent-vault`; normal spawn reconciles stale shared symlinks. Remove only
+  this installation's obsolete environment entries. Do not alter shared
+  credentials, upstream accounts or a remote gateway used by other apps.
+- **Setup:** `/init-agent-vault` installs the reviewed binary with checksum and
+  signed provenance verification. `setup/index.ts --step agent-vault` is a
+  read-only prerequisite check, not an installer, token rotator or credential
+  importer. The owner connects credentials privately and explicitly grants
+  selected groups. A newer canary mismatch is surfaced; never downgrade it
+  merely to match the pin.
+- **Verify:** require host/runner/UI typechecks, targeted approval/configuration/
+  migration tests, model generation and authenticated MCP checks through
+  network-disabled containers. Confirm all sessions, pending access workflows,
+  user grants and the public UI remain intact. No polling SDK, old network
+  setup, automatic credential inheritance or open-egress fallback remains.
+- **Rollback:** keep the previous source/build/assets plus consistent stopped
+  central DB, group configuration and matched gateway state. Historical
+  migrations, archive audit records and protected backups remain. Do not
+  restore a legacy backend without reviewing its owner grants; a binary-only
+  rollback does not undo the schema/skill retirement.
+
+Local CLI installation and the remote shared gateway are not automatically
+uninstalled: other applications may still use them. Legacy imported credential
+IDs are audit identifiers, not live backend routes, and are not rewritten in
+encrypted state.
+
 ## Plan of record: shared references (revision 7)
 
 The [gateway plan of record](credential-gateway-agent-vault-fork-proposal.md)

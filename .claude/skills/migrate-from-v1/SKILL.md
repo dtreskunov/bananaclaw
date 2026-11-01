@@ -31,7 +31,7 @@ Before anything else, check that `logs/setup-migration/handoff.json` exists. If 
 > bash migrate-v2.sh
 > ```
 >
-> It needs interactive prompts (channel selection, service switchover) and runs Node/pnpm bootstrap, Docker, OneCLI setup, and a container build that don't fit inside a Claude session. When it finishes, it'll hand control back to Claude automatically — at which point this skill picks up.
+> It needs interactive prompts (channel selection, service switchover) and runs Node/pnpm bootstrap, Docker, Agent Vault setup, and a container build that don't fit inside a Claude session. When it finishes, it'll hand control back to Claude automatically — at which point this skill picks up.
 
 Do not attempt to run the script yourself, simulate its effects, or pick up the migration mid-stream. The deterministic side has dependencies on a real interactive shell.
 
@@ -154,7 +154,7 @@ For each group that has a `CLAUDE.local.md`:
    - "Memory" (the stock version) → `container/CLAUDE.md`
    - "Message Formatting" → `container/CLAUDE.md`
    - "Admin Context" → v2 uses `user_roles`, not is_main
-   - "Authentication" → v2 uses OneCLI
+   - "Authentication" → v2 uses Agent Vault
    - "Container Mounts" → v2 mounts are different
    - "Managing Groups" / "Finding Available Groups" / "Registered Groups Config" → v2 entity model, no IPC
    - "Global Memory" → v2 has `.claude-shared.md` symlink
@@ -179,7 +179,7 @@ For each group, check:
 
 1. If `container.json` exists, read it and verify the `additionalMounts` host paths are still valid on this machine. Flag any that don't exist.
 2. If `.v1-container-config.json` exists (parse failure fallback), read it, discuss with the user, and write a proper `container.json`. Then delete the sidecar.
-3. Check for `env` or `packages` fields — `env` may overlap with OneCLI vault, `packages` (apt/npm) are portable.
+3. Check for `env` or `packages` fields — `env` may overlap with Agent Vault vault, `packages` (apt/npm) are portable.
 
 ## Phase 4: Fork customizations
 
@@ -219,7 +219,7 @@ pnpm exec tsx setup/index.ts --step <name>
 
 | Step | When to use |
 |------|-------------|
-| `onecli` | OneCLI not installed or not healthy |
+| `agent-vault` | Agent Vault not installed or not healthy |
 | `auth` | No Anthropic credential in vault |
 | `container` | Container image needs rebuild |
 | `service` | Service not installed or not running |

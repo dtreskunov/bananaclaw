@@ -5,7 +5,7 @@ description: Work in the user's real browser through BananaBrowse sessions (appr
 
 # BananaBrowse browser sessions
 
-BananaBrowse (formerly DomAgent) is independent of BananaClaw and OneCLI.
+BananaBrowse (formerly DomAgent) is independent of BananaClaw and Agent Vault.
 Use the live MCP instructions, tool schemas and tab capabilities as the
 authority for available features. `CAPABILITY_UNAVAILABLE` can mean a missing
 browser capability or an extension update requirement; check the error details,

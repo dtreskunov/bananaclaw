@@ -17,8 +17,6 @@
 #
 # Config via env — passed through unchanged:
 #   NANOCLAW_SKIP  comma-separated setup:auto step names to skip
-#   SECRET_NAME    OneCLI secret name (default: Anthropic)
-#   HOST_PATTERN   OneCLI host pattern (default: api.anthropic.com)
 
 set -euo pipefail
 
@@ -407,5 +405,5 @@ fi
 # --silent suppresses pnpm's `> nanoclaw@2.0.0 setup:auto / > tsx setup/auto.ts`
 # preamble so the flow continues visually from "Basics installed" straight
 # into setup:auto's spinner. exec so signals (Ctrl-C) propagate directly.
-# `-- "$@"` forwards any flags (e.g. --onecli-api-host) to setup:auto.
+# `-- "$@"` forwards any flags (e.g. --display-name) to setup:auto.
 exec pnpm --silent run setup:auto -- "$@"

@@ -13,7 +13,7 @@
  *                          channel flow). The CLI scratch agent is always
  *                          "Terminal Agent".
  *   NANOCLAW_SKIP          comma-separated step names to skip
- *                          (environment|container|onecli|auth|mounts|
+ *                          (environment|container|agent-vault|auth|mounts|
  *                           service|cli-agent|timezone|channel|
  *                           verify|first-chat)
  *
@@ -22,7 +22,6 @@
  * headless `claude -p` call for IANA-zone resolution.
  */
 import { spawn, spawnSync } from 'child_process';
-import fs from 'fs';
 import * as os from 'os';
 import path from 'path';
 
@@ -44,24 +43,28 @@ import './providers/index.js';
 import { brightSelect } from './lib/bright-select.js';
 import { offerClaudeOnFailure } from './lib/claude-handoff.js';
 import { setPickedProvider } from './lib/picked-provider.js';
-import {
-  applyToEnv,
-  parseFlags,
-  printHelp,
-  readFromEnv,
-} from './lib/setup-config-parse.js';
+import { applyToEnv, parseFlags, printHelp, readFromEnv } from './lib/setup-config-parse.js';
 import { runAdvancedScreen } from './lib/setup-config-screen.js';
 import { runWindowedStep } from './lib/windowed-runner.js';
 import { runUninstallFlow } from './uninstall/flow.js';
 import { detectExistingInstall } from './uninstall/scan.js';
 import { detectRegisteredGroups, detectExistingDisplayName } from './environment.js';
-import { pollHealth } from './onecli.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import { claudeCliAvailable, resolveTimezoneViaClaude } from './lib/tz-from-claude.js';
 import * as setupLog from './logs.js';
 import { ensureAnswer, fail, runQuietChild, runQuietStep, spawnQuiet } from './lib/runner.js';
 import { emit as phEmit } from './lib/diagnostics.js';
-import { accentGreen, brandBody, brandBold, brandChip, dimWrap, fitToWidth, fmtDuration, note, wrapForGutter } from './lib/theme.js';
+import {
+  accentGreen,
+  brandBody,
+  brandBold,
+  brandChip,
+  dimWrap,
+  fitToWidth,
+  fmtDuration,
+  note,
+  wrapForGutter,
+} from './lib/theme.js';
 import { isValidTimezone } from '../src/timezone.js';
 
 const CLI_AGENT_NAME = 'Terminal Agent';
@@ -71,10 +74,10 @@ type ChannelChoice = 'telegram' | 'discord' | 'whatsapp' | 'signal' | 'teams' | 
 
 async function main(): Promise<void> {
   // Make sure ~/.local/bin is on PATH for every child process we spawn.
-  // Installers we run mid-setup (OneCLI, claude) drop binaries there and
+  // Installers we run mid-setup (Agent Vault, claude) drop binaries there and
   // append a PATH line to the user's shell rc, but rc updates don't reach
   // an already-running Node process — so without this patch a freshly
-  // installed `onecli` is invisible to a subsequent `runInheritScript`.
+  // installed CLI is invisible to subsequent setup commands.
   ensureLocalBinOnPath();
 
   // Parse CLI flags first — `--help` short-circuits before we render anything,
@@ -184,7 +187,9 @@ async function main(): Promise<void> {
   }
 
   if (!skip.has('container')) {
-    p.log.message(brandBody(dimWrap('Your assistant lives in its own sandbox. It can only see what you explicitly share.', 4)));
+    p.log.message(
+      brandBody(dimWrap('Your assistant lives in its own sandbox. It can only see what you explicitly share.', 4)),
+    );
     p.log.message(
       brandBody(
         dimWrap(
@@ -223,105 +228,17 @@ async function main(): Promise<void> {
     maybeReexecUnderSg();
   }
 
-  if (!skip.has('onecli')) {
-    p.log.message(
-      brandBody(
-        dimWrap(
-          'Your assistant never gets your API keys directly. The vault adds them to approved requests as they leave the sandbox.',
-          4,
-        ),
-      ),
-    );
-
-    const remoteHost = process.env.NANOCLAW_ONECLI_API_HOST?.trim();
-
-    if (remoteHost) {
-      // Advanced-settings override: user has already named a remote vault,
-      // so skip the local-vs-fresh prompt entirely. Health-check it here
-      // rather than letting the step fail silently — a typo in the URL is a
-      // common mistake and the answer is human-fixable.
-      const s = p.spinner();
-      s.start(`Checking remote OneCLI at ${remoteHost}…`);
-      const healthy = await pollHealth(remoteHost, 5000);
-      if (!healthy) {
-        s.stop(`Couldn't reach OneCLI at ${remoteHost}.`, 1);
-        await fail(
-          'onecli',
-          `Couldn't reach OneCLI at ${remoteHost}.`,
-          'Check the URL and that OneCLI is running on the remote machine, then retry.',
-        );
-      }
-      s.stop('Remote OneCLI is reachable.');
-
-      const res = await runQuietStep(
-        'onecli',
-        {
-          running: `Connecting to remote OneCLI at ${remoteHost}…`,
-          done: 'OneCLI vault ready.',
-        },
-        ['--remote-url', remoteHost],
+  if (!skip.has('agent-vault')) {
+    const result = await runQuietStep('agent-vault', {
+      running: 'Verifying the Agent Vault gateway…',
+      done: 'Agent Vault is ready.',
+    });
+    if (!result.ok) {
+      await fail(
+        'agent-vault',
+        'Agent Vault is not ready.',
+        'Run /init-agent-vault to install or configure the verified gateway, then retry setup.',
       );
-      if (!res.ok) {
-        const err = res.terminal?.fields.ERROR;
-        await fail(
-          'onecli',
-          `Couldn't connect to remote OneCLI (${err ?? 'unknown error'}).`,
-          'Check the URL and that OneCLI is running on the remote machine, then retry.',
-        );
-      }
-    } else {
-      // Respect an existing OneCLI install. Re-running the installer would
-      // rebind the listener and knock any other app using that gateway
-      // offline — confirm with the user before doing that.
-      const existing = detectExistingOnecli();
-      let reuse = false;
-      if (existing) {
-        const choice = ensureAnswer(
-          await brightSelect({
-            message: `Found an existing OneCLI at ${existing.apiHost}. What would you like to do?`,
-            options: [
-              {
-                value: 'reuse',
-                label: 'Use the existing instance',
-                hint: 'recommended — keeps other apps bound to this vault working',
-              },
-              {
-                value: 'fresh',
-                label: 'Install a fresh instance for NanoClaw',
-                hint: 'reinstalls onecli; other apps may need to reconnect',
-              },
-            ],
-          }),
-        ) as 'reuse' | 'fresh';
-        setupLog.userInput('onecli_choice', choice);
-        reuse = choice === 'reuse';
-      }
-
-      const res = await runQuietStep(
-        'onecli',
-        {
-          running: reuse
-            ? 'Hooking up to your existing OneCLI…'
-            : "Setting up OneCLI, your agent's vault…",
-          done: 'OneCLI vault ready.',
-        },
-        reuse ? ['--reuse'] : [],
-      );
-      if (!res.ok) {
-        const err = res.terminal?.fields.ERROR;
-        if (err === 'onecli_not_on_path_after_install') {
-          await fail(
-            'onecli',
-            'OneCLI was installed but your shell needs to refresh to see it.',
-            'Open a new shell or run `export PATH="$HOME/.local/bin:$PATH"`, then retry.',
-          );
-        }
-        await fail(
-          'onecli',
-          `Couldn't set up OneCLI (${err ?? 'unknown error'}).`,
-          'Make sure curl is installed and ~/.local/bin is writable, then retry.',
-        );
-      }
     }
   }
 
@@ -346,15 +263,10 @@ async function main(): Promise<void> {
       // style, idempotent: self-skips if already installed), rebuild the image
       // (the container step already ran, the Dockerfile just changed), then
       // load the payload's setup module so it self-registers.
-      const install = await runQuietChild(
-        `add-${agentProvider}`,
-        'bash',
-        [`setup/add-${agentProvider}.sh`],
-        {
-          running: `Installing ${agentProvider}…`,
-          done: `${agentProvider} installed.`,
-        },
-      );
+      const install = await runQuietChild(`add-${agentProvider}`, 'bash', [`setup/add-${agentProvider}.sh`], {
+        running: `Installing ${agentProvider}…`,
+        done: `${agentProvider} installed.`,
+      });
       if (!install.ok) {
         await fail(
           `add-${agentProvider}`,
@@ -371,7 +283,13 @@ async function main(): Promise<void> {
       await providerEntry.runAuth();
       await providerEntry.runInstallCheck?.();
     } else {
-      await runAuthStep();
+      p.log.info(
+        brandBody(
+          'Connect your model credential privately in Credentials, then grant your agent Access after creating it.',
+        ),
+      );
+      setupLog.step('auth', 'skipped', 0, { REASON: 'user-owned-credentials-configured-after-agent-creation' });
+      skip.add('first-chat');
     }
   }
 
@@ -495,7 +413,15 @@ async function main(): Promise<void> {
           const createRes = await runQuietChild(
             'create-terminal-agent',
             'pnpm',
-            ['exec', 'tsx', 'scripts/init-cli-agent.ts', '--display-name', displayName!, '--agent-name', terminalAgentName],
+            [
+              'exec',
+              'tsx',
+              'scripts/init-cli-agent.ts',
+              '--display-name',
+              displayName!,
+              '--agent-name',
+              terminalAgentName,
+            ],
             { running: `Creating ${terminalAgentName}…`, done: `${terminalAgentName} is ready.` },
           );
           if (!createRes.ok) {
@@ -831,251 +757,6 @@ async function askAgentProviderChoice(): Promise<string> {
   return choice;
 }
 
-async function runAuthStep(): Promise<void> {
-  if (anthropicSecretExists()) {
-    p.log.success(brandBody('Your Claude account is already connected.'));
-    setupLog.step('auth', 'skipped', 0, { REASON: 'secret-already-present' });
-    return;
-  }
-
-  // Custom Anthropic-compatible endpoint flow. Both URL and token must be set;
-  // OneCLI stores the token as a generic Bearer secret keyed to the URL host,
-  // so the container only ever sees ANTHROPIC_BASE_URL + a placeholder.
-  const customBaseUrl = process.env.NANOCLAW_ANTHROPIC_BASE_URL?.trim();
-  const customAuthToken = process.env.NANOCLAW_ANTHROPIC_AUTH_TOKEN?.trim();
-  if (customBaseUrl && customAuthToken) {
-    await runCustomEndpointAuth(customBaseUrl, customAuthToken);
-    return;
-  }
-
-  const method = ensureAnswer(
-    await brightSelect({
-      message: 'How would you like to connect to Claude?',
-      options: [
-        {
-          value: 'subscription',
-          label: 'Sign in with my Claude subscription',
-          hint: 'recommended if you have Pro or Max',
-        },
-        {
-          value: 'oauth',
-          label: 'Paste an OAuth token I already have',
-          hint: 'sk-ant-oat…',
-        },
-        {
-          value: 'api',
-          label: 'Paste an Anthropic API key',
-          hint: 'pay-per-use via console.anthropic.com',
-        },
-        {
-          value: 'skip',
-          label: "Skip — I'll connect later",
-          hint: 'not recommended — Claude helps debug setup issues',
-        },
-      ],
-    }),
-  ) as 'subscription' | 'oauth' | 'api' | 'skip';
-  setupLog.userInput('auth_method', method);
-  phEmit('auth_method_chosen', { method });
-
-  if (method === 'skip') {
-    const confirmed = ensureAnswer(
-      await p.confirm({
-        message:
-          "Skip Claude sign-in? The agent won't be able to run until you connect, and we won't be able to help debug setup errors.",
-        initialValue: false,
-      }),
-    );
-    if (!confirmed) {
-      // Loop back to the auth picker so they can choose a real method.
-      return runAuthStep();
-    }
-    setupLog.step('auth', 'skipped', 0, { REASON: 'user-skipped' });
-    p.log.warn(
-      brandBody(
-        'Claude sign-in skipped. Re-run setup or run `bash nanoclaw.sh` to finish later.',
-      ),
-    );
-    return;
-  }
-
-  if (method === 'subscription') {
-    await runSubscriptionAuth();
-  } else {
-    await runPasteAuth(method);
-  }
-}
-
-async function runSubscriptionAuth(): Promise<void> {
-  p.log.step(brandBody('Opening the Claude sign-in flow…'));
-  console.log(k.dim('   (a browser will open for sign-in; this part is interactive)'));
-  console.log();
-  const start = Date.now();
-  const code = await runInheritScript('bash', ['setup/register-claude-token.sh']);
-  const durationMs = Date.now() - start;
-  console.log();
-  if (code !== 0) {
-    setupLog.step('auth', 'failed', durationMs, {
-      EXIT_CODE: code,
-      METHOD: 'subscription',
-    });
-    await fail(
-      'auth',
-      "Couldn't complete the Claude sign-in.",
-      'Re-run setup and try again, or choose a paste option instead.',
-    );
-  }
-  setupLog.step('auth', 'interactive', durationMs, { METHOD: 'subscription' });
-  p.log.success(brandBody('Claude account connected.'));
-}
-
-async function runPasteAuth(method: 'oauth' | 'api'): Promise<void> {
-  const label = method === 'oauth' ? 'OAuth token' : 'API key';
-  const prefix = method === 'oauth' ? 'sk-ant-oat' : 'sk-ant-api';
-
-  const answer = ensureAnswer(
-    await p.password({
-      message: `Paste your ${label}`,
-      clearOnError: true,
-      validate: (v) => {
-        // Strip any internal whitespace so a line-wrapped paste that did
-        // survive into clack can still validate. The mid-token-newline
-        // case where clack only sees the first line is caught by the
-        // shape check below.
-        const cleaned = (v ?? '').replace(/\s+/g, '');
-        if (!cleaned) return 'Required';
-        if (!cleaned.startsWith(prefix)) {
-          return `Should start with ${prefix}…`;
-        }
-        if (method === 'oauth' && !/^sk-ant-oat[A-Za-z0-9_-]{80,500}AA$/.test(cleaned)) {
-          return cleaned.length < 90
-            ? 'Token looks truncated — line breaks in the paste can cut it off. Widen your terminal so the token fits on one line, then paste again.'
-            : "Token shape doesn't look right (expected sk-ant-oat…AA).";
-        }
-        return undefined;
-      },
-    }),
-  );
-  const token = (answer as string).replace(/\s+/g, '');
-
-  const res = await runQuietChild(
-    'auth',
-    'onecli',
-    [
-      'secrets',
-      'create',
-      '--name',
-      'Anthropic',
-      '--type',
-      'anthropic',
-      '--value',
-      token,
-      '--host-pattern',
-      'api.anthropic.com',
-    ],
-    {
-      running: `Saving your ${label} to your OneCLI vault…`,
-      done: 'Claude account connected.',
-    },
-    {
-      extraFields: { METHOD: method },
-    },
-  );
-  if (!res.ok) {
-    await fail(
-      'auth',
-      `Couldn't save your ${label} to the vault.`,
-      'Make sure OneCLI is running (`onecli version`), then retry.',
-    );
-  }
-}
-
-/**
- * Set up Anthropic auth for a custom endpoint. The token is stored as a
- * OneCLI generic secret with header injection so the proxy rewrites the
- * Authorization header on the wire — the container only ever sees
- * ANTHROPIC_BASE_URL + a placeholder bearer.
- */
-async function runCustomEndpointAuth(
-  baseUrl: string,
-  token: string,
-): Promise<void> {
-  let host: string;
-  try {
-    host = new URL(baseUrl).hostname;
-  } catch {
-    await fail(
-      'auth',
-      `Invalid Anthropic base URL: ${baseUrl}`,
-      'Check --anthropic-base-url and retry.',
-    );
-    return;
-  }
-
-  const res = await runQuietChild(
-    'auth',
-    'onecli',
-    [
-      'secrets',
-      'create',
-      '--name',
-      'Anthropic',
-      '--type',
-      'generic',
-      '--value',
-      token,
-      '--host-pattern',
-      host,
-      '--header-name',
-      'Authorization',
-      '--value-format',
-      'Bearer {value}',
-    ],
-    {
-      running: `Saving your Anthropic auth token to your OneCLI vault…`,
-      done: 'Claude account connected.',
-    },
-    { extraFields: { METHOD: 'custom-endpoint', HOST: host } },
-  );
-  if (!res.ok) {
-    await fail(
-      'auth',
-      `Couldn't save your Anthropic auth token to the vault.`,
-      'Make sure OneCLI is running (`onecli version`), then retry.',
-    );
-  }
-
-  // ANTHROPIC_BASE_URL has to be in .env so the runtime provider config
-  // reads it when building container env. The token is *not* written —
-  // OneCLI holds it.
-  writeEnvLine('ANTHROPIC_BASE_URL', baseUrl);
-
-  // Register the claude provider so the runtime passes ANTHROPIC_BASE_URL
-  // and the placeholder bearer into the container. Only appended when the
-  // user has configured a custom endpoint; standard installs don't load
-  // the file at all.
-  appendProviderImport('./claude.js');
-}
-
-function writeEnvLine(key: string, value: string): void {
-  const envFile = path.join(process.cwd(), '.env');
-  const content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf-8') : '';
-  const re = new RegExp(`^${key}=.*$`, 'm');
-  const next = re.test(content)
-    ? content.replace(re, `${key}=${value}`)
-    : content.trimEnd() + (content ? '\n' : '') + `${key}=${value}\n`;
-  fs.writeFileSync(envFile, next);
-}
-
-function appendProviderImport(modulePath: string): void {
-  const file = path.join(process.cwd(), 'src', 'providers', 'index.ts');
-  const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
-  const line = `import '${modulePath}';`;
-  if (content.includes(line)) return;
-  const sep = content && !content.endsWith('\n') ? '\n' : '';
-  fs.writeFileSync(file, content + sep + line + '\n');
-}
-
 // ─── timezone step ─────────────────────────────────────────────────────
 
 /**
@@ -1275,7 +956,10 @@ async function askOtherChannelName(): Promise<void | typeof BACK_TO_CHANNEL_SELE
       placeholder: 'e.g. matrix, github, linear, webex',
     }),
   );
-  const name = (answer as string).trim().toLowerCase().replace(/^\/?(add-)?/, '');
+  const name = (answer as string)
+    .trim()
+    .toLowerCase()
+    .replace(/^\/?(add-)?/, '');
   setupLog.userInput('other_channel', name);
   phEmit('channel_other_named', { channel: name });
   p.log.info(
@@ -1298,70 +982,10 @@ function ensureLocalBinOnPath(): void {
   process.env.PATH = current ? `${localBin}${path.delimiter}${current}` : localBin;
 }
 
-function anthropicSecretExists(): boolean {
-  try {
-    const res = spawnSync('onecli', ['secrets', 'list'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    if (res.status !== 0) return false;
-    return /anthropic/i.test(res.stdout ?? '');
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Probe the host for a working OneCLI install so we can offer to reuse it
- * instead of re-running the installer (which rebinds the listener and breaks
- * any other app already using that gateway).
- */
-function detectExistingOnecli(): { version: string; apiHost: string } | null {
-  try {
-    const ver = spawnSync('onecli', ['version'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    if (ver.status !== 0) return null;
-    const version = (ver.stdout ?? '').trim();
-    if (!version) return null;
-
-    const host = spawnSync('onecli', ['config', 'get', 'api-host'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    if (host.status !== 0) return null;
-    const raw = (host.stdout ?? '').trim();
-    if (!raw) return null;
-
-    // onecli 1.3+ emits JSON by default. Older versions would print raw text.
-    try {
-      const parsed = JSON.parse(raw) as { data?: unknown; value?: unknown };
-      const val = parsed.data ?? parsed.value;
-      if (typeof val === 'string' && val.trim()) {
-        return { version, apiHost: val.trim() };
-      }
-    } catch {
-      // not JSON — try to extract a URL directly
-    }
-    const m = raw.match(/https?:\/\/[\w.-]+(?::\d+)?/);
-    return m ? { version, apiHost: m[0] } : null;
-  } catch {
-    return null;
-  }
-}
-
-function runInheritScript(cmd: string, args: string[]): Promise<number> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: 'inherit' });
-    child.on('close', (code) => resolve(code ?? 1));
-  });
-}
-
 /**
  * After installing Docker, this process's supplementary groups are still
  * frozen from login — subsequent steps that talk to /var/run/docker.sock
- * (onecli install, service start, …) fail with EACCES even though the
+ * (container setup, service start, …) fail with EACCES even though the
  * daemon is up. Detect that and re-exec the whole driver under `sg docker`
  * so the rest of the run inherits the docker group without a re-login.
  */
@@ -1375,7 +999,10 @@ function maybeReexecUnderSg(): void {
   if (spawnSync('which', ['sg'], { stdio: 'ignore' }).status !== 0) return;
 
   p.log.warn(brandBody('Docker socket not accessible in current group. Re-executing under `sg docker`.'));
-  const existingSkip = (process.env.NANOCLAW_SKIP ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const existingSkip = (process.env.NANOCLAW_SKIP ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   const skipList = [...new Set([...existingSkip, ...setupLog.completedStepNames()])].join(',');
   const res = spawnSync('sg', ['docker', '-c', 'pnpm run setup:auto'], {
     stdio: 'inherit',

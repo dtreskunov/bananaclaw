@@ -64,73 +64,35 @@ Messages and task operations are verified against group identity:
 | View all tasks | ✓ | Own only |
 | Manage other groups | ✓ | ✗ |
 
-### 5. Credential Isolation (OneCLI Agent Vault)
+### 5. Credential Isolation (Agent Vault)
 
-Real API credentials **never enter containers**. NanoClaw uses [OneCLI's Agent Vault](https://github.com/onecli/onecli) to proxy outbound requests and inject credentials at the gateway level.
+Real API credentials never enter containers. Users own personal static/OAuth
+connections; agents receive explicit whole-credential grants. The host token
+authenticates transport, not the effective user’s authority. Group sockets
+cannot bind personal libraries or inherit the host’s owner privileges.
 
-**How it works:**
-1. Credentials are registered once with `onecli secrets create`, stored and managed by OneCLI
-2. When NanoClaw spawns a container, it calls `applyContainerConfig()` to route outbound HTTPS through the OneCLI gateway
-3. The gateway matches requests by host and path, injects the real credential, and forwards
-4. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
+The scoped gateway matches approved HTTPS destinations, injects credentials
+and enforces native grants. Grant revocation is immediate and group-local;
+detaching one group does not disconnect shared OAuth. Access approval is
+distinct from per-request API approval. No implicit credential inheritance,
+copy/fan-out or legacy backend fallback exists.
 
-**Per-agent policies:**
-Each NanoClaw group gets its own OneCLI agent identity. This allows different credential policies per group (e.g. your sales agent vs. support agent). OneCLI supports rate limits, and time-bound access and approval flows are on the roadmap.
+Channel auth, host tokens, password inputs and mount allowlists remain host-only.
+The project `.env` is shadowed with `/dev/null` in container mounts.
 
-New OneCLI agents start with no credential grants. Operators may set
-`ONECLI_NEW_AGENT_SECRET_IDS` in `.env` to a comma-separated allow-list of
-OneCLI secret IDs that NanoClaw attaches immediately after creating an agent.
-This applies only at creation: changing the setting does not add to or remove
-grants from existing agents. IDs are available from `onecli secrets list`; the
-secret values remain exclusively in OneCLI.
+### 6. Mandatory Socket Egress
 
-**NOT Mounted:**
-- Channel auth sessions (`store/auth/`) — host only
-- Mount allowlist — external, never mounted
-- Any credentials matching blocked patterns
-- `.env` is shadowed with `/dev/null` in the project root mount
+Every agent and MCP probe uses `--network=none`. Its only egress is the
+read-only per-session Unix socket mounted below `/run/nanoclaw/egress`.
+An in-container relay at `127.0.0.1:3128` forwards proxy-aware clients to that
+socket. The gateway’s CA bundle is mounted read-only; provider contributions
+cannot replace proxy/CA settings or exempt arbitrary hosts.
 
-### 6. Egress Lockdown (Forced Proxy)
+Gateway/socket failure aborts spawning and leaves input pending for recovery.
+Non-proxy-aware networking fails by design. There is no opt-out flag, Docker
+gateway network, host-gateway route or open-egress fallback. Recovery containers
+also have networking disabled and do not receive credential access.
 
-The `HTTPS_PROXY` env var only redirects *proxy-aware* clients — a tool that
-ignores it (or a raw socket) could reach the internet directly and bypass
-credential injection, approvals, and audit. Egress lockdown closes that hole at
-the network layer.
-
-**How it works:** agents are placed on a Docker `--internal` network
-(`nanoclaw-egress`) that has **no route to the internet**. The OneCLI gateway
-container is attached to that network, aliased as `host.docker.internal`, so the
-injected proxy URL (`…@host.docker.internal:10255`) resolves to the gateway
-*container-to-container*. The gateway is therefore the **only reachable hop** —
-anything else has nowhere to go. The agent is non-root with no `NET_ADMIN`, so
-it cannot undo this. Identical mechanism on macOS and Linux (no host firewall,
-no `host-gateway` route).
-
-- **Self-healing:** the gateway is re-attached to the network at every spawn and
-  on each host-sweep tick, so an out-of-band detach (e.g. `docker compose up` on
-  the OneCLI stack — its compose lives in `~/.onecli`, not this repo) recovers
-  automatically.
-- **Fail-fast:** if lockdown is on but the network can't be created or the
-  gateway can't be attached (e.g. a non-standard gateway container name, or the
-  gateway isn't running), nanoclaw **refuses to spawn the agent** and surfaces a
-  clear error — it never silently falls back to open egress. Fix the cause (or
-  set `NANOCLAW_EGRESS_LOCKDOWN=false`) and retry. The host-sweep re-heal is the
-  exception: a heal failure there is logged but not fatal, since already-running
-  agents stay on the internal net (no leak) until the gateway returns.
-
-**Configuration:**
-
-| Env | Default | Meaning |
-| --- | --- | --- |
-| `NANOCLAW_EGRESS_LOCKDOWN` | `false` | Set `true` to opt in (otherwise the host-gateway path is used). Enabled automatically by `/add-golden-registry`. |
-| `NANOCLAW_EGRESS_NETWORK` | `nanoclaw-egress` | Network name. |
-| `ONECLI_GATEWAY_CONTAINER` | `onecli` | Gateway container to attach. |
-
-**⚠ Behavior when enabled:** with lockdown on, agents have **no direct
-internet** — all traffic must go through OneCLI. Proxy-aware clients (npm, pnpm,
-pip, curl, node/bun with the proxy env) are unaffected. Any workflow that relies
-on a **non-proxy-aware** tool reaching the internet directly will fail by design.
-Lockdown is **off by default**; opt in with `NANOCLAW_EGRESS_LOCKDOWN=true`.
 
 ## Privilege Comparison
 
@@ -159,7 +121,7 @@ Lockdown is **off by default**; opt in with `NANOCLAW_EGRESS_LOCKDOWN=true`.
 │  • IPC authorization                                              │
 │  • Mount validation (external allowlist)                          │
 │  • Container lifecycle                                            │
-│  • OneCLI Agent Vault (injects credentials, enforces policies)   │
+│  • Agent Vault (injects credentials, enforces policies)   │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
                                  ▼ Explicit mounts only, no secrets
@@ -168,7 +130,7 @@ Lockdown is **off by default**; opt in with `NANOCLAW_EGRESS_LOCKDOWN=true`.
 │  • Agent execution                                                │
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │
-│  • API calls routed through OneCLI Agent Vault                   │
+│  • API calls routed through Agent Vault                   │
 │  • No real credentials in environment or filesystem              │
 └──────────────────────────────────────────────────────────────────┘
 ```

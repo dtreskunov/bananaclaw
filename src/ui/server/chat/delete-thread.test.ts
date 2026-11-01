@@ -113,7 +113,7 @@ function seedApproval(id: string, sessionId: string | null): void {
     session_id: sessionId,
     agent_group_id: GROUP_ID,
     request_id: id,
-    action: sessionId ? 'install_packages' : 'onecli_credential',
+    action: sessionId ? 'install_packages' : 'sessionless-request',
     payload: '{}',
     created_at: NOW,
     title: 'Approval required',
@@ -221,13 +221,13 @@ describe('DELETE chat thread', () => {
     expect(killContainer).not.toHaveBeenCalled();
   });
 
-  it('cancels only confirmed session approvals, preserving other sessions and OneCLI requests', async () => {
+  it('cancels only confirmed session approvals, preserving other sessions and Agent Vault requests', async () => {
     seedMessagingGroup('web-mg', 'web', `group:${GROUP_ID}`, 'per-thread');
     seedSession('web-session', 'web-mg', 'web-thread');
     const otherDir = seedSession('other-session', 'web-mg', 'other-thread');
     seedApproval('approval', 'web-session');
     seedApproval('other-approval', 'other-session');
-    seedApproval('onecli-approval', null);
+    seedApproval('sessionless-approval', null);
 
     expect(await deleteThread('web-thread', '?cancelApprovals=1')).toEqual({
       status: 200,
@@ -235,7 +235,7 @@ describe('DELETE chat thread', () => {
     });
     expect(getPendingApproval('approval')).toBeUndefined();
     expect(getPendingApproval('other-approval')).toBeDefined();
-    expect(getPendingApproval('onecli-approval')).toBeDefined();
+    expect(getPendingApproval('sessionless-approval')).toBeDefined();
     expect(fs.existsSync(otherDir)).toBe(true);
   });
 

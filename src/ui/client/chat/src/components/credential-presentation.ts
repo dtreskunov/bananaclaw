@@ -25,7 +25,7 @@ export function connectionName(
   connection: Pick<Connection, 'label' | 'services' | 'resource_url' | 'app_id'>,
   apps: AppInfo[] = [],
 ): string {
-  if (connection.label && !/^(?:ag-[\w-]+\/|onecli-|(?:MCP|OAUTH|CONN)_)/i.test(connection.label))
+  if (connection.label && !/^(?:ag-[\w-]+\/|[a-z-]+-[a-f0-9]{16,}$|(?:MCP|OAUTH|CONN)_)/i.test(connection.label))
     return connection.label;
   const app = apps.find((item) => item.id === connection.app_id);
   if (app?.label) return app.label[0].toUpperCase() + app.label.slice(1);

@@ -4,7 +4,7 @@
  * HTTP clients can only use a TCP proxy URL, but the gateway is reachable only
  * through the per-session Unix socket the host mounts. This relay listens on
  * 127.0.0.1 and pipes each connection to that socket unchanged; the gateway
- * does all proxy work. Off when NANOCLAW_EGRESS_SOCKET is unset (OneCLI groups).
+ * does all proxy work. Off when NANOCLAW_EGRESS_SOCKET is unset (Agent Vault groups).
  *
  * Bun (1.3) closes a TCP connection fully when either side sends FIN, so a
  * client that half-closes before reading its reply loses it. HTTP and TLS

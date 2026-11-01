@@ -1,12 +1,5 @@
-import { getAgentGroup } from '../../db/agent-groups.js';
-import { getContainerConfig, setCredentialBackend } from '../../db/container-configs.js';
 import { log } from '../../log.js';
-import {
-  AgentVaultError,
-  ensureVault,
-  gatewayMessage,
-  usesAgentVault,
-} from '../../modules/credentials/agent-vault-client.js';
+import { AgentVaultError, gatewayMessage } from '../../modules/credentials/agent-vault-client.js';
 import {
   changeConnectionApp,
   ConnectionInputError,
@@ -181,32 +174,3 @@ command(
 command('oauth-app-remove', 'Remove a user/install OAuth app. --user --app [--install].', (args, userId) =>
   changeConnectionApp(userId, required(args, 'app'), 'DELETE', args.install === true ? 'install' : 'user'),
 );
-
-function existingGroup(args: Args): string {
-  const group = required(args, 'group');
-  if (!getAgentGroup(group) || !getContainerConfig(group)) throw new ConnectionInputError('Agent group not found');
-  return group;
-}
-
-for (const verb of ['get', 'set'] as const) {
-  register({
-    name: `credentials-backend-${verb}`,
-    description:
-      verb === 'get'
-        ? 'Show the active credential backend. Requires --group.'
-        : 'Explicitly cut over a group after workload acceptance. --group --backend onecli|agent-vault; restart group containers separately.',
-    access: 'open',
-    resource: CREDENTIALS_RESOURCE,
-    parseArgs: (raw) => raw,
-    handler: async (raw) => {
-      const args = raw as Args,
-        group = existingGroup(args);
-      if (verb === 'get') return usesAgentVault(group) ? 'agent-vault' : 'onecli';
-      const backend = required(args, 'backend');
-      if (backend !== 'onecli' && backend !== 'agent-vault') throw new ConnectionInputError('Unsupported backend');
-      if (backend === 'agent-vault') await ensureVault(group);
-      setCredentialBackend(group, backend);
-      return { group, backend, restartRequired: true };
-    },
-  });
-}

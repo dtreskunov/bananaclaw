@@ -20,7 +20,7 @@ free-form input. Don't dump raw data — summarize and explain conversationally.
 ## What this skill changes (conformance)
 
 This skill drives existing NanoClaw entry points (`setup/index.ts --step
-register`, `scripts/init-first-agent.ts`, the `onecli` CLI) and copies a few
+register`, `scripts/init-first-agent.ts`, the host `ncl credentials` CLI) and copies a few
 files in (workspace markdown, OpenClaw skills, and its own transform module +
 test). It makes no code-level reach-in into core. Its integration assumptions
 about v2 are guarded by `scripts/transform.test.ts`, which is copied into the
@@ -44,7 +44,7 @@ OpenClaw and NanoClaw v2 differ structurally. Keep these in mind throughout:
   container). Per-group memory is `groups/<folder>/CLAUDE.local.md`; the
   `CLAUDE.md` in each group is **composed at spawn — do not edit it.**
 - **Credentials.** Container-facing API credentials (Anthropic, OpenAI, …) are
-  held in the OneCLI Agent Vault and injected per request — never in container
+  held in the Agent Vault and injected per request — never in container
   env vars. Host-side channel tokens (Telegram/Discord/Slack bot tokens) stay
   in `.env`; the NanoClaw host process reads them to connect to the platform.
 - **Access control.** Per messaging group `unknown_sender_policy` plus
@@ -308,14 +308,14 @@ For each, read the config section and decide together:
 - **Matching v2 skill** → run that skill; route its credential per Phase 4.
 - **An MCP server** → install the exact configured package; wire via
   `ncl groups config add-mcp-server`. Don't guess at packages.
-- **An API key** → route to the OneCLI vault if container-facing (Phase 4).
+- **An API key** → route to the Agent Vault vault if container-facing (Phase 4).
 
 Don't install unknown packages or search for replacements — supply-chain risk.
 
 ## Phase 4: Credentials
 
 Two destinations, decided per credential. **Channel tokens → `.env`** (host
-reads them). **Container-facing API credentials → the OneCLI vault** (injected
+reads them). **Container-facing API credentials → the Agent Vault vault** (injected
 per request, never in container env).
 
 ### Channel tokens (telegram, discord, slack)
@@ -353,47 +353,21 @@ Baileys auth state (stale encryption sessions break decryption).
 Re-authenticate during `/setup` via `/add-whatsapp`. The extraction script
 reports `DESTINATION: none` for it.
 
-### Anthropic and other container-facing credentials → OneCLI vault
+### Container-facing credentials: user-owned Agent Vault connections
 
-Find the agent's model credentials in OpenClaw. Check, in order:
-1. `<STATE_DIR>/auth-profiles.json` (and
-   `<STATE_DIR>/agents/<id>/agent/auth-profiles.json`) — a `profiles` map keyed
-   `provider:identifier`. For an `anthropic` provider profile the value depends
-   on `type`: `api_key` → `key`, `token` → `token`, `oauth` → `access`.
-2. `<STATE_DIR>/.env` — `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
-3. Config `models.providers` — Anthropic provider `apiKey`.
+Inventory existing profile metadata without printing values. The intended owner
+privately creates a personal connection with the documented HTTPS destination
+and authentication mechanism, then grants selected groups. Use
+`ncl credentials create --user <owner-id> --kind static --label <label>
+--services <safe-json> --values-stdin` with a private local JSON values source.
+Never put real values in arguments, reports, chat or container env.
 
-These are container-facing, so they go to the OneCLI vault. Do **not** write
-them to `.env` or thread them into a container. Register each in the vault:
+Opaque exec/file references and expired OAuth profiles require private operator
+action or real consent; do not export/reuse another owner’s token. Use
+`/init-agent-vault` if the gateway needs setup and validate actual workloads
+before cutover. Do not enable credentials or share them merely because the
+migration found a matching label.
 
-```bash
-onecli secrets create --name Anthropic --type anthropic \
-  --value <key-or-token> --host-pattern api.anthropic.com
-```
-
-For other container-facing keys discovered in plugins (e.g. OpenAI):
-
-```bash
-onecli secrets create --name OpenAI --type api_key \
-  --value <key> --host-pattern api.openai.com
-```
-
-Run the command on the user's behalf so the value never lands in the chat
-transcript; confirm with `onecli secrets list`.
-
-**Caveats:** `keyRef`/`tokenRef` with `source:"exec"` or `source:"file"` can't
-be auto-extracted — ask the user to paste it. For an `oauth` profile with a
-past expiry, warn that the token may need refreshing; the user can run
-`claude setup-token` and register the fresh token.
-
-If OneCLI isn't installed yet, defer this: tell the user that during `/setup`
-(or `/init-onecli`) they'll register the Anthropic credential, and note the
-discovered profile in `migration-state.md` so it isn't lost.
-
-> If the user explicitly wants `.env`-based credentials instead of the OneCLI
-> vault, that's the `/use-native-credential-proxy` opt-out — the one place
-> credentials are read from `.env` and injected into container requests without
-> OneCLI. Only go there if the user asks for it.
 
 ## Phase 5: Scheduled Tasks
 
@@ -422,7 +396,7 @@ ncl groups config add-mcp-server --id <agent-group-id> \
 
 stdio servers must be runnable inside the container (Node/npx-based work;
 custom binaries need a Dockerfile addition). Secrets referenced by a server's
-`env` should go to the OneCLI vault (Phase 4), not be inlined. The config
+`env` should go to the Agent Vault vault (Phase 4), not be inlined. The config
 change takes effect on restart: `ncl groups restart --id <agent-group-id>`
 (add `--rebuild` only if a custom binary was added to the Dockerfile).
 
@@ -492,7 +466,7 @@ Print what was migrated:
 - User context / memories → `user-context.md` / `memories.md` / `daily-memories/`
 - OpenClaw skills → `container/skills/`
 - Channel tokens → `.env` (list channels)
-- Container-facing credentials → OneCLI vault (list)
+- Container-facing credentials → Agent Vault vault (list)
 - Scheduled tasks → mapped and scheduled via the agent (or noted for first run)
 - MCP servers → wired into agent group container configs
 
@@ -503,7 +477,7 @@ Not applicable: unsupported channels (registered for the future); OpenClaw-only
 features (exec approvals, human delay, TTS, model/thinking config).
 
 Remind: "Run `/setup` next to finish your NanoClaw install. Channel tokens are
-in `.env`; container-facing credentials are in the OneCLI vault. Select the
+in `.env`; container-facing credentials are in the Agent Vault vault. Select the
 channels we configured when setup asks."
 
 Then delete `migration-state.md` (or offer to keep it as a record), and remove

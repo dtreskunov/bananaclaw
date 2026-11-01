@@ -198,7 +198,7 @@ CREATE INDEX idx_sessions_lookup     ON sessions(messaging_group_id, thread_id);
   Confirmed requests are cancelled by removing their outstanding approval rows, so
   later card clicks cannot execute them. The response reports `cancelledApprovals`,
   and cancellations are logged and shown in a toast. Unrelated requests, including
-  sessionless OneCLI approvals, remain untouched; already applied actions are not undone.
+  sessionless Agent Vault approvals, remain untouched; already applied actions are not undone.
   Approvals being processed hold a process-local session guard through their
   handler, resolution callbacks, and container wake. Deletion returns `409
   approval_in_progress` until processing finishes, even with cancellation consent.
@@ -275,7 +275,7 @@ Access layer: `src/db/agent-destinations.ts`.
 Two workflows share this table:
 
 - **Session-bound MCP approvals** — `install_packages`, `add_mcp_server`. `session_id` is set.
-- **OneCLI credential approvals** — `session_id` may be NULL; `agent_group_id` + `channel_type` + `platform_id` route the admin card.
+- **Agent Vault credential approvals** — `session_id` may be NULL; `agent_group_id` + `channel_type` + `platform_id` route the admin card.
 
 ```sql
 CREATE TABLE pending_approvals (
@@ -305,7 +305,7 @@ CREATE INDEX idx_pending_approvals_action_status ON pending_approvals(action, st
   that input's channel, platform, thread and agent-to-agent source session. Legacy
   approvals without it use their workflow origin or the session's messaging group;
   a host notification is never fabricated as an agent-to-agent message to itself.
-- Access layer: `src/db/sessions.ts`; sweep + delivery: `src/onecli-approvals.ts`.
+- Access layer: `src/db/sessions.ts`; sweep + delivery: `src/modules/approvals/primitive.ts`.
 
 #### Retained approval history
 
@@ -430,7 +430,7 @@ Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMig
 |---|------|------------|
 | 001 | `001-initial.ts` | Core tables: `agent_groups`, `messaging_groups`, `messaging_group_agents`, `users`, `user_roles`, `agent_group_members`, `user_dms`, `sessions`, `questions` |
 | 002 | `002-chat-sdk-state.ts` | `chat_sdk_kv`, `chat_sdk_subscriptions`, `chat_sdk_locks`, `chat_sdk_lists` |
-| 003 | `003-pending-approvals.ts` | `pending_approvals` (session-bound + OneCLI fields) |
+| 003 | `003-pending-approvals.ts` | `pending_approvals` (session-bound + Agent Vault fields) |
 | 004 | `004-agent-destinations.ts` | `agent_destinations` + backfill from existing `messaging_group_agents` wirings |
 | 007 | `007-pending-approvals-title-options.ts` | `ALTER TABLE pending_approvals` add `title`, `options_json` (retrofits DBs created between 003 and 007) |
 | 008 | `008-dropped-messages.ts` | `unregistered_senders` |

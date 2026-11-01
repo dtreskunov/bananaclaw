@@ -20,9 +20,6 @@ importers:
       '@clack/prompts':
         specifier: ^1.2.0
         version: 1.2.0
-      '@onecli-sh/sdk':
-        specifier: 3.1.0
-        version: 3.1.0
       '@resend/chat-sdk-adapter':
         specifier: 0.2.2
         version: 0.2.2(@chat-adapter/shared@4.26.0)(@react-email/render@2.0.8(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(chat@4.26.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -588,10 +585,6 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
-
-  '@onecli-sh/sdk@3.1.0':
-    resolution: {integrity: sha512-Akf4T32/pIGWJO0FQBwlPXYFUVMn200lFxWaZWtB8dNpORDjT7cMykd5W+aTA/4//YV1XiXBOoaTUUL1yqIf4w==}
-    engines: {node: '>=20'}
 
   '@oxc-project/types@0.124.0':
     resolution: {integrity: sha512-VBFWMTBvHxS11Z5Lvlr3IWgrwhMTXV+Md+EQF0Xf60+wAdsGFTBx7X7K/hP4pi8N7dcm1RvcHwDxZ16Qx8keUg==}
@@ -2857,8 +2850,6 @@ snapshots:
       '@emnapi/runtime': 1.9.2
       '@tybys/wasm-util': 0.10.1
     optional: true
-
-  '@onecli-sh/sdk@3.1.0': {}
 
   '@oxc-project/types@0.124.0': {}
 

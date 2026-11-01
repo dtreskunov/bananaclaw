@@ -47,7 +47,7 @@ export interface ContainerConfigRow {
   packages_pip: string; // JSON: string[]
   additional_mounts: string; // JSON: AdditionalMountConfig[]
   cli_scope: string; // 'disabled' | 'group' | 'global'
-  /** Host-only backend. New groups default to AgentVault; legacy selections are explicit. */
+  /** Host-only schema invariant; Agent Vault is the only supported backend. */
   credential_backend?: string | null;
   /** Host-only web microphone backend; null inherits the server default. */
   voice_input_backend?: string | null;

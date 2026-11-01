@@ -32,7 +32,7 @@ Customizations route through the v2 entity model: users → messaging groups →
 | `src/router.ts` | Inbound routing: messaging group → agent group → session → `inbound.db` → wake |
 | `src/delivery.ts` | Polls `outbound.db`, delivers via adapter, handles system actions |
 | `src/session-manager.ts` | Resolves sessions; opens `inbound.db` / `outbound.db`; heartbeat path |
-| `src/container-runner.ts` | Spawns per-agent-group containers with session DB + outbox mounts, OneCLI `ensureAgent` |
+| `src/container-runner.ts` | Spawns per-agent-group containers with session DB + outbox mounts, Agent Vault `ensureAgent` |
 | `src/channels/` | Channel adapter infra (registry, Chat SDK bridge); specific adapters install from the `channels` branch |
 | `src/config.ts` | Process-level config (assistant name, paths, timeouts) read from `.env` |
 | `data/v2.db` | Central DB: users, roles, agent_groups, messaging_groups, wirings, container_configs |
@@ -63,7 +63,7 @@ Questions to ask:
 - Which agent group should have access?
 
 Implementation:
-- If an `/add-<service>-tool` skill exists (e.g. `/add-gmail-tool`, `/add-gcal-tool`), run it — it wires the MCP server and routes credentials through OneCLI so no raw keys reach the container.
+- If an `/add-<service>-tool` skill exists (e.g. `/add-gmail-tool`, `/add-gcal-tool`), run it — it wires the MCP server and routes credentials through Agent Vault so no raw keys reach the container.
 - Otherwise wire the MCP server into the agent group's container config: `ncl groups config add-mcp-server --id <group-id> --name <name> --command <cmd> [--args <json-array>] [--env <json-object>]`, then `ncl groups restart --id <group-id>` to take effect. From inside a container the agent uses the `add_mcp_server` self-mod tool, which requires one admin approval.
 
 ### Changing Assistant Behavior

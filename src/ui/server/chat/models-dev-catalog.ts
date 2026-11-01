@@ -21,7 +21,7 @@
  * call tools is useless here, and offering it invites a confusing failure
  * much later.
  *
- * Fetched without the OneCLI proxy: models.dev is public, unauthenticated,
+ * Fetched without the Agent Vault proxy: models.dev is public, unauthenticated,
  * and already exempted from the container's proxy via NO_PROXY
  * (src/providers/opencode.ts).
  */

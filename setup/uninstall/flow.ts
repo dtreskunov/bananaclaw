@@ -23,14 +23,11 @@ import k from 'kleur';
 import { emit as phEmit } from '../lib/diagnostics.js';
 import { note } from '../lib/theme.js';
 import * as setupLog from '../logs.js';
-import {
-  resolveOnecliDeletions,
-  type RunCommand,
-  type VaultAgent,
-} from './onecli-agents.js';
+import type { RunCommand } from './scan.js';
 import { buildRemovalPlan, type Decisions } from './plan.js';
 import { executePlan, type ExecDeps } from './remove.js';
 import { scanInstall, tilde, type Inventory } from './scan.js';
+import { cleanupGatewayGroups } from './agent-vault.js';
 
 const GROUPS = {
   service: {
@@ -47,10 +44,6 @@ const GROUPS = {
     title: "3) Your agents' memory & files",
     desc: 'Notes and memory your agents created (groups/) and any migrated data (store/). Content you made — it cannot be recovered after deletion.',
     prompt: "Delete your agents' memory & files shown above? (cannot be undone)",
-  },
-  onecli: {
-    title: '4) OneCLI credential agents',
-    desc: 'Per-agent entries this copy registered in the OneCLI vault. The OneCLI app, your credentials, and the gateway are NOT touched.',
   },
 } as const;
 
@@ -95,39 +88,22 @@ export async function runUninstallFlow(opts: {
   const svcRows = serviceRows(inv, home);
   const dataRows = [...inv.data, ...inv.runtime].map(({ what, where }) => ({ what, where }));
   const userRows = inv.user.map(({ what, where }) => ({ what, where }));
-  const totalFound =
-    svcRows.length +
-    dataRows.length +
-    userRows.length +
-    inv.onecli.mine.length +
-    inv.onecli.orphans.length;
+  const totalFound = svcRows.length + dataRows.length + userRows.length;
 
   if (totalFound === 0) {
     p.outro(
       `✓ Nothing to uninstall — this copy (${inv.slug}) is already clean.\n` +
-        k.dim('   (No service, containers, image, data, or OneCLI agents found for this folder.)'),
+        k.dim('   (No service, containers, image, or data found for this folder.)'),
     );
     process.exit(0);
   }
 
   if (dryRun) {
-    p.log.message(
-      k.cyan('PREVIEW ONLY — this shows what would be deleted and changes nothing.'),
-    );
+    p.log.message(k.cyan('PREVIEW ONLY — this shows what would be deleted and changes nothing.'));
     if (svcRows.length > 0) note(groupBody(GROUPS.service.desc, svcRows), GROUPS.service.title);
     if (dataRows.length > 0) note(groupBody(GROUPS.data.desc, dataRows), GROUPS.data.title);
     if (userRows.length > 0) note(groupBody(GROUPS.user.desc, userRows), GROUPS.user.title);
-    if (inv.onecli.mine.length > 0 || inv.onecli.orphans.length > 0) {
-      const lines = [GROUPS.onecli.desc, ''];
-      lines.push('Would be deleted (after confirmation):');
-      for (const a of inv.onecli.mine) lines.push(`  ● ${a.name} — ${a.identifier}`);
-      if (inv.onecli.mine.length === 0) lines.push('  (none)');
-      lines.push('Left in place — may belong to another copy:');
-      for (const a of inv.onecli.orphans) lines.push(`  ○ ${a.name} — ${a.identifier}`);
-      if (inv.onecli.orphans.length === 0) lines.push('  (none)');
-      note(lines.join('\n'), GROUPS.onecli.title);
-    }
-    const empty = emptyGroupTitles(svcRows.length, dataRows.length, userRows.length, inv);
+    const empty = emptyGroupTitles(svcRows.length, dataRows.length, userRows.length);
     if (empty.length > 0) p.log.message(k.dim(`Nothing found for: ${empty.join(', ')}`));
     for (const n of inv.notes) p.log.message(k.dim(`• ${n}`));
     p.outro('Preview complete. Nothing was changed.');
@@ -169,8 +145,6 @@ export async function runUninstallFlow(opts: {
   if (!dataYes && dataRows.length > 0) keptNotes.push(`${GROUPS.data.title}: kept by your choice.`);
   if (!userYes && userRows.length > 0) keptNotes.push(`${GROUPS.user.title}: kept by your choice.`);
 
-  const onecliDelete = await decideOnecli(inv, yes, keptNotes);
-
   // Record the decisions before execution can delete logs/ — but only into
   // an existing logs/ (userInput would otherwise mkdir it back into
   // existence, leaving a fresh logs/setup.log behind after the uninstall).
@@ -181,7 +155,6 @@ export async function runUninstallFlow(opts: {
         service: serviceYes,
         data: dataYes,
         user: userYes,
-        onecliAgentsDeleted: onecliDelete.length,
       }),
     );
   }
@@ -190,8 +163,14 @@ export async function runUninstallFlow(opts: {
     service: serviceYes,
     data: dataYes,
     user: userYes,
-    onecliDelete,
   };
+  const revokeAccess =
+    serviceYes &&
+    dataYes &&
+    (await confirmGroup(
+      'Revoke this copy’s agent Access in Agent Vault? Personal credentials and other copies stay untouched.',
+      yes,
+    ));
   const actions = buildRemovalPlan(inv, decisions);
 
   if (actions.length === 0) {
@@ -207,7 +186,6 @@ export async function runUninstallFlow(opts: {
       service: serviceYes,
       data: dataYes,
       user: userYes,
-      onecliAgentsDeleted: onecliDelete.length,
     },
     { persistId: false },
   );
@@ -223,7 +201,16 @@ export async function runUninstallFlow(opts: {
     log: (line) => p.log.message(line),
     isRoot: process.getuid?.() === 0,
   };
-  const { notes: execNotes } = executePlan(head, deps);
+  const teardown = head.filter((action) => !['delete-path', 'backup-env'].includes(action.kind));
+  const dataActions = head.filter((action) => ['delete-path', 'backup-env'].includes(action.kind));
+  const { notes: serviceNotes } = executePlan(teardown, deps);
+  if (revokeAccess) {
+    if (serviceNotes.length)
+      throw new Error('Service teardown needs review before revoking gateway access or deleting data');
+    await cleanupGatewayGroups(projectRoot);
+  }
+  const { notes: dataNotes } = executePlan(dataActions, deps);
+  const execNotes = [...serviceNotes, ...dataNotes];
 
   printLeftAlone([...inv.notes, ...keptNotes, ...execNotes]);
 
@@ -250,71 +237,6 @@ async function confirmGroup(prompt: string, yes: boolean): Promise<boolean> {
   return answered(await p.confirm({ message: prompt, initialValue: false }));
 }
 
-/**
- * Group 4 has two sub-decisions the single-prompt loop can't express:
- * MINE is one yes/no; ORPHANS get a separate default-No prompt with an
- * explicit cross-copy warning. --yes deletes MINE but never ORPHANS
- * (enforced in resolveOnecliDeletions); anything kept is reported with
- * the exact manual delete command (by vault uuid).
- */
-async function decideOnecli(
-  inv: Inventory,
-  yes: boolean,
-  keptNotes: string[],
-): Promise<VaultAgent[]> {
-  const { mine, orphans } = inv.onecli;
-  if (mine.length === 0 && orphans.length === 0) return [];
-
-  const rows = [
-    ...mine.map((a) => ({ what: 'OneCLI agent', where: `${a.name} — ${a.identifier}` })),
-    ...orphans.map((a) => ({ what: 'OneCLI agent (orphan)', where: `${a.name} — ${a.identifier}` })),
-  ];
-  note(groupBody(GROUPS.onecli.desc, rows), GROUPS.onecli.title);
-
-  let deleteMine = false;
-  if (mine.length > 0 && !yes) {
-    deleteMine = answered(
-      await p.confirm({
-        message: `Delete this copy's ${mine.length} OneCLI agent(s)?`,
-        initialValue: false,
-      }),
-    );
-    if (!deleteMine) keptNotes.push('OneCLI agents (this copy): kept by your choice.');
-  }
-
-  let deleteOrphans = false;
-  if (orphans.length > 0) {
-    if (yes) {
-      p.log.warn(
-        `${orphans.length} other NanoClaw-style agent(s) in the vault are not linked to this copy;\n--yes does NOT delete them (they may belong to another copy).`,
-      );
-    } else {
-      p.log.warn(
-        `Found ${orphans.length} other NanoClaw-style agent(s) in the vault not linked to this copy —\nthey may belong to ANOTHER NanoClaw copy on this machine.`,
-      );
-      deleteOrphans = answered(
-        await p.confirm({ message: 'Delete them too?', initialValue: false }),
-      );
-    }
-    if (yes || !deleteOrphans) {
-      keptNotes.push(
-        `OneCLI orphan agents (${orphans.length}): left in place — remove manually if they're yours:`,
-      );
-      for (const a of orphans) {
-        keptNotes.push(`  onecli agents delete --id ${a.uuid}   # ${a.name} — ${a.identifier}`);
-      }
-    }
-  }
-
-  return resolveOnecliDeletions({
-    mine,
-    orphans,
-    assumeYes: yes,
-    deleteMine,
-    deleteOrphans,
-  });
-}
-
 function serviceRows(inv: Inventory, home: string): { what: string; where: string }[] {
   const s = inv.service;
   const rows: { what: string; where: string }[] = [];
@@ -337,25 +259,17 @@ function groupBody(desc: string, rows: { what: string; where: string }[]): strin
   return lines.join('\n');
 }
 
-function emptyGroupTitles(
-  svcCount: number,
-  dataCount: number,
-  userCount: number,
-  inv: Inventory,
-): string[] {
+function emptyGroupTitles(svcCount: number, dataCount: number, userCount: number): string[] {
   const empty: string[] = [];
   if (svcCount === 0) empty.push(GROUPS.service.title);
   if (dataCount === 0) empty.push(GROUPS.data.title);
   if (userCount === 0) empty.push(GROUPS.user.title);
-  if (inv.onecli.mine.length === 0 && inv.onecli.orphans.length === 0) {
-    empty.push(GROUPS.onecli.title);
-  }
   return empty;
 }
 
 function printLeftAlone(notes: string[]): void {
   const lines = [
-    '• OneCLI app, vault & credentials: ~/.local/share/onecli, ~/.local/bin/onecli',
+    '• Shared Agent Vault service and personal connections: ~/.agent-vault/',
     '• Host-wide config: ~/.config/nanoclaw/ (mount/sender allowlists)',
     '• PATH line in ~/.bashrc and ~/.zshrc',
     '• Other NanoClaw copies on this machine',

@@ -231,18 +231,10 @@ describe('syncSkillSymlinks', () => {
 });
 
 describe('buildContainerArgs ordering invariant (structural)', () => {
-  // The OneCLI gateway apply (SDK applyContainerConfig) appends credential-stub
-  // mounts — e.g. the codex auth.json sentinel nested INSIDE our RW
-  // /home/node/.codex mount. Docker applies binds in argument order, so the
-  // stub must land AFTER its parent mount or the parent shadows it and the
-  // agent silently degrades to loginless auth. Driving the real
-  // buildContainerArgs needs a live gateway + container runtime, so this
-  // guards the invariant structurally: the gateway apply must appear after
-  // the volume-mounts loop in the source.
-  it('applies the OneCLI gateway after the volume mounts', () => {
+  it('applies the scoped gateway mounts after provider volume mounts', () => {
     const src = fs.readFileSync(path.join(process.cwd(), 'src', 'container-runner.ts'), 'utf-8');
     const mountsLoop = src.indexOf('for (const mount of mounts)');
-    const gatewayApply = src.indexOf('onecli.applyContainerConfig');
+    const gatewayApply = src.indexOf('await applyAgentVaultEgress(args');
     expect(mountsLoop).toBeGreaterThan(-1);
     expect(gatewayApply).toBeGreaterThan(-1);
     expect(gatewayApply).toBeGreaterThan(mountsLoop);

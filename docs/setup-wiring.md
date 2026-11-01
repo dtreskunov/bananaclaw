@@ -19,10 +19,13 @@ Last updated: 2026-04-09
 - Container image rebuilt with tsconfig (`container/agent-runner/tsconfig.json`)
 - E2E verified: host → Docker container → Claude responds → "E2E works!" ✓
 
-### OneCLI Integration
-- `ensureAgent()` call added before `applyContainerConfig()` in `src/container-runner.ts`
-- Without `ensureAgent`, OneCLI rejects unknown agent identifiers and returns false, leaving container with no credentials
-- E2E verified with OneCLI credential injection ✓
+### Agent Vault Integration
+
+- Every agent uses a per-session Unix socket with `--network=none`.
+- Failed socket provisioning aborts spawn and preserves queued input.
+- Fresh setup verifies the pinned gateway and protected host token; installation
+  uses `/init-agent-vault`.
+- Model credentials are user-owned; creating a group does not grant access.
 
 ### Channel Barrel
 - `src/index.ts` imports `./channels/index.js` (the barrel)
@@ -98,7 +101,7 @@ Channel adapter → routeInbound() → resolve messaging_group → resolve agent
 | `src/session-manager.ts` | Creates inbound.db + outbound.db per session |
 | `src/delivery.ts` | Delivers committed outbound rows, recovers after crashes, handles system actions |
 | `src/host-sweep.ts` | Syncs processing_ack, stale detection, recurrence |
-| `src/container-runner.ts` | Spawns containers, OneCLI ensureAgent + applyContainerConfig |
+| `src/container-runner.ts` | Spawns containers, Agent Vault scoped socket + CA provisioning |
 | `setup/register.ts` | Creates entities (agent_group, messaging_group, wiring) |
 | `setup/verify.ts` | Checks central DB for registered groups |
 | `container/agent-runner/src/db/connection.ts` | Two-DB connection layer (inbound read-only, outbound read-write) |

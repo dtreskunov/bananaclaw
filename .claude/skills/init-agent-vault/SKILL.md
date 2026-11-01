@@ -1,12 +1,12 @@
 ---
 name: init-agent-vault
-description: Install or upgrade the headless Agent Vault credential gateway for NanoClaw. Use for Agent Vault setup, a pinned gateway release upgrade, or P5 cutover from the OneCLI canary. Verifies platform checksums and signed source provenance before installation and preserves existing credentials and configuration.
+description: Install or upgrade the headless Agent Vault credential gateway for NanoClaw. Use for Agent Vault setup or a pinned gateway release upgrade. Verifies platform checksums and signed source provenance before installation and preserves existing credentials and configuration.
 ---
 
 # Initialize or upgrade Agent Vault
 
-This is the `dtreskunov/agent-vault` gateway, not OneCLI. Do not run
-`/init-onecli`, an upstream installer, or a `latest` download for this task.
+This is the `dtreskunov/agent-vault` gateway. Do not run
+an upstream installer or a `latest` download for this task.
 Follow [the release and upgrade guide](../../../docs/agent-vault-upgrades.md).
 
 **Compatibility requirement:** this checkout requires the revision-7 native
@@ -93,15 +93,11 @@ Retain the previous binary and state backup for rollback.
   metadata. Consent alone does not grant an agent access.
 - Coordinate Google/GitHub consent with the operator; never claim it passed
   without a real sign-in. F8 stdio token placeholders are separate wiring.
-- Keep OneCLI and existing group backends unchanged unless a separate migration
-  was explicitly requested. Test any approved per-group switch with
-  `ncl credentials backend`, not an all-groups cutover.
-- For an approved migration, inventory source access and target readiness,
-  preserve private rollback state and validate actual model/MCP workloads
-  before switching. Missing consent or values remain blockers unless the
-  operator explicitly removes those capabilities. Revoke only the removed
-  groups' grants, never shared connections or other groups' access. Keep the
-  seven-day sustained acceptance gate before OneCLI retirement.
+- Agent Vault is the only supported backend. Do not create automatic
+  credential grants or reconnect operator-removed accounts. Preserve private
+  rollback state and validate actual model/MCP workloads after an upgrade.
+  Missing consent or values remain explicit blockers. Revoke only selected
+  groups' grants, never shared connections or other groups' access.
 - Report the installed version, checksum/provenance results, rollback paths and
   any pending acceptance steps. Remove temporary download tooling, retaining
   release verification material and license/NOTICE files with the installation.

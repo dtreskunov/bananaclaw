@@ -2,7 +2,7 @@
  * Agent Vault egress (credential gateway spike).
  *
  * Groups configured with the AgentVault credential backend get egress from the
- * headless Agent Vault fork instead of OneCLI. Each container gets its own
+ * headless Agent Vault fork instead of Agent Vault. Each container gets its own
  * gateway socket session: the gateway binds `egress.sock` in a fresh
  * directory under AGENT_VAULT_SOCKET_ROOT, NanoClaw mounts that directory, and
  * the in-container relay forwards 127.0.0.1:3128 to it. The socket itself is
@@ -112,7 +112,7 @@ function sessionDir(s: GatewaySettings, containerName: string): string {
 /**
  * Open a gateway socket session for this container and append its mounts and
  * env to the docker args. Throws when the gateway can't provide one; callers
- * treat that like a OneCLI outage and refuse to spawn.
+ * treat that like a Agent Vault outage and refuse to spawn.
  */
 export async function applyAgentVaultEgress(
   args: string[],

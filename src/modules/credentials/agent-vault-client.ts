@@ -70,8 +70,7 @@ export function usesAgentVault(agentGroupId: string): boolean {
   const config = getContainerConfig(agentGroupId);
   if (!config) return !!getAgentGroup(agentGroupId);
   if (config.credential_backend === 'agent-vault') return true;
-  if (config.credential_backend === 'onecli') return false;
-  throw new Error('Credential backend is not initialized; run the host database migrations');
+  throw new Error('Unsupported credential backend; complete the reviewed gateway cutover and database migrations');
 }
 
 /** Each agent group has exactly one vault, named after the group. */

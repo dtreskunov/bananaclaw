@@ -81,14 +81,16 @@ Tasks can exist before a session is awake — the host sweep creates/wakes the c
 
 **v1:** `.env` — plain environment variables. `DISCORD_BOT_TOKEN`, `ANTHROPIC_API_KEY`, etc. The host read them directly and passed them in to any code that needed them.
 
-**v2:** OneCLI Agent Vault. A separate local service at `http://127.0.0.1:10254` holds secrets. Agents are *scoped* to specific secrets and the vault injects them into approved API requests as they leave the container. The container never sees the raw secret value.
+**v2:** Agent Vault. The local gateway at `http://127.0.0.1:14321` stores user-owned connections. Agents receive explicit whole-credential grants and scoped per-session sockets; real credentials never enter containers.
 
-Gotcha: auto-created agents receive no credential grants, even if matching
-secrets exist in the vault. Set `ONECLI_NEW_AGENT_SECRET_IDS` before creating
-agents, or attach secrets to existing agents with `onecli agents grants
-attach-secret`.
+Auto-created agents receive no grants. The owner privately connects credentials
+and grants selected agents Access. Grants cover the whole credential, including
+future URL rules; do not broaden another owner's service-only share implicitly.
 
-**What the automated migration does:** copies every v1 `.env` key verbatim into v2 `.env`, never overwriting existing v2 keys. The OneCLI vault migration is a separate step owned by the `/init-onecli` skill, which knows how to pull from `.env`.
+**Migration:** preserve private v1 state, then review credential ownership and
+exact destinations. Use `/init-agent-vault` for verified installation and the
+owner's Credentials page for connection setup. Never copy raw values into
+container configuration or infer grants from imported environment variables.
 
 ---
 

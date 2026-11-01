@@ -7,8 +7,8 @@
  *     to NanoClaw's `.env`. The NanoClaw *host* process reads these to connect
  *     to the messaging platform; they never enter a container.
  *   - Container-facing API credentials (Anthropic, OpenAI, …) → NOT written
- *     anywhere by this script. The script prints the `onecli secrets create`
- *     command the operator runs so the credential lands in the OneCLI Agent
+ *     anywhere by this script. The script prints the `ncl credentials create --values-stdin`
+ *     command the operator runs so the credential lands in the Agent Vault Agent
  *     Vault, which injects it per-request. Raw credentials are never threaded
  *     into a container env var.
  *

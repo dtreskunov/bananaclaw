@@ -11,7 +11,7 @@ The host sweep recovers stopped sessions with unsettled turns, outstanding
 processing claims, or a stale running registry entry even when there is no
 pending input. It launches a short-lived, provider-free recovery container.
 Only the runner-state store, session socket capability, and runner source are
-mounted; networking is disabled and no OneCLI credentials or MCP tools are
+mounted; networking is disabled and no Agent Vault credentials or MCP tools are
 initialized. Normal wakes wait for recovery to finish, preventing two writers.
 
 The recovery runner drains its existing durable journal first, preserving any

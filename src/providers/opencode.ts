@@ -6,7 +6,7 @@
  * OPENCODE_* env vars tell the CLI which provider/model to use at runtime
  * (read on the host, injected into the container). NO_PROXY / no_proxy are
  * merged with host values so the in-container OpenCode client can talk to
- * 127.0.0.1 even when HTTPS_PROXY is set by OneCLI.
+ * 127.0.0.1 even when HTTPS_PROXY is set by Agent Vault.
  */
 import fs from 'fs';
 import path from 'path';
@@ -41,7 +41,7 @@ registerProviderContainerConfig(
     repairOpencodeIdRollover(opencodeDir);
 
     // models.dev hosts the public provider/model catalog OpenCode fetches at
-    // boot. Route it around the OneCLI proxy (which has no secret rule for it
+    // boot. Route it around the Agent Vault proxy (which has no secret rule for it
     // and returns empty → "no providers found").
     const noProxyAdditions = '127.0.0.1,localhost,models.dev,.models.dev';
     const env: Record<string, string> = {

@@ -4,6 +4,15 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Agent Vault-only runtime and setup.** The legacy gateway SDK,
+  approval poller, agent provisioning, Docker egress network, backend-switching
+  CLI and temporary importer are removed. Containers always use the scoped Unix
+  gateway socket with networking disabled. Setup uses `/init-agent-vault` and
+  explicit user-owned connections/grants; the built-in credential skill is now
+  `/agent-vault`. Retirement refuses unmigrated groups or pending legacy
+  approvals and preserves audit data. See
+  [detect / migrate / verify / rollback](docs/agent-vault-migration.md#agent-vault-only-retirement).
+
 - **[BREAKING] Gateway release `gw-v0.3.0` and whole-credential authority.**
   Pins the query-placement canary's source with verified platform checksums
   and signed provenance. Includes whole-credential grants, exact named-MCP

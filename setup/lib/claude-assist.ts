@@ -51,10 +51,9 @@ export const STEP_FILES: Record<string, string[]> = {
     'setup/install-docker.sh',
     'container/Dockerfile',
   ],
-  onecli: ['setup/onecli.ts'],
+  'agent-vault': ['setup/agent-vault.ts', 'docs/agent-vault-upgrades.md'],
   auth: [
-    'setup/auth.ts',
-    'setup/register-claude-token.sh',
+    'src/cli/commands/credentials.ts',
     'setup/install-claude.sh',
   ],
   mounts: ['setup/mounts.ts'],
@@ -189,7 +188,7 @@ export async function ensureClaudeReady(projectRoot: string): Promise<boolean> {
     // Run under script(1) to capture the OAuth token from PTY output
     // while preserving interactive TTY for the browser OAuth flow.
     // Same approach as register-claude-token.sh, but we set the env var
-    // instead of writing to OneCLI.
+    // instead of writing to Agent Vault.
     const tmpfile = path.join(os.tmpdir(), `claude-setup-token-${process.pid}`);
     try {
       const isUtilLinux = (() => {

@@ -17,7 +17,7 @@ Before any Vercel operation, verify auth:
 vercel whoami --token placeholder
 ```
 
-If this fails, report the exact endpoint and error and load `/onecli-gateway`
+If this fails, report the exact endpoint and error and load `/agent-vault`
 for the configured backend. With Agent Vault, request missing access using
 `request_access` for `https://api.vercel.com` and the intended operation.
 The user privately selects/connects a credential and approves this agent's

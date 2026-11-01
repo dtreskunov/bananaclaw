@@ -116,7 +116,7 @@ interface ImagesResponse {
 }
 
 const PROVIDER_INFO: Record<string, string> = {
-  claude: 'Claude — Anthropic models via the official SDK. Uses your OneCLI-injected Anthropic API key.',
+  claude: 'Claude — Anthropic models via the official SDK. Uses your Agent Vault-managed Anthropic credential.',
   native:
     'Native — experimental in-process agent loop using OpenAI-compatible Chat or Anthropic Messages. The model picker only shows models.dev routes these transports can call directly.',
   opencode:
