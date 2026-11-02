@@ -1,12 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppInfo, Connection, CredentialGroup, Service } from './CredentialsApi';
 import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnectionDialog } from './CredentialsDialogs';
-import { ConfirmCredentialAction, ErrorNotice, SecretInput, useConnectionSignIn } from './CredentialsParts';
+import {
+  ConfirmCredentialAction,
+  CredentialDialog,
+  ErrorNotice,
+  SecretInput,
+  useConnectionSignIn,
+} from './CredentialsParts';
 import { GroupCredentials, McpConnectionAccess, serviceMatchesResource } from './GroupCredentialAccess';
 import { showToast } from './Toast';
 import { AccessRequestRedirect, CredentialsContent, CredentialsPage } from './CredentialsPage';
 import { CredentialsTable } from './CredentialsTable';
 import { MobileDialog } from './MobileDialog';
+import { ModalDialog } from './ModalDialog';
 import { channelType, credentialsOpen, groupId, isMobile, messagingGroupId, threadId } from '../state';
 import { CredentialAuthenticationForm, CredentialServiceForm } from './CredentialServiceForm';
 import type { RouteDraft } from './credential-routing';
@@ -14,6 +21,7 @@ import { OAuthAppForm } from './OAuthAppForm';
 import type { OAuthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
 import { ApprovalCard, ApprovalCardFrame } from './ApprovalCard';
+import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { AccessRequestReview } from './AccessRequestReview';
 import { AccessRequestCard } from './AccessRequestCard';
 import { accessApprovalId } from '../credentials-navigation';
@@ -133,10 +141,15 @@ interface TestProps {
   savedLabel?: string;
   preferredKey?: string;
   message?: string;
+  description?: string;
+  href?: string;
+  signInMessage?: unknown;
   'aria-label'?: string;
   open?: boolean;
   class?: string;
   scopes?: string | string[];
+  unspecifiedScopes?: boolean;
+  onScopes?: (value: string) => void;
   selectDiscovered?: boolean;
   appId?: string;
   resource?: string;
@@ -160,7 +173,8 @@ interface TestProps {
   title?: string;
   onConfirm(): Promise<void>;
   onSubmit(event: { preventDefault(): void }): Promise<void>;
-  onCreate(request: AccessRequirements): void;
+  onCreate(request: AccessRequirements): void | Promise<void>;
+  onManage(connection: Connection, request?: AccessRequirements): void;
   onCreated(connection: Connection): void;
   accessRequest?: AccessRequirements;
   preferredConnectionId?: string;
@@ -213,10 +227,10 @@ describe('assisted credential approval UI', () => {
     descendants(node)
       .find((child) => child.type === 'button' && child.props.children === 'Review the new account')!
       .props.onClick();
-    expect(onManage).toHaveBeenCalledWith(created);
+    expect(onManage).toHaveBeenCalledWith(created, expect.objectContaining({ scopes: ['read'] }));
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
-  it('lists only URL/mechanism-compatible credentials and passes creation suggestions intact', () => {
+  it('lists only URL/mechanism-compatible credentials and starts setup separately before creation', async () => {
     const request = {
       request_id: 'access-one',
       status: 'pending',
@@ -251,11 +265,11 @@ describe('assisted credential approval UI', () => {
         .filter((child) => child.type === 'input' && child.props.type === 'radio')
         .map((child) => child.props.value),
     ).toEqual([original.id]);
-    descendants(node)
+    await descendants(node)
       .find((child) => child.type === 'button' && child.props.children === 'Add account')!
       .props.onClick();
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining(request));
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/ui/chat/api/credentials/access-requests/access-one/setup');
   });
   it('prefills researched MCP OAuth settings but starts consent only on an explicit action', () => {
     const request = {
@@ -495,8 +509,9 @@ describe('assisted credential approval UI', () => {
     expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
     props.connections = [{ ...original, status: 'disabled' }];
     node = draw();
-    expect(allow().props.disabled).toBe(true);
-    await allow().props.onClick();
+    expect(descendants(node).some((child) => child.type === 'button' && child.props.children === 'Allow access')).toBe(
+      false,
+    );
     expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
     props.connections = [original];
     node = draw();
@@ -576,7 +591,7 @@ describe('assisted credential approval UI', () => {
     expect(nickname.props.value).toBe(original.label);
     expect(descendants(node).filter((child) => child.type === 'details')).toHaveLength(0);
     expect(
-      descendants(node).some((child) => child.type === 'section' && child.props['aria-label'] === 'More information'),
+      descendants(node).some((child) => child.type === 'section' && child.props['aria-label'] === 'Access details'),
     ).toBe(true);
     const allow = (): TestNode =>
       descendants(node).find((child) => child.type === 'button' && child.props.children === 'Allow access')!;
@@ -598,6 +613,396 @@ describe('assisted credential approval UI', () => {
 });
 
 describe('transcript access review presentation', () => {
+  it('opens account setup without showing permission controls in the transcript', async () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      purpose: 'account',
+      status: 'pending',
+      revision: 2,
+      resource_url: 'https://mcp.example.com/mcp',
+      authentication: { type: 'mcp_oauth' },
+      result: null,
+    };
+    const onCreate = vi.fn();
+    const draw = () => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestReview({
+        id: 'access-one',
+        connections: [],
+        onCreate,
+        onManage: vi.fn(),
+        onSaved: vi.fn(),
+      }) as TestNode;
+    };
+    let node = draw();
+    expect(find(node, OAuthScopePicker)).toBeUndefined();
+    const signIn = () =>
+      descendants(node).find((child) => child.type === 'button' && child.props.children === 'Sign in')!;
+    expect(signIn().props.disabled).toBe(false);
+    await signIn().props.onClick();
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ resource_url: 'https://mcp.example.com/mcp' }));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('filters ready accounts by enabled permissions, not previously requested permissions', () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      purpose: 'access',
+      status: 'pending',
+      revision: 1,
+      resource_url: 'https://api.example.com/',
+      authentication: { type: 'mcp_oauth' },
+      scopes: ['read'],
+      result: null,
+    };
+    const account: Connection = {
+      ...original,
+      kind: 'mcp_oauth',
+      requested_scopes: ['read', 'write'],
+      granted_scopes: ['read'],
+      scope_source: 'provider',
+    };
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [
+        account,
+        { ...account, id: 'missing-permission', granted_scopes: ['write'] },
+        { ...account, id: 'unknown-permissions', scope_source: 'unknown' },
+      ],
+      onCreate: vi.fn(),
+      onManage: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(
+      descendants(node)
+        .filter((child) => child.type === 'input' && child.props.type === 'radio')
+        .map((child) => child.props.value),
+    ).toEqual([account.id]);
+    expect(
+      descendants(node).filter((child) => child.type === 'button' && child.props.children === 'Sign in'),
+    ).toHaveLength(2);
+  });
+  it('shows all enabled account permissions rather than implying the request is a permission ceiling', async () => {
+    const request = {
+      request_id: 'access-one',
+      status: 'pending',
+      revision: 1,
+      purpose: 'access',
+      resource_url: 'https://api.example.com/',
+      authentication: { type: 'mcp_oauth' },
+      scopes: ['read'],
+      result: null,
+    };
+    const account: Connection = {
+      ...original,
+      kind: 'mcp_oauth',
+      granted_scopes: ['read', 'write'],
+      scope_source: 'provider',
+    };
+    hooks.resource.data = request;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ request, connection: account, matches: true })));
+    const draw = () => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestReview({
+        id: 'access-one',
+        connections: [account],
+        onCreate: vi.fn(),
+        onManage: vi.fn(),
+        onSaved: vi.fn(),
+      }) as TestNode;
+    };
+    let node = draw();
+    descendants(node)
+      .find((child) => child.type === 'input' && child.props.type === 'radio')!
+      .props.onChange(account.id);
+    node = draw();
+    for (const effect of hooks.effects) effect();
+    await vi.waitFor(() => expect(hooks.slots[1]).toMatchObject({ matches: true }));
+    node = draw();
+    expect(
+      descendants(node).some(
+        (child) =>
+          child.type === 'p' && Array.isArray(child.props.children) && child.props.children.includes('read, write'),
+      ),
+    ).toBe(true);
+    expect(
+      descendants(node).some(
+        (child) =>
+          child.type === 'p' &&
+          child.props.children === 'The agent receives all enabled permissions on this account to act on your behalf.',
+      ),
+    ).toBe(true);
+  });
+  it('passes the required permissions into an existing-account sign-in dialog', () => {
+    hooks.resource.data = { connections: [original], groups, apps: [], canEditInstall: true };
+    const draw = () => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestCard({ id: 'access-one' }) as TestNode;
+    };
+    let node = draw();
+    const review = find(node, AccessRequestReview);
+    const request = { resource_url: 'https://api.example.com/', scopes: ['read'] };
+    review.props.onManage({ ...original, kind: 'mcp_oauth' }, request);
+    node = draw();
+    expect(find(node, OAuthConnectionDialog).props.accessRequest).toEqual(request);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('shows only relevant OAuth setup information with no empty account picker', () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      purpose: 'account',
+      status: 'pending',
+      revision: 2,
+      resource_url: 'https://mcp.example.com/mcp',
+      reason: 'A lengthy explanation of the missing account.',
+      authentication: { type: 'mcp_oauth', app_id: 'provider' },
+      scopes: ['read'],
+      result: null,
+    };
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [],
+      apps: [
+        {
+          id: 'provider',
+          label: 'Provider',
+          source: 'install',
+          issuer: 'https://auth.example.com',
+          client_id: 'test-client',
+          client_secret_set: false,
+          token_endpoint_auth_method: 'none',
+          authorization_endpoint: 'https://auth.example.com/authorize',
+          api_hosts: [],
+          default_scopes: [],
+          identity: 'none',
+          token_scope_separator: 'space',
+        },
+      ],
+      onCreate: vi.fn(),
+      onManage: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    const buttons = descendants(node)
+      .filter((child) => child.type === 'button')
+      .map((child) => child.props.children);
+    expect(buttons).toEqual(['Decline', 'Sign in']);
+    expect(descendants(node).some((child) => child.type === 'fieldset' || child.type === 'blockquote')).toBe(false);
+    expect(descendants(node).some((child) => child.props['aria-label'] === 'Access details')).toBe(false);
+    expect(
+      descendants(node).some(
+        (child) => child.type === 'p' && child.props.children === 'https://auth.example.com/authorize',
+      ),
+    ).toBe(true);
+    expect(descendants(node).some((child) => child.type === 'li' && child.props.children === 'read')).toBe(false);
+    expect(find(node, OAuthScopePicker)).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('reports an unavailable setup API without flashing a dialog or starting sign-in', async () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      purpose: 'access',
+      status: 'pending',
+      revision: 1,
+      resource_url: 'https://mcp.example.com/mcp',
+      authentication: { type: 'mcp_oauth' },
+      scopes: ['read'],
+      result: null,
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ error: 'not_found' }, { status: 404 })));
+    const onCreate = vi.fn();
+    const draw = () => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestReview({
+        id: 'access-one',
+        connections: [],
+        onCreate,
+        onManage: vi.fn(),
+        onSaved: vi.fn(),
+      }) as TestNode;
+    };
+    const node = draw();
+    await descendants(node)
+      .find((child) => child.type === 'button' && child.props.children === 'Sign in')!
+      .props.onClick();
+    const next = draw();
+    expect(
+      descendants(next)
+        .filter((child) => child.type === ErrorNotice)
+        .map((child) => child.props.message),
+    ).toContain('Account setup unavailable. Reload and retry.');
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+  it('hides draft account controls while OAuth sign-in is pending', () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      purpose: 'account',
+      status: 'pending',
+      revision: 2,
+      resource_url: 'https://api.example.com/',
+      authentication: { type: 'mcp_oauth' },
+      result: null,
+    };
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [{ ...original, kind: 'mcp_oauth', status: 'draft' }],
+      signingIn: true,
+      signInMessage: 'Sign in',
+      onCreate: vi.fn(),
+      onManage: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(descendants(node).some((child) => child.type === 'fieldset')).toBe(false);
+    expect(
+      descendants(node)
+        .filter((child) => child.type === 'button')
+        .map((child) => child.props.children),
+    ).toEqual(['Decline']);
+    expect(descendants(node).some((child) => child.type === ApprovalMessageInput)).toBe(false);
+  });
+  it('uses the common account editor to review permissions before creating an OAuth account', async () => {
+    hooks.resource.data = { connections: [], groups, apps: [], canEditInstall: true };
+    const draw = () => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestCard({ id: 'access-one' }) as TestNode;
+    };
+    let node = draw();
+    const review = find(node, AccessRequestReview);
+    await review.props.onCreate({
+      resource_url: 'https://mcp.example.com/mcp',
+      authentication: { type: 'mcp_oauth' },
+      scopes: ['read'],
+    });
+    node = draw();
+    expect(find(node, ConnectionEditor).props.accessRequest).toMatchObject({ scopes: ['read'] });
+    expect(window.open).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('uses a compact native modal for account dialogs and retains an explicit wider app editor', () => {
+    const node = CredentialDialog({ title: 'Account', children: 'Body', onClose: vi.fn() });
+    expect(node.type).toBe(ModalDialog);
+    expect(node.props.maxWidth).toBe('520px');
+    const wide = CredentialDialog({ title: 'App', children: 'Body', onClose: vi.fn(), maxWidth: '760px' });
+    expect(wide.props.maxWidth).toBe('760px');
+  });
+  it('shows an account setup request without an impossible Allow access action', () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      status: 'pending',
+      revision: 1,
+      purpose: 'access',
+      resource_url: 'https://api.example.com/',
+      reason: 'Finish the report',
+      result: null,
+    };
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [],
+      onCreate: vi.fn(),
+      onManage: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(node.props.title).toBe('Set up an account');
+    const buttons = descendants(node)
+      .filter((child) => child.type === 'button')
+      .map((child) => child.props.children);
+    expect(buttons).toContain('Add account');
+    expect(buttons).toContain('Decline');
+    expect(buttons).not.toContain('Allow access');
+    expect(descendants(node).some((child) => child.type === 'fieldset')).toBe(false);
+    expect(
+      descendants(node).some((child) => child.type === 'legend' && child.props.children === 'Choose an account'),
+    ).toBe(false);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+  it('treats a ready account with suspended agent access as an access request', () => {
+    hooks.resource.data = {
+      request_id: 'access-one',
+      status: 'pending',
+      revision: 1,
+      purpose: 'access',
+      resource_url: 'https://api.example.com/',
+      reason: 'Finish the report',
+      result: null,
+    };
+    const node = AccessRequestReview({
+      id: 'access-one',
+      connections: [{ ...original, grants: [{ vault: 'one', services: ['basic'], status: 'suspended' }] }],
+      onCreate: vi.fn(),
+      onManage: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    expect(node.props.title).toBe('Allow account access?');
+    expect(descendants(node).some((child) => child.type === 'button' && child.props.children === 'Allow access')).toBe(
+      true,
+    );
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+  it('confirms setup using a metadata-only endpoint, never the grant endpoint', async () => {
+    const request = {
+      request_id: 'access-one',
+      purpose: 'account',
+      status: 'pending',
+      revision: 2,
+      resource_url: 'https://api.example.com/',
+      reason: 'Finish the report',
+      result: null,
+    };
+    hooks.resource.data = request;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          request,
+          connection: original,
+          matches: true,
+          mcp: { names: ['search'], revision: 'config' },
+        }),
+      ),
+    );
+    const onSaved = vi.fn();
+    const draw = () => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestReview({
+        id: 'access-one',
+        connections: [original],
+        onCreate: vi.fn(),
+        onManage: vi.fn(),
+        onSaved,
+      }) as TestNode;
+    };
+    let node = draw();
+    descendants(node)
+      .find((child) => child.type === 'input' && child.props.type === 'radio')!
+      .props.onChange({
+        currentTarget: { value: original.id },
+      });
+    node = draw();
+    for (const effect of hooks.effects) effect();
+    await vi.waitFor(() => expect(hooks.slots[1]).toMatchObject({ matches: true }));
+    node = draw();
+    expect(descendants(node).filter((child) => child.type === 'input' && child.props.type === 'checkbox')).toHaveLength(
+      0,
+    );
+    const confirm = descendants(node).find(
+      (child) => child.type === 'button' && child.props.children === 'Confirm account setup',
+    )!;
+    expect(confirm.props.disabled).toBe(false);
+    confirm.props.onClick();
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    const [url, options] = vi.mocked(fetch).mock.calls.at(-1)!;
+    expect(String(url)).toBe('/ui/chat/api/credentials/access-requests/access-one/account');
+    expect(JSON.parse(String(options?.body))).toEqual({
+      connection_id: original.id,
+      connection_revision: original.revision,
+      request_revision: 2,
+    });
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/apply'))).toBe(false);
+  });
   it('reuses approval-card framing and distinguishes identically named tools and accounts', () => {
     hooks.resource.data = {
       request_id: 'access-one',
@@ -617,7 +1022,7 @@ describe('transcript access review presentation', () => {
       onSaved: vi.fn(),
     });
     expect(node.type).toBe(ApprovalCardFrame);
-    expect(node.props.title).toBe('Let My Agent use an account?');
+    expect(node.props.title).toBe('Allow account access?');
     const labels = descendants(node)
       .filter((child) => child.type === 'strong')
       .map((child) => child.props.children);
@@ -638,7 +1043,11 @@ describe('transcript access review presentation', () => {
     };
     let node = draw();
     const review = descendants(node).find((child) => child.type === AccessRequestReview)!;
-    review.props.onCreate({ resource_url: 'https://api.example.com/', mcp_server: 'SnapTrade' });
+    review.props.onCreate({
+      resource_url: 'https://api.example.com/',
+      mcp_server: 'SnapTrade',
+      authentication: { type: 'basic' },
+    });
     node = draw();
     const editor = descendants(node).find((child) => child.type === ConnectionEditor)!;
     expect(editor.props.accessRequest).toMatchObject({ mcp_server: 'SnapTrade' });
@@ -669,8 +1078,7 @@ describe('transcript access review presentation', () => {
       onManage: vi.fn(),
       onSaved: vi.fn(),
     });
-    const fields = descendants(node).find((child) => child.type === 'fieldset')!;
-    expect(fields.props.disabled).not.toBe(true);
+    expect(descendants(node).some((child) => child.type === 'fieldset')).toBe(false);
     descendants(node)
       .find((child) => child.type === 'button' && child.props.children === 'Try again')!
       .props.onClick();
@@ -1212,6 +1620,125 @@ describe('connection UI safety and ownership', () => {
       scopes: ['read'],
     });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not send an empty scope request when reconnecting an unfinished draft', () => {
+    const node = OAuthConnectionDialog({
+      connection: {
+        ...original,
+        kind: 'mcp_oauth',
+        status: 'draft',
+        resource_url: 'https://mcp.example.com/mcp',
+        requested_scopes: [],
+      },
+      apps: [],
+      onStart: vi.fn(),
+      onClose: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    const fields = descendants(node).find(
+      (child) => typeof child.type === 'function' && child.type.name === 'OAuthFields',
+    )!;
+    expect(fields.props.scopes).toBe('');
+    expect(fields.props.unspecifiedScopes).toBe(false);
+    expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('preserves required permissions on retry and refuses a selection that omits them', async () => {
+    const onStart = vi.fn();
+    const props = {
+      connection: {
+        ...original,
+        kind: 'mcp_oauth' as const,
+        status: 'draft' as const,
+        resource_url: 'https://mcp.example.com/mcp',
+        requested_scopes: [],
+      },
+      accessRequest: { resource_url: 'https://mcp.example.com/mcp', scopes: ['read'] },
+      apps: [],
+      onStart,
+      onClose: vi.fn(),
+      onSaved: vi.fn(),
+    };
+    const draw = () => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return OAuthConnectionDialog(props) as TestNode;
+    };
+    let node = draw();
+    const fields = () =>
+      descendants(node).find((child) => typeof child.type === 'function' && child.type.name === 'OAuthFields')!;
+    expect(fields().props.scopes).toBe('read');
+    fields().props.onScopes!('write');
+    node = draw();
+    expect(descendants(node).find((child) => child.props.type === 'submit')!.props.disabled).toBe(true);
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(onStart).not.toHaveBeenCalled();
+    fields().props.onScopes!('read');
+    node = draw();
+    await find(node, 'form').props.onSubmit({ preventDefault: vi.fn() });
+    expect(onStart).toHaveBeenCalledWith(original.id, {
+      resource_url: props.connection.resource_url,
+      scopes: ['read'],
+    });
+  });
+  it('uses confirmed permissions as the reconnect baseline instead of a broader rejected request', () => {
+    const node = OAuthConnectionDialog({
+      connection: {
+        ...original,
+        kind: 'mcp_oauth',
+        resource_url: 'https://mcp.example.com/mcp',
+        requested_scopes: ['read', 'write'],
+        granted_scopes: ['read'],
+        scope_source: 'provider',
+      },
+      accessRequest: { resource_url: 'https://mcp.example.com/mcp', scopes: ['read'] },
+      apps: [],
+      onStart: vi.fn(),
+      onClose: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    const fields = descendants(node).find(
+      (child) => typeof child.type === 'function' && child.type.name === 'OAuthFields',
+    )!;
+    expect(fields.props.scopes).toBe('read');
+    expect(fields.props.selectDiscovered).toBe(true);
+  });
+  it('does not carry ungranted draft permissions into a newly scoped request', () => {
+    const node = OAuthConnectionDialog({
+      connection: {
+        ...original,
+        kind: 'mcp_oauth',
+        status: 'draft',
+        resource_url: 'https://mcp.example.com/mcp',
+        requested_scopes: ['write'],
+        granted_scopes: null,
+        app_id: 'provider',
+      },
+      accessRequest: { resource_url: 'https://mcp.example.com/mcp', scopes: ['read'] },
+      apps: [
+        {
+          id: 'provider',
+          label: 'Provider',
+          source: 'install',
+          issuer: 'https://auth.example.com',
+          client_id: 'test-client',
+          client_secret_set: false,
+          token_endpoint_auth_method: 'none',
+          api_hosts: ['mcp.example.com'],
+          default_scopes: ['write'],
+          identity: 'none',
+          token_scope_separator: 'space',
+        },
+      ],
+      onStart: vi.fn(),
+      onClose: vi.fn(),
+      onSaved: vi.fn(),
+    });
+    const fields = descendants(node).find(
+      (child) => typeof child.type === 'function' && child.type.name === 'OAuthFields',
+    )!;
+    expect(fields.props.scopes).toBe('read');
   });
 
   it('keeps invalid OAuth fields blocked without an acknowledgement step', () => {

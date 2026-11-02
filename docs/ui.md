@@ -762,12 +762,24 @@ requesting conversation as interactive transcript approval bubbles. Account
 selection, access review and **Allow access / Decline** use the same message
 bubble and approval-card framing as other approvals; there is no second review
 screen. Existing private `?access_request=…#credentials` links redirect to the
-requesting chat without applying access. Account creation and sign-in reuse the
-existing private account dialogs, prefilled with the exact destination and purpose.
-Adding or signing in to an account is not approval. New credentials and OAuth
-apps initially select all discovered scopes, retaining additional suggested or
-custom values. Saved selections, explicit provider-default choices and manual
-edits are not expanded by discovery. Signing in does not grant access.
+requesting chat without applying access. **Sign in** opens the shared account
+dialog for permission review before contacting the provider. Add/reconnect
+dialogs use the common native `ModalDialog` top layer, with a 520px desktop
+maximum and the shared full-screen mobile layout; OAuth app editing retains
+its explicit wider layout.
+Pending requests omit agent attribution for the current agent. An approved or
+declined request becomes a user bubble and names the responder only when it
+is someone other than the current user. Request bubbles fit their content,
+subject to the shared message maximum width, rather than filling the chat.
+Adding or signing in to an account is not access approval. All discovered
+permissions are selected by default in untouched add/reconnect dialogs,
+alongside requested and custom permissions. Selected permissions stay as
+removable chips before and after discovery; available permissions use add
+chips, not replacement checkboxes. Manual removals are not restored by later
+discovery. **Omit scopes** explicitly sends no scope parameter and warns that
+some providers reject it; no omission is automatically inferred from empty
+metadata. The setup chat bubble contains no permission section. Signing in
+does not grant access.
 Personal credential creation, reconnect, app configuration and connection actions
 use their explicit action buttons without an additional acknowledgement message
 or checkbox. Functional scope, no-scope-request and agent-access checkboxes remain.
@@ -826,13 +838,41 @@ overrides are rejected. CLI callers use `--authentication '<safe-json-object>'`.
 The request picker lists only the user's credentials covering its destination
 and requested mechanism/header details. Requested scopes must be present in
 provider-reported grants for ready OAuth credentials; unknown grants and implied
-scope hierarchies are not assumed. Compatible MCP drafts can finish consent,
-but cannot be granted until ready. With no matches, **Add account**
-opens the existing form with the exact URL, type, app suggestion and scopes
-prefilled for explicit review; new setups also select discovered scopes.
-New matching credentials are selected on return, but access is never granted
-merely by creating or signing in. The general library is hidden during request
+scope hierarchies are not assumed. These are minimum requirements, not a
+per-agent scope restriction: an access grant gives the agent all enabled
+permissions on the selected account. Review shows those actual permissions
+and explains them as what the agent can do on the user's behalf after access
+is approved. Accounts missing required permissions can be reauthorized
+without creating duplicates. Compatible MCP drafts can finish consent,
+but cannot be granted until ready. If no compatible ready account exists, the
+request becomes a durable **Set up an account** request with no **Allow access**
+action. An empty picker has no **Choose an account** legend or empty-state
+explanation. OAuth requests show **Sign in** and
+the sign-in address when available. Sign-in uses the host-generated OAuth URL;
+bare discovery endpoints are displayed only, never used to bypass state/PKCE.
+The account dialog reviews permissions, reserves the OAuth popup on submission,
+and reuses the same draft after failed attempts. Requested permissions are
+preserved alongside default-selected discovery results. Omission is explicit,
+and available only when assisted setup metadata advertises no permissions.
+Reconnect dialogs retain required permissions
+and reject a selection that omits them; an unfinished empty draft is not treated
+as an explicit scope-omission choice. Manual account setup remains available when
+credentials or an app choice are needed.
+New matching credentials are selected on return. When a newly created account
+is ready, setup completion notifies the requesting agent with readiness,
+destination and scope metadata only; it never grants access or changes MCP
+bindings. Existing unready accounts can be enabled or reconnected privately,
+then confirmed with **Confirm account setup**. The agent must check setup
+metadata and submit a separate access request before authenticated operations.
+A ready account with a suspended or absent grant for this agent remains an
+access request: the user explicitly restores or grants access rather than
+creating another account. The general library is hidden during request
 review and remains available through **My Credentials**.
+Deploy the matching host and chat assets together: setup requires the host's
+`/access-requests/:id/setup` and `/account` routes. Restart the host and reload
+chat clients after deploying API changes; rebuilding assets alone is insufficient.
+Composer layout rules target only `#chat-form`, not credential forms rendered
+inside request bubbles. Credential dialogs keep their normal stacked layout.
 If application fails after a partial change, **Review and retry** reopens the
 same unexpired request for fresh selection and explicit confirmation. Reopening
 does not grant access, reconnect credentials, or change MCP configuration.
@@ -907,9 +947,12 @@ Scope selection uses discovered MCP protected-resource scopes, falling back to
 authorization-server metadata when the resource does not advertise any. OAuth
 apps inspect issuer metadata, including while editing an unsaved app. Configured
 defaults and custom values remain available because discovery lists may be
-incomplete; advertised scopes are never automatically selected. An empty
-connection selection requires an explicit "Make no scope request" choice.
-Requested and provider-reported scopes are displayed separately.
+incomplete. New setups select advertised scopes; a new MCP OAuth setup with
+successful discovery and no scopes selects **Use provider defaults**. Saved
+and manual selections are preserved. Otherwise an empty selection requires
+an explicit **Use provider defaults** choice. Only provider-reported granted
+scopes are displayed on saved credentials; requested scopes remain stored for
+sign-in and verification.
 Discovery creates no DCR registration, consent state, token refresh or grant
 change. Failed discovery is shown explicitly without preventing custom entry.
 Owner-approved OAuth permission changes apply to all receiving agents; OAuth

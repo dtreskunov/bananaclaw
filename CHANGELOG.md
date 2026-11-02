@@ -4,6 +4,22 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **Request ownership and separate account setup.** Current-agent requests
+  omit redundant attribution; approval/denial bubbles use the responder's user
+  styling and name only other users. Missing or unready accounts use setup-only
+  requests that report metadata without granting access. A separate explicit
+  access request is required afterward; suspended agent grants do not imply
+  that a new account is needed. Empty OAuth requests show **Sign in**
+  rather than an empty picker. Account setup uses compact common native dialogs
+  above chat bubbles. Discovered permissions default to selected removable
+  chips, stay chips after discovery, and appear only in account dialogs.
+  **Omit scopes** accurately describes sending no scope parameter, with a
+  provider-rejection warning. Retries retain required permissions
+  and ready accounts are filtered by confirmed grants. Permission explanations
+  state what the agent can do on the user's behalf, including all enabled
+  permissions of a selected account. Composer CSS no longer affects account
+  dialogs inside request bubbles.
+
 - **[BREAKING] One agent-facing MCP addition operation.** Agents use
   `add_mcp_server` for their own stdio or HTTP/SSE servers. The configuration
   CLI addition is host-only, including for global-scope agents; cross-agent

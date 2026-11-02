@@ -30,6 +30,7 @@ import {
   callLog,
   completeSignIn,
   getOptions,
+  getAccessApproval,
   installMockFetch,
   onMockChange,
   resetState,
@@ -140,7 +141,7 @@ function Controls(): preact.JSX.Element {
         <div class="cred-fixture-buttons">
           <button type="button" onClick={() => openCredentials()}>Personal Credentials</button>
           <button type="button" onClick={() => reopen('credentials')}>Agent Credentials</button>
-        <button type="button" onClick={() => reopen('mcp')}>Tools</button>
+          <button type="button" onClick={() => reopen('mcp')}>Tools</button>
           <button type="button" onClick={() => { resetState(); fixtureRevision.value++; if (groupAdminOpen.value) reopen('credentials'); }}>Reset</button>
         </div>
         <details class="cred-fixture-log">
@@ -160,15 +161,13 @@ function Controls(): preact.JSX.Element {
 }
 
 function Fixture(): preact.JSX.Element {
+  useMockVersion();
   return (
     <>
       <Header />
       {credentialsOpen.value ? <CredentialsPage key={fixtureRevision.value} /> : <main class="cred-fixture-page chat-main">
         {params.has('access_request') ? <div class="chat-log"><ApprovalBubble key={fixtureRevision.value}
-          approval={{ approvalId: 'fixture-access', action: 'request_access', title: 'Allow access', details: null,
-            packages: null, options: [], agentGroupId: FIXTURE_GROUP.id, agentGroupName: FIXTURE_GROUP.name,
-            createdAt: new Date().toISOString(), reviewRequired: true,
-            origin: { agentGroupId: FIXTURE_GROUP.id, threadId: 'fixture-thread', channelType: 'web', messagingGroupId: 'fixture-web' } }}
+          approval={getAccessApproval()}
           busy={false} onReview={() => {}} onRespond={() => {}} /></div> :
           <p>Chat fixture. Use personal Credentials or Agent Settings → Credentials.</p>}
         <button type="button" onClick={() => reopen()}>Open Agent Settings</button>

@@ -6,7 +6,8 @@ import {
   type OAuthCompleteMessage, type SignInInput,
   type SignInProgress, type SignInStart,
 } from './CredentialsApi';
-import { MobileDialog, MobileDialogFooter } from './MobileDialog';
+import { MobileDialogFooter } from './MobileDialog';
+import { ModalDialog } from './ModalDialog';
 import { showToast } from './Toast';
 
 export function SecretInput({ value, onInput, placeholder = 'New value', disabled, label }: {
@@ -21,27 +22,13 @@ export function SecretInput({ value, onInput, placeholder = 'New value', disable
   </div>;
 }
 
-export function useEscapeClose(onClose: () => void, busy = false): void {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return;
-      event.stopImmediatePropagation();
-      event.preventDefault();
-      if (!busy) onClose();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, busy]);
-}
-
-export function CredentialDialog({ title, children, onClose, busy, footer }: {
-  title: string; children: ComponentChildren; onClose: () => void; busy?: boolean; footer?: ComponentChildren;
+export function CredentialDialog({ title, children, onClose, busy, footer, maxWidth = '520px' }: {
+  title: string; children: ComponentChildren; onClose: () => void; busy?: boolean; footer?: ComponentChildren; maxWidth?: string;
 }): JSX.Element {
-  useEscapeClose(onClose, busy);
-  return <MobileDialog title={title} onClose={onClose} maxWidth="760px" className="ga-cred-dialog" closeDisabled={busy}>
+  return <ModalDialog title={title} onClose={onClose} maxWidth={maxWidth} className="ga-cred-dialog" closeDisabled={busy}>
     <div class="settings-body ga-cred ga-cred-dialog-body">{children}</div>
     <MobileDialogFooter className="ga-cred-foot">{footer}</MobileDialogFooter>
-  </MobileDialog>;
+  </ModalDialog>;
 }
 
 export function ErrorNotice({ message }: { message: string }): JSX.Element | null {
@@ -114,7 +101,7 @@ export function useConnectionSignIn(onFinished: () => void): {
   const closePopup = (): void => { popup.current?.close(); popup.current = null; };
   const openPopup = (url: string): void => {
     popup.current = window.open(url, 'nanoclaw-oauth', 'popup,width=520,height=720');
-    if (!popup.current) showToast('Sign-in popup blocked. Use “Open sign-in window”.', 'err');
+    if (!popup.current) showToast('Sign-in popup blocked. Try opening sign-in again.', 'err');
   };
   async function start(id: string, input: SignInInput): Promise<void> {
     if (pending.current) throw new CredentialsError('Finish or stop waiting for the current sign-in first.');
@@ -128,7 +115,7 @@ export function useConnectionSignIn(onFinished: () => void): {
       setWaiting(result);
       currentState.current = result.state;
       if (popup.current && !popup.current.closed) popup.current.location.href = url.href;
-      else showToast('Sign-in popup blocked. Use “Open sign-in window”.', 'err');
+      else showToast('Sign-in popup blocked. Try opening sign-in again.', 'err');
     } catch (error) {
       pending.current = false;
       closePopup();

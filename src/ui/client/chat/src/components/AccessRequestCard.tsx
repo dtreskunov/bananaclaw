@@ -6,7 +6,8 @@ import { useConnectionSignIn, useCredentialResource } from './CredentialsParts';
 import { ConnectionActionDialog, ConnectionEditor, OAuthConnectionDialog } from './CredentialsDialogs';
 import type { AccessRequirements } from '../../../../shared/access-authentication';
 
-type AccountDialog = { kind: 'add'; request: AccessRequirements } | { kind: 'manage'; connection: Connection };
+type AccountDialog = { kind: 'add'; request: AccessRequirements } |
+  { kind: 'manage'; connection: Connection; request?: AccessRequirements };
 
 export function AccessRequestCard({ id, disabled }: { id: string; disabled?: boolean }) {
   const accounts = useCredentialResource<CredentialsOverview>(credentialsPath());
@@ -23,6 +24,7 @@ export function AccessRequestCard({ id, disabled }: { id: string; disabled?: boo
       <AccessRequestReview
         id={id}
         connections={accounts.data?.connections ?? []}
+        apps={accounts.data?.apps ?? []}
         disabled={disabled}
         loadingAccounts={accounts.loading}
         accountsError={accounts.error}
@@ -30,20 +32,19 @@ export function AccessRequestCard({ id, disabled }: { id: string; disabled?: boo
         preferredConnectionId={created}
         signingIn={!!signIn.waiting}
         onCreate={(request) => setDialog({ kind: 'add', request })}
-        onManage={(account) => setDialog({ kind: 'manage', connection: account })}
+        onManage={(account, request) => setDialog({ kind: 'manage', connection: account, request })}
         onSaved={saved}
         signInMessage={
           signIn.waiting ? (
             <div class="access-sign-in" role="status">
-              <p>Finish signing in to your {signIn.waiting.label} account.</p>
               <div class="question-card-actions approval-actions">
-                <button type="button" class="approval-btn" onClick={signIn.reopen}>
-                  Open sign-in window
-                </button>
+                <a class="approval-btn" href={signIn.waiting.authorizeUrl} target="_blank" rel="noopener noreferrer"
+                  onClick={event => { event.preventDefault(); signIn.reopen(); }}>Sign in</a>
                 <button type="button" class="approval-btn" onClick={signIn.stop}>
                   Stop waiting
                 </button>
               </div>
+              <p class="access-destination">{new URL(signIn.waiting.authorizeUrl).origin}{new URL(signIn.waiting.authorizeUrl).pathname}</p>
             </div>
           ) : null
         }
@@ -66,6 +67,7 @@ export function AccessRequestCard({ id, disabled }: { id: string; disabled?: boo
           <ConnectionEditor
             id={connection.id}
             apps={accounts.data.apps}
+            accessRequest={dialog?.kind === 'manage' ? dialog.request : undefined}
             onStart={signIn.start}
             onSaved={saved}
             onClose={close}
@@ -74,6 +76,7 @@ export function AccessRequestCard({ id, disabled }: { id: string; disabled?: boo
           <OAuthConnectionDialog
             connection={connection}
             apps={accounts.data.apps}
+            accessRequest={dialog?.kind === 'manage' ? dialog.request : undefined}
             onStart={signIn.start}
             onSaved={saved}
             onClose={close}

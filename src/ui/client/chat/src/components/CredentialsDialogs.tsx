@@ -99,8 +99,10 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
     }
   }
   const renamed = !connection || label.trim() !== connectionName(connection, apps);
+  const hasRequiredScopes = !accessRequest?.scopes?.length ||
+    accessRequest.scopes.every(scope => scopeValues(scopes).includes(scope));
   const canSave = !busy && !stale && !mixed && !!label.trim() && (creatingOAuth
-    ? validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resource : !!appId)
+    ? validScopeSelection(scopes, unspecifiedScopes) && hasRequiredScopes && (kind === 'mcp_oauth' ? !!resource : !!appId)
     : !routingError && !missingValues && (!connection || renamed || routingChanged || Object.keys(supplied).length > 0));
   const changeRoute = (index: number, route: RouteDraft): void => {
     setRoutes((old) => old.map((item, at) => at === index ? route : item));
@@ -173,6 +175,8 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
       {creatingOAuth ? <>
         <OAuthFields kind={kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth'} apps={apps} appId={appId}
           selectDiscovered={!oauthDraft}
+          permissionsDescription={accessRequest ? 'What the agent can do on your behalf once access is approved.' : undefined}
+          providerDefaultsOnlyWhenUnadvertised={!!accessRequest}
           resource={routes[0].pattern} scopes={scopes} unspecifiedScopes={unspecifiedScopes} busy={busy} firstInput={firstUrl}
           onUnspecifiedScopes={setUnspecifiedScopes}
           onResource={(pattern) => changeRoute(0, { ...routes[0], pattern })}
@@ -226,11 +230,14 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
   </CredentialDialog>;
 }
 
-function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, busy, firstInput, onResource, onApp, onScopes, onUnspecifiedScopes, selectDiscovered = false }: {
+function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, busy, firstInput, onResource, onApp, onScopes, onUnspecifiedScopes, permissionsDescription,
+  providerDefaultsOnlyWhenUnadvertised = false, selectDiscovered = false }: {
   kind: 'mcp_oauth' | 'oauth_app'; apps: AppInfo[]; resource: string; appId: string; scopes: string; busy: boolean;
   firstInput?: RefObject<HTMLInputElement>; onResource: (value: string) => void; onApp: (value: string) => void; onScopes: (value: string) => void;
   unspecifiedScopes: boolean; onUnspecifiedScopes: (value: boolean) => void;
   selectDiscovered?: boolean;
+  permissionsDescription?: string;
+  providerDefaultsOnlyWhenUnadvertised?: boolean;
 }): JSX.Element {
   return <>
     {kind === 'mcp_oauth' ? <Field label="Tools website"><input ref={firstInput} type="text" aria-label="Tools website"
@@ -242,22 +249,30 @@ function OAuthFields({ kind, apps, resource, appId, scopes, unspecifiedScopes, b
       {apps.map((app) => <option key={`${app.source}:${app.id}`} value={app.id}>{app.label} · {app.source === 'user' ? 'Personal' : 'Install'}</option>)}
     </select></Field>
     {kind === 'oauth_app' && !apps.length ? <p>Configure an app in the OAuth apps section first.</p> : null}
-    <OAuthScopePicker label="Permissions" resource={kind === 'mcp_oauth' ? resource : undefined} appId={appId}
+    <OAuthScopePicker label="Permissions" description={permissionsDescription} resource={kind === 'mcp_oauth' ? resource : undefined} appId={appId}
+      providerDefaultsOnlyWhenUnadvertised={providerDefaultsOnlyWhenUnadvertised}
       configured={apps.find(app => app.id === appId)?.default_scopes ?? []}
       value={scopes} onChange={onScopes} disabled={busy} unspecified={unspecifiedScopes} onUnspecified={onUnspecifiedScopes}
       selectDiscovered={selectDiscovered} />
   </>;
 }
 
-export function OAuthConnectionDialog({ connection, apps, onStart, onClose, onSaved }: {
+export function OAuthConnectionDialog({ connection, apps, accessRequest, onStart, onClose, onSaved }: {
   connection: Connection; apps: AppInfo[];
+  accessRequest?: AccessRequirements;
   onStart: (id: string, input: SignInInput) => Promise<void>; onClose: () => void; onSaved: () => void;
 }): JSX.Element {
   const kind = connection.kind === 'oauth_app' ? 'oauth_app' : 'mcp_oauth';
-  const [resource, setResource] = useState(connection.resource_url ?? '');
-  const [app, setApp] = useState(connection.app_id ?? '');
-  const [scopes, setScopes] = useState((connection.requested_scopes ?? []).join('\n'));
-  const [unspecifiedScopes, setUnspecifiedScopes] = useState(!connection.requested_scopes?.length);
+  const [resource, setResource] = useState(connection.resource_url ?? accessRequest?.resource_url ?? '');
+  const [app, setApp] = useState(accessRequest?.authentication?.app_id ?? connection.app_id ?? '');
+  const savedScopes = connection.status !== 'draft' && connection.scope_source === 'provider'
+    ? connection.granted_scopes ?? [] : accessRequest?.scopes?.length ? [] : connection.requested_scopes ?? [];
+  const [scopes, setScopes] = useState([...new Set([
+    ...(savedScopes.length ? savedScopes : accessRequest?.scopes?.length ? [] :
+      apps.find(item => item.id === app)?.default_scopes ?? []),
+    ...(accessRequest?.scopes ?? []),
+  ])].join('\n'));
+  const [unspecifiedScopes, setUnspecifiedScopes] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   let resourceUrl = '';
@@ -269,7 +284,10 @@ export function OAuthConnectionDialog({ connection, apps, onStart, onClose, onSa
       resourceError = errorMessage(error);
     }
   }
-  const canStart = !busy && validScopeSelection(scopes, unspecifiedScopes) && (kind === 'mcp_oauth' ? !!resourceUrl : !!app);
+  const hasRequiredScopes = !accessRequest?.scopes?.length ||
+    accessRequest.scopes.every(scope => scopeValues(scopes).includes(scope));
+  const canStart = !busy && validScopeSelection(scopes, unspecifiedScopes) && hasRequiredScopes &&
+    (kind === 'mcp_oauth' ? !!resourceUrl : !!app);
   async function start(event: Event): Promise<void> {
     event.preventDefault();
     if (!canStart) return;
@@ -296,12 +314,15 @@ export function OAuthConnectionDialog({ connection, apps, onStart, onClose, onSa
   </>}>
     <form id="personal-oauth" onSubmit={start}>
       <OAuthFields kind={kind} apps={apps} resource={resource} appId={app} scopes={scopes} busy={busy} unspecifiedScopes={unspecifiedScopes}
+        selectDiscovered
+        permissionsDescription={accessRequest ? 'What the agent can do on your behalf once access is approved.' : undefined}
+        providerDefaultsOnlyWhenUnadvertised={!!accessRequest}
         onUnspecifiedScopes={setUnspecifiedScopes}
         onResource={setResource}
         onApp={(value) => {
           setApp(value);
           setUnspecifiedScopes(false);
-          setScopes((apps.find((item) => item.id === value)?.default_scopes ?? []).join('\n'));
+          setScopes((accessRequest?.scopes ?? apps.find((item) => item.id === value)?.default_scopes ?? []).join('\n'));
         }} onScopes={setScopes} />
       {resource && resourceError ? <ErrorNotice message={resourceError} /> : null}
       <ErrorNotice message={error} />
@@ -375,7 +396,7 @@ export function OAuthAppDialog({ app, canEditInstall, onClose, onSaved }: {
     }
     finally { setBusy(false); }
   }
-  return <CredentialDialog title={app ? `Manage OAuth app · ${app.label}` : 'Configure OAuth app'} onClose={onClose} busy={busy} footer={<>
+  return <CredentialDialog title={app ? `Manage OAuth app · ${app.label}` : 'Configure OAuth app'} onClose={onClose} busy={busy} maxWidth="760px" footer={<>
     <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
     {app ? <button type="button" class="danger" disabled={!canManage} onClick={() => {
       if (!deleting) { setDeleting(true); return; }

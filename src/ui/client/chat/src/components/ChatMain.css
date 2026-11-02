@@ -72,7 +72,7 @@
 .chat-main .pending,
 .chat-main .readonly-banner,
 .chat-main .chat-subnotice,
-.chat-main form {
+.chat-main form:where(#chat-form) {
   padding-inline: var(--chat-gutter);
 }
 .chat-main > .log,
@@ -517,8 +517,8 @@
 .chat-main .pending { display: flex; flex-wrap: wrap; gap: 4px; padding-block: 4px; font-size: var(--font-xs); color: var(--muted); }
 .chat-main .pending .item { display: inline-flex; align-items: center; gap: 4px; background: var(--wash-strong); padding: 2px 6px; border-radius: var(--radius-pill); }
 .chat-main .pending .item button { padding: 0 4px; border: 0; background: transparent; cursor: pointer; color: inherit; font-size: var(--font-lg); line-height: 1; }
-.chat-main form { display: flex; gap: 6px; padding-block: 8px 16px; min-height: var(--bottom-row-h); align-items: flex-end; }
-.chat-main form > button { height: 32px; flex-shrink: 0; }
+.chat-main form:where(#chat-form) { display: flex; gap: 6px; padding-block: 8px 16px; min-height: var(--bottom-row-h); align-items: flex-end; }
+.chat-main form:where(#chat-form) > button { height: 32px; flex-shrink: 0; }
 .chat-main #chat-send,
 .chat-main .question-response-send {
   position: absolute;
@@ -578,8 +578,8 @@
 .chat-main .recording-time {
   font-variant-numeric: tabular-nums;
 }
-.chat-main form.ws-down textarea,
-.chat-main form.ws-down > button { opacity: 0.55; cursor: not-allowed; }
+.chat-main form:where(#chat-form).ws-down textarea,
+.chat-main form:where(#chat-form).ws-down > button { opacity: 0.55; cursor: not-allowed; }
 .chat-main.drag-active { outline: 2px dashed var(--accent-strong); outline-offset: -4px; }
 
 /* Composer "+" menu */
@@ -669,7 +669,7 @@
   .chat-main .msg.mobile-actions-visible .msg-inline-actions,
   .chat-main .msg:focus-within .msg-inline-actions { display: inline-flex; }
   .chat-main .msg .meta { min-height: 32px; }
-  .chat-main form {
+  .chat-main form:where(#chat-form) {
     padding-inline: 12px;
     padding-block: 8px calc(12px + env(safe-area-inset-bottom));
     gap: 8px;
@@ -679,7 +679,7 @@
   .chat-main .message-action-btn { min-height: 44px; }
 }
 
-.chat-main .approval-message { width: 100%; }
+.chat-main .approval-message { width: fit-content; }
 .chat-main .approval-bubble.question-prompt { border: 0; padding: 0; margin: 0; background: transparent; }
 .chat-main .approval-decision { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
 .chat-main .approval-response-text { flex-basis: 100%; white-space: pre-wrap; margin: 4px 0 0; }

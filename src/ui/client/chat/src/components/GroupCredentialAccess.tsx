@@ -39,14 +39,14 @@ export function McpConnectionAccess({ gid, resourceUrl, onOpenCredentials, authe
               account_alias: authentication?.account_alias || serverName || 'Account' } : undefined);
           }}>
           <option value="">Choose an account automatically</option>
-          {authentication && !choices.some(choice => choice.connection_id === authentication.connection_id)
+          {authentication && !choices.length
             ? <option value={authentication.connection_id}>Saved account — not available to this agent</option> : null}
           {choices.map(choice => <option key={choice.connection_id} value={choice.connection_id} disabled={choice.status !== 'active'}>
             {choice.label}{choice.status === 'active' ? '' : ` (${choice.status})`}
           </option>)}
         </select>
       ) : null}
-      {authentication && !choices.length
+      {authentication && !choices.some(choice => choice.connection_id === authentication.connection_id)
         ? <p class="muted">Your saved account is not available to this agent.</p> : null}
       {authentication ? <label>Name for this account in these tools
         <input class="ga-mcp-input" disabled={disabled} aria-label={`Account name for ${serverName ? `${serverName} tools` : 'these tools'}`} value={authentication.account_alias} maxLength={80}
