@@ -34,6 +34,16 @@ are discovery hints, not permission to install or proof of trust. Verify the
 publisher's documentation for the exact command or endpoint, transport and
 authentication requirements; do not guess endpoint or OAuth paths.
 
+Before recommending a Google-hosted MCP server, verify the user's account
+eligibility, preview enrollment, API enablement and OAuth-client requirements
+in current official documentation. Published scopes, initialization and tool
+discovery do not prove authenticated access. Distinguish Workspace servers
+from Google Cloud servers; do not claim all Google MCP requires Workspace.
+For personal Gmail, Calendar and Drive, prefer supported REST API OAuth through
+`/agent-vault` when choosing a new integration unless MCP eligibility is
+confirmed. Keep's account restrictions also apply to REST; it is not a fallback.
+Load `/agent-vault` for the Google-specific checks before submitting setup.
+
 Examples:
 
 ```

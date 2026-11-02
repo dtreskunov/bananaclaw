@@ -63,6 +63,37 @@ behavior are unchanged. Both use the same configuration implementation.
   using the normal deployment rollback procedure. No database migration or
   credential change is required.
 
+### Google-hosted servers and REST OAuth
+
+Before recommending setup, agent guidance requires verification of account
+eligibility, preview/project enrollment, API enablement and OAuth-client
+requirements against current official documentation. Advertised scopes,
+successful initialization or tool discovery do not prove authenticated access.
+
+- [Workspace MCP setup](https://developers.google.com/workspace/guides/configure-mcp-servers)
+  requires Developer Preview membership and a correctly configured Cloud
+  project/OAuth client. [Enrollment](https://developers.google.com/workspace/preview)
+  requires Workspace account information; this does not prove that every end
+  user must have Workspace.
+- [Cloud MCP](https://docs.cloud.google.com/mcp/authenticate-mcp) has
+  product-specific IAM or API-key requirements, not a blanket Workspace rule.
+- For new personal-account integrations, prefer regular
+  [Gmail](https://developers.google.com/workspace/gmail/api/quickstart/python),
+  [Calendar](https://developers.google.com/workspace/calendar/api/quickstart/python)
+  or [Drive](https://developers.google.com/workspace/drive/api/quickstart/python)
+  REST OAuth when MCP eligibility is unconfirmed. Verify operation support,
+  OAuth audience/testing/verification requirements and permissions. Reuse an
+  approved connection for the intended account; preserve working MCP tools.
+  Request the exact REST destination with `authentication.type=oauth_app`,
+  documented scopes and no `mcp_server`, then await explicit access approval.
+- [Keep's documented enterprise setup](https://developers.google.com/workspace/keep/api/guides/java)
+  uses a service account with Workspace admin-approved domain-wide delegation.
+  REST is not a workaround for personal-account restrictions.
+
+These checks are shared across MCP-add guidance and the built-in
+`agent-vault`/`self-customize` skills. Existing configurations and grants are
+unchanged; refreshed guidance is available when agents next load instructions.
+
 ## Go deeper
 
 - **[The skills model in full](skills-model.md)**: how skills, recipes, tests, and upgrades work under the hood.

@@ -40,6 +40,11 @@ add_mcp_server({ name: "example", url: "https://mcp.example.com/mcp", transport:
   the current response finishes. No image rebuild is needed for MCP wiring.
 - Never request access for a new named server before addition approval and
   restart. Afterward, load `/agent-vault` if credentials are needed.
+- Before recommending Google-hosted MCP setup, load `/agent-vault` to verify
+  personal versus Workspace account eligibility, preview/project enrollment
+  and OAuth-client requirements. Prefer supported REST OAuth for new personal
+  Gmail, Calendar or Drive integrations if MCP eligibility is unconfirmed.
+  REST is not a workaround for Keep's account restrictions.
 
 ### How approval works
 

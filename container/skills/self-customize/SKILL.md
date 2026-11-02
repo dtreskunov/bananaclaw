@@ -25,6 +25,13 @@ https://mcp.so, then verify the publisher's command or endpoint, transport and
 authentication documentation. Use `add_mcp_server` for both stdio and remote
 servers; never use the CLI as a second setup path.
 
+For Google-hosted servers, verify account eligibility, preview/project
+enrollment, API enablement and OAuth-client requirements before recommending
+setup. Scope metadata or a tool list is not proof of account support.
+Load `/agent-vault` for product-specific checks. Prefer supported REST OAuth
+for new personal Gmail, Calendar or Drive integrations when MCP eligibility
+is unconfirmed; REST does not bypass Keep's account restrictions.
+
 Submit once, tell the user approval is pending, and **finish the turn**.
 Do not poll, resubmit or manually restart while waiting. Only after addition
 approval and the automatic restart, load `/agent-vault` and use `request_access`

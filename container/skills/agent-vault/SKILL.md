@@ -72,3 +72,42 @@ bypass the gateway.
   Requesting fewer scopes is not a guaranteed provider-side revocation.
 - Prefer live configured/account state to stale memory. Never ask for secrets
   in chat. The host token and real OAuth tokens are not available to containers.
+
+## Google services: verify eligibility before setup
+
+Before recommending a Google-hosted MCP server, check current official
+documentation for the user's account type, preview/project enrollment, API
+enablement, OAuth-client requirements and the requested operation. Ask whether
+the account is personal Google/Gmail or Google Workspace when unknown.
+Published scopes, successful initialization and tool discovery are not proof
+that the account can authorize or use the service.
+
+- [Workspace MCP setup](https://developers.google.com/workspace/guides/configure-mcp-servers)
+  currently requires Developer Preview membership, a Cloud project, enabled
+  APIs and an OAuth client marked for an AI-powered agent.
+  [Preview enrollment](https://developers.google.com/workspace/preview)
+  requires Workspace account information and registration of the Cloud project.
+  Enrollment requirements do not establish that every end user must have
+  Workspace. Verify each server; do not promise personal-account compatibility.
+- [Google Cloud MCP authentication](https://docs.cloud.google.com/mcp/authenticate-mcp)
+  has product-specific IAM-principal or API-key requirements. Do not apply a
+  blanket Workspace-account requirement to all Google-hosted MCP servers.
+- [Keep](https://developers.google.com/workspace/keep) is an enterprise API;
+  its [documented setup](https://developers.google.com/workspace/keep/api/guides/java)
+  uses a service account with Workspace admin-approved domain-wide delegation.
+  Do not recommend the official Keep MCP or REST API as an ordinary personal
+  Gmail OAuth integration. Changing transport or omitting scopes does not
+  remove account restrictions.
+
+When choosing a new integration for personal Gmail, Calendar or Drive,
+prefer the supported regular REST API with user OAuth if MCP eligibility
+has not been confirmed. Verify the specific API operation and OAuth app's
+audience, testing/verification requirements and permissions first. Reuse an
+existing approved connection for the intended account when available; keep
+working configured MCP tools and never silently switch accounts.
+For REST, use `request_access` with the exact documented API destination,
+`authentication: { type: "oauth_app" }`, a configured `app_id` only if known,
+and the documented scopes needed for the task. Omit `mcp_server`: REST API
+access is not a grant for an MCP endpoint. Wait for explicit access approval,
+then make a safe authenticated read through the gateway before promising
+support. Do not use standalone OAuth CLIs, bypass the gateway or replay writes.

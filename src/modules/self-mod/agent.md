@@ -19,6 +19,12 @@ only with admin approval.
   https://mcp.so, then verify the publisher's documented setup requirements.
   No image rebuild is required for MCP wiring.
 
+Before recommending a Google-hosted server, load `/agent-vault` and verify
+account eligibility, preview/project enrollment and OAuth-client requirements.
+Do not infer access from advertised scopes or tool discovery. For new personal
+Gmail, Calendar or Drive integrations, prefer supported REST OAuth when MCP
+eligibility is unconfirmed; REST does not bypass Keep's account restrictions.
+
 ## Flow
 
 You call one of these tools → the host asks an admin via DM → admin approves
