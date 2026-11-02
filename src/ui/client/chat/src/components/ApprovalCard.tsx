@@ -23,10 +23,12 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
   const pending = status === 'pending';
   const here = isApprovalThread(a.origin);
   const labels: Record<string, string> = {
-    approved: 'Approved', rejected: 'Declined', applying: 'Applying…', failed: 'Could not apply',
+    approved: a.purpose === 'account' ? 'Account setup confirmed' : 'Approved',
+    rejected: 'Declined', applying: 'Applying…', failed: 'Could not apply',
     cancelled: 'Cancelled', expired: 'Expired',
   };
-  return <ApprovalCardFrame approvalId={a.approvalId} title={a.action === 'add_mcp_server' ? 'Add tools' : a.title || a.action}>
+  return <ApprovalCardFrame approvalId={a.approvalId} title={a.purpose === 'account' ? 'Set up an account' :
+    a.action === 'add_mcp_server' ? 'Add tools' : a.title || a.action}>
     <div class="approval-text">
       {a.packages ? <div class="approval-packages">
         {(['apt', 'npm', 'pip'] as const).map(manager => a.packages![manager].length ? <div class="approval-package-list" key={manager}>
@@ -39,7 +41,6 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
         : 'Requesting thread unavailable.'}</p> : null}
       {!pending ? <div class="approval-decision" role="status">
         <strong>{labels[status] ?? status}</strong>
-        {a.respondedBy ? <span> · {a.respondedBy.displayName}</span> : null}
         {a.responseMessage ? <p class="approval-response-text">{a.responseMessage}</p> : null}
         {status === 'failed' && a.outcomeMessage ? <p class="approval-response-text" role="alert">{a.outcomeMessage}</p> : null}
       </div> : null}
