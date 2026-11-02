@@ -633,6 +633,7 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
       // ignore — fall back to empty options
     }
     const presentation = presentApproval(r.action, r.payload);
+    const workflow = getApprovalWorkflow(r.approval_id);
     visible.push({
       approvalId: r.approval_id,
       action: r.action,
@@ -645,10 +646,18 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
       createdAt: r.created_at,
       supportsResponseMessage: r.session_id !== null,
       origin: approvalOrigin(userId, r),
-      ...(getApprovalWorkflow(r.approval_id)
+      ...(workflow
         ? {
             reviewRequired: true,
-            stage: getApprovalWorkflow(r.approval_id)!.stage,
+            stage: workflow.stage,
+            ...(r.action === 'request_access'
+              ? {
+                  purpose:
+                    (JSON.parse(workflow.origin_json) as { purpose?: string }).purpose === 'account'
+                      ? ('account' as const)
+                      : ('access' as const),
+                }
+              : {}),
           }
         : {}),
     });

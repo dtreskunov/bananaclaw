@@ -17,6 +17,7 @@ export interface ConversationApproval {
   createdAt: string;
   supportsResponseMessage?: boolean;
   reviewRequired?: boolean;
+  purpose?: 'account' | 'access';
   stage?: string;
   origin?: ApprovalOrigin | null;
   status?: 'pending' | 'applying' | 'approved' | 'rejected' | 'failed' | 'cancelled' | 'expired';

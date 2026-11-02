@@ -27,6 +27,8 @@ import { getApprovalHistory } from '../../../db/approval-history.js';
 import { approvalOrigin } from './approval-transcript.js';
 import {
   applyAccessRequest,
+  completeAccountRequest,
+  prepareAccountRequest,
   previewAccessRequest,
   retryAccessRequest,
   reviewAccessRequest,
@@ -92,7 +94,7 @@ export async function handleCredentialsRequest(
       return true;
     }
     const sub = path.slice('/api/credentials'.length);
-    const request = /^\/access-requests\/([^/]+)(?:\/(preview|apply|retry))?$/.exec(sub);
+    const request = /^\/access-requests\/([^/]+)(?:\/(preview|apply|retry|setup|account))?$/.exec(sub);
     if (request) {
       const requestId = decode(request[1]);
       if (method === 'GET' && !request[2]) {
@@ -111,6 +113,14 @@ export async function handleCredentialsRequest(
       } else if (method === 'POST' && request[2] === 'retry') {
         const result = retryAccessRequest(userId, requestId, await readBody(req));
         audit(userId, 'credential_access_retry', requestId, { group: result.agent_group_id });
+        json(res, 200, result);
+      } else if (method === 'POST' && request[2] === 'setup') {
+        const result = prepareAccountRequest(userId, requestId, await readBody(req));
+        audit(userId, 'credential_account_setup_requested', requestId, { group: result.agent_group_id });
+        json(res, 200, result);
+      } else if (method === 'POST' && request[2] === 'account') {
+        const result = await completeAccountRequest(userId, requestId, await readBody(req));
+        audit(userId, 'credential_account_setup_confirmed', requestId, { group: result.agent_group_id });
         json(res, 200, result);
       } else throw new ConnectionInputError('Method not allowed', 405);
       return true;

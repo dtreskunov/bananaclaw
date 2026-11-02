@@ -209,6 +209,51 @@ async function call(method: string, url: string, body?: unknown, headers: Record
 }
 
 describe('user-owned Credentials API', () => {
+  it('completes setup through a separate authenticated metadata-only API', async () => {
+    ensureContainerConfig(GROUP);
+    const session = {
+      id: 'sess-account-http',
+      agent_group_id: GROUP,
+      messaging_group_id: null,
+      thread_id: 'account-thread',
+      agent_provider: null,
+      status: 'active' as const,
+      container_status: 'stopped' as const,
+      created_at: 'before',
+      last_active: 'before',
+    };
+    createSession(session);
+    initSessionFolder(GROUP, session.id);
+    const request = await requestAccess(session, {
+      resource_url: 'https://api.example.test/search',
+      reason: 'Set up search.',
+    });
+    const path = `/ui/chat/api/credentials/access-requests/${request.request_id}`;
+    user = 'member';
+    expect((await call('POST', path + '/setup', { request_revision: request.revision })).status).toBe(403);
+    user = 'alice';
+    expect(
+      (await call('POST', path + '/setup', { request_revision: request.revision }, { origin: 'https://evil.example' }))
+        .status,
+    ).toBe(403);
+    const setup = await call('POST', path + '/setup', { request_revision: request.revision });
+    expect(setup.status).toBe(200);
+    expect(setup.value).toMatchObject({ purpose: 'account', revision: request.revision + 1 });
+    const selected = {
+      connection_id: 'connection-one',
+      connection_revision: REVISION,
+      request_revision: request.revision + 1,
+    };
+    expect((await call('POST', path + '/apply', selected)).status).toBe(409);
+    const result = await call('POST', path + '/account', selected);
+    expect(result.status).toBe(200);
+    expect(result.value).toMatchObject({ purpose: 'account', status: 'completed' });
+    expect(result.text).toContain('No agent access was granted');
+    expect(result.text).not.toContain('SEARCH_KEY');
+    expect(requests.some((r) => r.method === 'PUT' && r.path.includes('/grants/'))).toBe(false);
+    expect(workflowGranted).toBe(false);
+    expect((await call('POST', path + '/account', selected)).status).toBe(409);
+  });
   it('reopens partial failures only after authenticated review and reuses an existing grant', async () => {
     ensureContainerConfig(GROUP);
     const session = {

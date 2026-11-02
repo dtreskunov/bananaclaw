@@ -47,6 +47,7 @@ import {
   type SharedConnection,
 } from './shared-connections.js';
 import { AgentVaultError, usesAgentVault } from './agent-vault-client.js';
+import { updateApprovalHistory } from '../../db/approval-history.js';
 
 export const ACCESS_ACTION = 'request_access';
 const TTL_MS = 24 * 60 * 60_000;
@@ -148,6 +149,10 @@ export function accessRequestStatus(id: string, sessionId?: string) {
   if (sessionId && record.session.id !== sessionId) throw new ConnectionInputError('Access request not found', 404);
   return {
     request_id: record.workflow.approval_id,
+    purpose:
+      (JSON.parse(record.workflow.origin_json) as { purpose?: string }).purpose === 'account'
+        ? ('account' as const)
+        : ('access' as const),
     status: record.workflow.stage,
     resource_url: record.input.resource_url,
     reason: record.input.reason,
@@ -216,7 +221,10 @@ export async function requestAccess(
     }
   }
   const prior = latestApprovalWorkflow(key);
-  if (prior) {
+  if (
+    prior &&
+    !(prior.stage === 'completed' && (JSON.parse(prior.origin_json) as { purpose?: string }).purpose === 'account')
+  ) {
     if (requestId) linkApprovalSubmission(prior.approval_id, requestId);
     return accessRequestStatus(prior.approval_id, session.id);
   }
@@ -264,6 +272,77 @@ export async function previewAccessRequest(userId: string, id: string, connectio
     verification: 'Grant verification only. The agent must verify the authenticated operation after access is granted.',
     mcp: mcpConfiguration(request.agent_group_id, request.resource_url, request.mcp_server),
   };
+}
+
+export function prepareAccountRequest(userId: string, id: string, raw: unknown) {
+  const request = reviewAccessRequest(userId, id);
+  const body = objectBody(raw);
+  if (Object.keys(body).some((key) => key !== 'request_revision') || !Number.isSafeInteger(body.request_revision))
+    throw new ConnectionInputError('Refresh and supply the reviewed request revision.');
+  if (request.status !== 'pending' || request.revision !== body.request_revision)
+    throw new ConnectionInputError('The request changed. Refresh before setting up an account.', 409);
+  if (request.purpose === 'account') return request;
+  getDb().transaction(() => {
+    const changed = getDb()
+      .prepare(
+        `UPDATE approval_workflows SET origin_json=json_set(origin_json,'$.purpose','account'),
+       revision=revision+1,updated_at=? WHERE approval_id=? AND stage='pending' AND revision=?`,
+      )
+      .run(new Date().toISOString(), request.request_id, body.request_revision).changes;
+    if (!changed) throw new ConnectionInputError('The request changed. Refresh before setting up an account.', 409);
+    updateApprovalHistory(request.request_id, 'pending');
+  })();
+  return accessRequestStatus(request.request_id);
+}
+
+export async function completeAccountRequest(userId: string, id: string, raw: unknown) {
+  const body = objectBody(raw);
+  if (
+    Object.keys(body).some(
+      (key) => !['connection_id', 'connection_revision', 'request_revision', 'message'].includes(key),
+    ) ||
+    typeof body.connection_id !== 'string' ||
+    typeof body.connection_revision !== 'string' ||
+    !Number.isSafeInteger(body.request_revision)
+  )
+    throw new ConnectionInputError('Select an account and confirm the exact reviewed revisions.');
+  let message;
+  try {
+    message = parseApprovalMessage(body.message);
+  } catch (error) {
+    if (!(error instanceof ApprovalMessageError)) throw error;
+    throw new ConnectionInputError(error.message);
+  }
+  const preview = await previewAccessRequest(userId, id, body.connection_id);
+  const request = preview.request;
+  if (request.purpose !== 'account' || request.status !== 'pending')
+    throw new ConnectionInputError('This account setup request is no longer pending.', 409);
+  if (!preview.matches || preview.connection.status !== 'ready')
+    throw new ConnectionInputError('Finish setting up a compatible account before confirming.', 409);
+  if (preview.connection.revision !== body.connection_revision)
+    throw new ConnectionInputError('The account changed. Review setup again.', 412);
+  const metadata = {
+    status: preview.connection.status,
+    destination: request.resource_url,
+    authentication: request.authentication?.type ?? preview.connection.kind,
+    scopes: preview.connection.kind === 'static' ? undefined : preview.connection.granted_scopes,
+    scope_source: preview.connection.kind === 'static' ? undefined : preview.connection.scope_source,
+  };
+  const responseMessage = message ? { userId, message } : undefined;
+  getDb().transaction(() => {
+    if (!claimApprovalWorkflow(request.request_id, Number(body.request_revision), { userId, responseMessage }))
+      throw new ConnectionInputError('The request changed. Refresh before confirming account setup.', 409);
+    finishApprovalWorkflow(
+      request.request_id,
+      'completed',
+      `Account setup confirmed. Setup metadata: ${JSON.stringify(metadata)}. No agent access was granted and no MCP binding was changed. Verify this metadata only; authenticated operations require a separate request_access and explicit user approval. Do not assume account setup grants access or automatically replay writes.`,
+      false,
+      responseMessage,
+      userId,
+    );
+  })();
+  await notifyApprovalWorkflow(request.request_id);
+  return accessRequestStatus(request.request_id);
 }
 
 function mcpConfiguration(groupId: string, resource: string, target?: string) {
@@ -378,6 +457,11 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
   const preview = await previewAccessRequest(userId, id, body.connection_id);
   id = preview.request.request_id;
   const current = reviewAccessRequest(userId, id);
+  if (current.purpose === 'account')
+    throw new ConnectionInputError(
+      'Account setup cannot grant access. Confirm setup, then request access separately.',
+      409,
+    );
   if (current.status !== 'pending') throw new ConnectionInputError('This approval is no longer pending.', 409);
   if (preview.request.status !== 'pending') throw new ConnectionInputError('This approval is no longer pending.', 409);
   if (!preview.matches || preview.connection.status !== 'ready')
@@ -558,7 +642,7 @@ registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, use
     finishApprovalWorkflow(
       approval.approval_id,
       'rejected',
-      'Your access request was rejected. No credentials were changed. Do not repeat this request unless the user asks.',
+      `Your ${request.purpose === 'account' ? 'account setup' : 'access'} request was rejected. No credentials were changed. Do not repeat this request unless the user asks.`,
       false,
       responseMessage,
       userId,

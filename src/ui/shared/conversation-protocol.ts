@@ -107,6 +107,7 @@ const message = shape({
       createdAt: text,
       supportsResponseMessage: optional(bool),
       reviewRequired: optional(bool),
+      purpose: optional(oneOf('account', 'access')),
       stage: optional(text),
       origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
       status: optional(oneOf('pending', 'applying', 'approved', 'rejected', 'failed', 'cancelled', 'expired')),

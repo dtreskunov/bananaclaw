@@ -67,6 +67,7 @@ export function presentApprovalHistory(userId: string, row: ApprovalHistoryRow):
   const session = getSession(row.session_id);
   const responder = row.responded_by ? getUser(row.responded_by) : undefined;
   const status = row.status === 'pending' && isApprovalExecuting(row.approval_id) ? 'applying' : row.status;
+  const workflow = getApprovalWorkflow(row.approval_id);
   return {
     approvalId: row.approval_id,
     action: row.action,
@@ -77,7 +78,15 @@ export function presentApprovalHistory(userId: string, row: ApprovalHistoryRow):
     agentGroupName: session ? (getAgentGroup(session.agent_group_id)?.name ?? null) : null,
     createdAt: row.created_at,
     supportsResponseMessage: true,
-    reviewRequired: !!getApprovalWorkflow(row.approval_id),
+    reviewRequired: !!workflow,
+    ...(workflow && row.action === 'request_access'
+      ? {
+          purpose:
+            (JSON.parse(workflow.origin_json) as { purpose?: string }).purpose === 'account'
+              ? ('account' as const)
+              : ('access' as const),
+        }
+      : {}),
     stage: status,
     status,
     decision: row.decision,

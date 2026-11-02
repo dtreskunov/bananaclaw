@@ -59,6 +59,8 @@ import {
   accessRequestInput,
   accessRequestStatus,
   applyAccessRequest,
+  completeAccountRequest,
+  prepareAccountRequest,
   cancelAccessRequest,
   previewAccessRequest,
   recoverAccessRequests,
@@ -165,6 +167,114 @@ function resultMessage(id: string) {
 }
 
 describe('assisted access approvals', () => {
+  it('requires the requested permissions in confirmed account grants before access can be approved', async () => {
+    connection.kind = 'mcp_oauth';
+    connection.requested_scopes = ['read', 'write'];
+    connection.granted_scopes = ['read'];
+    connection.scope_source = 'provider';
+    const request = await requestAccess(
+      session,
+      {
+        ...input,
+        authentication: { type: 'mcp_oauth' },
+        scopes: ['write'],
+      },
+      'appr-access-scoped',
+    );
+    expect(request.scopes).toEqual(['write']);
+    expect((await previewAccessRequest('alice', request.request_id, connection.id)).matches).toBe(false);
+    await expect(applyAccessRequest('alice', request.request_id, selection(request.revision))).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(mocks.grant).not.toHaveBeenCalled();
+    connection.granted_scopes = ['read', 'write'];
+    expect((await previewAccessRequest('alice', request.request_id, connection.id)).matches).toBe(true);
+    expect(mocks.grant).not.toHaveBeenCalled();
+  });
+  it('completes account setup with metadata only and permits a separate access request', async () => {
+    const request = await seed();
+    const setup = prepareAccountRequest('alice', request.request_id, { request_revision: request.revision });
+    expect(setup.purpose).toBe('account');
+    expect(setup.revision).toBe(request.revision + 1);
+    await expect(applyAccessRequest('alice', setup.request_id, selection(setup.revision))).rejects.toMatchObject({
+      status: 409,
+    });
+    const configBefore = getDb().prepare('SELECT mcp_servers FROM container_configs').pluck().get();
+    await completeAccountRequest('alice', setup.request_id, {
+      ...selection(setup.revision),
+      message: 'Check setup before requesting access.',
+    });
+    expect(accessRequestStatus(setup.request_id)).toMatchObject({ purpose: 'account', status: 'completed' });
+    expect(mocks.grant).not.toHaveBeenCalled();
+    expect(connection.grants).toEqual([]);
+    expect(getDb().prepare('SELECT mcp_servers FROM container_configs').pluck().get()).toBe(configBefore);
+    const content = JSON.parse((resultMessage(setup.request_id) as { content: string }).content);
+    expect(content.text).toContain('No agent access was granted');
+    expect(content.text).toContain('authenticated operations require a separate request_access');
+    expect(content.text).not.toContain('API_KEY');
+    expect(content.text).not.toContain('BIND_');
+    expect(content.approvalResponse.message).toBe('Check setup before requesting access.');
+    expect(mocks.wake).toHaveBeenCalled();
+    await notifyApprovalWorkflow(setup.request_id);
+    expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
+    const access = await requestAccess(session, input, 'appr-access-after-setup');
+    expect(access).toMatchObject({ request_id: 'appr-access-after-setup', purpose: 'access', status: 'pending' });
+    await applyAccessRequest('alice', access.request_id, selection(access.revision));
+    expect(mocks.grant).toHaveBeenCalledOnce();
+  });
+  it('keeps a ready account with suspended agent access on the access-approval path', async () => {
+    connection.grants = [{ vault: session.agent_group_id, services: ['api'], status: 'suspended' }];
+    const request = await seed();
+    expect(request.purpose).toBe('access');
+    expect(mocks.grant).not.toHaveBeenCalled();
+    await applyAccessRequest('alice', request.request_id, selection());
+    expect(mocks.grant).toHaveBeenCalledOnce();
+  });
+  it('rejects stale, unready, cross-owner and grant-shaped account setup confirmations', async () => {
+    const request = await seed();
+    const setup = prepareAccountRequest('alice', request.request_id, { request_revision: request.revision });
+    await expect(completeAccountRequest('alice', setup.request_id, selection(request.revision))).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(completeAccountRequest('bob', setup.request_id, selection(setup.revision))).rejects.toMatchObject({
+      status: 403,
+    });
+    connection.status = 'disabled';
+    await expect(completeAccountRequest('alice', setup.request_id, selection(setup.revision))).rejects.toMatchObject({
+      status: 409,
+    });
+    connection.status = 'ready';
+    await expect(
+      completeAccountRequest('alice', setup.request_id, {
+        ...selection(setup.revision),
+        configure_mcp: true,
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(mocks.grant).not.toHaveBeenCalled();
+    expect(accessRequestStatus(setup.request_id).status).toBe('pending');
+  });
+  it('rejects account setup without silently provisioning or granting access', async () => {
+    const request = await seed();
+    prepareAccountRequest('alice', request.request_id, { request_revision: request.revision });
+    const approval = getPendingApproval(request.request_id)!;
+    await getInteractiveApprovalHandler(approval.action)!(
+      approval,
+      {
+        questionId: approval.approval_id,
+        userId: 'alice',
+        channelType: 'web',
+        platformId: 'admin',
+        threadId: null,
+        value: 'reject',
+      },
+      'alice',
+    );
+    expect(accessRequestStatus(request.request_id)).toMatchObject({ purpose: 'account', status: 'rejected' });
+    expect(mocks.grant).not.toHaveBeenCalled();
+    expect(JSON.parse((resultMessage(request.request_id) as { content: string }).content).text).toContain(
+      'Your account setup request was rejected.',
+    );
+  });
   it('includes an access approval message in its single existing outcome notification', async () => {
     const request = await seed();
     await applyAccessRequest('alice', request.request_id, { ...selection(), message: '  Use read-only operations.  ' });

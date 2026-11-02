@@ -19,6 +19,7 @@ import { registerApprovalHandler } from '../../../modules/approvals/primitive.js
 import { readConversation } from './conversation.js';
 import { readChatHistory } from './chat.js';
 import { approvalOrigin } from './approval-transcript.js';
+import { createApprovalWorkflow, finishApprovalWorkflow } from '../../../modules/approvals/workflows.js';
 import {
   CONVERSATION_PROTOCOL_VERSION,
   diffConversation,
@@ -76,6 +77,28 @@ function request() {
 const view = (thread = 'source-thread', user = 'owner') => readConversation(user, 'g', thread);
 
 describe('retained approval transcript', () => {
+  it('retains account-setup purpose and its responder after completion and reload', () => {
+    request();
+    getDb().prepare("UPDATE approval_history SET action='request_access' WHERE approval_id='approval'").run();
+    createApprovalWorkflow('approval', 'account-setup', { messageId: 'source', purpose: 'account' });
+    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
+      purpose: 'account',
+      status: 'pending',
+    });
+    finishApprovalWorkflow(
+      'approval',
+      'completed',
+      'Account setup confirmed; no agent access was granted.',
+      false,
+      undefined,
+      'owner',
+    );
+    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
+      purpose: 'account',
+      status: 'approved',
+      respondedBy: { userId: 'owner', displayName: 'Owner' },
+    });
+  });
   it('places a request only in its exact originating thread, even in a shared session', () => {
     request();
     expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toEqual({
