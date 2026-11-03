@@ -1,4 +1,4 @@
-import { isStepCount, streamText, wrapLanguageModel, type LanguageModelCallEndEvent, type ModelMessage, type ToolSet } from 'ai';
+import { APICallError, isStepCount, streamText, wrapLanguageModel, type LanguageModelCallEndEvent, type LanguageModelMiddleware, type ModelMessage, type ToolSet } from 'ai';
 
 import { registerProvider } from './provider-registry.js';
 import { loadConfig } from '../config.js';
@@ -55,6 +55,21 @@ function log(message: string): void {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+function quotaExhausted(error: unknown): boolean {
+  return /\b(?:Token|M) Plan\b.*\busage limit\b/i.test(errorMessage(error));
+}
+
+const stopExhaustedQuota: LanguageModelMiddleware = {
+  wrapStream: async ({ doStream }) => {
+    try { return await doStream(); }
+    catch (error) {
+      if (APICallError.isInstance(error) && quotaExhausted(error))
+        throw new APICallError({ ...error, message: error.message, cause: error, isRetryable: false });
+      throw error;
+    }
+  },
+};
 
 /**
  * Maps AI SDK usage onto the provider-wide convention shared with the Claude
@@ -379,8 +394,11 @@ export class NativeProvider implements AgentProvider {
                   : resolved.maxOutputTokens;
               const adapter = await languageModel(resolved);
               const modelSetupMs = Date.now() - startedAt;
-              const model = resolved.protocol === 'openai-chat'
-                ? wrapLanguageModel({ model: adapter, middleware: openAiToolMedia })
+              const model = resolved.protocol === 'openai-chat' || options.economyMode
+                ? wrapLanguageModel({ model: adapter, middleware: [
+                    ...(resolved.protocol === 'openai-chat' ? [openAiToolMedia] : []),
+                    ...(options.economyMode ? [stopExhaustedQuota] : []),
+                  ] })
                 : adapter;
               let stepsCompleted = 0;
               let finishReason = '';
@@ -815,7 +833,8 @@ export class NativeProvider implements AgentProvider {
               yield {
                 type: 'error',
                 message: errorMessage(error),
-                retryable: !(error instanceof CompactionSummaryError) && /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
+                retryable: !(error instanceof CompactionSummaryError) && !quotaExhausted(error) &&
+                  /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
               };
             } finally {
               active = false;

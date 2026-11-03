@@ -66,6 +66,7 @@ let rejectedMediaData: string[];
 let mediaRejectionStatus: number;
 let rejectMediaRetry: boolean;
 let mediaRetryFailureStatus: number;
+let apiFailures: Array<{ status: number; message: string }>;
 
 const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
   (executable) => spawnSync(executable, ['-version'], { stdio: 'ignore' }).status === 0,
@@ -128,6 +129,7 @@ beforeEach(() => {
   mediaRejectionStatus = 400;
   rejectMediaRetry = false;
   mediaRetryFailureStatus = 400;
+  apiFailures = [];
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -141,6 +143,10 @@ beforeEach(() => {
       requestUrls.push(request.url);
       requestHeaders.push(request.headers);
       requests.push((await request.json()) as Record<string, unknown>);
+      const failure = apiFailures.shift();
+      if (failure) return Response.json({
+        type: 'error', error: { type: 'rate_limit_error', message: failure.message },
+      }, { status: failure.status });
       const isCompaction = JSON.stringify(requests.at(-1)).includes(COMPACTION_INSTRUCTIONS);
       const modelMessages = requests.at(-1)?.messages;
       const hasCompletedTool = Array.isArray(modelMessages) && modelMessages.some(
@@ -336,6 +342,28 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'does not retry confirmed plan exhaustion through %s', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      apiFailures = Array.from({ length: 3 }, () => ({
+        status: 429, message: 'The Token Plan usage limit has been reached. (2067)',
+      }));
+      const events = await collect(new NativeProvider({ model: 'local/stub', economyMode: true }));
+      expect(requests).toHaveLength(1);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'error', retryable: false, message: expect.stringContaining('Token Plan usage limit'),
+      }));
+    },
+  );
+
+  it('retains the SDK retry for an ordinary transient 429', async () => {
+    apiFailures = [{ status: 429, message: 'Too many requests; retry shortly' }];
+    const events = await collect(new NativeProvider({ model: 'local/stub', economyMode: true }));
+    expect(requests).toHaveLength(2);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(replyTexts(events).flat()).toContain('hello from stub');
+  }, 15_000);
+
   it('includes the final handoff in its durable 20-call ceiling and grants only a new input a fresh allowance', async () => {
     scriptedToolCalls = Array.from({ length: 19 }, () => ['bash', '{"command":"echo once >> budget-actions.txt"}']);
     const first = await collect(new NativeProvider({ model: 'local/stub', economyMode: true }));

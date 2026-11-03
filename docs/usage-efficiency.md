@@ -69,6 +69,11 @@ parent's historical rows, which must not be billed again in cross-session audits
 Budget estimates cannot guarantee MiniMax quota availability: other clients
 share the account, quota units are weighted, and an in-flight call's actual
 usage can differ from its estimate. An overrun prevents subsequent calls.
+The request allowance counts SDK model calls; their existing maximum of two
+transient HTTP retries remains separate. Confirmed MiniMax Token/M Plan usage
+exhaustion is terminal in economy mode and is not retried. Ordinary transient
+429/network errors retain the SDK's bounded retry behavior; no paid-credit
+fallback or credential change is performed.
 
 ## Private memory migration
 
