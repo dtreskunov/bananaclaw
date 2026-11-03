@@ -6,7 +6,8 @@ import { getSession, isApprovalExecuting } from '../../../db/sessions.js';
 import { getMessagingGroup } from '../../../db/messaging-groups.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
-import { getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
+import { getAccountRequest, getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
+import type { AccountInteraction, AccountRequestData } from '../../shared/approval.js';
 import { inboundDbPath, openInboundDb } from '../../../session-manager.js';
 import type { ApprovalOrigin, ConversationApproval } from '../../shared/approval.js';
 import { presentApproval } from './approval-presentation.js';
@@ -67,20 +68,33 @@ export type ApprovalViewRecord = Omit<ApprovalHistoryRow, 'session_id'> & {
   agent_group_id?: string | null;
 };
 
+function responseContext(userId: string, row: ApprovalViewRecord) {
+  const responder = row.responded_by ? getUser(row.responded_by) : undefined;
+  return {
+    decision: row.decision,
+    respondedBy: row.responded_by
+      ? { userId: row.responded_by, displayName: responder?.display_name || row.responded_by }
+      : null,
+    responseMessage: row.response_message,
+    origin: approvalOrigin(userId, row),
+  };
+}
+
+export function projectAccountInteraction(userId: string, account: AccountRequestData): AccountInteraction {
+  const history = getApprovalHistory(account.id);
+  if (!history) throw new Error('Account request history unavailable');
+  return { ...responseContext(userId, history), ...account };
+}
+
 export function projectApproval(userId: string, row: ApprovalViewRecord): ConversationApproval {
+  if (row.action === 'request_access') return projectAccountInteraction(userId, getAccountRequest(row.approval_id));
   const session = row.session_id ? getSession(row.session_id) : undefined;
   const groupId = row.agent_group_id ?? session?.agent_group_id ?? null;
-  const responder = row.responded_by ? getUser(row.responded_by) : undefined;
   const status = row.status === 'pending' && isApprovalExecuting(row.approval_id) ? 'applying' : row.status;
   const workflow = getApprovalWorkflow(row.approval_id);
-  if (row.action === 'request_access' && !workflow) throw new Error('Credential review state unavailable');
   return {
-    kind:
-      row.action === 'request_access'
-        ? (JSON.parse(workflow!.origin_json) as { purpose?: string }).purpose === 'account'
-          ? 'account_setup'
-          : 'access_grant'
-        : 'confirmation',
+    ...responseContext(userId, row),
+    kind: 'confirmation',
     id: row.approval_id,
     action: row.action,
     title: row.title,
@@ -92,14 +106,8 @@ export function projectApproval(userId: string, row: ApprovalViewRecord): Conver
     supportsResponseMessage: row.session_id !== null,
     reviewRequired: !!workflow,
     status,
-    decision: row.decision,
-    respondedBy: row.responded_by
-      ? { userId: row.responded_by, displayName: responder?.display_name || row.responded_by }
-      : null,
-    responseMessage: row.response_message,
     resolvedAt: row.resolved_at,
     outcomeMessage: row.outcome_message,
-    origin: approvalOrigin(userId, row),
   };
 }
 

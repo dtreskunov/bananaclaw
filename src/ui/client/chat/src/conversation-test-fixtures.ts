@@ -2,6 +2,27 @@ import type { Conversation, ConversationTurn } from '../../../shared/conversatio
 import { CONVERSATION_PROTOCOL_VERSION, type ConversationSnapshot } from '../../../shared/conversation-protocol';
 import { conversationTimeline } from '../../../server/chat/conversation-timeline';
 import type { PendingWebSend } from './types';
+import type { AccountInteraction, AccountRequirements } from '../../../shared/approval';
+
+export function testAccountInteraction(
+  overrides: Omit<Partial<AccountInteraction>, 'requirements'> & { requirements?: Partial<AccountRequirements> } = {},
+): AccountInteraction {
+  return {
+    id: 'access-one',
+    kind: 'access_grant',
+    status: 'pending',
+    revision: 1,
+    agentGroupId: 'one',
+    agentGroupName: 'One',
+    createdAt: '2026-01-01T00:00:00Z',
+    expiresAt: null,
+    outcomeMessage: null,
+    resolvedAt: null,
+    origin: { agentGroupId: 'one', threadId: 'thread-one', channelType: 'web', messagingGroupId: 'web-one' },
+    ...overrides,
+    requirements: { resource_url: 'https://api.example.com/', reason: 'Read the report', ...overrides.requirements },
+  };
+}
 
 export const testWebSubmission: PendingWebSend = {
   groupId: 'group',

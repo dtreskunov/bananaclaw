@@ -40,6 +40,8 @@ bypass the gateway.
   Do not include secrets, owner IDs or credential IDs. Scope suggestions need
   user review and are not automatically granted. `ncl access request
   --resource-url <url> --reason <purpose>` uses the same approval workflow.
+  Request/status data uses `id`, `kind`, `requirements`, `status` and `revision`.
+  `account_setup` completion confirms metadata only; it never grants agent access.
   Wait for the host's completion message; submission/review is not permission.
   Do not probe token endpoints, inspect process environments/browser cookies,
   guess credential placeholders, or create a recurring availability poller.

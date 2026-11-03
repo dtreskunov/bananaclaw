@@ -4934,7 +4934,7 @@ var require_markdown = __commonJS({
         m6.contains = m6.contains.concat(CONTAINABLE);
       });
       CONTAINABLE = CONTAINABLE.concat(BOLD, ITALIC);
-      const HEADER = {
+      const HEADER2 = {
         className: "section",
         variants: [
           {
@@ -4974,7 +4974,7 @@ var require_markdown = __commonJS({
           "mkd"
         ],
         contains: [
-          HEADER,
+          HEADER2,
           INLINE_HTML,
           LIST,
           BOLD,
@@ -18720,8 +18720,166 @@ function isTurnStartStep(step) {
   return step.kind === "notification" && !!step.id?.startsWith("ui:start:");
 }
 
+// ../../shared/oauth-app.ts
+function isOAuthScope(value) {
+  return typeof value === "string" && value.length > 0 && [...value].every((character) => character >= "!" && character <= "~" && character !== '"' && character !== "\\");
+}
+
+// ../../shared/credential-matching.ts
+function serviceMatchesResource(service, resourceUrl) {
+  const url = URL.parse(resourceUrl);
+  if (!url || service.enabled === false || service.https_only && url.protocol !== "https:") return false;
+  const slash = service.host.indexOf("/");
+  const authority = slash < 0 ? service.host : service.host.slice(0, slash);
+  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
+  const separator = authority.lastIndexOf(":");
+  const explicitPort = separator >= 0 && /^\d+$/.test(authority.slice(separator + 1));
+  const host = explicitPort ? authority.slice(0, separator) : authority;
+  if (explicitPort && authority.slice(separator + 1) !== (url.port || (url.protocol === "https:" ? "443" : "80")))
+    return false;
+  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(value);
+  return glob(host.toLowerCase(), url.hostname.toLowerCase()) && (!path || glob(path, url.pathname));
+}
+
+// ../../shared/access-authentication.ts
+var ACCESS_AUTHENTICATION_LABELS = {
+  mcp_oauth: "Tools sign-in",
+  oauth_app: "App sign-in",
+  bearer: "Bearer token",
+  "api-key": "API key",
+  basic: "Username and password",
+  custom: "Custom headers"
+};
+var AccessAuthenticationError = class extends Error {
+};
+var HEADER = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/;
+var PARAMETER = /^[A-Za-z0-9._~-]{1,128}$/;
+function validHeader(value) {
+  return typeof value === "string" && HEADER.test(value) && !["proxy-authorization", "x-agentvault-binding"].includes(value.toLowerCase());
+}
+function parseAccessAuthentication(value) {
+  if (value === void 0) return void 0;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new AccessAuthenticationError("Authentication hints must describe a mechanism, never credential values.");
+  const hint = value;
+  if (Object.keys(hint).some(
+    (key) => !["type", "app_id", "header", "prefix", "headers", "location", "parameter"].includes(key)
+  ) || !["mcp_oauth", "oauth_app", "bearer", "api-key", "basic", "custom"].includes(String(hint.type)))
+    throw new AccessAuthenticationError(
+      "Choose a supported sign-in method. Never include passwords or access keys in this request."
+    );
+  const type = hint.type;
+  const oauth = type === "mcp_oauth" || type === "oauth_app";
+  if (hint.location !== void 0 && (type !== "api-key" || hint.location !== "header" && hint.location !== "query"))
+    throw new AccessAuthenticationError("API-key placement must be header or query.");
+  const query = type === "api-key" && hint.location === "query";
+  if (hint.app_id !== void 0 && (!oauth || typeof hint.app_id !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(hint.app_id)))
+    throw new AccessAuthenticationError(
+      "An OAuth app suggestion must be a configured app identifier, not a credential or client secret."
+    );
+  if (hint.header !== void 0 && (type !== "api-key" || query))
+    throw new AccessAuthenticationError("A header name is only valid for API-key header placement.");
+  if (type === "api-key" && !query && !validHeader(hint.header))
+    throw new AccessAuthenticationError("API-key authentication requires a valid header name.");
+  if (hint.parameter !== void 0 && !query || query && (typeof hint.parameter !== "string" || !PARAMETER.test(hint.parameter)))
+    throw new AccessAuthenticationError("Query API keys require a public parameter name, never a value.");
+  if (hint.prefix !== void 0 && (type !== "api-key" || query || typeof hint.prefix !== "string" || hint.prefix.length > 128 || [...hint.prefix].some((char) => char < " " || char > "~")))
+    throw new AccessAuthenticationError("Provide only a public API-key header prefix without control characters.");
+  if (hint.headers !== void 0 && type !== "custom" || type === "custom" && (!Array.isArray(hint.headers) || !hint.headers.length || hint.headers.length > 16 || !hint.headers.every(validHeader) || new Set(hint.headers.map((header) => header.toLowerCase())).size !== hint.headers.length))
+    throw new AccessAuthenticationError(
+      "Custom authentication requires distinct header names only, never header values."
+    );
+  return {
+    type,
+    ...hint.app_id === void 0 ? {} : { app_id: hint.app_id },
+    ...hint.header === void 0 ? {} : { header: hint.header },
+    ...hint.prefix === void 0 ? {} : { prefix: hint.prefix },
+    ...hint.location === void 0 ? {} : { location: hint.location },
+    ...hint.parameter === void 0 ? {} : { parameter: hint.parameter },
+    ...hint.headers === void 0 ? {} : { headers: [...hint.headers] }
+  };
+}
+function connectionMatchesAccess(connection2, request) {
+  const destination = URL.parse(request.resource_url);
+  if (!destination || destination.protocol !== "https:") return false;
+  const hint = request.authentication;
+  const oauthHint = hint?.type === "mcp_oauth" || hint?.type === "oauth_app";
+  if (oauthHint && connection2.kind !== hint.type) return false;
+  if (hint?.app_id && connection2.app_id !== hint.app_id) return false;
+  if (request.scopes?.length) {
+    if (connection2.kind === "static") return false;
+    const scopes = connection2.status === "ready" ? connection2.scope_source === "provider" ? connection2.granted_scopes : null : connection2.requested_scopes;
+    if (!scopes || request.scopes.some((scope) => !scopes.includes(scope))) return false;
+  }
+  const services = connection2.services.filter((service) => serviceMatchesResource(service, request.resource_url));
+  if (!services.length) {
+    return connection2.kind === "mcp_oauth" && connection2.status !== "ready" && (!hint || oauthHint || hint.type === "bearer") && URL.parse(connection2.resource_url ?? "")?.href === destination.href;
+  }
+  if (!hint || oauthHint) return true;
+  return services.some((service) => {
+    if (service.auth.type !== hint.type) return false;
+    if (hint.type === "api-key") {
+      if ((service.auth.location ?? "header") !== (hint.location ?? "header")) return false;
+      if (hint.location === "query") return service.auth.parameter === hint.parameter;
+      return (service.auth.header || "Authorization").toLowerCase() === hint.header?.toLowerCase() && (hint.prefix === void 0 || (service.auth.prefix ?? "") === hint.prefix);
+    }
+    if (hint.type === "custom") {
+      const headers = Object.keys(service.auth.headers ?? {}).map((header) => header.toLowerCase());
+      return hint.headers?.every((header) => headers.includes(header.toLowerCase())) ?? false;
+    }
+    return true;
+  });
+}
+
+// ../../shared/connection-input.ts
+var ConnectionInputError = class extends Error {
+  constructor(message2, status = 400) {
+    super(message2);
+    this.status = status;
+  }
+};
+function objectBody(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new ConnectionInputError("Provide a JSON object");
+  return value;
+}
+function accessRequestInput(raw) {
+  const body = objectBody(raw);
+  if (Object.keys(body).some((key) => !["resource_url", "reason", "scopes", "mcp_server", "authentication"].includes(key)))
+    throw new ConnectionInputError(
+      "Access requests accept only resource_url, reason, optional scopes and an optional mcp_server name. Never supply secrets."
+    );
+  const url = typeof body.resource_url === "string" ? URL.parse(body.resource_url) : null;
+  let authentication2;
+  try {
+    authentication2 = parseAccessAuthentication(body.authentication);
+  } catch (error) {
+    if (!(error instanceof AccessAuthenticationError)) throw error;
+    throw new ConnectionInputError(error.message);
+  }
+  if (body.mcp_server !== void 0 && (typeof body.mcp_server !== "string" || !/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(body.mcp_server)))
+    throw new ConnectionInputError("Select an existing named MCP server.");
+  if (!url || url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.href.length > 2048 || [...String(body.resource_url)].some((char) => char.charCodeAt(0) <= 32 || char === "*"))
+    throw new ConnectionInputError(
+      "Provide an exact HTTPS destination without credentials, query, fragment or wildcard."
+    );
+  if (typeof body.reason !== "string" || !body.reason.trim() || body.reason.length > 1e3 || [...body.reason].some((char) => char.charCodeAt(0) < 32 && !["	", "\n", "\r"].includes(char)))
+    throw new ConnectionInputError("Explain the access needed in at most 1000 characters; do not include credentials.");
+  if (body.scopes !== void 0 && (!Array.isArray(body.scopes) || body.scopes.length > 64 || !body.scopes.every((scope) => isOAuthScope(scope) && scope.length <= 2048)))
+    throw new ConnectionInputError("Provide valid scope suggestions, never tokens.");
+  if (Array.isArray(body.scopes) && body.scopes.length && authentication2 && !["mcp_oauth", "oauth_app", "bearer"].includes(authentication2.type))
+    throw new ConnectionInputError("OAuth scope suggestions require an OAuth or bearer authentication request.");
+  return {
+    resource_url: url.href,
+    reason: body.reason.trim(),
+    ...authentication2 ? { authentication: authentication2 } : {},
+    ...body.mcp_server === void 0 ? {} : { mcp_server: body.mcp_server },
+    ...body.scopes === void 0 ? {} : { scopes: [...new Set(body.scopes)].sort() }
+  };
+}
+
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 7;
+var CONVERSATION_PROTOCOL_VERSION = 8;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -18866,28 +19024,52 @@ var question = (value) => isQuestionInput(value) && shape({
   messageId: optional(id),
   timelinePosition: optional(integer)
 })(value);
-var approval = shape({
-  kind: oneOf("confirmation", "account_setup", "access_grant"),
+var consentContext = {
   id,
-  action: text,
-  title: text,
-  details: nullable(text),
-  packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
-  options: array(shape({ label: text, selectedLabel: text, value: text })),
   agentGroupId: nullable(text),
   agentGroupName: nullable(text),
   createdAt: text,
-  supportsResponseMessage: bool,
-  reviewRequired: bool,
   origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
-  status: oneOf("pending", "applying", "approved", "rejected", "failed", "cancelled", "expired"),
   decision: optional(nullable(text)),
   respondedBy: optional(nullable(shape({ userId: id, displayName: text }))),
   responseMessage: optional(nullable(text)),
   outcomeMessage: optional(nullable(text)),
   resolvedAt: optional(nullable(text))
+};
+var approval = shape({
+  ...consentContext,
+  kind: oneOf("confirmation"),
+  action: text,
+  title: text,
+  details: nullable(text),
+  packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
+  options: array(shape({ label: text, selectedLabel: text, value: text })),
+  supportsResponseMessage: bool,
+  reviewRequired: bool,
+  status: oneOf("pending", "applying", "approved", "rejected", "failed", "cancelled", "expired")
 });
-var interaction = (value) => question(value) || approval(value);
+var requirements = (value) => {
+  try {
+    accessRequestInput(value);
+    return true;
+  } catch (error) {
+    if (error instanceof ConnectionInputError) return false;
+    throw error;
+  }
+};
+var account = shape({
+  ...consentContext,
+  kind: oneOf("account_setup", "access_grant"),
+  requirements,
+  revision: integer,
+  expiresAt: nullable(text),
+  agentGroupId: id,
+  agentGroupName: text,
+  status: oneOf("pending", "applying", "completed", "rejected", "cancelled", "expired", "failed"),
+  outcomeMessage: nullable(text),
+  resolvedAt: nullable(text)
+});
+var interaction = (value) => question(value) || approval(value) || account(value);
 var tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
 var timelineRow = (v5) => shape({ kind: oneOf("message"), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v5) || shape({ kind: oneOf("interaction"), interactionId: id, trace: optional(tracePlacement) })(v5) || shape({ kind: oneOf("turn"), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v5);
 var connection = shape({ connected: bool, activeTurnId: nullable(id) });
@@ -23887,14 +24069,14 @@ function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
   const pending4 = status === "pending";
   const here = isApprovalThread(a4.origin);
   const labels = {
-    approved: a4.kind === "account_setup" ? "Account setup confirmed" : "Approved",
+    approved: "Approved",
     rejected: "Declined",
     applying: "Applying\u2026",
     failed: "Could not apply",
     cancelled: "Cancelled",
     expired: "Expired"
   };
-  return /* @__PURE__ */ u4(ApprovalCardFrame, { approvalId: a4.id, title: a4.kind === "account_setup" ? "Set up an account" : a4.action === "add_mcp_server" ? "Add tools" : a4.title || a4.action, children: [
+  return /* @__PURE__ */ u4(ApprovalCardFrame, { approvalId: a4.id, title: a4.action === "add_mcp_server" ? "Add tools" : a4.title || a4.action, children: [
     /* @__PURE__ */ u4("div", { class: "approval-text", children: [
       a4.packages ? /* @__PURE__ */ u4("div", { class: "approval-packages", children: ["apt", "npm", "pip"].map((manager) => a4.packages[manager].length ? /* @__PURE__ */ u4("div", { class: "approval-package-list", children: [
         /* @__PURE__ */ u4("span", { class: "approval-package-manager", children: manager }),
@@ -24045,11 +24227,6 @@ function MessageBubble({
     ] }) : null
   ] }) : children;
   return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children: content }) });
-}
-
-// ../../shared/oauth-app.ts
-function isOAuthScope(value) {
-  return typeof value === "string" && value.length > 0 && [...value].every((character) => character >= "!" && character <= "~" && character !== '"' && character !== "\\");
 }
 
 // src/components/CredentialsApi.ts
@@ -24401,6 +24578,18 @@ function useConnectionSignIn(onFinished) {
 }
 
 // src/components/credential-presentation.ts
+function accountRequestStatusText(request) {
+  const labels = {
+    pending: "Waiting for your response.",
+    applying: "Applying\u2026",
+    completed: request.kind === "account_setup" ? "Account setup confirmed. No agent access was granted." : "Access granted.",
+    rejected: "Request declined.",
+    cancelled: "Request cancelled.",
+    expired: "Request expired.",
+    failed: "Could not finish the request."
+  };
+  return labels[request.status];
+}
 var PROVIDERS = {
   "openrouter.ai": "OpenRouter",
   "ai-gateway.vercel.sh": "Vercel AI Gateway",
@@ -24439,63 +24628,6 @@ function accessGroups(connections, groups2) {
     connections.flatMap((connection2) => connection2.grants.map((grant) => grant.vault)).filter((id2) => !result.some((group) => group.id === id2))
   );
   return [...result, ...[...unknown].map((id2) => ({ id: id2, name: "Unavailable agent", canAdmin: false }))];
-}
-
-// ../../shared/credential-matching.ts
-function serviceMatchesResource(service, resourceUrl) {
-  const url = URL.parse(resourceUrl);
-  if (!url || service.enabled === false || service.https_only && url.protocol !== "https:") return false;
-  const slash = service.host.indexOf("/");
-  const authority = slash < 0 ? service.host : service.host.slice(0, slash);
-  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
-  const separator = authority.lastIndexOf(":");
-  const explicitPort = separator >= 0 && /^\d+$/.test(authority.slice(separator + 1));
-  const host = explicitPort ? authority.slice(0, separator) : authority;
-  if (explicitPort && authority.slice(separator + 1) !== (url.port || (url.protocol === "https:" ? "443" : "80")))
-    return false;
-  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(value);
-  return glob(host.toLowerCase(), url.hostname.toLowerCase()) && (!path || glob(path, url.pathname));
-}
-
-// ../../shared/access-authentication.ts
-var ACCESS_AUTHENTICATION_LABELS = {
-  mcp_oauth: "Tools sign-in",
-  oauth_app: "App sign-in",
-  bearer: "Bearer token",
-  "api-key": "API key",
-  basic: "Username and password",
-  custom: "Custom headers"
-};
-function connectionMatchesAccess(connection2, request) {
-  const destination = URL.parse(request.resource_url);
-  if (!destination || destination.protocol !== "https:") return false;
-  const hint = request.authentication;
-  const oauthHint = hint?.type === "mcp_oauth" || hint?.type === "oauth_app";
-  if (oauthHint && connection2.kind !== hint.type) return false;
-  if (hint?.app_id && connection2.app_id !== hint.app_id) return false;
-  if (request.scopes?.length) {
-    if (connection2.kind === "static") return false;
-    const scopes = connection2.status === "ready" ? connection2.scope_source === "provider" ? connection2.granted_scopes : null : connection2.requested_scopes;
-    if (!scopes || request.scopes.some((scope) => !scopes.includes(scope))) return false;
-  }
-  const services = connection2.services.filter((service) => serviceMatchesResource(service, request.resource_url));
-  if (!services.length) {
-    return connection2.kind === "mcp_oauth" && connection2.status !== "ready" && (!hint || oauthHint || hint.type === "bearer") && URL.parse(connection2.resource_url ?? "")?.href === destination.href;
-  }
-  if (!hint || oauthHint) return true;
-  return services.some((service) => {
-    if (service.auth.type !== hint.type) return false;
-    if (hint.type === "api-key") {
-      if ((service.auth.location ?? "header") !== (hint.location ?? "header")) return false;
-      if (hint.location === "query") return service.auth.parameter === hint.parameter;
-      return (service.auth.header || "Authorization").toLowerCase() === hint.header?.toLowerCase() && (hint.prefix === void 0 || (service.auth.prefix ?? "") === hint.prefix);
-    }
-    if (hint.type === "custom") {
-      const headers = Object.keys(service.auth.headers ?? {}).map((header) => header.toLowerCase());
-      return hint.headers?.every((header) => headers.includes(header.toLowerCase())) ?? false;
-    }
-    return true;
-  });
 }
 
 // src/components/credential-routing.ts
@@ -24664,19 +24796,12 @@ function credentialFields(services) {
 }
 
 // src/components/AccessRequestReview.tsx
-var STATUS_LABELS = {
-  applying: "Applying access...",
-  completed: "Access granted.",
-  rejected: "Request declined.",
-  cancelled: "Request cancelled.",
-  expired: "Request expired."
-};
 function accountNickname(preview, server) {
   const configured = preview.mcp?.configured?.[server];
   return configured?.connection_id === preview.connection.id ? configured.account_alias : connectionName(preview.connection).replace(/\p{Cc}/gu, " ").trim().slice(0, 80);
 }
 function AccessRequestReview({
-  id: id2,
+  request,
   connections,
   preferredConnectionId,
   signingIn,
@@ -24690,36 +24815,36 @@ function AccessRequestReview({
   signInMessage,
   apps = []
 }) {
+  const { id: id2, requirements: requirements2 } = request;
   const path = credentialsPath(`/access-requests/${encodeURIComponent(id2)}`);
-  const request = useCredentialResource(path);
   const [selected, setSelected] = h2("");
   const [preview, setPreview] = h2(null);
   const [busy, setBusy] = h2(false);
+  const [submitted, setSubmitted] = h2();
   const [error, setError] = h2("");
   const [configureMcp, setConfigureMcp] = h2(false);
   const [mcpServer, setMcpServer] = h2("");
   const [accountAlias, setAccountAlias] = h2("");
   const preferred = A2();
   const setupAttempt = A2();
-  const defaults = request.data ? accessCreationDefaults(request.data, apps) : void 0;
-  const effectiveRequest = request.data ? {
-    ...request.data,
+  const defaults = accessCreationDefaults(requirements2, apps);
+  const effectiveRequest = {
+    ...requirements2,
     ...defaults?.scopes.length ? { scopes: defaults.scopes } : {}
-  } : null;
-  const compatible = effectiveRequest ? connections.filter((connection2) => connectionMatchesAccess(connection2, effectiveRequest)) : [];
+  };
+  const compatible = connections.filter((connection2) => connectionMatchesAccess(connection2, effectiveRequest));
   const created = connections.find((connection2) => connection2.id === preferredConnectionId);
   const createdMismatch = created?.status === "ready" && !compatible.some((connection2) => connection2.id === created.id);
-  const reconnect = effectiveRequest ? connections.filter((connection2) => connection2.kind !== "static" && !compatible.some((candidate) => candidate.id === connection2.id) && !(createdMismatch && connection2.id === created.id) && connectionMatchesAccess(connection2, { ...effectiveRequest, scopes: void 0 })) : [];
+  const reconnect = connections.filter((connection2) => connection2.kind !== "static" && !compatible.some((candidate) => candidate.id === connection2.id) && !(createdMismatch && connection2.id === created.id) && connectionMatchesAccess(connection2, { ...effectiveRequest, scopes: void 0 }));
   const compatibleIds = JSON.stringify(compatible.map((connection2) => connection2.id));
   y2(() => {
-    if (!request.data) return;
     if (preferredConnectionId && preferred.current !== preferredConnectionId && compatible.some((connection2) => connection2.id === preferredConnectionId)) {
       preferred.current = preferredConnectionId;
       setSelected(preferredConnectionId);
     } else if (selected && !compatible.some((connection2) => connection2.id === selected)) {
       setSelected("");
     }
-  }, [preferredConnectionId, compatibleIds, selected, request.data]);
+  }, [preferredConnectionId, compatibleIds, selected, request]);
   const connectionVersion = JSON.stringify(connections.map((connection2) => [
     connection2.id,
     connection2.revision,
@@ -24729,25 +24854,26 @@ function AccessRequestReview({
     connection2.scope_source
   ]));
   const chosen = connections.find((connection2) => connection2.id === selected);
-  const here = isApprovalThread(request.data?.origin);
-  const blocked = busy || !!signingIn || !!disabled || !!loadingAccounts || !!accountsError;
-  const setup = request.data?.purpose === "account" || !!request.data && !loadingAccounts && !accountsError && !compatible.some((connection2) => connection2.status === "ready");
+  const here = isApprovalThread(request.origin);
+  const awaiting = submitted === `${id2}:${request.revision}`;
+  const blocked = busy || awaiting || !!signingIn || !!disabled || !!loadingAccounts || !!accountsError;
+  const setup = request.kind === "account_setup" || !loadingAccounts && !accountsError && !compatible.some((connection2) => connection2.status === "ready");
   const oauth = defaults?.kind !== void 0 && defaults.kind !== "static";
   const authorizationUrl = URL.parse(apps.find((app) => app.id === defaults?.appId)?.authorization_endpoint ?? "");
   const signInDestination = authorizationUrl?.protocol === "https:" && !authorizationUrl.username && !authorizationUrl.password ? authorizationUrl.origin + authorizationUrl.pathname : void 0;
-  const canApply = here && !blocked && compatible.some((connection2) => connection2.id === selected) && chosen?.status === "ready" && preview?.matches && preview.connection.status === "ready" && preview.connection.id === selected && chosen?.revision === preview.connection.revision && request.data?.status === "pending" && preview.request.status === "pending" && preview.request.revision === request.data.revision && (setup ? request.data.purpose === "account" : !configureMcp || !!mcpServer && !!accountAlias.trim());
-  const failed = request.data?.status === "failed";
+  const canApply = here && !blocked && compatible.some((connection2) => connection2.id === selected) && chosen?.status === "ready" && preview?.matches && preview.connection.status === "ready" && preview.connection.id === selected && chosen?.revision === preview.connection.revision && request.status === "pending" && preview.requestRevision === request.revision && (setup ? request.kind === "account_setup" : !configureMcp || !!mcpServer && !!accountAlias.trim());
+  const failed = request.status === "failed";
   y2(() => {
     setPreview(null);
     setConfigureMcp(false);
-    if (request.data?.status !== "pending") return;
+    if (request.status !== "pending") return;
     setError("");
     if (!selected) return;
     const controller = new AbortController();
     void credentialRequest(path + "/preview", "POST", { connection_id: selected }, controller.signal).then((value) => {
       if (controller.signal.aborted) return;
       setPreview(value);
-      const name = value.request.mcp_server ?? (value.mcp?.names.length === 1 ? value.mcp.names[0] : "");
+      const name = requirements2.mcp_server ?? (value.mcp?.names.length === 1 ? value.mcp.names[0] : "");
       setMcpServer(name);
       setAccountAlias(accountNickname(value, name));
     }).catch((error2) => {
@@ -24756,35 +24882,34 @@ function AccessRequestReview({
       setError(errorMessage(error2));
     });
     return () => controller.abort();
-  }, [path, selected, connectionVersion, request.data?.revision, request.data?.status]);
+  }, [path, selected, connectionVersion, request.revision, request.status]);
   async function prepareSetup() {
-    if (!request.data || blocked || !here || request.data.status !== "pending") return false;
-    if (request.data.purpose === "account") return true;
+    if (blocked || !here || request.status !== "pending") return false;
+    if (request.kind === "account_setup") return true;
     setBusy(true);
     setError("");
     setPreview(null);
     setConfigureMcp(false);
     try {
-      await credentialRequest(path + "/setup", "POST", { request_revision: request.data.revision });
-      await request.refresh();
+      await credentialRequest(path + "/setup", "POST", { request_revision: request.revision });
+      setSubmitted(`${id2}:${request.revision}`);
       onSaved();
       return true;
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
       setError(error2 instanceof CredentialsError && error2.status === 404 && error2.message === "not_found" ? "Account setup unavailable. Reload and retry." : errorMessage(error2));
-      await request.refresh();
       return false;
     } finally {
       setBusy(false);
     }
   }
   y2(() => {
-    if (!setup || !request.data || request.data.purpose === "account" || request.data.status !== "pending" || blocked || !here || setupAttempt.current === request.data.revision) return;
-    setupAttempt.current = request.data.revision;
+    if (!setup || request.kind === "account_setup" || request.status !== "pending" || blocked || !here || setupAttempt.current === request.revision) return;
+    setupAttempt.current = request.revision;
     void prepareSetup();
-  }, [setup, request.data?.purpose, request.data?.revision, request.data?.status, blocked, here]);
+  }, [setup, request.kind, request.revision, request.status, blocked, here]);
   async function addAccount() {
-    if (!await prepareSetup() || !effectiveRequest) return;
+    if (!await prepareSetup()) return;
     setBusy(true);
     setError("");
     try {
@@ -24796,11 +24921,11 @@ function AccessRequestReview({
       setBusy(false);
     }
   }
-  async function manageAccount(account) {
-    if (await prepareSetup()) onManage(account, effectiveRequest ?? void 0);
+  async function manageAccount(account2) {
+    if (await prepareSetup()) onManage(account2, effectiveRequest);
   }
   async function apply2() {
-    if (!preview || !canApply || !isApprovalThread(request.data?.origin)) return;
+    if (!preview || !canApply || !isApprovalThread(request.origin)) return;
     setBusy(true);
     setError("");
     try {
@@ -24808,7 +24933,7 @@ function AccessRequestReview({
       await credentialRequest(path + (setup ? "/account" : "/apply"), "POST", {
         connection_id: preview.connection.id,
         connection_revision: preview.connection.revision,
-        request_revision: preview.request.revision,
+        request_revision: preview.requestRevision,
         ...!setup ? {
           configure_mcp: configureMcp,
           config_revision: preview.mcp?.revision,
@@ -24817,14 +24942,13 @@ function AccessRequestReview({
         ...message2 ? { message: message2 } : {}
       });
       clearApprovalMessage(id2);
+      setSubmitted(`${id2}:${request.revision}`);
       setPreview(null);
-      await request.refresh();
       onSaved();
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
       setError(errorMessage(error2));
       setPreview(null);
-      await request.refresh();
       onSaved();
     } finally {
       setBusy(false);
@@ -24834,12 +24958,11 @@ function AccessRequestReview({
     if (setup && created?.status === "ready" && selected === created.id && canApply) void apply2();
   }, [setup, created?.id, created?.status, selected, canApply]);
   async function reject() {
-    if (!isApprovalThread(request.data?.origin)) return;
+    if (!isApprovalThread(request.origin)) return;
     setBusy(true);
     setError("");
     try {
       await respondApproval(id2, "reject", approvalMessageDrafts.value[id2]);
-      await request.refresh();
     } catch (error2) {
       setError(errorMessage(error2));
     } finally {
@@ -24847,25 +24970,24 @@ function AccessRequestReview({
     }
   }
   async function retry() {
-    if (!request.data || busy || !isApprovalThread(request.data.origin)) return;
+    if (blocked || !isApprovalThread(request.origin)) return;
     setBusy(true);
     setError("");
     setPreview(null);
     setConfigureMcp(false);
     try {
-      await credentialRequest(path + "/retry", "POST", { request_revision: request.data.revision });
+      await credentialRequest(path + "/retry", "POST", { request_revision: request.revision });
+      setSubmitted(`${id2}:${request.revision}`);
       setSelected("");
       onSaved();
-      await request.refresh();
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
       setError(errorMessage(error2));
-      await request.refresh();
     } finally {
       setBusy(false);
     }
   }
-  const agentName = request.data?.agent_group_name ?? "the agent";
+  const agentName = request.agentGroupName;
   const accountStatus = {
     ready: "Ready",
     draft: "Needs sign-in",
@@ -24873,262 +24995,259 @@ function AccessRequestReview({
     disabled: "Turned off"
   };
   return /* @__PURE__ */ u4(ApprovalCardFrame, { approvalId: id2, title: setup ? "Set up an account" : "Allow account access?", children: /* @__PURE__ */ u4("div", { class: "approval-text access-request-review", children: [
-    /* @__PURE__ */ u4(ErrorNotice, { message: request.error || (failed ? "Couldn't finish setup. Some changes may have applied." : error) }),
-    request.loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading the request\u2026" }) : null,
-    request.error ? /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn", onClick: () => void request.refresh(), children: "Try again" }) : null,
-    request.data ? /* @__PURE__ */ u4(k, { children: [
-      request.data.mcp_server ? /* @__PURE__ */ u4("p", { children: [
-        /* @__PURE__ */ u4("strong", { children: "Tools:" }),
-        " ",
-        request.data.mcp_server
-      ] }) : null,
-      !setup ? /* @__PURE__ */ u4("blockquote", { class: "access-request-reason", children: request.data.reason }) : null,
-      request.data.status !== "pending" ? /* @__PURE__ */ u4("div", { children: [
-        !failed ? /* @__PURE__ */ u4("p", { role: "status", children: setup && request.data.status === "completed" ? "Account setup confirmed. No agent access was granted." : STATUS_LABELS[request.data.status] ?? request.data.status }) : null,
-        request.data.status === "failed" && here ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "approval-btn",
-            disabled: blocked,
-            onClick: () => void retry(),
-            children: "Review and retry"
-          }
-        ) : null
-      ] }) : !here ? /* @__PURE__ */ u4("p", { children: request.data.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(request.data.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : /* @__PURE__ */ u4(k, { children: [
-        loadingAccounts ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading accounts\u2026" }) : null,
-        /* @__PURE__ */ u4(ErrorNotice, { message: accountsError ?? "" }),
-        accountsError ? /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn", onClick: onReloadAccounts, children: "Try again" }) : null,
-        compatible.length && !signingIn ? /* @__PURE__ */ u4("fieldset", { class: "access-accounts", disabled: busy || disabled || loadingAccounts, children: [
-          compatible.length > 1 ? /* @__PURE__ */ u4("legend", { children: "Choose an account" }) : null,
-          compatible.map((connection2) => /* @__PURE__ */ u4("label", { class: "access-account-option", children: [
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "radio",
-                name: `account-${id2}`,
-                "aria-label": `Account: ${connectionName(connection2)}${connection2.account ? ` (${connection2.account})` : ""}`,
-                value: connection2.id,
-                checked: selected === connection2.id,
-                onChange: () => setSelected(connection2.id)
-              }
-            ),
-            /* @__PURE__ */ u4("span", { children: [
-              /* @__PURE__ */ u4("span", { class: "access-account-name", children: [
-                /* @__PURE__ */ u4("strong", { children: "Account:" }),
-                " ",
-                connectionName(connection2)
-              ] }),
-              connection2.account ? /* @__PURE__ */ u4("span", { class: "access-account-identity", children: connection2.account }) : null,
-              /* @__PURE__ */ u4("span", { class: "muted", children: accountStatus[connection2.status] }),
-              connection2.status !== "ready" ? /* @__PURE__ */ u4(
-                "button",
-                {
-                  type: "button",
-                  class: "approval-btn",
-                  disabled: blocked,
-                  onClick: () => void manageAccount(connection2),
-                  children: connection2.status === "disabled" ? "Enable" : connection2.kind === "static" ? "Update account" : "Sign in"
-                }
-              ) : null
-            ] })
-          ] }, connection2.id))
-        ] }) : null,
-        !signingIn ? reconnect.map((connection2) => /* @__PURE__ */ u4("div", { class: "access-account-option", children: [
+    /* @__PURE__ */ u4(ErrorNotice, { message: failed ? "Couldn't finish setup. Some changes may have applied." : error }),
+    awaiting ? /* @__PURE__ */ u4("p", { role: "status", children: "Waiting for confirmation\u2026" }) : null,
+    requirements2.mcp_server ? /* @__PURE__ */ u4("p", { children: [
+      /* @__PURE__ */ u4("strong", { children: "Tools:" }),
+      " ",
+      requirements2.mcp_server
+    ] }) : null,
+    !setup ? /* @__PURE__ */ u4("blockquote", { class: "access-request-reason", children: requirements2.reason }) : null,
+    request.status !== "pending" ? /* @__PURE__ */ u4("div", { children: [
+      !failed ? /* @__PURE__ */ u4("p", { role: "status", children: accountRequestStatusText(request) }) : null,
+      request.status === "failed" && here ? /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "approval-btn",
+          disabled: blocked,
+          onClick: () => void retry(),
+          children: "Review and retry"
+        }
+      ) : null
+    ] }) : !here ? /* @__PURE__ */ u4("p", { children: request.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(request.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : /* @__PURE__ */ u4(k, { children: [
+      loadingAccounts ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading accounts\u2026" }) : null,
+      /* @__PURE__ */ u4(ErrorNotice, { message: accountsError ?? "" }),
+      accountsError ? /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn", onClick: onReloadAccounts, children: "Try again" }) : null,
+      compatible.length && !signingIn ? /* @__PURE__ */ u4("fieldset", { class: "access-accounts", disabled: blocked, children: [
+        compatible.length > 1 ? /* @__PURE__ */ u4("legend", { children: "Choose an account" }) : null,
+        compatible.map((connection2) => /* @__PURE__ */ u4("label", { class: "access-account-option", children: [
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "radio",
+              name: `account-${id2}`,
+              "aria-label": `Account: ${connectionName(connection2)}${connection2.account ? ` (${connection2.account})` : ""}`,
+              value: connection2.id,
+              checked: selected === connection2.id,
+              onChange: () => setSelected(connection2.id)
+            }
+          ),
           /* @__PURE__ */ u4("span", { children: [
             /* @__PURE__ */ u4("span", { class: "access-account-name", children: [
               /* @__PURE__ */ u4("strong", { children: "Account:" }),
               " ",
               connectionName(connection2)
             ] }),
-            connection2.account ? /* @__PURE__ */ u4("span", { class: "access-account-identity", children: connection2.account }) : null
+            connection2.account ? /* @__PURE__ */ u4("span", { class: "access-account-identity", children: connection2.account }) : null,
+            /* @__PURE__ */ u4("span", { class: "muted", children: accountStatus[connection2.status] }),
+            connection2.status !== "ready" ? /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "button",
+                class: "approval-btn",
+                disabled: blocked,
+                onClick: () => void manageAccount(connection2),
+                children: connection2.status === "disabled" ? "Enable" : connection2.kind === "static" ? "Update account" : "Sign in"
+              }
+            ) : null
+          ] })
+        ] }, connection2.id))
+      ] }) : null,
+      !signingIn ? reconnect.map((connection2) => /* @__PURE__ */ u4("div", { class: "access-account-option", children: [
+        /* @__PURE__ */ u4("span", { children: [
+          /* @__PURE__ */ u4("span", { class: "access-account-name", children: [
+            /* @__PURE__ */ u4("strong", { children: "Account:" }),
+            " ",
+            connectionName(connection2)
           ] }),
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn",
-              disabled: blocked,
-              onClick: () => void manageAccount(connection2),
-              children: connection2.status === "disabled" ? "Enable" : "Sign in"
-            }
-          )
-        ] }, connection2.id)) : null,
-        createdMismatch && !selected ? /* @__PURE__ */ u4("div", { role: "alert", children: [
-          "This account doesn't match the request. No access was granted.",
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn",
-              disabled: blocked,
-              onClick: () => onManage(created, effectiveRequest ?? void 0),
-              children: "Review the new account"
-            }
-          )
-        ] }) : null,
-        (compatible.length || reconnect.length) && !signingIn ? /* @__PURE__ */ u4(
+          connection2.account ? /* @__PURE__ */ u4("span", { class: "access-account-identity", children: connection2.account }) : null
+        ] }),
+        /* @__PURE__ */ u4(
           "button",
           {
             type: "button",
             class: "approval-btn",
             disabled: blocked,
-            onClick: () => {
-              setSelected("");
-              setPreview(null);
-              return addAccount();
-            },
-            children: "Add account"
+            onClick: () => void manageAccount(connection2),
+            children: connection2.status === "disabled" ? "Enable" : "Sign in"
           }
-        ) : null,
-        signInMessage,
-        preview ? /* @__PURE__ */ u4(k, { children: [
-          !setup && preview.mcp?.names.length ? /* @__PURE__ */ u4("div", { class: "access-tools-choice", children: [
+        )
+      ] }, connection2.id)) : null,
+      createdMismatch && !selected ? /* @__PURE__ */ u4("div", { role: "alert", children: [
+        "This account doesn't match the request. No access was granted.",
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "approval-btn",
+            disabled: blocked,
+            onClick: () => onManage(created, effectiveRequest),
+            children: "Review the new account"
+          }
+        )
+      ] }) : null,
+      (compatible.length || reconnect.length) && !signingIn ? /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "approval-btn",
+          disabled: blocked,
+          onClick: () => {
+            setSelected("");
+            setPreview(null);
+            return addAccount();
+          },
+          children: "Add account"
+        }
+      ) : null,
+      signInMessage,
+      preview ? /* @__PURE__ */ u4(k, { children: [
+        !setup && preview.mcp?.names.length ? /* @__PURE__ */ u4("div", { class: "access-tools-choice", children: [
+          /* @__PURE__ */ u4("label", { children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "checkbox",
+                checked: configureMcp,
+                disabled: blocked,
+                onChange: (event) => setConfigureMcp(event.currentTarget.checked)
+              }
+            ),
+            "Use this account with ",
+            mcpServer ? `${mcpServer} tools` : "these tools"
+          ] }),
+          configureMcp ? /* @__PURE__ */ u4(k, { children: [
+            !requirements2.mcp_server ? /* @__PURE__ */ u4("label", { children: [
+              "Tools",
+              /* @__PURE__ */ u4(
+                "select",
+                {
+                  "aria-label": "Tools for this account",
+                  value: mcpServer,
+                  disabled: blocked,
+                  onChange: (event) => {
+                    const name = event.currentTarget.value;
+                    setMcpServer(name);
+                    setAccountAlias(accountNickname(preview, name));
+                  },
+                  children: [
+                    /* @__PURE__ */ u4("option", { value: "", children: "Choose tools" }),
+                    preview.mcp.names.map((name) => /* @__PURE__ */ u4("option", { value: name, children: name }, name))
+                  ]
+                }
+              )
+            ] }) : null,
             /* @__PURE__ */ u4("label", { children: [
+              "Name the agent sees",
               /* @__PURE__ */ u4(
                 "input",
                 {
-                  type: "checkbox",
-                  checked: configureMcp,
+                  type: "text",
+                  class: "question-card-input",
+                  "aria-label": "Account name shown to agent",
+                  value: accountAlias,
+                  maxLength: 80,
                   disabled: blocked,
-                  onChange: (event) => setConfigureMcp(event.currentTarget.checked)
+                  onInput: (event) => setAccountAlias(event.currentTarget.value)
                 }
-              ),
-              "Use this account with ",
-              mcpServer ? `${mcpServer} tools` : "these tools"
-            ] }),
-            configureMcp ? /* @__PURE__ */ u4(k, { children: [
-              !preview.request.mcp_server ? /* @__PURE__ */ u4("label", { children: [
-                "Tools",
-                /* @__PURE__ */ u4(
-                  "select",
-                  {
-                    "aria-label": "Tools for this account",
-                    value: mcpServer,
-                    disabled: blocked,
-                    onChange: (event) => {
-                      const name = event.currentTarget.value;
-                      setMcpServer(name);
-                      setAccountAlias(accountNickname(preview, name));
-                    },
-                    children: [
-                      /* @__PURE__ */ u4("option", { value: "", children: "Choose tools" }),
-                      preview.mcp.names.map((name) => /* @__PURE__ */ u4("option", { value: name, children: name }, name))
-                    ]
-                  }
-                )
-              ] }) : null,
-              /* @__PURE__ */ u4("label", { children: [
-                "Name the agent sees",
-                /* @__PURE__ */ u4(
-                  "input",
-                  {
-                    type: "text",
-                    class: "question-card-input",
-                    "aria-label": "Account name shown to agent",
-                    value: accountAlias,
-                    maxLength: 80,
-                    disabled: blocked,
-                    onInput: (event) => setAccountAlias(event.currentTarget.value)
-                  }
-                )
-              ] })
-            ] }) : null
-          ] }) : null,
-          !preview.matches ? /* @__PURE__ */ u4("p", { role: "status", children: "This account doesn't match the request." }) : null,
-          preview.connection.status !== "ready" || !preview.matches ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn",
-              disabled: blocked,
-              onClick: () => void manageAccount(preview.connection),
-              children: "Manage this account"
-            }
-          ) : null
-        ] }) : null
-      ] }),
-      setup ? /* @__PURE__ */ u4(k, { children: !signingIn && signInDestination ? /* @__PURE__ */ u4("p", { class: "access-destination", children: signInDestination }) : null }) : /* @__PURE__ */ u4("section", { class: "access-more-information", "aria-label": "Access details", children: [
-        /* @__PURE__ */ u4("p", { children: [
-          /* @__PURE__ */ u4("strong", { children: "Website:" }),
-          " ",
-          /* @__PURE__ */ u4("span", { class: "access-destination", children: request.data.resource_url })
-        ] }),
-        request.data.authentication ? /* @__PURE__ */ u4("p", { children: [
-          /* @__PURE__ */ u4("strong", { children: "Account type:" }),
-          " ",
-          ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type],
-          request.data.authentication.app_id ? ` \xB7 App: ${request.data.authentication.app_id}` : ""
+              )
+            ] })
+          ] }) : null
         ] }) : null,
-        request.data.authentication?.header ? /* @__PURE__ */ u4("p", { children: [
-          "Sign-in field: ",
-          request.data.authentication.header
-        ] }) : null,
-        request.data.authentication?.parameter ? /* @__PURE__ */ u4("p", { children: [
-          "Sign-in field in the website address: ",
-          request.data.authentication.parameter
-        ] }) : null,
-        request.data.authentication?.prefix !== void 0 ? /* @__PURE__ */ u4("p", { children: [
-          "The value starts with: ",
-          JSON.stringify(request.data.authentication.prefix)
-        ] }) : null,
-        request.data.authentication?.headers?.length ? /* @__PURE__ */ u4("p", { children: [
-          "Sign-in fields: ",
-          request.data.authentication.headers.join(", ")
-        ] }) : null,
-        request.data.scopes?.length ? /* @__PURE__ */ u4(k, { children: [
-          /* @__PURE__ */ u4("p", { children: "Needed permissions:" }),
-          /* @__PURE__ */ u4("ul", { children: request.data.scopes.map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) })
-        ] }) : null,
-        preview ? /* @__PURE__ */ u4(k, { children: [
-          /* @__PURE__ */ u4("p", { children: "This account is set up for:" }),
-          /* @__PURE__ */ u4("ul", { children: preview.connection.services.map((service) => /* @__PURE__ */ u4("li", { children: serviceDestination(service) }, service.name)) }),
-          preview.connection.kind !== "static" ? /* @__PURE__ */ u4("p", { children: [
-            /* @__PURE__ */ u4("strong", { children: "Enabled permissions:" }),
-            " ",
-            preview.connection.scope_source === "provider" ? preview.connection.granted_scopes?.join(", ") || "Not reported." : "Not confirmed by the provider."
-          ] }) : null,
-          /* @__PURE__ */ u4("p", { children: "The agent receives all enabled permissions on this account to act on your behalf." })
-        ] }) : null,
-        failed && error ? /* @__PURE__ */ u4("p", { children: error }) : null,
-        request.data.result?.message && request.data.result.message !== error ? /* @__PURE__ */ u4("p", { children: request.data.result.message }) : null
-      ] }),
-      request.data.status === "pending" && here ? /* @__PURE__ */ u4(k, { children: [
-        !setup && preview && selected ? /* @__PURE__ */ u4("p", { class: "access-decision-summary", children: [
-          agentName,
-          " can use the ",
-          /* @__PURE__ */ u4("strong", { children: [
-            connectionName(preview.connection),
-            " account"
-          ] }),
-          ".",
-          configureMcp ? ` ${mcpServer || "The selected"} tools will also use this account.` : ""
-        ] }) : null,
-        !signingIn && (!setup || compatible.length) ? /* @__PURE__ */ u4(ApprovalMessageInput, { approvalId: id2, disabled: blocked }) : null,
-        /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: [
-          /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn approval-reject", disabled: busy || disabled, onClick: () => void reject(), children: "Decline" }),
-          !compatible.length && !reconnect.length && !signingIn ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn primary",
-              disabled: blocked,
-              onClick: () => addAccount(),
-              children: busy ? "Starting\u2026" : oauth ? "Sign in" : "Add account"
-            }
-          ) : null,
-          !setup || chosen?.status === "ready" ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn approval-approve primary",
-              disabled: !canApply,
-              onClick: () => void apply2(),
-              children: busy ? "Applying\u2026" : setup ? "Confirm account setup" : "Allow access"
-            }
-          ) : null
-        ] })
+        !preview.matches ? /* @__PURE__ */ u4("p", { role: "status", children: "This account doesn't match the request." }) : null,
+        preview.connection.status !== "ready" || !preview.matches ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "approval-btn",
+            disabled: blocked,
+            onClick: () => void manageAccount(preview.connection),
+            children: "Manage this account"
+          }
+        ) : null
       ] }) : null
+    ] }),
+    setup ? /* @__PURE__ */ u4(k, { children: !signingIn && signInDestination ? /* @__PURE__ */ u4("p", { class: "access-destination", children: signInDestination }) : null }) : /* @__PURE__ */ u4("section", { class: "access-more-information", "aria-label": "Access details", children: [
+      /* @__PURE__ */ u4("p", { children: [
+        /* @__PURE__ */ u4("strong", { children: "Website:" }),
+        " ",
+        /* @__PURE__ */ u4("span", { class: "access-destination", children: requirements2.resource_url })
+      ] }),
+      requirements2.authentication ? /* @__PURE__ */ u4("p", { children: [
+        /* @__PURE__ */ u4("strong", { children: "Account type:" }),
+        " ",
+        ACCESS_AUTHENTICATION_LABELS[requirements2.authentication.type],
+        requirements2.authentication.app_id ? ` \xB7 App: ${requirements2.authentication.app_id}` : ""
+      ] }) : null,
+      requirements2.authentication?.header ? /* @__PURE__ */ u4("p", { children: [
+        "Sign-in field: ",
+        requirements2.authentication.header
+      ] }) : null,
+      requirements2.authentication?.parameter ? /* @__PURE__ */ u4("p", { children: [
+        "Sign-in field in the website address: ",
+        requirements2.authentication.parameter
+      ] }) : null,
+      requirements2.authentication?.prefix !== void 0 ? /* @__PURE__ */ u4("p", { children: [
+        "The value starts with: ",
+        JSON.stringify(requirements2.authentication.prefix)
+      ] }) : null,
+      requirements2.authentication?.headers?.length ? /* @__PURE__ */ u4("p", { children: [
+        "Sign-in fields: ",
+        requirements2.authentication.headers.join(", ")
+      ] }) : null,
+      requirements2.scopes?.length ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("p", { children: "Needed permissions:" }),
+        /* @__PURE__ */ u4("ul", { children: requirements2.scopes.map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) })
+      ] }) : null,
+      preview ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("p", { children: "This account is set up for:" }),
+        /* @__PURE__ */ u4("ul", { children: preview.connection.services.map((service) => /* @__PURE__ */ u4("li", { children: serviceDestination(service) }, service.name)) }),
+        preview.connection.kind !== "static" ? /* @__PURE__ */ u4("p", { children: [
+          /* @__PURE__ */ u4("strong", { children: "Enabled permissions:" }),
+          " ",
+          preview.connection.scope_source === "provider" ? preview.connection.granted_scopes?.join(", ") || "Not reported." : "Not confirmed by the provider."
+        ] }) : null,
+        /* @__PURE__ */ u4("p", { children: "The agent receives all enabled permissions on this account to act on your behalf." })
+      ] }) : null,
+      failed && error ? /* @__PURE__ */ u4("p", { children: error }) : null,
+      request.outcomeMessage && request.outcomeMessage !== error ? /* @__PURE__ */ u4("p", { children: request.outcomeMessage }) : null
+    ] }),
+    request.status === "pending" && here ? /* @__PURE__ */ u4(k, { children: [
+      !setup && preview && selected ? /* @__PURE__ */ u4("p", { class: "access-decision-summary", children: [
+        agentName,
+        " can use the ",
+        /* @__PURE__ */ u4("strong", { children: [
+          connectionName(preview.connection),
+          " account"
+        ] }),
+        ".",
+        configureMcp ? ` ${mcpServer || "The selected"} tools will also use this account.` : ""
+      ] }) : null,
+      !signingIn && (!setup || compatible.length) ? /* @__PURE__ */ u4(ApprovalMessageInput, { approvalId: id2, disabled: blocked }) : null,
+      /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: [
+        /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn approval-reject", disabled: blocked, onClick: () => void reject(), children: "Decline" }),
+        !compatible.length && !reconnect.length && !signingIn ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "approval-btn primary",
+            disabled: blocked,
+            onClick: () => addAccount(),
+            children: busy ? "Starting\u2026" : oauth ? "Sign in" : "Add account"
+          }
+        ) : null,
+        !setup || chosen?.status === "ready" ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "approval-btn approval-approve primary",
+            disabled: !canApply,
+            onClick: () => void apply2(),
+            children: busy ? "Applying\u2026" : setup ? "Confirm account setup" : "Allow access"
+          }
+        ) : null
+      ] })
     ] }) : null
   ] }) });
 }
@@ -25401,12 +25520,12 @@ function CredentialRow({ connection: connection2, groups: groups2, apps, busy, o
     error ? /* @__PURE__ */ u4("tr", { children: /* @__PURE__ */ u4("td", { colSpan: groups2.length + 1, children: /* @__PURE__ */ u4(ErrorNotice, { message: error }) }) }) : null
   ] });
 }
-function CredentialCell({ children, services, account, status, actions }) {
+function CredentialCell({ children, services, account: account2, status, actions }) {
   const destinations = [...new Set(services.map(serviceDestination))];
   const notice = status === "ready" || status === "active" ? "" : status === "disabled" ? "Disabled" : status === "draft" ? "Not connected" : status === "suspended" ? "Access needs review" : "Sign in required";
   return /* @__PURE__ */ u4("th", { scope: "row", class: "credentials-matrix-name", children: [
     children,
-    account ? /* @__PURE__ */ u4("span", { class: "muted", children: account }) : null,
+    account2 ? /* @__PURE__ */ u4("span", { class: "muted", children: account2 }) : null,
     destinations.map((destination) => /* @__PURE__ */ u4("span", { class: "muted credential-destination", children: destination }, destination)),
     notice ? /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: notice }) : null,
     actions
@@ -26674,7 +26793,17 @@ function OAuthAppDialog({ app, canEditInstall, onClose, onSaved }) {
 }
 
 // src/components/AccessRequestCard.tsx
-function AccessRequestCard({ id: id2, disabled }) {
+function AccountRequestSummary({ request }) {
+  return /* @__PURE__ */ u4(ApprovalCardFrame, { approvalId: request.id, title: request.kind === "account_setup" ? "Set up an account" : "Allow account access?", children: /* @__PURE__ */ u4("div", { class: "approval-text", children: [
+    /* @__PURE__ */ u4("p", { children: request.requirements.reason }),
+    /* @__PURE__ */ u4("p", { class: "access-destination", children: request.requirements.resource_url }),
+    !isApprovalThread(request.origin) ? /* @__PURE__ */ u4("p", { children: request.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(request.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : null,
+    request.status !== "pending" ? /* @__PURE__ */ u4("p", { role: "status", children: accountRequestStatusText(request) }) : null,
+    request.responseMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", children: request.responseMessage }) : null,
+    request.status === "failed" && request.outcomeMessage ? /* @__PURE__ */ u4("p", { role: "alert", children: request.outcomeMessage }) : null
+  ] }) });
+}
+function AccessRequestCard({ request, disabled }) {
   const accounts = useCredentialResource(credentialsPath());
   const [dialog, setDialog] = h2(null);
   const [created, setCreated] = h2();
@@ -26688,7 +26817,7 @@ function AccessRequestCard({ id: id2, disabled }) {
     /* @__PURE__ */ u4(
       AccessRequestReview,
       {
-        id: id2,
+        request,
         connections: accounts.data?.connections ?? [],
         apps: accounts.data?.apps ?? [],
         disabled,
@@ -26697,8 +26826,8 @@ function AccessRequestCard({ id: id2, disabled }) {
         onReloadAccounts: saved,
         preferredConnectionId: created,
         signingIn: !!signIn.waiting,
-        onCreate: (request) => setDialog({ kind: "add", request }),
-        onManage: (account, request) => setDialog({ kind: "manage", connection: account, request }),
+        onCreate: (request2) => setDialog({ kind: "add", request: request2 }),
+        onManage: (account2, request2) => setDialog({ kind: "manage", connection: account2, request: request2 }),
         onSaved: saved,
         signInMessage: signIn.waiting ? /* @__PURE__ */ u4("div", { class: "access-sign-in", role: "status", children: [
           /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: [
@@ -26731,7 +26860,7 @@ function AccessRequestCard({ id: id2, disabled }) {
         apps: accounts.data.apps,
         resourceUrl: dialog.request.resource_url,
         accessRequest: dialog.request,
-        onCreated: (account) => setCreated(account.id),
+        onCreated: (account2) => setCreated(account2.id),
         onStart: signIn.start,
         onSaved: saved,
         onClose: close
@@ -26764,7 +26893,7 @@ function AccessRequestCard({ id: id2, disabled }) {
 // src/components/ApprovalBubble.tsx
 function ApprovalBubble({ approval: approval2, busy, onReview, onRespond, reference }) {
   const status = approval2.status;
-  const answered = approval2.decision === "approve" || approval2.decision === "reject" || status === "approved" || status === "rejected";
+  const answered = approval2.decision === "approve" || approval2.decision === "reject" || status === "approved" || status === "completed" || status === "rejected";
   const from = answered ? approval2.respondedBy && approval2.respondedBy.userId !== currentUserId.value ? approval2.respondedBy.displayName : void 0 : approval2.agentGroupId !== groupId.value ? approval2.agentGroupName || "Global" : void 0;
   const access = approval2.kind !== "confirmation" && isApprovalThread(approval2.origin) && ["pending", "applying", "failed"].includes(status);
   return /* @__PURE__ */ u4(
@@ -26774,7 +26903,7 @@ function ApprovalBubble({ approval: approval2, busy, onReview, onRespond, refere
       "data-msg-id": approval2.id,
       from,
       timestamp: approval2.resolvedAt ?? approval2.createdAt,
-      children: access ? /* @__PURE__ */ u4(AccessRequestCard, { id: approval2.id, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(ApprovalCard, { approval: approval2, busy, onReview, onRespond })
+      children: approval2.kind === "confirmation" ? /* @__PURE__ */ u4(ApprovalCard, { approval: approval2, busy, onReview, onRespond }) : access ? /* @__PURE__ */ u4(AccessRequestCard, { request: approval2, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(AccountRequestSummary, { request: approval2 })
     }
   );
 }

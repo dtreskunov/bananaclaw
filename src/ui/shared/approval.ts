@@ -5,24 +5,59 @@ export interface ApprovalOrigin {
   messagingGroupId: string;
 }
 
-export interface ConversationApproval {
-  kind: 'confirmation' | 'account_setup' | 'access_grant';
+interface InteractionIdentity {
   id: string;
+  agentGroupId: string | null;
+  agentGroupName: string | null;
+  createdAt: string;
+}
+
+interface InteractionContext {
+  origin?: ApprovalOrigin | null;
+  decision?: string | null;
+  respondedBy?: { userId: string; displayName: string } | null;
+  responseMessage?: string | null;
+}
+
+export interface ConfirmationInteraction extends InteractionIdentity, InteractionContext {
+  kind: 'confirmation';
   action: string;
   title: string;
   details: string | null;
   packages: { apt: string[]; npm: string[]; pip: string[] } | null;
   options: { label: string; selectedLabel: string; value: string }[];
-  agentGroupId: string | null;
-  agentGroupName: string | null;
-  createdAt: string;
   supportsResponseMessage: boolean;
   reviewRequired: boolean;
-  origin?: ApprovalOrigin | null;
   status: 'pending' | 'applying' | 'approved' | 'rejected' | 'failed' | 'cancelled' | 'expired';
-  decision?: string | null;
-  respondedBy?: { userId: string; displayName: string } | null;
-  responseMessage?: string | null;
   outcomeMessage?: string | null;
   resolvedAt?: string | null;
 }
+
+export interface AccountRequirements extends AccessRequirements {
+  reason: string;
+}
+
+export type AccountRequestStatus =
+  | 'pending'
+  | 'applying'
+  | 'completed'
+  | 'rejected'
+  | 'cancelled'
+  | 'expired'
+  | 'failed';
+
+export interface AccountRequestData extends InteractionIdentity {
+  kind: 'account_setup' | 'access_grant';
+  requirements: AccountRequirements;
+  status: AccountRequestStatus;
+  revision: number;
+  agentGroupId: string;
+  agentGroupName: string;
+  expiresAt: string | null;
+  outcomeMessage: string | null;
+  resolvedAt: string | null;
+}
+
+export type AccountInteraction = AccountRequestData & InteractionContext;
+export type ConversationApproval = ConfirmationInteraction | AccountInteraction;
+import type { AccessRequirements } from './access-authentication.js';

@@ -4,8 +4,11 @@ import { wakeContainer } from '../../container-runner.js';
 import { writeApprovalNotification } from './notification.js';
 import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
 import { updateApprovalHistory } from '../../db/approval-history.js';
+import { getAgentGroup } from '../../db/agent-groups.js';
+import { accessRequestInput, ConnectionInputError } from '../../ui/shared/connection-input.js';
+import type { AccountRequestData, AccountRequestStatus } from '../../ui/shared/approval.js';
 
-export type WorkflowStage = 'pending' | 'applying' | 'completed' | 'rejected' | 'cancelled' | 'expired' | 'failed';
+export type WorkflowStage = AccountRequestStatus;
 export interface ApprovalWorkflow {
   approval_id: string;
   dedupe_key: string;
@@ -26,6 +29,44 @@ export function getApprovalWorkflow(id: string): ApprovalWorkflow | undefined {
     OR EXISTS(SELECT 1 FROM json_each(submission_ids_json) WHERE value=?)`,
     )
     .get(id, id) as ApprovalWorkflow | undefined;
+}
+
+export function getAccountRequest(id: string, sessionId?: string): AccountRequestData {
+  const workflow = getApprovalWorkflow(id);
+  const approval = workflow ? getPendingApproval(workflow.approval_id) : undefined;
+  const session = approval?.session_id ? getSession(approval.session_id) : undefined;
+  if (
+    !approval ||
+    approval.action !== 'request_access' ||
+    !workflow ||
+    !session ||
+    (sessionId !== undefined && session.id !== sessionId)
+  )
+    throw new ConnectionInputError('Access request not found', 404);
+  if (workflow.stage === 'pending' && approval.expires_at && approval.expires_at <= new Date().toISOString()) {
+    finishApprovalWorkflow(
+      workflow.approval_id,
+      'expired',
+      'Your access request expired without changing credentials. Request access again if still needed.',
+    );
+    return getAccountRequest(id, sessionId);
+  }
+  return {
+    id: workflow.approval_id,
+    kind:
+      (JSON.parse(workflow.origin_json) as { purpose?: string }).purpose === 'account'
+        ? 'account_setup'
+        : 'access_grant',
+    requirements: accessRequestInput(JSON.parse(approval.payload)),
+    status: workflow.stage,
+    revision: workflow.revision,
+    agentGroupId: session.agent_group_id,
+    agentGroupName: getAgentGroup(session.agent_group_id)?.name ?? session.agent_group_id,
+    createdAt: approval.created_at,
+    expiresAt: approval.expires_at,
+    outcomeMessage: workflow.result_json ? (JSON.parse(workflow.result_json) as { message: string }).message : null,
+    resolvedAt: workflow.stage === 'pending' || workflow.stage === 'applying' ? null : workflow.updated_at,
+  };
 }
 
 export function linkApprovalSubmission(id: string, submissionId: string): void {

@@ -5,11 +5,30 @@ import { credentialsPath, type Connection, type CredentialsOverview } from './Cr
 import { useConnectionSignIn, useCredentialResource } from './CredentialsParts';
 import { ConnectionActionDialog, ConnectionEditor, OAuthConnectionDialog } from './CredentialsDialogs';
 import type { AccessRequirements } from '../../../../shared/access-authentication';
+import type { AccountInteraction } from '../../../../shared/approval';
+import { accountRequestStatusText } from './credential-presentation';
+import { ApprovalCardFrame } from './ApprovalCard';
+import { approvalThreadHref, isApprovalThread } from '../approval-origin';
 
 type AccountDialog = { kind: 'add'; request: AccessRequirements } |
   { kind: 'manage'; connection: Connection; request?: AccessRequirements };
 
-export function AccessRequestCard({ id, disabled }: { id: string; disabled?: boolean }) {
+export function AccountRequestSummary({ request }: { request: AccountInteraction }) {
+  return <ApprovalCardFrame approvalId={request.id} title={request.kind === 'account_setup' ? 'Set up an account' : 'Allow account access?'}>
+    <div class="approval-text">
+      <p>{request.requirements.reason}</p>
+      <p class="access-destination">{request.requirements.resource_url}</p>
+      {!isApprovalThread(request.origin) ? <p>{request.origin
+        ? <a href={approvalThreadHref(request.origin)}>Open requesting thread</a>
+        : 'Requesting thread unavailable.'}</p> : null}
+      {request.status !== 'pending' ? <p role="status">{accountRequestStatusText(request)}</p> : null}
+      {request.responseMessage ? <p class="approval-response-text">{request.responseMessage}</p> : null}
+      {request.status === 'failed' && request.outcomeMessage ? <p role="alert">{request.outcomeMessage}</p> : null}
+    </div>
+  </ApprovalCardFrame>;
+}
+
+export function AccessRequestCard({ request, disabled }: { request: AccountInteraction; disabled?: boolean }) {
   const accounts = useCredentialResource<CredentialsOverview>(credentialsPath());
   const [dialog, setDialog] = useState<AccountDialog | null>(null);
   const [created, setCreated] = useState<string>();
@@ -22,7 +41,7 @@ export function AccessRequestCard({ id, disabled }: { id: string; disabled?: boo
   return (
     <>
       <AccessRequestReview
-        id={id}
+        request={request}
         connections={accounts.data?.connections ?? []}
         apps={accounts.data?.apps ?? []}
         disabled={disabled}

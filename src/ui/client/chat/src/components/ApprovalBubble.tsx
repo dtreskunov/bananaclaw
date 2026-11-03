@@ -2,15 +2,16 @@ import type { ComponentProps } from 'preact';
 import { ApprovalCard } from './ApprovalCard';
 import { MessageBubble } from './MessageBubble';
 import { isApprovalThread } from '../approval-origin';
-import { AccessRequestCard } from './AccessRequestCard';
+import { AccessRequestCard, AccountRequestSummary } from './AccessRequestCard';
+import type { ConversationApproval } from '../../../../shared/approval';
 import { currentUserId, groupId } from '../state';
 
-type Props = ComponentProps<typeof ApprovalCard> & { reference?: boolean };
+type Props = Omit<ComponentProps<typeof ApprovalCard>, 'approval'> & { approval: ConversationApproval; reference?: boolean };
 
 export function ApprovalBubble({ approval, busy, onReview, onRespond, reference }: Props) {
   const status = approval.status;
   const answered = approval.decision === 'approve' || approval.decision === 'reject' ||
-    status === 'approved' || status === 'rejected';
+    status === 'approved' || status === 'completed' || status === 'rejected';
   const from = answered
     ? approval.respondedBy && approval.respondedBy.userId !== currentUserId.value
       ? approval.respondedBy.displayName : undefined
@@ -20,7 +21,9 @@ export function ApprovalBubble({ approval, busy, onReview, onRespond, reference 
   return <MessageBubble class={`msg ${answered ? 'in' : 'out'} approval-message${access ? ' markdown access-approval-message' : ''}${reference ? ' approval-reference' : ''}`}
     data-msg-id={approval.id}
     from={from} timestamp={approval.resolvedAt ?? approval.createdAt}>
-    {access ? <AccessRequestCard id={approval.id} disabled={busy || status === 'applying'} /> :
-      <ApprovalCard approval={approval} busy={busy} onReview={onReview} onRespond={onRespond} />}
+    {approval.kind === 'confirmation'
+      ? <ApprovalCard approval={approval} busy={busy} onReview={onReview} onRespond={onRespond} />
+      : access ? <AccessRequestCard request={approval} disabled={busy || status === 'applying'} />
+      : <AccountRequestSummary request={approval} />}
   </MessageBubble>;
 }

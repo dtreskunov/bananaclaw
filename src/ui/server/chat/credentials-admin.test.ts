@@ -3,6 +3,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Writable } from 'node:stream';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { projectAccountInteraction } from './approval-transcript.js';
 
 const ROOT = vi.hoisted(() => `/tmp/nanoclaw-shared-credentials-${process.pid}-${Math.random().toString(36).slice(2)}`);
 vi.mock('../../../config.js', async () => ({
@@ -228,7 +229,7 @@ describe('user-owned Credentials API', () => {
       resource_url: 'https://api.example.test/search',
       reason: 'Set up search.',
     });
-    const path = `/ui/chat/api/credentials/access-requests/${request.request_id}`;
+    const path = `/ui/chat/api/credentials/access-requests/${request.id}`;
     user = 'member';
     expect((await call('POST', path + '/setup', { request_revision: request.revision })).status).toBe(403);
     user = 'alice';
@@ -238,7 +239,7 @@ describe('user-owned Credentials API', () => {
     ).toBe(403);
     const setup = await call('POST', path + '/setup', { request_revision: request.revision });
     expect(setup.status).toBe(200);
-    expect(setup.value).toMatchObject({ purpose: 'account', revision: request.revision + 1 });
+    expect(setup.value).toMatchObject({ kind: 'account_setup', revision: request.revision + 1 });
     const selected = {
       connection_id: 'connection-one',
       connection_revision: REVISION,
@@ -247,7 +248,7 @@ describe('user-owned Credentials API', () => {
     expect((await call('POST', path + '/apply', selected)).status).toBe(409);
     const result = await call('POST', path + '/account', selected);
     expect(result.status).toBe(200);
-    expect(result.value).toMatchObject({ purpose: 'account', status: 'completed' });
+    expect(result.value).toMatchObject({ kind: 'account_setup', status: 'completed' });
     expect(result.text).toContain('No agent access was granted');
     expect(result.text).not.toContain('SEARCH_KEY');
     expect(requests.some((r) => r.method === 'PUT' && r.path.includes('/grants/'))).toBe(false);
@@ -274,9 +275,9 @@ describe('user-owned Credentials API', () => {
       reason: 'Read results.',
     });
     workflowGranted = true;
-    finishApprovalWorkflow(request.request_id, 'failed', 'Partial application');
-    const revision = getApprovalWorkflow(request.request_id)!.revision;
-    const path = `/ui/chat/api/credentials/access-requests/${request.request_id}`;
+    finishApprovalWorkflow(request.id, 'failed', 'Partial application');
+    const revision = getApprovalWorkflow(request.id)!.revision;
+    const path = `/ui/chat/api/credentials/access-requests/${request.id}`;
     user = 'member';
     expect((await call('POST', path + '/retry', { request_revision: revision })).status).toBe(403);
     user = 'alice';
@@ -287,7 +288,7 @@ describe('user-owned Credentials API', () => {
     expect((await call('POST', path + '/retry', { request_revision: 0 })).status).toBe(409);
     const retry = await call('POST', path + '/retry', { request_revision: revision });
     expect(retry.status).toBe(200);
-    expect(retry.value).toMatchObject({ status: 'pending', revision: revision + 1, result: null });
+    expect(retry.value).toMatchObject({ status: 'pending', revision: revision + 1, outcomeMessage: null });
     expect(requests.some((r) => r.method === 'PUT' && r.path.includes('/grants/'))).toBe(false);
     const applied = await call('POST', path + '/apply', {
       connection_id: 'connection-one',
@@ -320,16 +321,19 @@ describe('user-owned Credentials API', () => {
       reason: 'Read search results.',
       authentication: { type: 'bearer' },
     });
-    const path = `/ui/chat/api/credentials/access-requests/${request.request_id}`;
+    const path = `/ui/chat/api/credentials/access-requests/${request.id}`;
     user = 'member';
     expect((await call('GET', path)).status).toBe(403);
     user = 'alice';
     const review = await call('GET', path);
     expect(review.status).toBe(200);
-    expect(review.value).toMatchObject({ authentication: { type: 'bearer' } });
+    expect(review.value).toEqual(projectAccountInteraction('alice', request));
+    expect(review.value).toMatchObject({ requirements: { authentication: { type: 'bearer' } } });
     const preview = await call('POST', path + '/preview', { connection_id: 'connection-one' });
     expect(preview.status).toBe(200);
     expect(preview.value).toMatchObject({ matches: true, connection: { owner: { id: 'native-alice' } } });
+    expect(preview.value).toMatchObject({ requestRevision: request.revision });
+    expect(preview.value).not.toHaveProperty('request');
     expect(requests.some((r) => r.method === 'PUT' && r.path.includes('/grants/'))).toBe(false);
     expect(
       (

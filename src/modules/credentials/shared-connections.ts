@@ -7,6 +7,8 @@ import { AgentVaultError, gatewayJson, type GatewayRequestOptions } from './agen
 import { synchronizeManagedUser } from './managed-users.js';
 import type { GatewayService, AppInfo } from './gateway-credentials.js';
 import { recordSignIn } from './sign-ins.js';
+import { ConnectionInputError, objectBody } from '../../ui/shared/connection-input.js';
+export { ConnectionInputError, objectBody } from '../../ui/shared/connection-input.js';
 
 export interface ConnectionGrant {
   vault: string;
@@ -44,15 +46,6 @@ export interface ConnectionApp extends Omit<AppInfo, 'source'> {
   source: 'install' | 'user';
 }
 
-export class ConnectionInputError extends Error {
-  constructor(
-    message: string,
-    readonly status = 400,
-  ) {
-    super(message);
-  }
-}
-
 function requireUser(userId: string) {
   const user = getUser(userId);
   if (!user) throw new ConnectionInputError('Unknown credential owner', 403);
@@ -75,12 +68,6 @@ export function connectionRevision(value: unknown): string {
   if (typeof value !== 'string' || !/^"[a-f0-9]{64}"$/.test(value))
     throw new ConnectionInputError('Refresh connection metadata and supply its exact revision');
   return value;
-}
-
-export function objectBody(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new ConnectionInputError('Provide a JSON object');
-  return value as Record<string, unknown>;
 }
 
 function fields(body: Record<string, unknown>, allowed: string[]): void {

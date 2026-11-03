@@ -1213,7 +1213,7 @@ Skip failures retain the prompt and typed answer with a retryable error, includi
 a **Retry skip** control if the terminal outcome was saved before journaling failed.
 Answers and skips share one idempotent response ID and a first-response-wins update,
 so retries and competing tabs never produce both outcomes. Approvals cannot be skipped.
-Browser protocol version 7 carries questions and approvals as discriminated
+Browser protocol version 8 carries questions and consent requests as discriminated
 interactions. Choice, literal text, and skip responses are explicit; older
 clients must reload.
 
@@ -1356,7 +1356,7 @@ once, offline, using saved output associations and ordinals. These assigned
 positions encode canonical presentation order, not recovered execution timing.
 There are no runtime missing-position or saved-association placement fallbacks.
 
-The browser protocol is version 7 and validates `protocolVersion`, `streamId`,
+The browser protocol is version 8 and validates `protocolVersion`, `streamId`,
 revisions, entity shapes, timeline references, and unique activity placement.
 Gaps or unknown streams show a synchronization error and reconnect for a fresh
 snapshot; incompatible protocols explicitly ask for a page reload. Progress is
@@ -1375,6 +1375,14 @@ hints. Approvals use the same authorized projection in polling and transcripts,
 with one required status rather than optional status/stage fallbacks.
 The browser reuses these shared types and keeps rendering/submission metadata
 local. Account setup still grants no agent access.
+
+Account setup and access grants are structured-input variants, not approval
+objects with empty package/action fields. Their safe `requirements`, workflow
+revision and `completed` state are shared by native readers and browser views.
+The browser adds only viewer-specific origin and response context. Private
+previews bind `requestRevision`; they do not carry a second request DTO.
+The account editor receives the authoritative interaction as a prop and waits
+for its next revision after HTTP acceptance, rather than fetching shadow state.
 
 **Deployment:** this client and host have no legacy frame support. Build
 the checked-in bundle with `pnpm --dir src/ui/client/chat run build`, deploy host
@@ -1435,7 +1443,7 @@ conversion events are added to the drained journal. Repeat conversion is a no-op
 
 **Verify:** require zero pairs needing conversion, SQLite integrity/foreign-key
 checks, and matching activity positions on both sides before starting the matched
-host and runners. Verify session-link version 5, browser protocol version 7,
+host and runners. Verify session-link version 5, browser protocol version 8,
 served bundle hashes, reconnect snapshots, applied steering, mid-turn output and
 completion behavior. Reload open browser tabs. Runner source is bind-mounted, so
 source-only changes do not require an image rebuild.

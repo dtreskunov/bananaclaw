@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import type { PendingApprovalDto } from '../types';
+import type { ConfirmationInteraction } from '../../../../shared/approval';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { approvalMessageDrafts } from '../approval-messages';
 import { approvalThreadHref, isApprovalThread } from '../approval-origin';
@@ -14,7 +14,7 @@ export function ApprovalCardFrame({ approvalId, title, children }: {
 }
 
 export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
-  approval: PendingApprovalDto;
+  approval: ConfirmationInteraction;
   busy: boolean;
   onRespond: (value: string, message?: string) => void;
   onReview: () => void;
@@ -22,13 +22,12 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
   const status = a.status;
   const pending = status === 'pending';
   const here = isApprovalThread(a.origin);
-  const labels: Record<Exclude<PendingApprovalDto['status'], 'pending'>, string> = {
-    approved: a.kind === 'account_setup' ? 'Account setup confirmed' : 'Approved',
+  const labels: Record<Exclude<ConfirmationInteraction['status'], 'pending'>, string> = {
+    approved: 'Approved',
     rejected: 'Declined', applying: 'Applying…', failed: 'Could not apply',
     cancelled: 'Cancelled', expired: 'Expired',
   };
-  return <ApprovalCardFrame approvalId={a.id} title={a.kind === 'account_setup' ? 'Set up an account' :
-    a.action === 'add_mcp_server' ? 'Add tools' : a.title || a.action}>
+  return <ApprovalCardFrame approvalId={a.id} title={a.action === 'add_mcp_server' ? 'Add tools' : a.title || a.action}>
     <div class="approval-text">
       {a.packages ? <div class="approval-packages">
         {(['apt', 'npm', 'pip'] as const).map(manager => a.packages![manager].length ? <div class="approval-package-list" key={manager}>

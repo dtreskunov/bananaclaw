@@ -60,14 +60,14 @@ afterEach(() => {
   closeDb();
   fs.rmSync(root, { recursive: true, force: true });
 });
-function request() {
+function request(action = 'history-test', payload: Record<string, unknown> = {}) {
   createPendingApproval({
     approval_id: 'approval',
     session_id: 's',
     origin_message_id: 'source',
     request_id: 'request',
-    action: 'history-test',
-    payload: '{}',
+    action,
+    payload: JSON.stringify(payload),
     title: 'Install tool',
     options_json:
       '[{"label":"Approve","selectedLabel":"Approved","value":"approve"},{"label":"Reject","selectedLabel":"Declined","value":"reject"}]',
@@ -79,8 +79,7 @@ const approvals = (conversation = view()) => conversation.interactions.filter((i
 
 describe('retained approval transcript', () => {
   it('retains account-setup purpose and its responder after completion and reload', () => {
-    request();
-    getDb().prepare("UPDATE approval_history SET action='request_access' WHERE approval_id='approval'").run();
+    request('request_access', { resource_url: 'https://api.example.com/', reason: 'Read the report' });
     createApprovalWorkflow('approval', 'account-setup', { messageId: 'source', purpose: 'account' });
     expect(approvals()[0]).toMatchObject({
       kind: 'account_setup',
@@ -96,7 +95,7 @@ describe('retained approval transcript', () => {
     );
     expect(approvals()[0]).toMatchObject({
       kind: 'account_setup',
-      status: 'approved',
+      status: 'completed',
       respondedBy: { userId: 'owner', displayName: 'Owner' },
     });
   });

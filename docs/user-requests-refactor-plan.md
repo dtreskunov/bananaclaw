@@ -36,6 +36,15 @@ processing simple and adds no extra collection or registry.
 Interaction variants are question, confirmation, account setup, and access
 grant. Keep meaningful states and responses variant-specific:
 
+Account interactions carry `requirements` and the workflow revision directly.
+Their core data is shared by native/CLI readers and the authorized browser view;
+only viewer-specific origin, attribution, and response context are added for
+the browser. Account setup/grants use `completed`, not an approval-shaped
+`approved` state. The account editor receives this interaction as a prop and
+does not fetch or own another request DTO. Private previews bind a
+`requestRevision` without copying the request. The editor waits for the
+authoritative interaction update after HTTP acceptance.
+
 - A choice answer, literal text answer, and skip are explicit alternatives.
 - Approval is not successful application.
 - Account setup is not an agent access grant.

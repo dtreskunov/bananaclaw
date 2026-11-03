@@ -57,7 +57,7 @@ import {
 } from '../approvals/workflows.js';
 import {
   accessRequestInput,
-  accessRequestStatus,
+  getAccountRequest,
   applyAccessRequest,
   completeAccountRequest,
   prepareAccountRequest,
@@ -181,82 +181,82 @@ describe('assisted access approvals', () => {
       },
       'appr-access-scoped',
     );
-    expect(request.scopes).toEqual(['write']);
-    expect((await previewAccessRequest('alice', request.request_id, connection.id)).matches).toBe(false);
-    await expect(applyAccessRequest('alice', request.request_id, selection(request.revision))).rejects.toMatchObject({
+    expect(request.requirements.scopes).toEqual(['write']);
+    expect((await previewAccessRequest('alice', request.id, connection.id)).matches).toBe(false);
+    await expect(applyAccessRequest('alice', request.id, selection(request.revision))).rejects.toMatchObject({
       status: 409,
     });
     expect(mocks.grant).not.toHaveBeenCalled();
     connection.granted_scopes = ['read', 'write'];
-    expect((await previewAccessRequest('alice', request.request_id, connection.id)).matches).toBe(true);
+    expect((await previewAccessRequest('alice', request.id, connection.id)).matches).toBe(true);
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('completes account setup with metadata only and permits a separate access request', async () => {
     const request = await seed();
-    const setup = prepareAccountRequest('alice', request.request_id, { request_revision: request.revision });
-    expect(setup.purpose).toBe('account');
+    const setup = prepareAccountRequest('alice', request.id, { request_revision: request.revision });
+    expect(setup.kind).toBe('account_setup');
     expect(setup.revision).toBe(request.revision + 1);
-    await expect(applyAccessRequest('alice', setup.request_id, selection(setup.revision))).rejects.toMatchObject({
+    await expect(applyAccessRequest('alice', setup.id, selection(setup.revision))).rejects.toMatchObject({
       status: 409,
     });
     const configBefore = getDb().prepare('SELECT mcp_servers FROM container_configs').pluck().get();
-    await completeAccountRequest('alice', setup.request_id, {
+    await completeAccountRequest('alice', setup.id, {
       ...selection(setup.revision),
       message: 'Check setup before requesting access.',
     });
-    expect(accessRequestStatus(setup.request_id)).toMatchObject({ purpose: 'account', status: 'completed' });
+    expect(getAccountRequest(setup.id)).toMatchObject({ kind: 'account_setup', status: 'completed' });
     expect(mocks.grant).not.toHaveBeenCalled();
     expect(connection.grants).toEqual([]);
     expect(getDb().prepare('SELECT mcp_servers FROM container_configs').pluck().get()).toBe(configBefore);
-    const content = JSON.parse((resultMessage(setup.request_id) as { content: string }).content);
+    const content = JSON.parse((resultMessage(setup.id) as { content: string }).content);
     expect(content.text).toContain('No agent access was granted');
     expect(content.text).toContain('authenticated operations require a separate request_access');
     expect(content.text).not.toContain('API_KEY');
     expect(content.text).not.toContain('BIND_');
     expect(content.approvalResponse.message).toBe('Check setup before requesting access.');
     expect(mocks.wake).toHaveBeenCalled();
-    await notifyApprovalWorkflow(setup.request_id);
+    await notifyApprovalWorkflow(setup.id);
     expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
     const access = await requestAccess(session, input, 'appr-access-after-setup');
-    expect(access).toMatchObject({ request_id: 'appr-access-after-setup', purpose: 'access', status: 'pending' });
-    await applyAccessRequest('alice', access.request_id, selection(access.revision));
+    expect(access).toMatchObject({ id: 'appr-access-after-setup', kind: 'access_grant', status: 'pending' });
+    await applyAccessRequest('alice', access.id, selection(access.revision));
     expect(mocks.grant).toHaveBeenCalledOnce();
   });
   it('keeps a ready account with suspended agent access on the access-approval path', async () => {
     connection.grants = [{ vault: session.agent_group_id, services: ['api'], status: 'suspended' }];
     const request = await seed();
-    expect(request.purpose).toBe('access');
+    expect(request.kind).toBe('access_grant');
     expect(mocks.grant).not.toHaveBeenCalled();
-    await applyAccessRequest('alice', request.request_id, selection());
+    await applyAccessRequest('alice', request.id, selection());
     expect(mocks.grant).toHaveBeenCalledOnce();
   });
   it('rejects stale, unready, cross-owner and grant-shaped account setup confirmations', async () => {
     const request = await seed();
-    const setup = prepareAccountRequest('alice', request.request_id, { request_revision: request.revision });
-    await expect(completeAccountRequest('alice', setup.request_id, selection(request.revision))).rejects.toMatchObject({
+    const setup = prepareAccountRequest('alice', request.id, { request_revision: request.revision });
+    await expect(completeAccountRequest('alice', setup.id, selection(request.revision))).rejects.toMatchObject({
       status: 409,
     });
-    await expect(completeAccountRequest('bob', setup.request_id, selection(setup.revision))).rejects.toMatchObject({
+    await expect(completeAccountRequest('bob', setup.id, selection(setup.revision))).rejects.toMatchObject({
       status: 403,
     });
     connection.status = 'disabled';
-    await expect(completeAccountRequest('alice', setup.request_id, selection(setup.revision))).rejects.toMatchObject({
+    await expect(completeAccountRequest('alice', setup.id, selection(setup.revision))).rejects.toMatchObject({
       status: 409,
     });
     connection.status = 'ready';
     await expect(
-      completeAccountRequest('alice', setup.request_id, {
+      completeAccountRequest('alice', setup.id, {
         ...selection(setup.revision),
         configure_mcp: true,
       }),
     ).rejects.toMatchObject({ status: 400 });
     expect(mocks.grant).not.toHaveBeenCalled();
-    expect(accessRequestStatus(setup.request_id).status).toBe('pending');
+    expect(getAccountRequest(setup.id).status).toBe('pending');
   });
   it('rejects account setup without silently provisioning or granting access', async () => {
     const request = await seed();
-    prepareAccountRequest('alice', request.request_id, { request_revision: request.revision });
-    const approval = getPendingApproval(request.request_id)!;
+    prepareAccountRequest('alice', request.id, { request_revision: request.revision });
+    const approval = getPendingApproval(request.id)!;
     await getInteractiveApprovalHandler(approval.action)!(
       approval,
       {
@@ -269,28 +269,28 @@ describe('assisted access approvals', () => {
       },
       'alice',
     );
-    expect(accessRequestStatus(request.request_id)).toMatchObject({ purpose: 'account', status: 'rejected' });
+    expect(getAccountRequest(request.id)).toMatchObject({ kind: 'account_setup', status: 'rejected' });
     expect(mocks.grant).not.toHaveBeenCalled();
-    expect(JSON.parse((resultMessage(request.request_id) as { content: string }).content).text).toContain(
+    expect(JSON.parse((resultMessage(request.id) as { content: string }).content).text).toContain(
       'Your account setup request was rejected.',
     );
   });
   it('includes an access approval message in its single existing outcome notification', async () => {
     const request = await seed();
-    await applyAccessRequest('alice', request.request_id, { ...selection(), message: '  Use read-only operations.  ' });
+    await applyAccessRequest('alice', request.id, { ...selection(), message: '  Use read-only operations.  ' });
     expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
-    const content = JSON.parse((resultMessage(request.request_id) as { content: string }).content);
+    const content = JSON.parse((resultMessage(request.id) as { content: string }).content);
     expect(content.text).toContain('Access granted for');
     expect(content.text).toContain('User message from "alice":\nUse read-only operations.');
     expect(content.approvalResponse).toEqual({ userId: 'alice', message: 'Use read-only operations.' });
     expect(mocks.grant).toHaveBeenCalledWith('alice', connection.id, session.agent_group_id, { revision: rev });
-    await notifyApprovalWorkflow(request.request_id);
+    await notifyApprovalWorkflow(request.id);
     expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
   });
 
   it('includes a decline message without granting access or changing the decision', async () => {
     const request = await seed();
-    const approval = getPendingApproval(request.request_id)!;
+    const approval = getPendingApproval(request.id)!;
     await getInteractiveApprovalHandler(approval.action)!(
       approval,
       {
@@ -305,8 +305,8 @@ describe('assisted access approvals', () => {
       'alice',
     );
     expect(mocks.grant).not.toHaveBeenCalled();
-    expect(accessRequestStatus(request.request_id).status).toBe('rejected');
-    const content = JSON.parse((resultMessage(request.request_id) as { content: string }).content);
+    expect(getAccountRequest(request.id).status).toBe('rejected');
+    const content = JSON.parse((resultMessage(request.id) as { content: string }).content);
     expect(content.text).toContain('Your access request was rejected.');
     expect(content.text).toContain('Already finished elsewhere; do not retry.');
     expect(content.approvalResponse.userId).toBe('alice');
@@ -316,10 +316,10 @@ describe('assisted access approvals', () => {
     'rejects malformed or oversized approval messages before applying access',
     async (message) => {
       const request = await seed();
-      await expect(applyAccessRequest('alice', request.request_id, { ...selection(), message })).rejects.toMatchObject({
+      await expect(applyAccessRequest('alice', request.id, { ...selection(), message })).rejects.toMatchObject({
         status: 400,
       });
-      expect(accessRequestStatus(request.request_id).status).toBe('pending');
+      expect(getAccountRequest(request.id).status).toBe('pending');
       expect(mocks.grant).not.toHaveBeenCalled();
     },
   );
@@ -328,13 +328,13 @@ describe('assisted access approvals', () => {
     const request = await seed();
     mocks.grant.mockRejectedValueOnce(new Error('gateway failed'));
     await expect(
-      applyAccessRequest('alice', request.request_id, {
+      applyAccessRequest('alice', request.id, {
         ...selection(),
         message: 'Report the error instead of retrying.',
       }),
     ).rejects.toThrow('gateway failed');
-    expect(accessRequestStatus(request.request_id).status).toBe('failed');
-    const content = JSON.parse((resultMessage(request.request_id) as { content: string }).content);
+    expect(getAccountRequest(request.id).status).toBe('failed');
+    const content = JSON.parse((resultMessage(request.id) as { content: string }).content);
     expect(content.text).toContain('Access approval failed');
     expect(content.text).toContain('Report the error instead of retrying.');
     expect(content.approvalResponse.userId).toBe('alice');
@@ -343,15 +343,15 @@ describe('assisted access approvals', () => {
   it('recovers the exact responding user and message from a persisted access application', async () => {
     const request = await seed();
     connection.grants = [{ vault: session.agent_group_id, services: ['api'], status: 'active' }];
-    claimApprovalWorkflow(request.request_id, 1, {
+    claimApprovalWorkflow(request.id, 1, {
       userId: 'alice',
       connectionId: connection.id,
       connectionRevision: connection.revision,
       responseMessage: { userId: 'alice', message: 'Continue the original report.' },
     });
     await recoverAccessRequests(true);
-    expect(accessRequestStatus(request.request_id).status).toBe('completed');
-    const content = JSON.parse((resultMessage(request.request_id) as { content: string }).content);
+    expect(getAccountRequest(request.id).status).toBe('completed');
+    const content = JSON.parse((resultMessage(request.id) as { content: string }).content);
     expect(content.text).toContain('Continue the original report.');
     expect(content.approvalResponse).toEqual({ userId: 'alice', message: 'Continue the original report.' });
     expect(mocks.grant).not.toHaveBeenCalled();
@@ -371,7 +371,10 @@ describe('assisted access approvals', () => {
     );
     expect(response).toMatchObject({
       ok: true,
-      data: { status: 'pending', authentication: { type: 'api-key', header: 'X-Research-Key', prefix: 'Token ' } },
+      data: {
+        status: 'pending',
+        requirements: { authentication: { type: 'api-key', header: 'X-Research-Key', prefix: 'Token ' } },
+      },
     });
     expect(mocks.grant).not.toHaveBeenCalled();
   });
@@ -381,19 +384,18 @@ describe('assisted access approvals', () => {
       authentication: { type: 'mcp_oauth', app_id: 'google' },
       scopes: ['read'],
     });
-    expect(accessRequestStatus(request.request_id)).toMatchObject({
-      authentication: { type: 'mcp_oauth', app_id: 'google' },
-      scopes: ['read'],
+    expect(getAccountRequest(request.id)).toMatchObject({
+      requirements: { authentication: { type: 'mcp_oauth', app_id: 'google' }, scopes: ['read'] },
     });
-    expect((await previewAccessRequest('alice', request.request_id, connection.id)).matches).toBe(false);
-    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('Connect a compatible');
+    expect((await previewAccessRequest('alice', request.id, connection.id)).matches).toBe(false);
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('Connect a compatible');
     connection.kind = 'mcp_oauth';
     connection.app_id = 'google';
     connection.scope_source = 'provider';
     connection.granted_scopes = ['other'];
-    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('Connect a compatible');
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('Connect a compatible');
     connection.granted_scopes = ['read'];
-    expect((await applyAccessRequest('alice', request.request_id, selection())).status).toBe('completed');
+    expect((await applyAccessRequest('alice', request.id, selection())).status).toBe('completed');
   });
   it('accepts the real MCP transport envelope and provides session-scoped ncl parity', async () => {
     await getDeliveryAction('request_access')!(
@@ -401,7 +403,7 @@ describe('assisted access approvals', () => {
       session,
       getDb(),
     );
-    expect(accessRequestStatus('appr-access-envelope', session.id).status).toBe('pending');
+    expect(getAccountRequest('appr-access-envelope', session.id).status).toBe('pending');
     const ctx = {
       caller: 'agent' as const,
       sessionId: session.id,
@@ -416,7 +418,7 @@ describe('assisted access approvals', () => {
       },
       ctx,
     );
-    expect(requested).toMatchObject({ ok: true, data: { request_id: 'appr-access-envelope', status: 'pending' } });
+    expect(requested).toMatchObject({ ok: true, data: { id: 'appr-access-envelope', status: 'pending' } });
     expect(
       await dispatch(
         { id: 'cli-status', command: 'access-status', args: { 'request-id': 'appr-access-envelope' } },
@@ -434,10 +436,10 @@ describe('assisted access approvals', () => {
   it('persists in the common queue, deduplicates and never grants on submission', async () => {
     const first = await seed();
     const duplicate = await seed('appr-access-duplicate');
-    expect(first.request_id).toBe(duplicate.request_id);
-    expect(accessRequestStatus('appr-access-duplicate', session.id).request_id).toBe(first.request_id);
+    expect(first.id).toBe(duplicate.id);
+    expect(getAccountRequest('appr-access-duplicate', session.id).id).toBe(first.id);
     expect(first.status).toBe('pending');
-    expect(getPendingApproval(first.request_id)?.action).toBe('request_access');
+    expect(getPendingApproval(first.id)?.action).toBe('request_access');
     expect(getDb().prepare('SELECT COUNT(*) n FROM pending_approvals').get()).toEqual({ n: 1 });
     expect(mocks.grant).not.toHaveBeenCalled();
     expect(getDb().pragma('foreign_key_check')).toEqual([]);
@@ -464,11 +466,11 @@ describe('assisted access approvals', () => {
         getDb(),
       );
     }
-    expect(accessRequestStatus('appr-access-tavily-0')).toMatchObject({
+    expect(getAccountRequest('appr-access-tavily-0')).toMatchObject({
       status: 'pending',
-      resource_url: 'https://mcp.tavily.com/mcp/',
+      requirements: { resource_url: 'https://mcp.tavily.com/mcp/' },
     });
-    expect(accessRequestStatus('appr-access-tavily-1').request_id).toBe('appr-access-tavily-0');
+    expect(getAccountRequest('appr-access-tavily-1').id).toBe('appr-access-tavily-0');
     expect([...mocks.messages.values()]).toEqual([
       expect.objectContaining({ content: expect.stringContaining('review the pending approval') }),
     ]);
@@ -532,14 +534,14 @@ describe('assisted access approvals', () => {
   });
   it('does not reveal a different session request or another owner connection', async () => {
     const request = await seed();
-    expect(() => accessRequestStatus(request.request_id, 'other-session')).toThrow('not found');
-    expect(() => reviewAccessRequest('member', request.request_id)).toThrow();
-    await expect(previewAccessRequest('bob', request.request_id, connection.id)).rejects.toThrow('Not your connection');
-    expect(JSON.stringify(accessRequestStatus(request.request_id, session.id))).not.toContain('private-connection');
+    expect(() => getAccountRequest(request.id, 'other-session')).toThrow('not found');
+    expect(() => reviewAccessRequest('member', request.id)).toThrow();
+    await expect(previewAccessRequest('bob', request.id, connection.id)).rejects.toThrow('Not your connection');
+    expect(JSON.stringify(getAccountRequest(request.id, session.id))).not.toContain('private-connection');
   });
   it('requires private review; generic approve does not execute credentials', async () => {
     const request = await seed();
-    const approval = getPendingApproval(request.request_id)!;
+    const approval = getPendingApproval(request.id)!;
     await expect(
       getInteractiveApprovalHandler(approval.action)!(
         approval,
@@ -555,26 +557,26 @@ describe('assisted access approvals', () => {
       ),
     ).rejects.toThrow('Review access');
     expect(mocks.grant).not.toHaveBeenCalled();
-    expect(getApprovalWorkflow(request.request_id)?.stage).toBe('pending');
+    expect(getApprovalWorkflow(request.id)?.stage).toBe('pending');
   });
   it.each(['static', 'oauth_app', 'mcp_oauth'] as const)(
     'grants a reviewed %s and notifies the original thread once',
     async (kind) => {
       connection.kind = kind;
       const request = await seed();
-      const preview = await previewAccessRequest('alice', request.request_id, connection.id);
+      const preview = await previewAccessRequest('alice', request.id, connection.id);
       expect(preview.matches).toBe(true);
       expect(preview.grantBreadth).toContain('future URL patterns');
-      const result = await applyAccessRequest('alice', request.request_id, selection());
+      const result = await applyAccessRequest('alice', request.id, selection());
       expect(result.status).toBe('completed');
       expect(mocks.grant).toHaveBeenCalledWith('alice', connection.id, session.agent_group_id, { revision: rev });
-      await notifyApprovalWorkflow(request.request_id);
+      await notifyApprovalWorkflow(request.id);
       expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(1);
-      expect(resultMessage(request.request_id)).toMatchObject({
+      expect(resultMessage(request.id)).toMatchObject({
         threadId: session.thread_id,
         idempotent: true,
       });
-      await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('no longer pending');
+      await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('no longer pending');
     },
   );
   it.each(['bearer', 'basic', 'api-key', 'custom', 'passthrough'])(
@@ -591,30 +593,30 @@ describe('assisted access approvals', () => {
       if (authType === 'passthrough')
         connection.services[0].substitutions = [{ key: 'API_KEY', placeholder: '__API_KEY__', in: ['query'] }];
       const request = await seed();
-      const result = await applyAccessRequest('alice', request.request_id, selection());
+      const result = await applyAccessRequest('alice', request.id, selection());
       expect(result.status).toBe('completed');
-      expect(result.result?.message).toContain(authType);
-      if (authType === 'passthrough') expect(result.result?.message).toContain('__API_KEY__');
+      expect(result.outcomeMessage).toContain(authType);
+      if (authType === 'passthrough') expect(result.outcomeMessage).toContain('__API_KEY__');
     },
   );
   it('refuses mismatches, missing OAuth consent and stale credential/request revisions', async () => {
     const request = await seed();
     connection.status = 'draft';
-    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('Connect a compatible');
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('Connect a compatible');
     connection.status = 'ready';
     connection.services[0].host = 'other.example.com';
-    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('Connect a compatible');
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('Connect a compatible');
     connection.services[0].host = 'api.example.com';
     await expect(
-      applyAccessRequest('alice', request.request_id, { ...selection(), connection_revision: '"old"' }),
+      applyAccessRequest('alice', request.id, { ...selection(), connection_revision: '"old"' }),
     ).rejects.toThrow('changed');
-    await expect(applyAccessRequest('alice', request.request_id, selection(0))).rejects.toThrow('changed');
+    await expect(applyAccessRequest('alice', request.id, selection(0))).rejects.toThrow('changed');
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('requires current destination administration and reapproves suspended grants', async () => {
     const request = await seed();
     getDb().prepare("DELETE FROM user_roles WHERE user_id='alice'").run();
-    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('administrator');
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('administrator');
     expect(mocks.grant).not.toHaveBeenCalled();
     grantRole({
       user_id: 'alice',
@@ -624,7 +626,7 @@ describe('assisted access approvals', () => {
       granted_at: 'now',
     });
     connection.grants = [{ vault: session.agent_group_id, status: 'suspended', services: ['api'] }];
-    expect((await applyAccessRequest('alice', request.request_id, selection())).status).toBe('completed');
+    expect((await applyAccessRequest('alice', request.id, selection())).status).toBe('completed');
   });
   it('applies only the explicitly reviewed MCP selector and schedules a fresh session', async () => {
     connection.kind = 'mcp_oauth';
@@ -641,9 +643,9 @@ describe('assisted access approvals', () => {
       .prepare('UPDATE container_configs SET mcp_servers=? WHERE agent_group_id=?')
       .run(JSON.stringify(servers), session.agent_group_id);
     const request = await seed();
-    const preview = await previewAccessRequest('alice', request.request_id, connection.id);
+    const preview = await previewAccessRequest('alice', request.id, connection.id);
     expect(preview.mcp.names).toEqual(['example', 'other']);
-    const result = await applyAccessRequest('alice', request.request_id, {
+    const result = await applyAccessRequest('alice', request.id, {
       ...selection(),
       configure_mcp: true,
       config_revision: preview.mcp.revision,
@@ -663,12 +665,12 @@ describe('assisted access approvals', () => {
         authentication: { connection_id: connection.id, account_alias: 'Personal' },
       },
     });
-    expect(resultMessage(request.request_id)).toMatchObject({
+    expect(resultMessage(request.id)).toMatchObject({
       channelType: 'web',
       platformId: 'room',
       threadId: 'original-thread',
     });
-    const outcome = resultMessage(request.request_id) as { id: string; content: string; onWake?: number };
+    const outcome = resultMessage(request.id) as { id: string; content: string; onWake?: number };
     expect(outcome.onWake).toBeUndefined();
     expect(JSON.parse(outcome.content).inputHandling).toEqual({ mode: 'steer' });
     expect(mocks.messages.get(`${outcome.id}-restart`)).toMatchObject({ onWake: 1 });
@@ -679,8 +681,8 @@ describe('assisted access approvals', () => {
     expect(
       JSON.parse((mocks.messages.get(`${outcome.id}-restart`) as { content: string }).content).approvalResponse,
     ).toBeUndefined();
-    expect(result.result?.message).toContain('Only MCP server "example"');
-    expect(result.result?.message).not.toContain('BIND_TESTHANDLE');
+    expect(result.outcomeMessage).toContain('Only MCP server "example"');
+    expect(result.outcomeMessage).not.toContain('BIND_TESTHANDLE');
   });
   it('rejects stale MCP configuration before granting or restarting', async () => {
     connection.kind = 'mcp_oauth';
@@ -689,7 +691,7 @@ describe('assisted access approvals', () => {
       .run(JSON.stringify({ server: { type: 'http', url: input.resource_url } }), session.agent_group_id);
     const request = await seed();
     await expect(
-      applyAccessRequest('alice', request.request_id, {
+      applyAccessRequest('alice', request.id, {
         ...selection(),
         configure_mcp: true,
         config_revision: 'stale',
@@ -706,10 +708,10 @@ describe('assisted access approvals', () => {
       .prepare('UPDATE container_configs SET mcp_servers=? WHERE agent_group_id=?')
       .run(JSON.stringify(servers), session.agent_group_id);
     const request = await requestAccess(session, { ...input, mcp_server: 'personal' });
-    const preview = await previewAccessRequest('alice', request.request_id, connection.id);
+    const preview = await previewAccessRequest('alice', request.id, connection.id);
     expect(preview.mcp.names).toEqual(['personal']);
     await expect(
-      applyAccessRequest('alice', request.request_id, {
+      applyAccessRequest('alice', request.id, {
         ...selection(),
         configure_mcp: true,
         config_revision: preview.mcp.revision,
@@ -718,7 +720,7 @@ describe('assisted access approvals', () => {
       }),
     ).rejects.toThrow('Review one named');
     await expect(
-      applyAccessRequest('alice', request.request_id, {
+      applyAccessRequest('alice', request.id, {
         ...selection(),
         configure_mcp: true,
         config_revision: preview.mcp.revision,
@@ -730,8 +732,8 @@ describe('assisted access approvals', () => {
   it('keeps duplicate apply requests from executing concurrently', async () => {
     const request = await seed();
     const results = await Promise.allSettled([
-      applyAccessRequest('alice', request.request_id, selection()),
-      applyAccessRequest('alice', request.request_id, selection()),
+      applyAccessRequest('alice', request.id, selection()),
+      applyAccessRequest('alice', request.id, selection()),
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(mocks.grant).toHaveBeenCalledTimes(1);
@@ -739,16 +741,16 @@ describe('assisted access approvals', () => {
   it('records failure without claiming successful application', async () => {
     const request = await seed();
     mocks.grant.mockRejectedValueOnce(new Error('gateway failed'));
-    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('gateway failed');
-    expect(accessRequestStatus(request.request_id).status).toBe('failed');
-    expect(accessRequestStatus(request.request_id).result?.message).toContain('Some changes may have applied');
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('gateway failed');
+    expect(getAccountRequest(request.id).status).toBe('failed');
+    expect(getAccountRequest(request.id).outcomeMessage).toContain('Some changes may have applied');
   });
   it('persists the returned post-grant ETag separately from the exact reviewed revision', async () => {
     const request = await seed();
     const reviewed = selection();
-    await applyAccessRequest('alice', request.request_id, reviewed);
+    await applyAccessRequest('alice', request.id, reviewed);
     expect(connection.revision).not.toBe(reviewed.connection_revision);
-    expect(JSON.parse(getApprovalWorkflow(request.request_id)!.data_json)).toMatchObject({
+    expect(JSON.parse(getApprovalWorkflow(request.id)!.data_json)).toMatchObject({
       reviewedConnectionRevision: reviewed.connection_revision,
       connectionRevision: connection.revision,
       grantApplied: true,
@@ -762,62 +764,58 @@ describe('assisted access approvals', () => {
       connection.revision = `"${'c'.repeat(64)}"`;
       return receipt;
     });
-    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow('could not be verified');
-    const failed = accessRequestStatus(request.request_id);
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('could not be verified');
+    const failed = getAccountRequest(request.id);
     expect(failed.status).toBe('failed');
-    expect(failed.result?.message).toContain('grant verification');
-    const retry = retryAccessRequest('alice', request.request_id, { request_revision: failed.revision });
+    expect(failed.outcomeMessage).toContain('grant verification');
+    const retry = retryAccessRequest('alice', request.id, { request_revision: failed.revision });
     expect(retry.status).toBe('pending');
-    expect(retry.result).toBeNull();
+    expect(retry.outcomeMessage).toBeNull();
     expect(mocks.grant).toHaveBeenCalledTimes(1);
-    await expect(applyAccessRequest('alice', request.request_id, selection(1))).rejects.toThrow('changed');
-    await applyAccessRequest('alice', request.request_id, selection(retry.revision));
-    expect(accessRequestStatus(request.request_id).status).toBe('completed');
+    await expect(applyAccessRequest('alice', request.id, selection(1))).rejects.toThrow('changed');
+    await applyAccessRequest('alice', request.id, selection(retry.revision));
+    expect(getAccountRequest(request.id).status).toBe('completed');
     expect(mocks.grant).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(getApprovalWorkflow(request.request_id)!.data_json).attempt_history).toHaveLength(1);
+    expect(JSON.parse(getApprovalWorkflow(request.id)!.data_json).attempt_history).toHaveLength(1);
     expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(2);
-    await notifyApprovalWorkflow(request.request_id);
+    await notifyApprovalWorkflow(request.id);
     expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(2);
   });
   it('rejects unauthorized, stale, terminal and expired retries without reopening them', async () => {
     const request = await seed();
-    expect(() => retryAccessRequest('alice', request.request_id, { request_revision: 1 })).toThrow('failed request');
-    finishApprovalWorkflow(request.request_id, 'failed', 'test failure');
-    const failed = accessRequestStatus(request.request_id);
-    expect(() => retryAccessRequest('member', request.request_id, { request_revision: failed.revision })).toThrow();
-    expect(() => retryAccessRequest('alice', request.request_id, { request_revision: 1 })).toThrow('failed request');
-    getDb()
-      .prepare('UPDATE pending_approvals SET expires_at=? WHERE approval_id=?')
-      .run('2000-01-01', request.request_id);
-    expect(() => retryAccessRequest('alice', request.request_id, { request_revision: failed.revision })).toThrow(
-      'expired',
-    );
-    expect(getApprovalWorkflow(request.request_id)?.stage).toBe('failed');
+    expect(() => retryAccessRequest('alice', request.id, { request_revision: 1 })).toThrow('failed request');
+    finishApprovalWorkflow(request.id, 'failed', 'test failure');
+    const failed = getAccountRequest(request.id);
+    expect(() => retryAccessRequest('member', request.id, { request_revision: failed.revision })).toThrow();
+    expect(() => retryAccessRequest('alice', request.id, { request_revision: 1 })).toThrow('failed request');
+    getDb().prepare('UPDATE pending_approvals SET expires_at=? WHERE approval_id=?').run('2000-01-01', request.id);
+    expect(() => retryAccessRequest('alice', request.id, { request_revision: failed.revision })).toThrow('expired');
+    expect(getApprovalWorkflow(request.id)?.stage).toBe('failed');
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('does not let an old failure notification acknowledge a newer retry outcome', async () => {
     const request = await seed();
-    finishApprovalWorkflow(request.request_id, 'failed', 'test failure');
+    finishApprovalWorkflow(request.id, 'failed', 'test failure');
     mocks.wake.mockImplementationOnce(async () => {
-      const failed = accessRequestStatus(request.request_id);
-      retryAccessRequest('alice', request.request_id, { request_revision: failed.revision });
-      finishApprovalWorkflow(request.request_id, 'completed', 'retry outcome');
+      const failed = getAccountRequest(request.id);
+      retryAccessRequest('alice', request.id, { request_revision: failed.revision });
+      finishApprovalWorkflow(request.id, 'completed', 'retry outcome');
     });
-    await notifyApprovalWorkflow(request.request_id);
-    expect(getApprovalWorkflow(request.request_id)?.notified).toBe(0);
-    await notifyApprovalWorkflow(request.request_id);
-    expect(getApprovalWorkflow(request.request_id)?.notified).toBe(1);
+    await notifyApprovalWorkflow(request.id);
+    expect(getApprovalWorkflow(request.id)?.notified).toBe(0);
+    await notifyApprovalWorkflow(request.id);
+    expect(getApprovalWorkflow(request.id)?.notified).toBe(1);
     expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(2);
   });
   it('deduplicates pre-upgrade notification receipts using their legacy message ID', async () => {
     const request = await seed();
-    finishApprovalWorkflow(request.request_id, 'failed', 'legacy failure');
+    finishApprovalWorkflow(request.id, 'failed', 'legacy failure');
     getDb()
       .prepare('UPDATE approval_workflows SET result_json=? WHERE approval_id=?')
-      .run(JSON.stringify({ message: 'legacy failure' }), request.request_id);
-    await notifyApprovalWorkflow(request.request_id);
-    expect(mocks.messages.has(`approval-result-${request.request_id}`)).toBe(true);
-    await notifyApprovalWorkflow(request.request_id);
+      .run(JSON.stringify({ message: 'legacy failure' }), request.id);
+    await notifyApprovalWorkflow(request.id);
+    expect(mocks.messages.has(`approval-result-${request.id}`)).toBe(true);
+    await notifyApprovalWorkflow(request.id);
     expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(1);
   });
   it('guards session deletion during application and does not treat resolved workflows as pending', async () => {
@@ -827,17 +825,17 @@ describe('assisted access approvals', () => {
       connection.grants = [{ vault: session.agent_group_id, services: ['api'], status: 'active' }];
       return connection;
     });
-    await applyAccessRequest('alice', request.request_id, selection());
+    await applyAccessRequest('alice', request.id, selection());
     expect(deleteSession(session.id)).toBe(0);
-    expect(getApprovalWorkflow(request.request_id)).toBeUndefined();
+    expect(getApprovalWorkflow(request.id)).toBeUndefined();
   });
   it('supports cancellation, rejection and expiry without changing grants', async () => {
     const cancelled = await seed('appr-access-cancel');
-    await cancelAccessRequest(cancelled.request_id, session.id);
-    expect(accessRequestStatus(cancelled.request_id).status).toBe('cancelled');
+    await cancelAccessRequest(cancelled.id, session.id);
+    expect(getAccountRequest(cancelled.id).status).toBe('cancelled');
     mocks.origin.id = 'new-human-request';
     const rejected = await seed('appr-access-reject');
-    const approval = getPendingApproval(rejected.request_id)!;
+    const approval = getPendingApproval(rejected.id)!;
     await getInteractiveApprovalHandler(approval.action)!(
       approval,
       {
@@ -850,49 +848,45 @@ describe('assisted access approvals', () => {
       },
       'alice',
     );
-    expect(accessRequestStatus(rejected.request_id).status).toBe('rejected');
-    expect((await seed('appr-access-reject-repeat')).request_id).toBe(rejected.request_id);
+    expect(getAccountRequest(rejected.id).status).toBe('rejected');
+    expect((await seed('appr-access-reject-repeat')).id).toBe(rejected.id);
     mocks.origin.id = 'another-human-request';
     const expired = await seed('appr-access-expire');
-    getDb()
-      .prepare('UPDATE pending_approvals SET expires_at=? WHERE approval_id=?')
-      .run('2000-01-01', expired.request_id);
+    getDb().prepare('UPDATE pending_approvals SET expires_at=? WHERE approval_id=?').run('2000-01-01', expired.id);
     await recoverAccessRequests();
-    expect(accessRequestStatus(expired.request_id).status).toBe('expired');
+    expect(getAccountRequest(expired.id).status).toBe('expired');
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('recovers completed application after restart without replaying the grant', async () => {
     const request = await seed();
-    claimApprovalWorkflow(request.request_id, 1, {
+    claimApprovalWorkflow(request.id, 1, {
       userId: 'alice',
       connectionId: connection.id,
       connectionRevision: rev,
     });
     connection.grants = [{ vault: session.agent_group_id, services: ['api'], status: 'active' }];
     await recoverAccessRequests(true);
-    expect(accessRequestStatus(request.request_id).status).toBe('completed');
+    expect(getAccountRequest(request.id).status).toBe('completed');
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('marks interrupted/ungranted application failed rather than replaying it', async () => {
     const request = await seed();
-    claimApprovalWorkflow(request.request_id, 1, {
+    claimApprovalWorkflow(request.id, 1, {
       userId: 'alice',
       connectionId: connection.id,
       connectionRevision: rev,
     });
     await recoverAccessRequests(true);
-    expect(accessRequestStatus(request.request_id).status).toBe('failed');
+    expect(getAccountRequest(request.id).status).toBe('failed');
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('does not discard a durable result when waking fails', async () => {
     const request = await seed();
     mocks.wake.mockRejectedValueOnce(new Error('temporary wake failure'));
-    await expect(applyAccessRequest('alice', request.request_id, selection())).rejects.toThrow(
-      'temporary wake failure',
-    );
-    expect(getApprovalWorkflow(request.request_id)).toMatchObject({ stage: 'completed', notified: 0 });
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('temporary wake failure');
+    expect(getApprovalWorkflow(request.id)).toMatchObject({ stage: 'completed', notified: 0 });
     await recoverAccessRequests();
-    expect(getApprovalWorkflow(request.request_id)?.notified).toBe(1);
+    expect(getApprovalWorkflow(request.id)?.notified).toBe(1);
     expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(1);
   });
 });

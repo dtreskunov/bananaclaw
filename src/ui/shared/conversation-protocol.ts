@@ -1,8 +1,9 @@
 import type { Conversation, ConversationMessage, ConversationInteraction, ConversationTurn } from './conversation.js';
 import { isQuestionInteraction } from './conversation.js';
+import { accessRequestInput, ConnectionInputError } from './connection-input.js';
 import type { QuestionInput, QuestionResponse } from './question.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 7;
+export const CONVERSATION_PROTOCOL_VERSION = 8;
 export interface EntityChanges<T> {
   upserts: T[];
   removeIds: string[];
@@ -200,28 +201,52 @@ const question: Check = (value) =>
     messageId: optional(id),
     timelinePosition: optional(integer),
   })(value);
-const approval = shape({
-  kind: oneOf('confirmation', 'account_setup', 'access_grant'),
+const consentContext = {
   id,
-  action: text,
-  title: text,
-  details: nullable(text),
-  packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
-  options: array(shape({ label: text, selectedLabel: text, value: text })),
   agentGroupId: nullable(text),
   agentGroupName: nullable(text),
   createdAt: text,
-  supportsResponseMessage: bool,
-  reviewRequired: bool,
   origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
-  status: oneOf('pending', 'applying', 'approved', 'rejected', 'failed', 'cancelled', 'expired'),
   decision: optional(nullable(text)),
   respondedBy: optional(nullable(shape({ userId: id, displayName: text }))),
   responseMessage: optional(nullable(text)),
   outcomeMessage: optional(nullable(text)),
   resolvedAt: optional(nullable(text)),
+};
+const approval = shape({
+  ...consentContext,
+  kind: oneOf('confirmation'),
+  action: text,
+  title: text,
+  details: nullable(text),
+  packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
+  options: array(shape({ label: text, selectedLabel: text, value: text })),
+  supportsResponseMessage: bool,
+  reviewRequired: bool,
+  status: oneOf('pending', 'applying', 'approved', 'rejected', 'failed', 'cancelled', 'expired'),
 });
-const interaction: Check = (value) => question(value) || approval(value);
+const requirements: Check = (value) => {
+  try {
+    accessRequestInput(value);
+    return true;
+  } catch (error) {
+    if (error instanceof ConnectionInputError) return false;
+    throw error;
+  }
+};
+const account = shape({
+  ...consentContext,
+  kind: oneOf('account_setup', 'access_grant'),
+  requirements,
+  revision: integer,
+  expiresAt: nullable(text),
+  agentGroupId: id,
+  agentGroupName: text,
+  status: oneOf('pending', 'applying', 'completed', 'rejected', 'cancelled', 'expired', 'failed'),
+  outcomeMessage: nullable(text),
+  resolvedAt: nullable(text),
+});
+const interaction: Check = (value) => question(value) || approval(value) || account(value);
 const tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
 const timelineRow: Check = (v) =>
   shape({ kind: oneOf('message'), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v) ||

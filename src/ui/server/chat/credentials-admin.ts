@@ -23,8 +23,7 @@ import {
 import { getSignIn } from '../../../modules/credentials/sign-ins.js';
 import { uiBaseUrl } from '../server.js';
 import { recordAdminAction } from './audit.js';
-import { getApprovalHistory } from '../../../db/approval-history.js';
-import { approvalOrigin } from './approval-transcript.js';
+import { projectAccountInteraction } from './approval-transcript.js';
 import {
   applyAccessRequest,
   completeAccountRequest,
@@ -99,8 +98,7 @@ export async function handleCredentialsRequest(
       const requestId = decode(request[1]);
       if (method === 'GET' && !request[2]) {
         const status = reviewAccessRequest(userId, requestId);
-        const history = getApprovalHistory(status.request_id);
-        json(res, 200, { ...status, origin: history ? approvalOrigin(userId, history) : null });
+        json(res, 200, projectAccountInteraction(userId, status));
       } else if (method === 'POST' && request[2] === 'preview') {
         const body = await readBody(req);
         if (typeof body.connection_id !== 'string' || Object.keys(body).some((key) => key !== 'connection_id'))
@@ -108,20 +106,20 @@ export async function handleCredentialsRequest(
         json(res, 200, await previewAccessRequest(userId, requestId, body.connection_id));
       } else if (method === 'POST' && request[2] === 'apply') {
         const result = await applyAccessRequest(userId, requestId, await readBody(req));
-        audit(userId, 'credential_access_approved', requestId, { group: result.agent_group_id });
-        json(res, 200, result);
+        audit(userId, 'credential_access_approved', requestId, { group: result.agentGroupId });
+        json(res, 200, projectAccountInteraction(userId, result));
       } else if (method === 'POST' && request[2] === 'retry') {
         const result = retryAccessRequest(userId, requestId, await readBody(req));
-        audit(userId, 'credential_access_retry', requestId, { group: result.agent_group_id });
-        json(res, 200, result);
+        audit(userId, 'credential_access_retry', requestId, { group: result.agentGroupId });
+        json(res, 200, projectAccountInteraction(userId, result));
       } else if (method === 'POST' && request[2] === 'setup') {
         const result = prepareAccountRequest(userId, requestId, await readBody(req));
-        audit(userId, 'credential_account_setup_requested', requestId, { group: result.agent_group_id });
-        json(res, 200, result);
+        audit(userId, 'credential_account_setup_requested', requestId, { group: result.agentGroupId });
+        json(res, 200, projectAccountInteraction(userId, result));
       } else if (method === 'POST' && request[2] === 'account') {
         const result = await completeAccountRequest(userId, requestId, await readBody(req));
-        audit(userId, 'credential_account_setup_confirmed', requestId, { group: result.agent_group_id });
-        json(res, 200, result);
+        audit(userId, 'credential_account_setup_confirmed', requestId, { group: result.agentGroupId });
+        json(res, 200, projectAccountInteraction(userId, result));
       } else throw new ConnectionInputError('Method not allowed', 405);
       return true;
     }
