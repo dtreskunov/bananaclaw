@@ -41,7 +41,7 @@ export function testSnapshot(partial: Partial<Conversation> = {}, streamId = 'te
       threadId: 'thread',
       messages: [],
       turns: [],
-      questions: [],
+      interactions: [],
       connection: { connected: true, activeTurnId: null },
       capabilities: { canSend: true, stop: false, steer: false, editInput: false, cancelInput: false },
       ...partial,

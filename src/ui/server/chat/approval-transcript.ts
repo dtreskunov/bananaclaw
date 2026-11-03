@@ -9,7 +9,6 @@ import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js
 import { getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
 import { inboundDbPath, openInboundDb } from '../../../session-manager.js';
 import type { ApprovalOrigin, ConversationApproval } from '../../shared/approval.js';
-import type { ConversationMessage } from '../../shared/conversation.js';
 import { presentApproval } from './approval-presentation.js';
 import { resolveTurnContext, type TurnContext } from './chat.js';
 
@@ -63,31 +62,35 @@ export function approvalOrigin(
   return { agentGroupId: session.agent_group_id, threadId, channelType: route.channel_type, messagingGroupId };
 }
 
-export function presentApprovalHistory(userId: string, row: ApprovalHistoryRow): ConversationApproval {
-  const session = getSession(row.session_id);
+export type ApprovalViewRecord = Omit<ApprovalHistoryRow, 'session_id'> & {
+  session_id: string | null;
+  agent_group_id?: string | null;
+};
+
+export function projectApproval(userId: string, row: ApprovalViewRecord): ConversationApproval {
+  const session = row.session_id ? getSession(row.session_id) : undefined;
+  const groupId = row.agent_group_id ?? session?.agent_group_id ?? null;
   const responder = row.responded_by ? getUser(row.responded_by) : undefined;
   const status = row.status === 'pending' && isApprovalExecuting(row.approval_id) ? 'applying' : row.status;
   const workflow = getApprovalWorkflow(row.approval_id);
+  if (row.action === 'request_access' && !workflow) throw new Error('Credential review state unavailable');
   return {
-    approvalId: row.approval_id,
+    kind:
+      row.action === 'request_access'
+        ? (JSON.parse(workflow!.origin_json) as { purpose?: string }).purpose === 'account'
+          ? 'account_setup'
+          : 'access_grant'
+        : 'confirmation',
+    id: row.approval_id,
     action: row.action,
     title: row.title,
     ...presentApproval(row.action, row.payload),
     options: JSON.parse(row.options_json),
-    agentGroupId: session?.agent_group_id ?? null,
-    agentGroupName: session ? (getAgentGroup(session.agent_group_id)?.name ?? null) : null,
+    agentGroupId: groupId,
+    agentGroupName: groupId ? (getAgentGroup(groupId)?.name ?? null) : null,
     createdAt: row.created_at,
-    supportsResponseMessage: true,
+    supportsResponseMessage: row.session_id !== null,
     reviewRequired: !!workflow,
-    ...(workflow && row.action === 'request_access'
-      ? {
-          purpose:
-            (JSON.parse(workflow.origin_json) as { purpose?: string }).purpose === 'account'
-              ? ('account' as const)
-              : ('access' as const),
-        }
-      : {}),
-    stage: status,
     status,
     decision: row.decision,
     respondedBy: row.responded_by
@@ -100,13 +103,13 @@ export function presentApprovalHistory(userId: string, row: ApprovalHistoryRow):
   };
 }
 
-export function approvalTranscript(userId: string, groupId: string, context: TurnContext): ConversationMessage[] {
+export function approvalTranscript(userId: string, groupId: string, context: TurnContext): ConversationApproval[] {
   if (!context.sessionId || !hasAdminPrivilege(userId, groupId)) return [];
   const rows = getDb()
     .prepare('SELECT * FROM approval_history WHERE session_id=? ORDER BY created_at,approval_id')
     .all(context.sessionId) as ApprovalHistoryRow[];
   return rows.flatMap((row) => {
-    const approval = presentApprovalHistory(userId, row);
+    const approval = projectApproval(userId, row);
     const origin = approval.origin;
     if (
       !origin ||
@@ -114,15 +117,7 @@ export function approvalTranscript(userId: string, groupId: string, context: Tur
       origin.threadId !== (context.threadId ?? `__dm:${origin.messagingGroupId}`)
     )
       return [];
-    return [
-      {
-        id: `approval:${row.approval_id}`,
-        direction: 'out' as const,
-        timestamp: row.created_at,
-        text: row.title || row.action,
-        approval,
-      },
-    ];
+    return [approval];
   });
 }
 

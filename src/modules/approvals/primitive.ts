@@ -245,7 +245,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
           title,
           question,
           responseMode: 'choice',
-          options,
+          options: normalizedOptions,
         }),
       );
     } catch (err) {

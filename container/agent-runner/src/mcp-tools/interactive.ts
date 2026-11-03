@@ -36,12 +36,16 @@ function hasOutstandingQuestion(): boolean {
   const inbound = openInboundDb();
   try {
     const questions = outbound
-      .prepare("SELECT content FROM messages_out WHERE kind = 'chat-sdk' AND content LIKE '%\"type\":\"ask_question\"%'")
+      .prepare(
+        'SELECT content FROM messages_out WHERE kind = \'chat-sdk\' AND content LIKE \'%"type":"ask_question"%\'',
+      )
       .all() as Array<{ content: string }>;
     const answered = new Set(
-      (inbound
-        .prepare("SELECT content FROM messages_in WHERE kind = 'interactive_response'")
-        .all() as Array<{ content: string }>).flatMap((row) => {
+      (
+        inbound.prepare("SELECT content FROM messages_in WHERE kind = 'interactive_response'").all() as Array<{
+          content: string;
+        }>
+      ).flatMap((row) => {
           try {
             const content = JSON.parse(row.content) as { questionId?: string };
             return content.questionId ? [content.questionId] : [];
@@ -107,6 +111,12 @@ export const askUserQuestion: McpToolDefinition = {
     const rawOptions = (args.options as unknown[] | undefined) ?? [];
     if (!question || !['choice', 'text', 'choice_or_text'].includes(responseMode)) {
       return err('question and responseMode are required');
+    }
+    if (
+      (args.placeholder !== undefined && typeof args.placeholder !== 'string') ||
+      (args.multiline !== undefined && typeof args.multiline !== 'boolean')
+    ) {
+      return err('placeholder must be text and multiline must be a boolean');
     }
     if (responseMode !== 'text' && rawOptions.length === 0) {
       return err('options are required for choice questions');

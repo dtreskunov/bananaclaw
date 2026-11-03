@@ -6,7 +6,8 @@ export interface ApprovalOrigin {
 }
 
 export interface ConversationApproval {
-  approvalId: string;
+  kind: 'confirmation' | 'account_setup' | 'access_grant';
+  id: string;
   action: string;
   title: string;
   details: string | null;
@@ -15,12 +16,10 @@ export interface ConversationApproval {
   agentGroupId: string | null;
   agentGroupName: string | null;
   createdAt: string;
-  supportsResponseMessage?: boolean;
-  reviewRequired?: boolean;
-  purpose?: 'account' | 'access';
-  stage?: string;
+  supportsResponseMessage: boolean;
+  reviewRequired: boolean;
   origin?: ApprovalOrigin | null;
-  status?: 'pending' | 'applying' | 'approved' | 'rejected' | 'failed' | 'cancelled' | 'expired';
+  status: 'pending' | 'applying' | 'approved' | 'rejected' | 'failed' | 'cancelled' | 'expired';
   decision?: string | null;
   respondedBy?: { userId: string; displayName: string } | null;
   responseMessage?: string | null;

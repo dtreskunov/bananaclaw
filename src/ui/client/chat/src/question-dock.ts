@@ -1,9 +1,9 @@
-import type { ConversationMessage } from '../../../shared/conversation';
+import type { ConversationMessage, ConversationInteraction } from '../../../shared/conversation';
 import { timelineSortKey } from '../../../shared/timeline';
 import type { PendingQuestionDto } from './types';
 
 export function dockQuestions(
-  questions: PendingQuestionDto[],
+  questions: ConversationInteraction[],
   messages: ConversationMessage[],
   groupId: string | null,
   threadId: string | null,
@@ -15,11 +15,12 @@ export function dockQuestions(
   );
   return questions
     .filter(
-      (question) =>
+      (question): question is PendingQuestionDto =>
+        question.kind === 'question' &&
         question.agentGroupId === groupId &&
         (!question.threadId || question.threadId === threadId) &&
         question.status !== 'cancelled' &&
-        !answered.has(question.questionId),
+        !answered.has(question.id),
     )
     .sort(
       (a, b) => timelineSortKey(a.createdAt, a.timelinePosition) - timelineSortKey(b.createdAt, b.timelinePosition),

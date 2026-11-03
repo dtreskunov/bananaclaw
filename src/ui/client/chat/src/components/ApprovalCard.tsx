@@ -19,15 +19,15 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
   onRespond: (value: string, message?: string) => void;
   onReview: () => void;
 }) {
-  const status = a.status ?? a.stage ?? 'pending';
+  const status = a.status;
   const pending = status === 'pending';
   const here = isApprovalThread(a.origin);
-  const labels: Record<string, string> = {
-    approved: a.purpose === 'account' ? 'Account setup confirmed' : 'Approved',
+  const labels: Record<Exclude<PendingApprovalDto['status'], 'pending'>, string> = {
+    approved: a.kind === 'account_setup' ? 'Account setup confirmed' : 'Approved',
     rejected: 'Declined', applying: 'Applying…', failed: 'Could not apply',
     cancelled: 'Cancelled', expired: 'Expired',
   };
-  return <ApprovalCardFrame approvalId={a.approvalId} title={a.purpose === 'account' ? 'Set up an account' :
+  return <ApprovalCardFrame approvalId={a.id} title={a.kind === 'account_setup' ? 'Set up an account' :
     a.action === 'add_mcp_server' ? 'Add tools' : a.title || a.action}>
     <div class="approval-text">
       {a.packages ? <div class="approval-packages">
@@ -40,24 +40,24 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
         ? <a href={approvalThreadHref(a.origin)}>Open requesting thread</a>
         : 'Requesting thread unavailable.'}</p> : null}
       {!pending ? <div class="approval-decision" role="status">
-        <strong>{labels[status] ?? status}</strong>
+        <strong>{labels[status]}</strong>
         {a.responseMessage ? <p class="approval-response-text">{a.responseMessage}</p> : null}
         {status === 'failed' && a.outcomeMessage ? <p class="approval-response-text" role="alert">{a.outcomeMessage}</p> : null}
       </div> : null}
       {here && status === 'failed' && a.reviewRequired ? <button type="button" class="approval-btn"
         disabled={busy} onClick={() => { if (isApprovalThread(a.origin)) onReview(); }}>Review failure</button> : null}
-      {here && pending && a.supportsResponseMessage ? <ApprovalMessageInput approvalId={a.approvalId}
-        disabled={busy || a.stage === 'applying'} /> : null}
+      {here && pending && a.supportsResponseMessage ? <ApprovalMessageInput approvalId={a.id}
+        disabled={busy} /> : null}
     </div>
     {here && pending ? <div class="question-card-actions approval-actions">
       {!a.options.length ? <span class="approval-disabled">no options</span> : a.options.map(option =>
         <button type="button" class={'approval-btn approval-' + (option.value === 'approve' ? 'approve' : option.value === 'reject' ? 'reject' : 'neutral')}
-          disabled={busy || a.stage === 'applying'} key={option.value}
+          disabled={busy} key={option.value}
           onClick={() => {
             if (!isApprovalThread(a.origin)) return;
             if (a.reviewRequired && option.value === 'review') onReview();
             else {
-              const message = a.supportsResponseMessage ? approvalMessageDrafts.value[a.approvalId]?.trim() : undefined;
+              const message = a.supportsResponseMessage ? approvalMessageDrafts.value[a.id]?.trim() : undefined;
               if (message) onRespond(option.value, message);
               else onRespond(option.value);
             }

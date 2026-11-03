@@ -1,11 +1,13 @@
 import type { Conversation, ConversationTimelineRow, ConversationTrace } from '../../shared/conversation.js';
+import { isQuestionInteraction } from '../../shared/conversation.js';
 import { timelineSortKey } from '../../shared/timeline.js';
 
-type ContentRow = Extract<ConversationTimelineRow, { kind: 'message' | 'question' }>;
+type ContentRow = Extract<ConversationTimelineRow, { kind: 'message' | 'interaction' }>;
 
 /** Host-owned conversation order with one trace host per logical turn. */
 export function conversationTimeline(view: Omit<Conversation, 'timeline'>): ConversationTimelineRow[] {
   const messages = view.messages.filter((message) => message.inputState?.status !== 'cancelled');
+  const questions = new Map(view.interactions.filter(isQuestionInteraction).map((item) => [item.id, item]));
   const ordered: Array<{ row: ContentRow; id: string; position: number | undefined; key: number }> = [
     ...messages.map((message) => ({
       row: { kind: 'message' as const, messageId: message.id },
@@ -13,20 +15,24 @@ export function conversationTimeline(view: Omit<Conversation, 'timeline'>): Conv
       position: message.timelinePosition,
       key: timelineSortKey(message.timestamp, message.timelinePosition),
     })),
-    ...view.questions
-      .filter((question) => !question.threadId || question.threadId === view.threadId)
-      .map((question) => ({
-        row: { kind: 'question' as const, questionId: question.questionId },
-        id: question.messageId ?? question.questionId,
-        position: question.timelinePosition,
-        key: timelineSortKey(question.createdAt, question.timelinePosition),
-      })),
+    ...view.interactions
+      .filter((item) => item.kind !== 'question' || !item.threadId || item.threadId === view.threadId)
+      .map((item) => {
+        const question = questions.get(item.id);
+        return {
+          row: { kind: 'interaction' as const, interactionId: item.id },
+          id: question?.messageId ?? item.id,
+          position: question?.timelinePosition,
+          key: timelineSortKey(item.createdAt, question?.timelinePosition),
+        };
+      }),
   ].sort((a, b) => {
     const bucket = Math.floor(a.key / 1000) - Math.floor(b.key / 1000);
     if (bucket) return bucket;
     return (
-      Number(a.row.kind === 'question' && a.position === undefined) -
-        Number(b.row.kind === 'question' && b.position === undefined) || a.key - b.key
+      Number(a.row.kind === 'interaction' && questions.has(a.row.interactionId) && a.position === undefined) -
+        Number(b.row.kind === 'interaction' && questions.has(b.row.interactionId) && b.position === undefined) ||
+      a.key - b.key
     );
   });
   const rows: ConversationTimelineRow[] = ordered.map(({ row }) => row);
@@ -44,10 +50,10 @@ export function conversationTimeline(view: Omit<Conversation, 'timeline'>): Conv
       ownsTurn: true,
     };
     const content = ordered.filter((entry) => {
+      if (entry.row.kind === 'interaction' && !questions.has(entry.row.interactionId)) return false;
       if (turn.outputIds.includes(entry.id)) return true;
-      if (entry.row.kind === 'question') {
-        const { questionId } = entry.row;
-        return view.questions.some((question) => question.questionId === questionId && question.turnId === turn.id);
+      if (entry.row.kind === 'interaction') {
+        return questions.get(entry.row.interactionId)?.turnId === turn.id;
       }
       return (
         turn.inputIds.includes(entry.id) &&

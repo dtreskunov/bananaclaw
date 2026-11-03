@@ -13,7 +13,15 @@ import { TIMEZONE, formatLocalTime } from './timezone.js';
  */
 export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
 
-const ADMIN_COMMANDS = new Set(['/remote-control', '/clear', '/compact', '/context', '/cost', '/files', '/upload-trace']);
+const ADMIN_COMMANDS = new Set([
+  '/remote-control',
+  '/clear',
+  '/compact',
+  '/context',
+  '/cost',
+  '/files',
+  '/upload-trace',
+]);
 const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/start']);
 
 export interface CommandInfo {
@@ -174,9 +182,9 @@ function formatChatMessages(messages: MessageInRow[]): string {
   // requested."`) instead of calling the API — see #2555 for the full trace.
   // The fix is simply to drop the wrapper; the single-message path (which
   // already worked) is now just the N=1 case of the same code.
-  const oneWayHint = messages.some((m) =>
-    m.channel_type === 'agent' && m.platform_id && !isHostOrigin(m) &&
-    !findByRouting(m.channel_type, m.platform_id),
+  const oneWayHint = messages.some(
+    (m) =>
+      m.channel_type === 'agent' && m.platform_id && !isHostOrigin(m) && !findByRouting(m.channel_type, m.platform_id),
   )
     ? '<routing_hint>Peer messages with reply_allowed="false" are one-way: sender_agent_id identifies the sender, not a destination. No authorized reply destination exists. Do not invent a to address or substitute this session\'s human channel for a peer reply.</routing_hint>\n'
     : '';
@@ -216,9 +224,7 @@ function originAttr(msg: MessageInRow): string {
   const fromDest = findByRouting(msg.channel_type, msg.platform_id);
   if (msg.channel_type === 'agent' && msg.platform_id && !isHostOrigin(msg)) {
     const identity = ` sender_agent_id="${escapeXml(msg.platform_id)}"`;
-    return fromDest
-      ? `${identity} from="${escapeXml(fromDest.name)}"`
-      : `${identity} reply_allowed="false"`;
+    return fromDest ? `${identity} from="${escapeXml(fromDest.name)}"` : `${identity} reply_allowed="false"`;
   }
   if (fromDest) return ` from="${escapeXml(fromDest.name)}"`;
   if (isHostOrigin(msg)) return '';
@@ -293,9 +299,13 @@ function formatSystemMessage(msg: MessageInRow): string {
 function formatInteractiveResponse(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const from = originAttr(msg);
+  if (typeof content.questionId !== 'string' || !content.questionId || typeof content.question !== 'string')
+    throw new Error('Invalid question response identity');
   if (content.responseType === 'skipped')
-    return `<question_response${from} question_id="${escapeXml(content.questionId || '')}" response_type="skipped"><question>${escapeXml(content.question || '')}</question><notice>The user skipped this question without providing an answer. Continue where possible without assuming an answer; explain if the missing information blocks progress. This is not a selected option, consent, or approval.</notice></question_response>`;
-  return `<question_response${from} question_id="${escapeXml(content.questionId || '')}" response_type="${escapeXml(content.responseType || 'text')}"><question>${escapeXml(content.question || '')}</question><answer>${escapeXml(content.value || '')}</answer></question_response>`;
+    return `<question_response${from} question_id="${escapeXml(content.questionId)}" response_type="skipped"><question>${escapeXml(content.question)}</question><notice>The user skipped this question without providing an answer. Continue where possible without assuming an answer; explain if the missing information blocks progress. This is not a selected option, consent, or approval.</notice></question_response>`;
+  if (!['choice', 'text'].includes(content.responseType) || typeof content.value !== 'string')
+    throw new Error('Invalid question response input');
+  return `<question_response${from} question_id="${escapeXml(content.questionId)}" response_type="${escapeXml(content.responseType)}"><question>${escapeXml(content.question)}</question><answer>${escapeXml(content.value)}</answer></question_response>`;
 }
 
 /**
@@ -381,7 +391,9 @@ function formatAttachments(attachments: any[] | undefined): string {
     if (localPath) {
       return `[${escapeXml(label)}: ${escapeXml(name)} — saved to ${escapeXml(localPath)}]`;
     }
-    return url ? `[${escapeXml(label)}: ${escapeXml(name)} (${escapeXml(url)})]` : `[${escapeXml(label)}: ${escapeXml(name)}]`;
+    return url
+      ? `[${escapeXml(label)}: ${escapeXml(name)} (${escapeXml(url)})]`
+      : `[${escapeXml(label)}: ${escapeXml(name)}]`;
   });
   return '\n' + parts.join('\n');
 }
@@ -513,7 +525,8 @@ export function parseAssistantOutput(raw: string): ParsedAssistantOutput {
   const leadingWhitespace = raw.match(/^\s*/)?.[0] ?? '';
   let body = raw.slice(leadingWhitespace.length);
   if (
-    body && body[0] !== '<' &&
+    body &&
+    body[0] !== '<' &&
     /^(?:message(?:\s*to=|\s+[\w-]+=|>)|internal\s*>|think(?:ing)?(?:\s[^>]*)?>)/i.test(body)
   ) {
     body = '<' + body;

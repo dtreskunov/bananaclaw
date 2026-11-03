@@ -1213,8 +1213,9 @@ Skip failures retain the prompt and typed answer with a retryable error, includi
 a **Retry skip** control if the terminal outcome was saved before journaling failed.
 Answers and skips share one idempotent response ID and a first-response-wins update,
 so retries and competing tabs never produce both outcomes. Approvals cannot be skipped.
-Browser protocol version 4 includes skipped responses and title-free questions;
-older clients must reload.
+Browser protocol version 7 carries questions and approvals as discriminated
+interactions. Choice, literal text, and skip responses are explicit; older
+clients must reload.
 
 The icon is disabled and grayed out while stopping, without adding transient
 status text or changing the bubble's layout. A **Stopping response** tooltip
@@ -1355,7 +1356,7 @@ once, offline, using saved output associations and ordinals. These assigned
 positions encode canonical presentation order, not recovered execution timing.
 There are no runtime missing-position or saved-association placement fallbacks.
 
-The browser protocol is version 5 and validates `protocolVersion`, `streamId`,
+The browser protocol is version 7 and validates `protocolVersion`, `streamId`,
 revisions, entity shapes, timeline references, and unique activity placement.
 Gaps or unknown streams show a synchronization error and reconnect for a fresh
 snapshot; incompatible protocols explicitly ask for a page reload. Progress is
@@ -1365,6 +1366,15 @@ Every projection rechecks access and scopes channel, platform and thread, includ
 shared sessions and synthetic DM IDs. Off-route sends cannot reveal their originating
 turn's trace; historical turns with an unknown origin expose only activity and
 usage anchored to already-visible outputs.
+
+Messages, interactions, and turns are separate normalized collections.
+Interactions share one `id` and have `question`, `confirmation`, `account_setup`,
+or `access_grant` kinds; timeline rows reference them by `interactionId`.
+Questions retain their input specification, including placeholder and multiline
+hints. Approvals use the same authorized projection in polling and transcripts,
+with one required status rather than optional status/stage fallbacks.
+The browser reuses these shared types and keeps rendering/submission metadata
+local. Account setup still grants no agent access.
 
 **Deployment:** this client and host have no legacy frame support. Build
 the checked-in bundle with `pnpm --dir src/ui/client/chat run build`, deploy host
@@ -1425,7 +1435,7 @@ conversion events are added to the drained journal. Repeat conversion is a no-op
 
 **Verify:** require zero pairs needing conversion, SQLite integrity/foreign-key
 checks, and matching activity positions on both sides before starting the matched
-host and runners. Verify session-link version 5, browser protocol version 4,
+host and runners. Verify session-link version 5, browser protocol version 7,
 served bundle hashes, reconnect snapshots, applied steering, mid-turn output and
 completion behavior. Reload open browser tabs. Runner source is bind-mounted, so
 source-only changes do not require an image rebuild.

@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import http from 'http';
 import type internal from 'stream';
 import path from 'path';
+import { isQuestionResponse } from '../../shared/conversation-protocol.js';
 
 import Busboy from 'busboy';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -1041,7 +1042,7 @@ type SuggestedAction = 'continue' | 'retry' | 'report';
 
 export interface HistoryMessage {
   questionId?: string;
-  questionResponseType?: 'skipped';
+  questionResponseType?: import('../../shared/question.js').QuestionResponse['responseType'];
   turnId?: string;
   inputState?: InputState;
   canEditPending?: boolean;
@@ -1781,7 +1782,7 @@ function parseInboundContent(
 ): {
   text: string;
   questionId?: string;
-  questionResponseType?: 'skipped';
+  questionResponseType?: import('../../shared/question.js').QuestionResponse['responseType'];
   files?: { filename: string; size: number; url?: string; contentType?: string }[];
   viaWeb?: boolean;
 } | null {
@@ -1790,17 +1791,14 @@ function parseInboundContent(
     if (o?.cancelled === true) return null;
     if (typeof o === 'string') return { text: o };
     if (includeQuestionResponses && o?.type === 'question_response') {
-      if (typeof o.questionId !== 'string' || !o.questionId) {
+      const questionId = o.questionId;
+      if (typeof questionId !== 'string' || !questionId || !isQuestionResponse(o)) {
         log.warn('Invalid question response in chat history');
         return null;
       }
       if (o.responseType === 'skipped')
-        return { text: 'Question skipped', questionId: o.questionId, questionResponseType: 'skipped' };
-      if (typeof o.value !== 'string') {
-        log.warn('Invalid question answer in chat history');
-        return null;
-      }
-      return { text: o.value, questionId: o.questionId };
+        return { text: 'Question skipped', questionId, questionResponseType: 'skipped' };
+      return { text: o.value, questionId, questionResponseType: o.responseType };
     }
     if (typeof o?.text === 'string' || Array.isArray(o?.attachments) || Array.isArray(o?.files)) {
       const text = typeof o?.text === 'string' ? o.text : '';

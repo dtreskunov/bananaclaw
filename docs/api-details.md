@@ -262,15 +262,15 @@ function createWhatsAppChannel(): ChannelAdapter {
 }
 ```
 
-**Question response** (from user clicking an interactive card):
+**Question response** (`kind: interactive_response`, after authenticated user input):
 ```json
 {
-  "sender": "John",
-  "senderId": "user123",
-  "text": "Yes",
+  "type": "question_response",
   "questionId": "q-123",
-  "selectedOption": "Yes",
-  "isFromMe": false
+  "question": "Continue?",
+  "responseType": "choice",
+  "value": "yes",
+  "userId": "user123"
 }
 ```
 
@@ -307,12 +307,14 @@ function createWhatsAppChannel(): ChannelAdapter {
 **Ask user question:**
 ```json
 {
-  "operation": "ask_question",
+  "type": "ask_question",
   "questionId": "q-123",
-  "title": "Failing Test",
   "question": "How should we handle the failing test?",
+  "responseMode": "choice_or_text",
+  "placeholder": "Explain another approach",
+  "multiline": true,
   "options": [
-    "Skip it",
+    { "label": "Skip it", "selectedLabel": "Skip it", "value": "skip" },
     { "label": "Fix and retry", "selectedLabel": "✅ Fixing", "value": "fix" },
     { "label": "Abort deployment", "selectedLabel": "❌ Aborted", "value": "abort" }
   ]

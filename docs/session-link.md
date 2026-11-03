@@ -49,7 +49,7 @@ invalidate but cannot publish new state. Projection failures are explicit,
 not successful empty histories. Unknown imported origins expose only sidecars
 anchored to visible messages; off-route sends never expose the source trace.
 
-The browser protocol is separately versioned (`protocolVersion: 5`). A
+The browser protocol is separately versioned (`protocolVersion: 7`). A
 subscription starts with `{kind:"snapshot", streamId, revision, conversation}`.
 Each atomic `update` names `baseRevision` and the next `revision`, with entity
 upserts, removals, an explicit typed presentation timeline, connection state

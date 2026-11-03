@@ -136,8 +136,8 @@ describe('Stop integration with chat actions', () => {
     canSend.value = true;
     applyTurnState({ id: 'turn-1', status: 'running' }, true);
     const question = {
-      questionId: 'question',
-      title: 'Choose',
+      kind: 'question' as const,
+      id: 'question',
       question: 'Continue?',
       responseMode: 'text' as const,
       options: [],

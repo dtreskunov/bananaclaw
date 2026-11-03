@@ -1,4 +1,5 @@
 import type { PendingApproval, Question, Session } from '../types.js';
+import type { QuestionResponse } from '../ui/shared/question.js';
 import { getDb, hasTable } from './connection.js';
 import { invalidateConversation } from '../conversation-events.js';
 import { archiveApprovalRequest } from './approval-history.js';
@@ -151,7 +152,9 @@ export function deleteSession(id: string, cancelApprovals = false): number {
  * IGNORE` that would throw UNIQUE and prevent the retry from reaching the
  * actual send step. Returns true if a new row was inserted.
  */
-export function createQuestion(question: Question): boolean {
+export function createQuestion(
+  question: Omit<Question, 'status' | 'answer_value' | 'answer_type' | 'answered_by' | 'answered_at' | 'cancelled_at'>,
+): boolean {
   const result = getDb()
     .prepare(
       `INSERT OR IGNORE INTO questions
@@ -160,8 +163,8 @@ export function createQuestion(question: Question): boolean {
           answered_by, answered_at, cancelled_at, created_at)
        VALUES
          (@question_id, @session_id, @message_out_id, @in_reply_to, @platform_id, @channel_type, @thread_id,
-          @question_text, @response_mode, @options_json, @status, @answer_value, @answer_type,
-          @answered_by, @answered_at, @cancelled_at, @created_at)`,
+          @question_text, @response_mode, @options_json, 'pending', NULL, NULL,
+          NULL, NULL, NULL, @created_at)`,
     )
     .run({
       ...question,
@@ -182,7 +185,7 @@ export function getQuestion(questionId: string): Question | undefined {
 
 export function answerQuestion(
   questionId: string,
-  answer: ({ value: string; type: 'choice' | 'text' } | { value: null; type: 'skipped' }) & {
+  answer: QuestionResponse & {
     userId: string | null;
     answeredAt: string;
   },
@@ -190,11 +193,11 @@ export function answerQuestion(
   const result = getDb()
     .prepare(
       `UPDATE questions
-          SET status = 'answered', answer_value = @value, answer_type = @type,
+          SET status = 'answered', answer_value = @value, answer_type = @responseType,
               answered_by = @userId, answered_at = @answeredAt
         WHERE question_id = @questionId AND status = 'pending'`,
     )
-    .run({ questionId, ...answer });
+    .run({ questionId, ...answer, value: answer.responseType === 'skipped' ? null : answer.value });
   const sessionId = result.changes ? getQuestion(questionId)?.session_id : undefined;
   if (sessionId) queueMicrotask(() => invalidateConversation(sessionId));
   return result.changes > 0;

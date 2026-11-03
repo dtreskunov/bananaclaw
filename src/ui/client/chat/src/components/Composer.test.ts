@@ -34,15 +34,7 @@ import {
 import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, openPendingEditor } from '../pending-edit';
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
-import {
-  clearPinnedContext,
-  removePending,
-  respondQuestion,
-  retryChatSend,
-  sendChat,
-  skipQuestion,
-  warmChat,
-} from '../actions';
+import { clearPinnedContext, removePending, respondQuestion, retryChatSend, sendChat, warmChat } from '../actions';
 import type { ActivityLine, ChatMessage, PendingQuestionDto, Thread } from '../types';
 import type { ConversationMessage, ConversationTurn } from '../../../../shared/conversation';
 import { applyConversationFrame, completedResponse, conversationState, resetConversation } from '../conversation-state';
@@ -133,7 +125,6 @@ vi.mock('../actions', () => ({
   addPendingFiles: vi.fn(),
   removePending: vi.fn(),
   respondQuestion: vi.fn(),
-  skipQuestion: vi.fn(),
 }));
 
 const thread: Thread = { threadId: 'thread', title: 'Chat', lastActivityAt: '', channelType: 'web' };
@@ -804,7 +795,8 @@ describe('main composer pending edits', () => {
   });
 
   const dockQuestion: PendingQuestionDto = {
-    questionId: 'q',
+    kind: 'question',
+    id: 'q',
     question: 'Choose?',
     responseMode: 'choice_or_text',
     options: [{ label: 'First', selectedLabel: 'Chosen first', value: 'first' }],
@@ -832,7 +824,6 @@ describe('main composer pending edits', () => {
     beforeEach(() => {
       resetMount('');
       vi.mocked(respondQuestion).mockReset().mockResolvedValue(true);
-      vi.mocked(skipQuestion).mockReset().mockResolvedValue(true);
     });
     it('shows the question beside Skip without a separate title', () => {
       mount();
@@ -841,6 +832,13 @@ describe('main composer pending edits', () => {
       const header = prompt.props.children[0];
       expect(header.props.children[0].props.children).toBe(dockQuestion.question);
       expect(header.props.children[1].props['aria-label']).toBe('Skip question and notify agent');
+    });
+    it('uses the stored placeholder and multiline request without changing composition controls', () => {
+      mount({ ...dockQuestion, placeholder: 'Describe the result', multiline: true });
+      const textarea = find(tree, 'textarea');
+      expect(textarea.props.placeholder).toBe('Describe the result');
+      expect(textarea.props.rows).toBe(3);
+      expect(findComponent(tree, 'ComposerPlusMenu')).toBeUndefined();
     });
     it('shares the ordinary composer input while omitting its attachment controls', () => {
       const ordinary = findComponent(tree, 'ComposerInput');
@@ -947,22 +945,21 @@ describe('main composer pending edits', () => {
       click();
       click();
       find(tree, 'button', 'First').props.onClick();
-      await vi.waitFor(() => expect(skipQuestion).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledOnce());
       mount();
-      expect(skipQuestion).toHaveBeenCalledWith('q');
-      expect(respondQuestion).not.toHaveBeenCalled();
+      expect(respondQuestion).toHaveBeenCalledWith('q', { responseType: 'skipped' });
       expect(sendChat).not.toHaveBeenCalled();
       expect(find(tree, 'button', 'First').props.disabled).toBe(true);
       expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
       expect(find(tree, 'div', 'Waiting for skip confirmation…')).toBeDefined();
     });
     it('retains typed text and offers a retry when skipping fails after the outcome is saved', async () => {
-      vi.mocked(skipQuestion).mockResolvedValueOnce(false);
+      vi.mocked(respondQuestion).mockResolvedValueOnce(false);
       mount();
       find(tree, 'textarea').props.onInput({ currentTarget: { value: 'Unsaved answer' } });
       mount();
       find(tree, 'button', 'Skip question and notify agent').props.onClick();
-      await vi.waitFor(() => expect(skipQuestion).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledOnce());
       mount({ ...dockQuestion, status: 'answered', answerType: 'skipped' });
       expect(find(tree, 'textarea').props.value).toBe('Unsaved answer');
       expect(find(tree, 'p').props.role).toBe('alert');
@@ -970,7 +967,7 @@ describe('main composer pending edits', () => {
       expect(retry.props.children).toBe('Retry skip');
       expect(retry.props.disabled).toBe(false);
       retry.props.onClick();
-      await vi.waitFor(() => expect(skipQuestion).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledTimes(2));
     });
     it('renders the skip event without interpreting it as a selected option', () => {
       const bubble = QuestionAnswerBubble({
@@ -998,7 +995,7 @@ describe('main composer pending edits', () => {
       click();
       await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledOnce());
       mount();
-      expect(respondQuestion).toHaveBeenCalledWith('q', 'first');
+      expect(respondQuestion).toHaveBeenCalledWith('q', { responseType: 'choice', value: 'first' });
       expect(find(tree, 'button', 'First').props.disabled).toBe(true);
       expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
       expect(find(tree, 'section').props['aria-busy']).toBe(true);
@@ -1010,7 +1007,9 @@ describe('main composer pending edits', () => {
       find(tree, 'textarea').props.onInput({ currentTarget: { value: '  My answer  ' } });
       mount();
       find(tree, 'form').props.onSubmit({ preventDefault() {} });
-      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledWith('q', 'My answer'));
+      await vi.waitFor(() =>
+        expect(respondQuestion).toHaveBeenCalledWith('q', { responseType: 'text', value: 'My answer' }),
+      );
       mount();
       expect(find(tree, 'textarea').props.value).toBe('  My answer  ');
       expect(find(tree, 'p').props.role).toBe('alert');
@@ -1060,7 +1059,7 @@ describe('main composer pending edits', () => {
         mount();
         expect(find(tree, 'textarea').props.value).toBe('Dictated answer');
         expect(await target.send()).toBe(true);
-        expect(respondQuestion).toHaveBeenCalledWith('q', 'Dictated answer');
+        expect(respondQuestion).toHaveBeenCalledWith('q', { responseType: 'text', value: 'Dictated answer' });
         expect(sendChat).not.toHaveBeenCalled();
       } finally {
         start.mockRestore();

@@ -60,7 +60,7 @@ import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
 import { ConversationProtocolError, type ConversationSnapshot } from '../../../shared/conversation-protocol';
-import type { QuestionResponse } from '../../../shared/question-response';
+import type { QuestionResponse } from '../../../shared/question';
 import { applyTurnState, resetTurnState } from './stop-turn';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { parentPath } from './utils';
@@ -1621,7 +1621,7 @@ export async function respondApproval(approvalId: string, value: string, message
   // seconds; keeping the row visible the whole time is misleading. If the
   // POST fails we re-fetch the canonical list.
   const before = pendingApprovals.value;
-  pendingApprovals.value = before.filter((a) => a.approvalId !== approvalId);
+  pendingApprovals.value = before.filter((a) => a.id !== approvalId);
   const verb = value === 'approve' ? 'Approving' : value === 'reject' ? 'Rejecting' : 'Submitting';
   chatStatus.value = verb + '\u2026';
   try {
@@ -1656,15 +1656,7 @@ export async function respondApproval(approvalId: string, value: string, message
   }
 }
 
-export async function respondQuestion(questionId: string, value: string): Promise<boolean> {
-  return submitQuestionResponse(questionId, { value });
-}
-
-export async function skipQuestion(questionId: string): Promise<boolean> {
-  return submitQuestionResponse(questionId, { responseType: 'skipped' });
-}
-
-async function submitQuestionResponse(questionId: string, response: QuestionResponse): Promise<boolean> {
+export async function respondQuestion(questionId: string, response: QuestionResponse): Promise<boolean> {
   if (respondingQuestionIds.value.has(questionId)) return false;
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);

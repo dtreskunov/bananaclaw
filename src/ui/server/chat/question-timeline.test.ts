@@ -8,7 +8,7 @@ function questionTimeline(messages: ConversationMessage[], questions: Conversati
     threadId,
     messages,
     turns: [],
-    questions,
+    interactions: questions,
     connection: { connected: true, activeTurnId: null },
     capabilities: { canSend: true, stop: false, steer: false, editInput: false, cancelInput: false },
   });
@@ -20,7 +20,8 @@ function message(id: string, timestamp: string): ConversationMessage {
 
 function question(overrides: Partial<ConversationQuestion> = {}): ConversationQuestion {
   return {
-    questionId: 'question-1',
+    kind: 'question',
+    id: 'question-1',
     question: 'What should it say?',
     responseMode: 'text',
     options: [],
@@ -45,7 +46,7 @@ describe('host question presentation order', () => {
 
     expect(result).toEqual([
       { kind: 'message', messageId: 'before' },
-      { kind: 'question', questionId: 'question-1' },
+      { kind: 'interaction', interactionId: 'question-1' },
       { kind: 'message', messageId: 'after' },
     ]);
   });
@@ -58,7 +59,7 @@ describe('host question presentation order', () => {
     const result = questionTimeline([message('message-1', '2026-07-15T05:34:20Z')], [question()], 'thread-1');
     expect(result).toEqual([
       { kind: 'message', messageId: 'message-1' },
-      { kind: 'question', questionId: 'question-1' },
+      { kind: 'interaction', interactionId: 'question-1' },
     ]);
   });
 
@@ -77,7 +78,7 @@ describe('host question presentation order', () => {
     expect(result).toEqual([
       { kind: 'message', messageId: 'triggering-input' },
       { kind: 'message', messageId: 'later-in-bucket' },
-      { kind: 'question', questionId: 'question-1' },
+      { kind: 'interaction', interactionId: 'question-1' },
       { kind: 'message', messageId: 'later-output' },
     ]);
   });
@@ -98,7 +99,7 @@ describe('host question presentation order', () => {
     );
 
     expect(result).toEqual([
-      { kind: 'question', questionId: 'question-1' },
+      { kind: 'interaction', interactionId: 'question-1' },
       { kind: 'message', messageId: 'before' },
       { kind: 'message', messageId: 'after' },
     ]);
@@ -131,7 +132,7 @@ describe('host question presentation order', () => {
     );
     expect(
       result.map((row) =>
-        row.kind === 'question' ? row.questionId : row.kind === 'message' ? row.messageId : row.turnId,
+        row.kind === 'interaction' ? row.interactionId : row.kind === 'message' ? row.messageId : row.turnId,
       ),
     ).toEqual(['question-1', 'asking-reply', 'answer-input', 'answer-reply']);
   });
@@ -147,6 +148,6 @@ describe('host question presentation order', () => {
       'thread-1',
     );
 
-    expect(result).toEqual([{ kind: 'question', questionId: 'question-1' }]);
+    expect(result).toEqual([{ kind: 'interaction', interactionId: 'question-1' }]);
   });
 });

@@ -1,4 +1,6 @@
 import type { InputState } from './input-state.js';
+import type { QuestionInput, QuestionResponse } from './question.js';
+import type { ConversationApproval } from './approval.js';
 
 /** Browser-safe, route-scoped host projection. No runner journal or routing IDs. */
 export interface ConversationUsage {
@@ -22,9 +24,8 @@ export interface ConversationMessage {
   direction: 'in' | 'out' | 'event';
   timestamp: string;
   text: string;
-  approval?: import('./approval.js').ConversationApproval;
   questionId?: string;
-  questionResponseType?: 'skipped';
+  questionResponseType?: QuestionResponse['responseType'];
   turnId?: string;
   timelinePosition?: number;
   inputState?: InputState;
@@ -53,11 +54,9 @@ export interface ConversationMessage {
   };
 }
 
-export interface ConversationQuestion {
-  questionId: string;
-  question: string;
-  responseMode: 'choice' | 'text' | 'choice_or_text';
-  options: { label: string; selectedLabel: string; value: string }[];
+export interface ConversationQuestion extends QuestionInput {
+  kind: 'question';
+  id: string;
   status: 'pending' | 'answered' | 'cancelled';
   answerValue: string | null;
   answerType: 'choice' | 'text' | 'skipped' | null;
@@ -69,6 +68,12 @@ export interface ConversationQuestion {
   createdAt: string;
   messageId?: string;
   timelinePosition?: number;
+}
+
+export type ConversationInteraction = ConversationQuestion | ConversationApproval;
+
+export function isQuestionInteraction(item: ConversationInteraction): item is ConversationQuestion {
+  return item.kind === 'question';
 }
 
 export interface ConversationActivity {
@@ -86,7 +91,7 @@ export interface ConversationTrace {
 
 export type ConversationTimelineRow =
   | { kind: 'message'; messageId: string; trace?: ConversationTrace; statsTurnId?: string }
-  | { kind: 'question'; questionId: string; trace?: ConversationTrace }
+  | { kind: 'interaction'; interactionId: string; trace?: ConversationTrace }
   | { kind: 'turn'; turnId: string; afterId: string | null; trace: ConversationTrace; status: boolean };
 
 export interface ConversationTurn {
@@ -122,7 +127,7 @@ export interface Conversation {
   threadId: string;
   messages: ConversationMessage[];
   turns: ConversationTurn[];
-  questions: ConversationQuestion[];
+  interactions: ConversationInteraction[];
   timeline: ConversationTimelineRow[];
   connection: { connected: boolean; activeTurnId: string | null };
   capabilities: ConversationCapabilities;

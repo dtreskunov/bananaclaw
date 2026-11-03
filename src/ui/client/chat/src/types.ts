@@ -159,6 +159,7 @@ export interface MessagePresentation {
 
 export type TranscriptRow =
   | { kind: 'message'; message: ChatMessage }
+  | { kind: 'interaction'; interaction: PendingApprovalDto }
   | { kind: 'starting'; submission: PendingWebSend }
   | {
       kind: 'question-answer';

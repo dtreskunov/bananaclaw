@@ -1086,7 +1086,7 @@ describe('chat turn snapshots and events', () => {
           'question-output',
           'chat-sdk',
           NOW,
-          '{"type":"ask_question","questionId":"q"}',
+          '{"type":"ask_question","questionId":"q","question":"Continue?","responseMode":"text","options":[]}',
           'turn-1',
           'group:agent',
           'web',
@@ -1104,17 +1104,11 @@ describe('chat turn snapshots and events', () => {
         question_text: 'Continue?',
         response_mode: 'text',
         options: [],
-        status: 'pending',
-        answer_value: null,
-        answer_type: null,
-        answered_by: null,
-        answered_at: null,
-        cancelled_at: null,
         created_at: NOW,
       });
-      await vi.waitFor(() => expect(socketView(frames).questions[0]?.status).toBe('pending'));
-      answerQuestion('q', { value: 'yes', type: 'text', userId: null, answeredAt: NOW });
-      await vi.waitFor(() => expect(socketView(frames).questions[0]?.answerValue).toBe('yes'));
+      await vi.waitFor(() => expect(socketView(frames).interactions[0]?.status).toBe('pending'));
+      answerQuestion('q', { value: 'yes', responseType: 'text', userId: null, answeredAt: NOW });
+      await vi.waitFor(() => expect(socketView(frames).interactions[0]).toMatchObject({ answerValue: 'yes' }));
       writeSessionMessage('agent', 'session-1', {
         id: 'question-response:q',
         kind: 'interactive_response',

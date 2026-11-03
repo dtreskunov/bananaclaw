@@ -1,3 +1,5 @@
+import type { QuestionInput, QuestionOption } from '../ui/shared/question.js';
+
 /**
  * Shared ask_question payload schema + normalization.
  *
@@ -15,11 +17,7 @@ export interface OptionInput {
 
 export type RawOption = string | OptionInput;
 
-export interface NormalizedOption {
-  label: string;
-  selectedLabel: string;
-  value: string;
-}
+export type NormalizedOption = QuestionOption;
 
 export function normalizeOption(raw: RawOption): NormalizedOption {
   if (typeof raw === 'string') {
@@ -37,12 +35,9 @@ export function normalizeOptions(raws: RawOption[]): NormalizedOption[] {
   return raws.map(normalizeOption);
 }
 
-export interface AskQuestionPayload {
+export interface AskQuestionPayload extends QuestionInput {
   type: 'ask_question';
   questionId: string;
-  question: string;
-  responseMode: 'choice' | 'text' | 'choice_or_text';
-  options: NormalizedOption[];
 }
 
 export function formatQuestionResponse(question: string, response: string): string {

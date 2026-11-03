@@ -7,7 +7,7 @@ const view: Conversation = {
   threadId: 't',
   messages: [],
   turns: [],
-  questions: [],
+  interactions: [],
   timeline: [],
   connection: { connected: false, activeTurnId: null },
   capabilities: { canSend: true, stop: false, steer: false, editInput: false, cancelInput: false },

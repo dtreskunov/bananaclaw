@@ -76,7 +76,7 @@ import { attachScrollEdges } from '../scroll-edges';
 import { revealLatestActivity } from '../activity-trace-scroll';
 import { showToast } from './Toast';
 import './ZoomableImage.css';
-import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingWebSend, Thread, TranscriptRow, TurnUsage } from '../types';
+import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingApprovalDto, PendingWebSend, Thread, TranscriptRow, TurnUsage } from '../types';
 
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
 const revealedMobileMessageActionsId = signal<string | null>(null);
@@ -759,11 +759,6 @@ function Message(
       </button>
     );
   }
-  const approval = m.approval;
-  if (approval) return <ApprovalBubble approval={approval} messageId={m.id}
-      busy={respondingApprovalIds.value.has(approval.approvalId)}
-      onReview={() => openCredentials({ approvalId: approval.approvalId })}
-      onRespond={(value, message) => { void respondApproval(approval.approvalId, value, message).catch(console.error); }} />;
   if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
   const md = renderMarkdown(m.text, groupId.value);
   const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
@@ -955,11 +950,19 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
   );
 }
 
+function ApprovalRow({ approval, reference }: { approval: PendingApprovalDto; reference?: boolean }) {
+  return <ApprovalBubble approval={approval} reference={reference}
+    busy={respondingApprovalIds.value.has(approval.id)}
+    onReview={() => openCredentials({ approvalId: approval.id })}
+    onRespond={(value, message) => { void respondApproval(approval.id, value, message).catch(console.error); }} />;
+}
+
 interface SingleGroup { kind: 'single'; m: ChatMessage }
 interface EventsGroup { kind: 'events'; events: ChatMessage[] }
 type MsgGroup = SingleGroup | EventsGroup
   | { kind: 'starting'; row: Extract<TranscriptRow, { kind: 'starting' }> }
   | { kind: 'turn'; row: Extract<TranscriptRow, { kind: 'turn' }> }
+  | { kind: 'interaction'; row: Extract<TranscriptRow, { kind: 'interaction' }> }
   | { kind: 'question-answer'; row: Extract<TranscriptRow, { kind: 'question-answer' }> };
 
 function groupKey(group: MsgGroup, responseTurnId: string | null): string {
@@ -968,6 +971,7 @@ function groupKey(group: MsgGroup, responseTurnId: string | null): string {
     return 'response:active';
   if (group.kind === 'turn') return `turn:${group.row.turn.id}`;
   if (group.kind === 'question-answer') return `question-answer:${group.row.answer.id}`;
+  if (group.kind === 'interaction') return `interaction:${group.row.interaction.id}`;
   if (group.kind === 'events') return `events:${group.events[0]!.id}`;
   return `single:${group.m.id}`;
 }
@@ -975,6 +979,7 @@ function groupKey(group: MsgGroup, responseTurnId: string | null): string {
 function groupContains(group: MsgGroup, messageId: string): boolean {
   if (group.kind === 'turn' || group.kind === 'starting') return false;
   if (group.kind === 'question-answer') return group.row.answer.id === messageId;
+  if (group.kind === 'interaction') return group.row.interaction.id === messageId;
   if (group.kind === 'events') return group.events.some((e) => e.id === messageId);
   return group.m.id === messageId;
 }
@@ -996,6 +1001,7 @@ function groupMessages(list: TranscriptRow[]): MsgGroup[] {
       flushEvents();
       if (row.kind === 'starting') out.push({ kind: 'starting', row });
       else if (row.kind === 'turn') out.push({ kind: 'turn', row });
+      else if (row.kind === 'interaction') out.push({ kind: 'interaction', row });
       else out.push({ kind: 'question-answer', row });
       continue;
     }
@@ -1051,13 +1057,10 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
 function ApprovalReferences() {
   const list = pendingApprovals.value.filter(a => !isApprovalThread(a.origin));
   if (list.length === 0) return null;
-  const busy = respondingApprovalIds.value;
   return (
     <>
         {list.map((a) => (
-          <ApprovalBubble key={a.approvalId} reference approval={a} busy={busy.has(a.approvalId)}
-            onReview={() => openCredentials({ approvalId: a.approvalId })}
-            onRespond={(value, message) => { void respondApproval(a.approvalId, value, message).catch(console.error); }} />
+          <ApprovalRow key={a.id} reference approval={a} />
         ))}
     </>
   );
@@ -1526,6 +1529,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
   let latestConversationalMessage: ChatMessage | undefined;
   for (let index = list.length - 1; index >= 0; index--) {
     const row = list[index]!;
+    if (row.kind === 'interaction') break;
     if (row.kind !== 'message') continue;
     const message = row.message;
     if (message.direction !== 'event') {
@@ -1547,6 +1551,8 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                     ? <ResponseStatusRow key={key} source={g.row} />
                     : g.kind === 'question-answer'
                       ? <QuestionAnswer key={key} question={g.row.question} answer={g.row.answer} />
+                    : g.kind === 'interaction'
+                      ? <ApprovalRow key={key} approval={g.row.interaction} />
                     : g.kind === 'events'
                       ? <EventsGroup key={key} events={g.events} />
                       : <MessageRow
@@ -1917,7 +1923,7 @@ export function InputDock() {
     </div>
     {questions.length > 0 && <div class="question-dock">
       {questions.map((question) => <QuestionPrompt
-        key={`${groupId.value}:${threadId.value}:${channelType.value}:${messagingGroupId.value}:${question.questionId}`}
+        key={`${groupId.value}:${threadId.value}:${channelType.value}:${messagingGroupId.value}:${question.id}`}
         question={question} />)}
     </div>}
   </div>;

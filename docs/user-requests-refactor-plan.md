@@ -28,6 +28,11 @@ new inbox capabilities, and stronger journaling are not prerequisites.
   own execution/accounting data; timeline rows reference items and turns.
   The question dock and transcript render the same interaction.
 
+The wire keeps normalized `messages`, `interactions`, and `turns` collections.
+The timeline combines them for rendering. Replacing the former `questions`
+collection rather than introducing a mixed message array keeps message-only
+processing simple and adds no extra collection or registry.
+
 Interaction variants are question, confirmation, account setup, and access
 grant. Keep meaningful states and responses variant-specific:
 

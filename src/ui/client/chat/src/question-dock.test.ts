@@ -4,7 +4,8 @@ import type { PendingQuestionDto } from './types';
 import type { ConversationMessage } from '../../../shared/conversation';
 
 const question: PendingQuestionDto = {
-  questionId: 'q',
+  kind: 'question',
+  id: 'q',
   question: 'Choose?',
   responseMode: 'text',
   options: [],
@@ -37,20 +38,20 @@ describe('question input dock', () => {
       dockQuestions(
         [
           question,
-          { ...question, questionId: 'off-thread', threadId: 'other' },
-          { ...question, questionId: 'off-group', agentGroupId: 'other' },
-          { ...question, questionId: 'cancelled', status: 'cancelled' },
-          { ...question, questionId: 'unthreaded', threadId: null },
+          { ...question, id: 'off-thread', threadId: 'other' },
+          { ...question, id: 'off-group', agentGroupId: 'other' },
+          { ...question, id: 'cancelled', status: 'cancelled' },
+          { ...question, id: 'unthreaded', threadId: null },
         ],
         [],
         'group',
         'thread',
-      ).map((q) => q.questionId),
+      ).map((q) => q.id),
     ).toEqual(['q', 'unthreaded']);
   });
   it('waits for the actual skip event, then removes only the resolved prompt', () => {
     const skipped: PendingQuestionDto = { ...question, status: 'answered', answerType: 'skipped' };
-    const other = { ...question, questionId: 'other' };
+    const other = { ...question, id: 'other' };
     expect(dockQuestions([skipped, other], [], 'group', 'thread')).toEqual([skipped, other]);
     expect(
       dockQuestions(
@@ -62,9 +63,9 @@ describe('question input dock', () => {
     ).toEqual([other]);
   });
   it('orders multiple prompts by recorded position without changing records', () => {
-    const questions = [{ ...question, questionId: 'second', timelinePosition: 200 }, question];
-    expect(dockQuestions(questions, [], 'group', 'thread').map((q) => q.questionId)).toEqual(['q', 'second']);
-    expect(questions[0].questionId).toBe('second');
+    const questions = [{ ...question, id: 'second', timelinePosition: 200 }, question];
+    expect(dockQuestions(questions, [], 'group', 'thread').map((q) => q.id)).toEqual(['q', 'second']);
+    expect(questions[0].id).toBe('second');
   });
   it('does not treat outbound or cancelled inputs as answer events', () => {
     expect(

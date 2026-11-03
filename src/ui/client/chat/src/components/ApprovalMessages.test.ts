@@ -79,7 +79,10 @@ function button(value: unknown, label: string): Node {
 }
 
 const approval: PendingApprovalDto = {
-  approvalId: 'approval',
+  kind: 'confirmation',
+  status: 'pending',
+  reviewRequired: false,
+  id: 'approval',
   action: 'install_packages',
   title: 'Install package',
   details: null,

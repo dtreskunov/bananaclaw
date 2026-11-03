@@ -421,7 +421,7 @@ function makeConversation(nextScene: Scene, startedAt = new Date(Date.now() - 70
         : []),
     ],
     turns: [turn],
-    questions: [],
+    interactions: [],
     connection: { connected: nextScene !== 'disconnected', activeTurnId: settled ? null : fixtureTurnId },
     capabilities: { canSend: true, stop: !settled, stopTool: !settled, steer: nextScene === 'busy-send',
       editInput: pendingInput, cancelInput: pendingInput },

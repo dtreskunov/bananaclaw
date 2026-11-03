@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppInfo, Connection, CredentialGroup, Service } from './CredentialsApi';
+import type { PendingApprovalDto } from '../types';
 import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnectionDialog } from './CredentialsDialogs';
 import {
   ConfirmCredentialAction,
@@ -365,8 +366,10 @@ describe('assisted credential approval UI', () => {
   it('uses a non-authorizing review action while retaining ordinary approval buttons', () => {
     const onReview = vi.fn(),
       onRespond = vi.fn();
-    const approval = {
-      approvalId: 'access-one',
+    const approval: PendingApprovalDto = {
+      kind: 'access_grant',
+      supportsResponseMessage: false,
+      id: 'access-one',
       action: 'request_access',
       title: 'Request access',
       details: 'Read calendar',
@@ -380,7 +383,7 @@ describe('assisted credential approval UI', () => {
       createdAt: '2026-01-01',
       origin: { agentGroupId: 'one', threadId: 'thread-one', channelType: 'web', messagingGroupId: 'web-one' },
       reviewRequired: true,
-      stage: 'pending',
+      status: 'pending',
     };
     const card = ApprovalCard({ approval, busy: false, onReview, onRespond });
     const buttons = descendants(card).filter((node) => node.type === 'button');
@@ -392,6 +395,7 @@ describe('assisted credential approval UI', () => {
     const simple = ApprovalCard({
       approval: {
         ...approval,
+        kind: 'confirmation',
         action: 'install_packages',
         reviewRequired: false,
         options: [{ label: 'Approve', value: 'approve', selectedLabel: 'Approved' }],

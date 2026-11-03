@@ -75,14 +75,15 @@ function request() {
   });
 }
 const view = (thread = 'source-thread', user = 'owner') => readConversation(user, 'g', thread);
+const approvals = (conversation = view()) => conversation.interactions.filter((item) => item.kind !== 'question');
 
 describe('retained approval transcript', () => {
   it('retains account-setup purpose and its responder after completion and reload', () => {
     request();
     getDb().prepare("UPDATE approval_history SET action='request_access' WHERE approval_id='approval'").run();
     createApprovalWorkflow('approval', 'account-setup', { messageId: 'source', purpose: 'account' });
-    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
-      purpose: 'account',
+    expect(approvals()[0]).toMatchObject({
+      kind: 'account_setup',
       status: 'pending',
     });
     finishApprovalWorkflow(
@@ -93,8 +94,8 @@ describe('retained approval transcript', () => {
       undefined,
       'owner',
     );
-    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
-      purpose: 'account',
+    expect(approvals()[0]).toMatchObject({
+      kind: 'account_setup',
       status: 'approved',
       respondedBy: { userId: 'owner', displayName: 'Owner' },
     });
@@ -107,13 +108,13 @@ describe('retained approval transcript', () => {
       channelType: 'web',
       messagingGroupId: 'web',
     });
-    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
-      approvalId: 'approval',
+    expect(approvals()[0]).toMatchObject({
+      id: 'approval',
       status: 'pending',
       title: 'Install tool',
     });
-    expect(view('other-thread').messages.filter((message) => message.approval)).toEqual([]);
-    expect(view('source-thread', 'member').messages.filter((message) => message.approval)).toEqual([]);
+    expect(approvals(view('other-thread'))).toEqual([]);
+    expect(approvals(view('source-thread', 'member'))).toEqual([]);
   });
 
   it.each(['approve', 'reject'])(
@@ -132,14 +133,14 @@ describe('retained approval transcript', () => {
       });
       expect(getPendingApproval('approval')).toBeUndefined();
       const after = view();
-      const bubble = after.messages.find((message) => message.id === 'approval:approval');
-      expect(bubble?.approval).toMatchObject({
+      const bubble = approvals(after).find((item) => item.id === 'approval');
+      expect(bubble).toMatchObject({
         status: value === 'approve' ? 'approved' : 'rejected',
         decision: value,
         responseMessage: 'Keep existing work.',
         respondedBy: { userId: 'owner', displayName: 'Owner' },
       });
-      expect(bubble?.timestamp).toBe(before.messages.find((message) => message.approval)?.timestamp);
+      expect(bubble?.createdAt).toBe(approvals(before)[0]?.createdAt);
       expect(after.messages.filter((message) => message.text.includes('User message from'))).toEqual([]);
       expect(
         readChatHistory('owner', 'g', 'source-thread').some((message) => message.text.includes('User message from')),
@@ -173,10 +174,8 @@ describe('retained approval transcript', () => {
           changes: diffConversation(before, after),
         }),
       );
-      expect(settled.conversation.messages.find((message) => message.id === bubble?.id)?.approval).toEqual(
-        bubble?.approval,
-      );
-      expect(view().messages.find((message) => message.id === bubble?.id)?.approval).toEqual(bubble?.approval);
+      expect(approvals(settled.conversation).find((item) => item.id === bubble?.id)).toEqual(bubble);
+      expect(approvals().find((item) => item.id === bubble?.id)).toEqual(bubble);
     },
   );
 
@@ -184,7 +183,7 @@ describe('retained approval transcript', () => {
     request();
     getDb().prepare("UPDATE approval_history SET origin_message_id='missing' WHERE approval_id='approval'").run();
     expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
-    expect(view().messages.filter((message) => message.approval)).toEqual([]);
+    expect(approvals()).toEqual([]);
   });
 
   it('does not invent a root thread for legacy unanchored shared sessions', () => {
@@ -214,7 +213,7 @@ describe('retained approval transcript', () => {
       platformId: 'admin-dm',
       threadId: null,
     });
-    const approval = view().messages.find((message) => message.approval)?.approval;
+    const approval = approvals()[0];
     expect(approval?.status).toBe('failed');
     expect(approval?.outcomeMessage).toContain('The image build failed');
   });

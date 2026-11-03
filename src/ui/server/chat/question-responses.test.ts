@@ -63,12 +63,6 @@ beforeEach(() => {
     question_text: 'Which option?',
     response_mode: 'choice',
     options: [{ label: 'Yes', selectedLabel: 'Selected yes', value: 'yes' }],
-    status: 'pending',
-    answer_value: null,
-    answer_type: null,
-    answered_by: null,
-    answered_at: null,
-    cancelled_at: null,
     created_at: NOW,
   });
   runtime.userId = 'web:member';
@@ -220,7 +214,7 @@ describe('typed responses through the existing endpoint', () => {
   });
 
   it.each(['answer', 'skip'])('keeps the first %s resolution across competing requests', async (first) => {
-    const answer = { value: 'yes' };
+    const answer = { responseType: 'choice', value: 'yes' };
     const skip = { responseType: 'skipped' };
     await respond(first === 'answer' ? answer : skip);
     await respond(first === 'answer' ? skip : answer);
@@ -248,13 +242,17 @@ describe('typed responses through the existing endpoint', () => {
     expect(runtime.wake).not.toHaveBeenCalled();
   });
 
-  it.each([{ responseType: 'skipped', value: 'yes' }, { responseType: 'unknown' }, {}])(
-    'rejects malformed response %j without resolving the question',
-    async (body) => {
-      expect((await respond(body)).status).toBe(400);
-      expect(getQuestion('q')?.status).toBe('pending');
-    },
-  );
+  it.each([
+    { responseType: 'skipped', value: 'yes' },
+    { responseType: 'unknown' },
+    { value: 'yes' },
+    { responseType: 'choice', value: 'invalid' },
+    { responseType: 'text', value: 'yes' },
+    {},
+  ])('rejects malformed response %j without resolving the question', async (body) => {
+    expect((await respond(body)).status).toBe(400);
+    expect(getQuestion('q')?.status).toBe('pending');
+  });
 
   it('rejects cancelled and unknown questions and never treats a skip as an approval', async () => {
     expect((await respond({ responseType: 'skipped' }, 'missing')).status).toBe(404);

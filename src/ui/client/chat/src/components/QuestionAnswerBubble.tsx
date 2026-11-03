@@ -7,7 +7,9 @@ import { MessageBubble } from './MessageBubble';
 export function QuestionAnswerBubble({ question, answer }: { question: PendingQuestionDto; answer: ChatMessage }) {
   const response = answer.questionResponseType === 'skipped'
     ? 'Question skipped'
-    : (question.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text);
+    : answer.questionResponseType === 'choice'
+      ? (question.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text)
+      : answer.text;
   const text = formatQuestionResponse(question.question, response);
   const md = renderMarkdown(text, groupId.value);
   return (

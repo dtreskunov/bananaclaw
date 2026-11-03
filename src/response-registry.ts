@@ -13,9 +13,9 @@
  */
 
 import { log } from './log.js';
-import type { QuestionResponse } from './ui/shared/question-response.js';
+import type { QuestionResponse } from './ui/shared/question.js';
 
-export type ResponsePayload = QuestionResponse & {
+export type ResponsePayload = (QuestionResponse | { value: string; responseType?: never }) & {
   questionId: string;
   message?: string;
   userId: string | null;

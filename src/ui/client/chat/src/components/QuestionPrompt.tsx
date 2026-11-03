@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { respondQuestion, skipQuestion } from '../actions';
+import { respondQuestion } from '../actions';
 import { isRecording } from '../recorder';
 import {
   channelType,
@@ -25,10 +25,10 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
   const tid = threadId.value;
   const channel = channelType.value;
   const mg = messagingGroupId.value;
-  const target = `${gid}:${tid}:question:${q.questionId}`;
+  const target = `${gid}:${tid}:question:${q.id}`;
   const voiceState = voice.state.value;
   const active = voiceState.target === target;
-  const busy = respondingQuestionIds.value.has(q.questionId);
+  const busy = respondingQuestionIds.value.has(q.id);
   const waiting = !!accepted || q.status === 'answered';
   const skipped = accepted === 'skipped' || q.answerType === 'skipped';
   const disconnected = (!channel || channel === 'web') && !chatReady.value;
@@ -43,7 +43,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
   const canType = q.responseMode !== 'choice';
   const { autosize, multiLine } = useComposerTextarea(textareaRef, answer, null);
 
-  const submit = async (value = answerRef.current.trim()): Promise<boolean> => {
+  const submit = async (value = answerRef.current.trim(), responseType: 'choice' | 'text' = 'text'): Promise<boolean> => {
     if (
       !value.trim() ||
       submitting.current ||
@@ -57,7 +57,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
     submitting.current = true;
     setError('');
     try {
-      const sent = await respondQuestion(q.questionId, value);
+      const sent = await respondQuestion(q.id, { responseType, value });
       if (sent) setAccepted('answer');
       else setError('Could not submit your answer. Please retry.');
       return sent;
@@ -79,7 +79,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
     setError('');
     if (voice.state.value.target === target) voice.detach();
     try {
-      const sent = await skipQuestion(q.questionId);
+      const sent = await respondQuestion(q.id, { responseType: 'skipped' });
       if (sent) setAccepted('skipped');
       else setError('Could not skip this question. Please retry.');
     } finally {
@@ -126,7 +126,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
   return (
     <section
       class="question-prompt"
-      data-question-id={q.questionId}
+      data-question-id={q.id}
       aria-label={q.question || 'Question'}
       aria-busy={busy || waiting}
     >
@@ -153,7 +153,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
               disabled={disabled}
               onClick={() => {
                 if (voice.state.value.target === target) voice.detach();
-                void submit(option.value);
+                void submit(option.value, 'choice');
               }}
             >
               {option.label}
@@ -173,7 +173,8 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
         >
           <ComposerInput
             inputRef={textareaRef}
-            multiLine={multiLine}
+            multiLine={q.multiline || multiLine}
+            rows={q.multiline ? 3 : 1}
             listening={active && voiceState.phase === 'listening'}
             className="question-response-input-wrap"
             textarea={{
@@ -182,7 +183,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
               disabled,
               readOnly: voiceLocked,
               'aria-label': 'Your answer',
-              placeholder: 'Type your answer…',
+              placeholder: q.placeholder ?? 'Type your answer…',
               onInput: (event) => {
                 answerRef.current = event.currentTarget.value;
                 setAnswer(answerRef.current);

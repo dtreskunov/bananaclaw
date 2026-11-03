@@ -468,12 +468,6 @@ describe('durable questions', () => {
       question_text: 'Choose one',
       response_mode: 'choice',
       options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
-      status: 'pending',
-      answer_value: null,
-      answer_type: null,
-      answered_by: null,
-      answered_at: null,
-      cancelled_at: null,
       created_at: now(),
     });
     const result = getQuestion('q-1');
@@ -510,21 +504,17 @@ describe('durable questions', () => {
       question_text: 'What should happen?',
       response_mode: 'choice_or_text',
       options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
-      status: 'pending',
-      answer_value: null,
-      answer_type: null,
-      answered_by: null,
-      answered_at: null,
-      cancelled_at: null,
       created_at: now(),
     });
-    expect(answerQuestion('q-1', { value: 'Something else', type: 'text', userId: 'user-1', answeredAt: now() })).toBe(
-      true,
-    );
+    expect(
+      answerQuestion('q-1', { value: 'Something else', responseType: 'text', userId: 'user-1', answeredAt: now() }),
+    ).toBe(true);
     const result = getQuestion('q-1');
     expect(result?.status).toBe('answered');
     expect(result?.answer_value).toBe('Something else');
     expect(result?.answer_type).toBe('text');
-    expect(answerQuestion('q-1', { value: 'yes', type: 'choice', userId: 'user-1', answeredAt: now() })).toBe(false);
+    expect(answerQuestion('q-1', { value: 'yes', responseType: 'choice', userId: 'user-1', answeredAt: now() })).toBe(
+      false,
+    );
   });
 });

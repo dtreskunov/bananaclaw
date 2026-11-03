@@ -101,10 +101,10 @@ export function resetState(): void {
 }
 resetState();
 export function getAccessApproval(): PendingApprovalDto {
-  return {
-    approvalId: 'fixture-access', action: 'request_access', title: 'Allow access', details: null,
+  return {kind: accessPurpose === 'account' ? 'account_setup' : 'access_grant', supportsResponseMessage: false,
+    id: 'fixture-access', action: 'request_access', title: 'Allow access', details: null,
     packages: null, options: [], agentGroupId: FIXTURE_GROUP.id, agentGroupName: FIXTURE_GROUP.name,
-    createdAt: accessCreatedAt, reviewRequired: true, purpose: accessPurpose,
+    createdAt: accessCreatedAt, reviewRequired: true,
     status: accessStage === 'completed' ? 'approved' : accessStage === 'rejected' ? 'rejected' :
       accessStage === 'failed' ? 'failed' : 'pending',
     resolvedAt: accessResolvedAt,

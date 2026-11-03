@@ -449,6 +449,7 @@ registerChannelAdapter('resend', {
         const claimed = await dispatchResponse({
           questionId: approvalId,
           value: optionValue,
+          responseType: 'choice',
           userId: senderAddress,
           channelType: 'resend',
           platformId,

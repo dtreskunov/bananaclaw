@@ -1,6 +1,8 @@
-import type { Conversation, ConversationMessage, ConversationQuestion, ConversationTurn } from './conversation.js';
+import type { Conversation, ConversationMessage, ConversationInteraction, ConversationTurn } from './conversation.js';
+import { isQuestionInteraction } from './conversation.js';
+import type { QuestionInput, QuestionResponse } from './question.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 5;
+export const CONVERSATION_PROTOCOL_VERSION = 7;
 export interface EntityChanges<T> {
   upserts: T[];
   removeIds: string[];
@@ -9,7 +11,7 @@ export interface EntityChanges<T> {
 export interface ConversationChanges {
   messages: EntityChanges<ConversationMessage>;
   turns: EntityChanges<ConversationTurn>;
-  questions: EntityChanges<ConversationQuestion>;
+  interactions: EntityChanges<ConversationInteraction>;
   connection: Conversation['connection'];
   capabilities: Conversation['capabilities'];
   timeline: Conversation['timeline'];
@@ -70,6 +72,24 @@ const shape =
   (v) =>
     object(v) && Object.entries(fields).every(([key, check]) => check(v[key]));
 const strings = array(id);
+const questionInput = shape({
+  question: text,
+  responseMode: oneOf('choice', 'text', 'choice_or_text'),
+  options: array(shape({ label: text, selectedLabel: text, value: text })),
+  placeholder: optional(text),
+  multiline: optional(bool),
+});
+const questionAnswer = shape({
+  responseType: oneOf('choice', 'text'),
+  value: (v) => typeof v === 'string' && !!v.trim(),
+});
+const questionSkip = shape({ responseType: oneOf('skipped'), value: (v) => v === undefined });
+export function isQuestionInput(value: unknown): value is QuestionInput {
+  return questionInput(value);
+}
+export function isQuestionResponse(value: unknown): value is QuestionResponse {
+  return questionAnswer(value) || questionSkip(value);
+}
 const trace = shape({ ts: text, text });
 const usageFields = {
   cost_usd: number,
@@ -94,32 +114,8 @@ const message = shape({
   direction: oneOf('in', 'out', 'event'),
   timestamp: text,
   text,
-  approval: optional(
-    shape({
-      approvalId: id,
-      action: text,
-      title: text,
-      details: nullable(text),
-      packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
-      options: array(shape({ label: text, selectedLabel: text, value: text })),
-      agentGroupId: nullable(text),
-      agentGroupName: nullable(text),
-      createdAt: text,
-      supportsResponseMessage: optional(bool),
-      reviewRequired: optional(bool),
-      purpose: optional(oneOf('account', 'access')),
-      stage: optional(text),
-      origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
-      status: optional(oneOf('pending', 'applying', 'approved', 'rejected', 'failed', 'cancelled', 'expired')),
-      decision: optional(nullable(text)),
-      respondedBy: optional(nullable(shape({ userId: id, displayName: text }))),
-      responseMessage: optional(nullable(text)),
-      outcomeMessage: optional(nullable(text)),
-      resolvedAt: optional(nullable(text)),
-    }),
-  ),
   questionId: optional(id),
-  questionResponseType: optional(oneOf('skipped')),
+  questionResponseType: optional(oneOf('choice', 'text', 'skipped')),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -187,27 +183,49 @@ const turn = shape({
     durationMs: nullable(number),
   }),
 });
-const question = shape({
-  questionId: id,
-  question: text,
-  responseMode: oneOf('choice', 'text', 'choice_or_text'),
+const question: Check = (value) =>
+  isQuestionInput(value) &&
+  shape({
+    kind: oneOf('question'),
+    id,
+    status: oneOf('pending', 'answered', 'cancelled'),
+    answerValue: nullable(text),
+    answerType: nullable(oneOf('choice', 'text', 'skipped')),
+    answeredAt: nullable(text),
+    activity: optional(array(trace)),
+    turnId: optional(id),
+    threadId: nullable(text),
+    agentGroupId: id,
+    createdAt: text,
+    messageId: optional(id),
+    timelinePosition: optional(integer),
+  })(value);
+const approval = shape({
+  kind: oneOf('confirmation', 'account_setup', 'access_grant'),
+  id,
+  action: text,
+  title: text,
+  details: nullable(text),
+  packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
   options: array(shape({ label: text, selectedLabel: text, value: text })),
-  status: oneOf('pending', 'answered', 'cancelled'),
-  answerValue: nullable(text),
-  answerType: nullable(oneOf('choice', 'text', 'skipped')),
-  answeredAt: nullable(text),
-  activity: optional(array(trace)),
-  turnId: optional(id),
-  threadId: nullable(text),
-  agentGroupId: id,
+  agentGroupId: nullable(text),
+  agentGroupName: nullable(text),
   createdAt: text,
-  messageId: optional(id),
-  timelinePosition: optional(integer),
+  supportsResponseMessage: bool,
+  reviewRequired: bool,
+  origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
+  status: oneOf('pending', 'applying', 'approved', 'rejected', 'failed', 'cancelled', 'expired'),
+  decision: optional(nullable(text)),
+  respondedBy: optional(nullable(shape({ userId: id, displayName: text }))),
+  responseMessage: optional(nullable(text)),
+  outcomeMessage: optional(nullable(text)),
+  resolvedAt: optional(nullable(text)),
 });
+const interaction: Check = (value) => question(value) || approval(value);
 const tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
 const timelineRow: Check = (v) =>
   shape({ kind: oneOf('message'), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v) ||
-  shape({ kind: oneOf('question'), questionId: id, trace: optional(tracePlacement) })(v) ||
+  shape({ kind: oneOf('interaction'), interactionId: id, trace: optional(tracePlacement) })(v) ||
   shape({ kind: oneOf('turn'), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v);
 const connection = shape({ connected: bool, activeTurnId: nullable(id) });
 const capabilities = shape({
@@ -222,7 +240,7 @@ const conversation = shape({
   threadId: id,
   messages: array(message),
   turns: array(turn),
-  questions: array(question),
+  interactions: array(interaction),
   timeline: array(timelineRow),
   connection,
   capabilities,
@@ -242,7 +260,7 @@ export function parseConversationFrame(value: unknown): ConversationFrame {
     shape({
       messages: changes(message),
       turns: changes(turn),
-      questions: changes(question),
+      interactions: changes(interaction),
       connection,
       capabilities,
       timeline: array(timelineRow),
@@ -252,17 +270,15 @@ export function parseConversationFrame(value: unknown): ConversationFrame {
   throw new ConversationProtocolError('invalid_frame');
 }
 
-function keyOf<T extends { id: string } | { questionId: string }>(entity: T): string {
-  return 'id' in entity ? entity.id : entity.questionId;
+function unique<T extends { id: string }>(entities: T[]): void {
+  if (new Set(entities.map((entity) => entity.id)).size !== entities.length)
+    throw new ConversationProtocolError('invalid_frame');
 }
-function unique<T extends { id: string } | { questionId: string }>(entities: T[]): void {
-  if (new Set(entities.map(keyOf)).size !== entities.length) throw new ConversationProtocolError('invalid_frame');
-}
-function applyEntities<T extends { id: string } | { questionId: string }>(prior: T[], delta: EntityChanges<T>): T[] {
+function applyEntities<T extends { id: string }>(prior: T[], delta: EntityChanges<T>): T[] {
   unique(delta.upserts);
-  const values = new Map(prior.map((entity) => [keyOf(entity), entity]));
+  const values = new Map(prior.map((entity) => [entity.id, entity]));
   for (const id of delta.removeIds) values.delete(id);
-  for (const entity of delta.upserts) values.set(keyOf(entity), entity);
+  for (const entity of delta.upserts) values.set(entity.id, entity);
   if (
     new Set(delta.order).size !== delta.order.length ||
     delta.order.length !== values.size ||
@@ -273,7 +289,7 @@ function applyEntities<T extends { id: string } | { questionId: string }>(prior:
 }
 
 function validateTimeline(view: Conversation): void {
-  const questionIds = new Set(view.questions.map((question) => question.questionId));
+  const questionIds = new Set(view.interactions.filter(isQuestionInteraction).map((item) => item.id));
   if (
     view.messages.some(
       (message) =>
@@ -284,7 +300,7 @@ function validateTimeline(view: Conversation): void {
   const messages = new Set(
     view.messages.filter((message) => message.inputState?.status !== 'cancelled').map((message) => message.id),
   );
-  const questions = new Set(view.questions.map((question) => question.questionId));
+  const interactions = new Set(view.interactions.map((item) => item.id));
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
   const seenRows = new Set<string>();
   const seenActivity = new Set<string>();
@@ -294,8 +310,8 @@ function validateTimeline(view: Conversation): void {
     const key =
       row.kind === 'message'
         ? `message:${row.messageId}`
-        : row.kind === 'question'
-          ? `question:${row.questionId}`
+        : row.kind === 'interaction'
+          ? `interaction:${row.interactionId}`
           : `turn:${row.turnId}:after:${row.afterId}`;
     if (seenRows.has(key)) throw new ConversationProtocolError('invalid_frame');
     seenRows.add(key);
@@ -307,8 +323,8 @@ function validateTimeline(view: Conversation): void {
         if (statsHosts.has(row.statsTurnId)) throw new ConversationProtocolError('invalid_frame');
         statsHosts.add(row.statsTurnId);
       }
-    } else if (row.kind === 'question') {
-      if (!questions.delete(row.questionId)) throw new ConversationProtocolError('invalid_frame');
+    } else if (row.kind === 'interaction') {
+      if (!interactions.delete(row.interactionId)) throw new ConversationProtocolError('invalid_frame');
     } else if (!turns.has(row.turnId) || row.trace.turnId !== row.turnId) {
       throw new ConversationProtocolError('invalid_frame');
     }
@@ -328,7 +344,7 @@ function validateTimeline(view: Conversation): void {
   }
   if (
     messages.size ||
-    questions.size ||
+    interactions.size ||
     view.turns.some((turn) => turn.activity.some((line) => !seenActivity.has(`${turn.id}:${line.ordinal}`)))
   )
     throw new ConversationProtocolError('invalid_frame');
@@ -340,7 +356,7 @@ export function reduceConversation(state: ConversationSnapshot | null, frame: Co
     if (state?.streamId === frame.streamId && frame.revision <= state.revision) return state;
     unique(frame.conversation.messages);
     unique(frame.conversation.turns);
-    unique(frame.conversation.questions);
+    unique(frame.conversation.interactions);
     validateTimeline(frame.conversation);
     return frame;
   }
@@ -357,7 +373,7 @@ export function reduceConversation(state: ConversationSnapshot | null, frame: Co
       threadId: state.conversation.threadId,
       messages: applyEntities(state.conversation.messages, changes.messages),
       turns: applyEntities(state.conversation.turns, changes.turns),
-      questions: applyEntities(state.conversation.questions, changes.questions),
+      interactions: applyEntities(state.conversation.interactions, changes.interactions),
       timeline: changes.timeline,
       connection: changes.connection,
       capabilities: changes.capabilities,
@@ -367,12 +383,12 @@ export function reduceConversation(state: ConversationSnapshot | null, frame: Co
   return next;
 }
 
-function diffEntities<T extends { id: string } | { questionId: string }>(before: T[], after: T[]): EntityChanges<T> {
-  const old = new Map(before.map((entity) => [keyOf(entity), JSON.stringify(entity)]));
-  const order = after.map(keyOf);
+function diffEntities<T extends { id: string }>(before: T[], after: T[]): EntityChanges<T> {
+  const old = new Map(before.map((entity) => [entity.id, JSON.stringify(entity)]));
+  const order = after.map((entity) => entity.id);
   const retained = new Set(order);
   return {
-    upserts: after.filter((entity) => old.get(keyOf(entity)) !== JSON.stringify(entity)),
+    upserts: after.filter((entity) => old.get(entity.id) !== JSON.stringify(entity)),
     removeIds: [...old.keys()].filter((id) => !retained.has(id)),
     order,
   };
@@ -382,7 +398,7 @@ export function diffConversation(before: Conversation, after: Conversation): Con
   return {
     messages: diffEntities(before.messages, after.messages),
     turns: diffEntities(before.turns, after.turns),
-    questions: diffEntities(before.questions, after.questions),
+    interactions: diffEntities(before.interactions, after.interactions),
     connection: after.connection,
     capabilities: after.capabilities,
     timeline: after.timeline,

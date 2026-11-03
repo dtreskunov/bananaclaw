@@ -12,7 +12,8 @@ vi.mock('../state', () => ({
 }));
 
 const question: PendingQuestionDto = {
-  questionId: 'q',
+  kind: 'question',
+  id: 'q',
   question: 'Which **day**?',
   responseMode: 'choice_or_text',
   options: [{ label: 'Monday', selectedLabel: 'Monday selected', value: 'monday' }],
@@ -27,6 +28,7 @@ const question: PendingQuestionDto = {
 const answer: ChatMessage = {
   id: 'question-response:q',
   questionId: 'q',
+  questionResponseType: 'text',
   direction: 'in',
   text: '**Tuesday**',
   timestamp: '2026-10-05T17:01:00Z',
@@ -73,7 +75,10 @@ describe('answered question markdown', () => {
   });
 
   it('uses the selected option label rather than its stored value', () => {
-    const bubble = QuestionAnswerBubble({ question, answer: { ...answer, text: 'monday' } });
+    const bubble = QuestionAnswerBubble({
+      question,
+      answer: { ...answer, text: 'monday', questionResponseType: 'choice' },
+    });
     expect(bubble.props.children.props.dangerouslySetInnerHTML.__html).toContain('<p>Monday selected</p>');
   });
 
@@ -82,7 +87,15 @@ describe('answered question markdown', () => {
       question,
       answer: { ...answer, text: 'Wednesday' },
     });
+
     expect(bubble.props.children.props.dangerouslySetInnerHTML.__html).toContain('<p>Wednesday</p>');
+  });
+
+  it('keeps literal text even when it equals an option value', () => {
+    const bubble = QuestionAnswerBubble({ question, answer: { ...answer, text: 'monday' } });
+    const html = bubble.props.children.props.dangerouslySetInnerHTML.__html;
+    expect(html).toContain('<p>monday</p>');
+    expect(html).not.toContain('Monday selected');
   });
 
   it('renders an explicit skip independently of choice labels', () => {

@@ -59,6 +59,7 @@ interface ComposerInputProps {
     icon?: ComponentChildren;
   };
   multiLine: boolean;
+  rows?: number;
   listening: boolean;
   className?: string;
   hidden?: boolean;
@@ -73,14 +74,14 @@ function onComposerKeyDown(event: JSX.TargetedKeyboardEvent<HTMLTextAreaElement>
 }
 
 export function ComposerInput({
-  inputRef, textarea, voice, send, multiLine, listening, className = '', hidden = false, controls,
+  inputRef, textarea, voice, send, multiLine, rows = 1, listening, className = '', hidden = false, controls,
 }: ComposerInputProps) {
   return (
     <div
       class={`composer-input-wrap${!send && !voice ? ' composer-passive' : ''}${className ? ` ${className}` : ''}${multiLine ? ' multi-line' : ''}${listening ? ' voice-listening' : ''}`}
       style={hidden ? 'display:none' : ''}
     >
-      <textarea {...textarea} ref={inputRef} rows={1} onKeyDown={send ? onComposerKeyDown : undefined} />
+      <textarea {...textarea} ref={inputRef} rows={rows} onKeyDown={send ? onComposerKeyDown : undefined} />
       {controls}
       {voice ? <VoiceButton {...voice} /> : null}
       {send ? <button

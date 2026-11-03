@@ -8,7 +8,11 @@ import { MessageBubble } from './MessageBubble';
 import type { PendingApprovalDto } from '../types';
 
 const approval: PendingApprovalDto = {
-  approvalId: 'approval',
+  kind: 'confirmation',
+  status: 'pending',
+  supportsResponseMessage: false,
+  reviewRequired: false,
+  id: 'approval',
   action: 'install_packages',
   title: 'Install package',
   details: null,
@@ -28,7 +32,7 @@ describe('shared approval bubble chrome', () => {
     expect(node.type).toBe(MessageBubble);
     expect(node.props.from).toBe('Research agent');
     expect(node.props.timestamp).toBe(approval.createdAt);
-    expect(node.props['data-msg-id']).toBe('approval:approval');
+    expect(node.props['data-msg-id']).toBe(approval.id);
     expect(node.props.children.type).toBe(ApprovalCard);
   });
   it('timestamps a resolved response using the decision time, without duplicating metadata in its body', () => {
@@ -67,6 +71,7 @@ describe('shared approval bubble chrome', () => {
       channelType.value = 'web';
       const access = {
         ...approval,
+        kind: 'access_grant' as const,
         action: 'request_access',
         reviewRequired: true,
         status,
@@ -81,7 +86,7 @@ describe('shared approval bubble chrome', () => {
       expect(node.type).toBe(MessageBubble);
       expect(node.props.class).toContain('markdown access-approval-message');
       expect(node.props.children.type).toBe(AccessRequestCard);
-      expect(node.props.children.props.id).toBe(approval.approvalId);
+      expect(node.props.children.props.id).toBe(approval.id);
       expect(node.props.children.props.disabled).toBe(status === 'applying');
     },
   );
@@ -91,6 +96,7 @@ describe('shared approval bubble chrome', () => {
     channelType.value = 'web';
     const access = {
       ...approval,
+      kind: 'access_grant' as const,
       action: 'request_access',
       reviewRequired: true,
       origin: {
