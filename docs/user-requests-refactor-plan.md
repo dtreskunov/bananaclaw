@@ -145,8 +145,13 @@ databases create only the canonical store. Migration application is keyed by
 `current-state-interactions`, not its numeric file prefix. The unrelated
 Agent Vault-only migration/security checks remain required and unchanged.
 
-`scripts/cutover-interactions.ts` is a disposable, explicit offline tool for the
-`retained-approvals` schema at `412af3c15`, not a startup migration. It preserves
+The completed converter and its conversion-only tests have been retired.
+The reviewed `scripts/cutover-interactions.ts` remains recoverable with its
+matching source in commit `c70cbc6ca`. Fresh-schema creation and legacy-storage
+refusal tests remain in the current host; rollback backups are retained.
+
+The converter is an explicit offline tool for the `retained-approvals` schema at
+`412af3c15`, not a startup migration. It preserves
 IDs, full input specifications, tagged answers, responder attribution, notes,
 timestamps, statuses, revisions, dedupe keys, aliases, private selection/recovery
 JSON and notification/restart flags. It never resets records, calls credential
@@ -173,7 +178,17 @@ lookup index as well; cutover never cancels a question to impose new uniqueness.
    stopped (or absent in an isolated rehearsal). Never finalize uncertain
    approval effects merely to bypass these checks. Missing/invalid outbound
    question provenance and global ID/alias collisions are hard errors.
-4. Choose a new backup file in an operator-owned mode-0700 directory and run
+4. If another retained-approvals installation needs conversion, recover the
+   reviewed source into an isolated historical worktree and prepare its locked
+   dependencies. Do not graft the converter onto a later schema or restore
+   legacy readers in the current host:
+
+   ```bash
+   git worktree add --detach /offline/cutover-source c70cbc6ca
+   cd /offline/cutover-source
+   ```
+
+   Choose a new backup file in an operator-owned mode-0700 directory and run
    **only against the authorized, stopped database** (an isolated copy for
    rehearsal, then the original installation for the approved cutover):
 

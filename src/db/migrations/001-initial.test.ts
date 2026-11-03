@@ -6,7 +6,7 @@ import { createApproval } from '../approvals.js';
 
 afterEach(closeDb);
 
-it('bootstraps questions directly in the canonical store with typed skip and one outstanding question', () => {
+it('bootstraps canonical questions with typed responses, idempotence and retained pending queues', () => {
   const db = initTestDb();
   runMigrations(db);
   db.exec(`
@@ -39,7 +39,10 @@ it('bootstraps questions directly in the canonical store with typed skip and one
       },
     }),
   ).toThrow('Global interaction ID collision');
-  expect(() => createQuestion({ ...question, id: 'other' })).toThrow('UNIQUE');
+  const queued = { ...question, id: 'other', message_out_id: 'out-other' };
+  expect(createQuestion(queued)).toBe(true);
+  expect(createQuestion(queued)).toBe(false);
+  expect(getQuestion('other')).toMatchObject({ status: 'pending', input: question.input });
   expect(answerQuestion('q', { responseType: 'skipped', userId: 'actor', answeredAt: 'skipped' })).toBe(true);
   expect(getQuestion('q')).toMatchObject({
     status: 'answered',
@@ -58,6 +61,7 @@ it('bootstraps questions directly in the canonical store with typed skip and one
   };
   expect(answerQuestion('literal', answer)).toBe(true);
   expect(getQuestion('literal')?.response).toEqual({ responseType: 'text', value: 'yes' });
+  expect(getQuestion('other')?.status).toBe('pending');
   expect(() => db.exec(`UPDATE interactions SET response_json='{"responseType":"skipped","value":"fake"}'`)).toThrow(
     'CHECK',
   );
