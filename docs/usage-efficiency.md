@@ -21,8 +21,12 @@ rejects an incompatible provider change unless economy mode is disabled.
 
 Economy mode limits aggregate text from each tool result to 16 KiB, including
 an explicit abbreviation notice. Complete typed results are saved privately
-under the session's `native-state/tool-results/`, not the shared agent workspace
-or public Pages. Errors remain errors; media is not truncated. Stored history
+in the native database's `tool_results` table and materialized under the session's
+`native-state/tool-results/`, not the shared agent workspace or public Pages.
+Files are disposable views rebuilt inside the runner after a database-only
+fork snapshot; the host never copies an agent-writable result directory.
+The existing database snapshot size limit covers the complete results.
+Errors remain errors; media is not truncated. Stored history
 and subsequent requests use the same bounded projection.
 
 Use `read({path, startLine, lineCount})` for up to 200 lines, or query a saved
@@ -84,7 +88,8 @@ Do this offline first, inside a private copy of the group's workspace:
 
 1. Copy the complete original `CLAUDE.local.md` to `MEMORY.archive.md` in the
    same directory. Check byte-for-byte equality and keep the original backup.
-2. Keep identity, current preferences and safety rules in `CLAUDE.local.md`.
+2. Keep identity, current preferences and safety rules in `CLAUDE.local.md`,
+   targeting at most 20 KiB. Archive new details before the index grows past it.
    Replace historical investigations with a topic index listing archive line
    ranges. Keeping the archive beside the original preserves relative links.
 3. Use bounded reads of the relevant archive ranges, not whole-file loading.

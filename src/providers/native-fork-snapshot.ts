@@ -31,19 +31,6 @@ export function cloneNativeSessionState(parentSessionDir: string, newSessionDir:
     db = new Database(source, { readonly: true });
     fs.rmSync(destination, { force: true });
     db.prepare('VACUUM INTO ?').run(destination);
-    const results = path.join(path.dirname(source), 'tool-results');
-    if (fs.existsSync(results)) {
-      if (!fs.lstatSync(results).isDirectory()) throw new Error('Tool results must be a private directory');
-      const files = fs
-        .readdirSync(results, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && /^[a-f0-9]{64}\.json$/.test(entry.name));
-      const total = files.reduce((bytes, entry) => bytes + fs.statSync(path.join(results, entry.name)).size, size);
-      if (total > limit)
-        throw new Error(`Native state and tool results exceed the snapshot limit (${total} > ${limit})`);
-      const target = path.join(path.dirname(destination), 'tool-results');
-      fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-      for (const entry of files) fs.copyFileSync(path.join(results, entry.name), path.join(target, entry.name));
-    }
     return true;
     // eslint-disable-next-line no-catch-all/no-catch-all -- snapshot failure degrades to the existing digest fork
   } catch (error) {

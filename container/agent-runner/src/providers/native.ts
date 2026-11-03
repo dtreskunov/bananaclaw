@@ -43,7 +43,6 @@ import {
 } from './native/reply.js';
 import { DeferredMcpTools, mcpToolSearchMode } from './native/tool-search.js';
 import { boundToolResults } from './native/tool-results.js';
-import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 export const MAX_STEPS = 100;
@@ -310,7 +309,7 @@ export class NativeProvider implements AgentProvider {
     const options = this.options;
     const store = this.store;
     const project = (messages: ModelMessage[]) => options.economyMode
-      ? boundToolResults(messages, path.join(store.directory, 'tool-results')) : messages;
+      ? boundToolResults(messages, (complete) => store.archiveResult(complete)) : messages;
     const history = (messages: ModelMessage[]) => project(portableHistory(messages));
     const seenBrokerGuidance = new Set<string>();
     const pendingBrokerGuidance = new Set<string>();

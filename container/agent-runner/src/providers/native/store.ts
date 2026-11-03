@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { ModelMessage } from 'ai';
 import type { CallUsage } from '../types.js';
@@ -29,7 +30,7 @@ export const ECONOMY_TOKENS = 2_000_000;
 
 export class NativeStore {
   private readonly db: Database;
-  readonly directory: string;
+  private readonly directory: string;
 
   constructor(filename = process.env.NATIVE_STATE_PATH || DEFAULT_PATH) {
     this.directory = path.dirname(filename);
@@ -86,7 +87,31 @@ export class NativeStore {
         duration_api_ms INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_native_calls_task ON model_calls(conversation_id, task_key);
+      CREATE TABLE IF NOT EXISTS tool_results (
+        id TEXT PRIMARY KEY,
+        content_json TEXT NOT NULL
+      );
     `);
+    try {
+      for (const row of this.db.query<{ id: string; content_json: string }, []>(
+        'SELECT id, content_json FROM tool_results',
+      ).iterate()) this.materializeResult(row.id, row.content_json);
+    } catch (error) { this.db.close(); throw error; }
+  }
+
+  archiveResult(complete: string): string {
+    const id = createHash('sha256').update(complete).digest('hex');
+    this.db.prepare('INSERT OR IGNORE INTO tool_results (id,content_json) VALUES (?,?)').run(id, complete);
+    return this.materializeResult(id, complete);
+  }
+
+  private materializeResult(id: string, complete: string): string {
+    if (!/^[a-f0-9]{64}$/.test(id)) throw new Error('Invalid archived tool result ID');
+    const directory = path.join(this.directory, 'tool-results');
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const filename = path.join(directory, `${id}.json`);
+    fs.writeFileSync(filename, complete, { mode: 0o600 });
+    return filename;
   }
 
   budget(conversation: string, task: string): { calls: number; tokens: number } {

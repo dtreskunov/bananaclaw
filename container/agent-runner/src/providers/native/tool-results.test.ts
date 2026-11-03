@@ -4,16 +4,21 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ModelMessage } from 'ai';
 import { boundToolResults, MAX_TOOL_TEXT_BYTES } from './tool-results.js';
+import { NativeStore } from './store.js';
 
 let root: string;
-beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-results-')); });
-afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
+let store: NativeStore;
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-results-'));
+  store = new NativeStore(path.join(root, 'state.db'));
+});
+afterEach(() => { store.close(); fs.rmSync(root, { recursive: true, force: true }); });
 type Output = Extract<Extract<ModelMessage, { role: 'tool' }>['content'][number], { type: 'tool-result' }>['output'];
 function project(output: Output) {
   const messages: ModelMessage[] = [{ role: 'tool', content: [
     { type: 'tool-result', toolCallId: 'call', toolName: 'external', output },
   ] }];
-  const result = boundToolResults(messages, path.join(root, 'private'))[0];
+  const result = boundToolResults(messages, (complete) => store.archiveResult(complete))[0];
   if (result.role !== 'tool' || result.content[0].type !== 'tool-result') throw new Error('Missing tool result');
   return { messages, output: result.content[0].output };
 }
@@ -27,15 +32,15 @@ it.each(['text', 'error-text', 'json', 'error-json'] as const)('bounds %s while 
   if (result.output.type !== 'text' && result.output.type !== 'error-text') throw new Error('Missing preview');
   expect(Buffer.byteLength(result.output.value)).toBeLessThanOrEqual(MAX_TOOL_TEXT_BYTES);
   expect(result.output.value).not.toContain('\uFFFD');
-  const files = fs.readdirSync(path.join(root, 'private'));
+  const files = fs.readdirSync(path.join(root, 'tool-results'));
   expect(files).toHaveLength(1);
-  const filename = path.join(root, 'private', files[0]);
+  const filename = path.join(root, 'tool-results', files[0]);
   expect(JSON.parse(fs.readFileSync(filename, 'utf8'))).toEqual(original);
   expect(result.output.value).toContain(filename);
   expect(fs.statSync(filename).mode & 0o777).toBe(0o600);
   expect(result.messages[0]).toMatchObject({ content: [{ output: original }] });
   project(original);
-  expect(fs.readdirSync(path.join(root, 'private'))).toHaveLength(1);
+  expect(fs.readdirSync(path.join(root, 'tool-results'))).toHaveLength(1);
 });
 
 it('caps aggregate text, preserves media, and leaves small results untouched', () => {
@@ -53,6 +58,19 @@ it('caps aggregate text, preserves media, and leaves small results untouched', (
 });
 
 it('surfaces archive-write failures instead of returning an incomplete success', () => {
-  fs.writeFileSync(path.join(root, 'private'), 'not a directory');
+  fs.writeFileSync(path.join(root, 'tool-results'), 'not a directory');
   expect(() => project({ type: 'text', value: 'x'.repeat(20_000) })).toThrow();
+});
+
+it('reconstructs complete private files from a database-only snapshot', () => {
+  const original: Output = { type: 'text', value: 'complete result '.repeat(2000) };
+  project(original);
+  const [name] = fs.readdirSync(path.join(root, 'tool-results'));
+  store.close();
+  const child = path.join(root, 'fork');
+  fs.mkdirSync(child);
+  fs.copyFileSync(path.join(root, 'state.db'), path.join(child, 'state.db'));
+  store = new NativeStore(path.join(child, 'state.db'));
+  expect(JSON.parse(fs.readFileSync(path.join(child, 'tool-results', name), 'utf8'))).toEqual(original);
+  expect(fs.statSync(path.join(child, 'tool-results', name)).mode & 0o777).toBe(0o600);
 });
