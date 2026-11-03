@@ -142,12 +142,11 @@ describe('Stop integration with chat actions', () => {
       responseMode: 'text' as const,
       options: [],
       status: 'pending' as const,
-      answerValue: null,
-      answerType: null,
       answeredAt: null,
       threadId: 'thread',
       agentGroupId: 'group',
       createdAt: '2026-09-25T00:00:00Z',
+      response: null,
     };
     pendingQuestions.value = [question];
     vi.stubGlobal(

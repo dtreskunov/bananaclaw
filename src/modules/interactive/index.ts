@@ -22,7 +22,10 @@ export async function handleInteractiveResponse(payload: ResponsePayload): Promi
   if (question.status === 'cancelled') return true;
 
   if (question.status === 'pending') {
-    if (!isQuestionResponse(payload) || !questionAcceptsResponse(question.response_mode, question.options, payload)) {
+    if (
+      !isQuestionResponse(payload) ||
+      !questionAcceptsResponse(question.input.responseMode, question.input.options, payload)
+    ) {
       log.warn('Question response does not match the requested input', { questionId: payload.questionId });
       return true;
     }
@@ -39,18 +42,15 @@ export async function handleInteractiveResponse(payload: ResponsePayload): Promi
   return true;
 }
 
-async function routeQuestionResponse(question: Question): Promise<void> {
-  const skipped = question.answer_type === 'skipped';
-  const timestamp = question.answered_at;
-  if (!timestamp || (!skipped && (!question.answer_value || !question.answer_type)))
-    throw new Error(`Incomplete question response: ${question.question_id}`);
+async function routeQuestionResponse(question: Extract<Question, { status: 'answered' }>): Promise<void> {
+  const timestamp = question.responded_at;
   const session = getSession(question.session_id);
   if (!session) {
-    throw new Error(`Session not found for question: ${question.question_id}`);
+    throw new Error(`Session not found for question: ${question.id}`);
   }
 
   writeSessionMessage(session.agent_group_id, session.id, {
-    id: `question-response:${question.question_id}`,
+    id: `question-response:${question.id}`,
     kind: 'interactive_response',
     timestamp,
     platformId: question.platform_id,
@@ -58,17 +58,16 @@ async function routeQuestionResponse(question: Question): Promise<void> {
     threadId: question.thread_id,
     content: JSON.stringify({
       type: 'question_response',
-      questionId: question.question_id,
-      question: question.question_text,
-      responseType: skipped ? 'skipped' : question.answer_type,
-      ...(!skipped ? { value: question.answer_value } : {}),
-      userId: question.answered_by ?? '',
+      questionId: question.id,
+      question: question.input.question,
+      ...question.response,
+      userId: question.responded_by ?? '',
     }),
     idempotent: true,
   });
   log.info('Question response routed', {
-    questionId: question.question_id,
-    responseType: skipped ? 'skipped' : question.answer_type,
+    questionId: question.id,
+    responseType: question.response.responseType,
     sessionId: session.id,
   });
 

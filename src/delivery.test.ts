@@ -22,10 +22,10 @@ vi.mock('./container-runner.js', () => ({
 
 vi.mock('./config.js', async () => {
   const actual = await vi.importActual<typeof import('./config.js')>('./config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-delivery' };
+  return { ...actual, DATA_DIR: process.cwd() + '/.test-tmp/delivery' };
 });
 
-const TEST_DIR = '/tmp/nanoclaw-test-delivery';
+const TEST_DIR = process.cwd() + '/.test-tmp/delivery';
 
 import {
   initTestDb,
@@ -34,6 +34,7 @@ import {
   createAgentGroup,
   createMessagingGroup,
   createMessagingGroupAgent,
+  getQuestion,
 } from './db/index.js';
 import { getDeliveredIds, markDelivered } from './db/session-db.js';
 import { resolveSession, outboundDbPath, openInboundDb } from './session-manager.js';
@@ -115,13 +116,47 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     setDeliveryAdapter({ deliver: vi.fn() });
     const db = new Database(outboundDbPath('ag-1', session.id));
     try {
-      db.prepare(`INSERT INTO messages_out(id,timestamp,kind,in_reply_to,content)
-        VALUES('approval-request',datetime('now'),'system','original-input','{"action":"approval-origin-test"}')`).run();
-    } finally { db.close(); }
+      db.prepare(
+        `INSERT INTO messages_out(id,timestamp,kind,in_reply_to,content)
+        VALUES('approval-request',datetime('now'),'system','original-input','{"action":"approval-origin-test"}')`,
+      ).run();
+    } finally {
+      db.close();
+    }
     await deliverSessionMessages(session);
-    expect(action).toHaveBeenCalledWith(
-      { action: 'approval-origin-test' }, session, expect.anything(), { originMessageId: 'original-input' },
-    );
+    expect(action).toHaveBeenCalledWith({ action: 'approval-origin-test' }, session, expect.anything(), {
+      originMessageId: 'original-input',
+    });
+  });
+
+  it('stores the complete immutable question input without copying its delivery envelope', async () => {
+    seedAgentAndChannel();
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    const input = {
+      question: 'Choose or explain',
+      responseMode: 'choice_or_text',
+      options: [{ label: 'Yes', selectedLabel: 'Agreed', value: 'yes' }],
+      placeholder: 'Explain your choice',
+      multiline: true,
+    };
+    const out = new Database(outboundDbPath('ag-1', session.id));
+    out
+      .prepare(
+        `INSERT INTO messages_out(id,timestamp,kind,platform_id,channel_type,content)
+      VALUES('question-output',datetime('now'),'chat-sdk','telegram:123','telegram',?)`,
+      )
+      .run(JSON.stringify({ type: 'ask_question', questionId: 'question', ...input, timelinePosition: 100 }));
+    out.close();
+    setDeliveryAdapter({ deliver: vi.fn().mockResolvedValue('receipt') });
+    await deliverSessionMessages(session);
+    expect(getQuestion('question')).toMatchObject({
+      id: 'question',
+      session_id: session.id,
+      message_out_id: 'question-output',
+      status: 'pending',
+      response: null,
+    });
+    expect(getQuestion('question')?.input).toEqual(input);
   });
 
   it('resolves stable outbound edit targets to platform delivery receipts', async () => {
@@ -158,8 +193,9 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     });
     const stored = new Database(outboundDbPath('ag-1', session.id), { readonly: true });
     try {
-      expect(JSON.parse(stored.prepare("SELECT content FROM messages_out WHERE id = 'edit-op'").pluck().get() as string))
-        .toMatchObject({ messageId: 'original' });
+      expect(
+        JSON.parse(stored.prepare("SELECT content FROM messages_out WHERE id = 'edit-op'").pluck().get() as string),
+      ).toMatchObject({ messageId: 'original' });
     } finally {
       stored.close();
     }

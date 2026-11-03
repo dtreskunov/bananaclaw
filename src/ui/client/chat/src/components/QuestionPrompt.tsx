@@ -30,7 +30,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
   const active = voiceState.target === target;
   const busy = respondingInteractionIds.value.has(q.id);
   const waiting = !!accepted || q.status === 'answered';
-  const skipped = accepted === 'skipped' || q.answerType === 'skipped';
+  const skipped = accepted === 'skipped' || q.response?.responseType === 'skipped';
   const disconnected = (!channel || channel === 'web') && !chatReady.value;
   const disabled = busy || waiting || disconnected;
   const skipDisabled = busy || !!accepted || disconnected || q.status === 'cancelled' || (waiting && !skipped);
@@ -43,7 +43,10 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
   const canType = q.responseMode !== 'choice';
   const { autosize, multiLine } = useComposerTextarea(textareaRef, answer, null);
 
-  const submit = async (value = answerRef.current.trim(), responseType: 'choice' | 'text' = 'text'): Promise<boolean> => {
+  const submit = async (
+    value = answerRef.current.trim(),
+    responseType: 'choice' | 'text' = 'text',
+  ): Promise<boolean> => {
     if (
       !value.trim() ||
       submitting.current ||
@@ -140,7 +143,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
           disabled={skipDisabled}
           onClick={() => void skip()}
         >
-          {q.answerType === 'skipped' && !accepted ? 'Retry skip' : 'Skip'}
+          {q.response?.responseType === 'skipped' && !accepted ? 'Retry skip' : 'Skip'}
         </button>
       </div>
       {!!q.options.length && (
@@ -191,7 +194,9 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
               },
             }}
             voice={{
-              target, controller: voice, onStart: startVoice,
+              target,
+              controller: voice,
+              onStart: startVoice,
               className: 'question-response-mic',
               configured: voiceInput.value.ready,
               unavailable,

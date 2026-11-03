@@ -16,7 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-cli-archive-restore';
+const TEST_ROOT = process.cwd() + '/.test-tmp/nanoclaw-test-cli-archive-restore';
 const TEST_GROUPS_DIR = path.join(TEST_ROOT, 'groups');
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
@@ -32,8 +32,8 @@ vi.mock('../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../config.js')>('../../config.js');
   return {
     ...actual,
-    GROUPS_DIR: '/tmp/nanoclaw-test-cli-archive-restore/groups',
-    DATA_DIR: '/tmp/nanoclaw-test-cli-archive-restore/data',
+    GROUPS_DIR: process.cwd() + '/.test-tmp/nanoclaw-test-cli-archive-restore/groups',
+    DATA_DIR: process.cwd() + '/.test-tmp/nanoclaw-test-cli-archive-restore/data',
   };
 });
 
@@ -71,14 +71,16 @@ interface SeedRefs {
 
 function seedApproval(refs: SeedRefs, id: string, action = 'request_access') {
   createApproval({
-    approval_id: id,
+    id: id,
     request_id: id,
     session_id: refs.sessionId,
-    action,
-    payload: '{"resource_url":"https://api.example.com/","reason":"Read"}',
     created_at: NOW(),
-    title: 'Request',
-    options_json: '[]',
+    input: {
+      action: action,
+      payload: JSON.parse('{"resource_url":"https://api.example.com/","reason":"Read"}'),
+      title: 'Request',
+      options: JSON.parse('[]'),
+    },
   });
 }
 
@@ -175,7 +177,7 @@ describe('ncl groups archive ↔ restore round trip', () => {
       seedApproval(refs, id);
       createApprovalWorkflow(id, id);
       getDb()
-        .prepare('UPDATE approval_workflows SET data_json=? WHERE approval_id=?')
+        .prepare('UPDATE interaction_progress SET data_json=? WHERE id=?')
         .run('{"private_selection":"must-not-be-archived"}', id);
     }
     finishApprovalWorkflow('failed', 'failed', 'Review uncertain effects.');
@@ -188,10 +190,10 @@ describe('ncl groups archive ↔ restore round trip', () => {
     const dumpText = fs.readFileSync(path.join(TEST_GROUPS_DIR, 'audit~', 'archive.json'), 'utf8');
     expect(dumpText).not.toContain('must-not-be-archived');
     expect(JSON.parse(dumpText)).toMatchObject({
-      version: 2,
-      approvals: expect.arrayContaining([
-        expect.objectContaining({ approval_id: 'pending', status: 'cancelled' }),
-        expect.objectContaining({ approval_id: 'failed', status: 'failed' }),
+      version: 3,
+      interactions: expect.arrayContaining([
+        expect.objectContaining({ id: 'pending', status: 'cancelled' }),
+        expect.objectContaining({ id: 'failed', status: 'failed' }),
       ]),
     });
     expect((await restore('audit', true)).ok).toBe(true);
@@ -202,7 +204,7 @@ describe('ncl groups archive ↔ restore round trip', () => {
       outcomeMessage: 'Review uncertain effects.',
       retryable: false,
     });
-    expect(getDb().prepare('SELECT * FROM approval_workflows').all()).toEqual([]);
+    expect(getDb().prepare('SELECT * FROM interaction_progress').all()).toEqual([]);
   });
 
   it.each(['persisted', 'process-local'])(
@@ -226,16 +228,16 @@ describe('ncl groups archive ↔ restore round trip', () => {
     },
   );
 
-  it('rejects retired archive formats without replaying rows', async () => {
+  it.each([1, 2])('rejects retired archive format %s without replaying rows', async (version) => {
     const refs = seedGroup('old-format', 'old-format');
     await archive(refs.id);
     const file = path.join(TEST_GROUPS_DIR, 'old-format~', 'archive.json');
     const dump = JSON.parse(fs.readFileSync(file, 'utf8'));
-    dump.version = 1;
+    dump.version = version;
     fs.writeFileSync(file, JSON.stringify(dump));
     const result = await restore('old-format', true);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain('not supported');
+    if (!result.ok) expect(result.error.message).toContain('Unsupported archive storage');
     expect(fs.existsSync(file)).toBe(true);
   });
 
@@ -303,18 +305,20 @@ describe('ncl groups archive ↔ restore round trip', () => {
     const db = getDb();
     const seededSession = db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id);
     db.prepare(
-      `INSERT INTO approvals(
-      approval_id,request_id,session_id,action,payload,title,options_json,created_at,status,decision,responded_by,response_message)
-      VALUES('retained-approval','retained-approval',?,'install_packages','{}','Install package','[]',?,'approved','approve',?,'Keep existing work.')`,
+      `INSERT INTO interactions(
+      id,kind,request_id,session_id,input_json,created_at,updated_at,status,responded_by,response_json)
+      VALUES('retained-approval','confirmation','retained-approval',?,
+      '{"action":"install_packages","payload":{},"title":"Install package","options":[]}',?,'updated','approved',?,
+      '{"decision":"approve","message":"Keep existing work."}')`,
     ).run(refs.sessionId, NOW(), refs.userId);
-    const approval = db.prepare("SELECT * FROM approvals WHERE approval_id='retained-approval'").get();
+    const approval = db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get();
 
     await archive(refs.id);
     const r = await restore('rt-sess', true);
     expect(r.ok).toBe(true);
 
     expect(db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id)).toEqual(seededSession);
-    expect(db.prepare("SELECT * FROM approvals WHERE approval_id='retained-approval'").get()).toEqual(approval);
+    expect(db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get()).toEqual(approval);
   });
 
   it('refuses to restore over a live group with the same folder', async () => {

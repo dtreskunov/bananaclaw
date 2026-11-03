@@ -16,7 +16,6 @@ import { cascadeDeleteAgentGroup, type CascadeCounts } from '../../db/cascade-de
 import { getDb, hasTable } from '../../db/connection.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { assertGroupApprovalsIdle, getSessionsByAgentGroup } from '../../db/sessions.js';
-import { updateApprovalStatus } from '../../db/approvals.js';
 import { log } from '../../log.js';
 
 export interface ArchiveResult {
@@ -29,7 +28,7 @@ export interface ArchiveResult {
 }
 
 export interface ArchiveDump {
-  version: 2;
+  version: 3;
   archived_at: string;
   archived_by: { user_id: string; display_name?: string | null };
   agent_group: Record<string, unknown>;
@@ -41,9 +40,8 @@ export interface ArchiveDump {
   agent_destinations_pointing: Array<Record<string, unknown>>;
   pending_sender_approvals: Array<Record<string, unknown>>;
   pending_channel_approvals: Array<Record<string, unknown>>;
-  approvals: Array<Record<string, unknown>>;
+  interactions: Array<Record<string, unknown>>;
   sessions: Array<Record<string, unknown>>;
-  questions: Array<Record<string, unknown>>;
 }
 
 /**
@@ -99,19 +97,15 @@ function dumpRows(groupId: string): Omit<ArchiveDump, 'archived_at' | 'archived_
     .prepare('SELECT * FROM pending_channel_approvals WHERE agent_group_id = ?')
     .all(groupId) as Array<Record<string, unknown>>;
 
-  const approvals = db
+  const interactions = db
     .prepare(
-      'SELECT * FROM approvals WHERE agent_group_id = ? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)',
+      'SELECT * FROM interactions WHERE agent_group_id = ? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)',
     )
     .all(groupId, groupId) as Array<Record<string, unknown>>;
 
   const sessions = db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').all(groupId) as Array<
     Record<string, unknown>
   >;
-  const questions = db
-    .prepare('SELECT * FROM questions WHERE session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)')
-    .all(groupId) as Array<Record<string, unknown>>;
-
   return {
     agent_group: group,
     container_config: cfg ?? null,
@@ -122,9 +116,8 @@ function dumpRows(groupId: string): Omit<ArchiveDump, 'archived_at' | 'archived_
     agent_destinations_pointing: destsPointing,
     pending_sender_approvals: senderApprovals,
     pending_channel_approvals: channelApprovals,
-    approvals,
+    interactions,
     sessions,
-    questions,
   };
 }
 
@@ -143,7 +136,7 @@ function renderRestoreReadme(
     '',
     'This folder is the archived state of an agent group. The DB row',
     'and every dependent row (wirings, members, scoped roles, destinations,',
-    'sessions, finalized approvals, pending questions) were dumped to',
+    'sessions, finalized interactions) were dumped to',
     '`archive.json` in this directory and then deleted from the central DB.',
     '',
     'Session data on disk lives at `data/v2-sessions/' + groupId + '~/` (if',
@@ -163,7 +156,7 @@ function renderRestoreReadme(
     '',
     'By default sessions and pending_* rows are NOT replayed — pass',
     '`--with-sessions` if you also want those back.',
-    'Pending approvals were cancelled. Restored approval records are audit-only;',
+    'Pending interactions were cancelled. Restored interactions are audit-only;',
     'private account selections and recovery state are never archived or resumed.',
     '',
     '## Manual restore (fallback)',
@@ -194,17 +187,15 @@ export function archiveAgentGroup(
   const archiveJsonPath = path.join(groupDir, 'archive.json');
   getDb().transaction(() => {
     assertGroupApprovalsIdle(groupId);
-    const pending = getDb()
+    getDb()
       .prepare(
-        `SELECT approval_id FROM approvals WHERE status='pending' AND
+        `UPDATE interactions SET status='cancelled', revision=revision+1, updated_at=?,resolved_at=?,
+         outcome_message='The group was archived before a decision was made. No approval effects were applied.'
+         WHERE status='pending' AND
        (agent_group_id=? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id=?))`,
       )
-      .all(groupId, groupId) as { approval_id: string }[];
-    for (const approval of pending)
-      updateApprovalStatus(approval.approval_id, 'cancelled', {
-        outcome: 'The group was archived before a decision was made. No approval effects were applied.',
-      });
-    const dump: ArchiveDump = { version: 2, archived_at: archivedAt, archived_by: actor, ...dumpRows(groupId) };
+      .run(archivedAt, archivedAt, groupId, groupId);
+    const dump: ArchiveDump = { version: 3, archived_at: archivedAt, archived_by: actor, ...dumpRows(groupId) };
     fs.writeFileSync(archiveJsonPath, JSON.stringify(dump, null, 2), 'utf-8');
     fs.writeFileSync(
       path.join(groupDir, 'ARCHIVE_RESTORE.md'),

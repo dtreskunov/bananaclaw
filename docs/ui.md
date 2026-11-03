@@ -1156,7 +1156,8 @@ of prompt visibility. Reconnects restore the dock from authoritative question
 and response records; read-only views retain their existing answer permissions.
 
 Skipping uses the existing response endpoint with a typed `responseType: "skipped"`
-response and no answer value. It resolves the question with `answer_type = 'skipped'`,
+response and no answer value. It resolves the question with a tagged
+`response_json = '{"responseType":"skipped"}'`,
 records who responded and when, and journals a wake-eligible interactive input.
 The agent is explicitly told that no answer, choice, consent or approval was
 provided; it can continue where possible or explain what is blocked. The transcript
@@ -1166,8 +1167,9 @@ Skip failures retain the prompt and typed answer with a retryable error, includi
 a **Retry skip** control if the terminal outcome was saved before journaling failed.
 Answers and skips share one idempotent response ID and a first-response-wins update,
 so retries and competing tabs never produce both outcomes. Approvals cannot be skipped.
-Browser protocol version 8 carries questions and consent requests as discriminated
-interactions. Choice, literal text, and skip responses are explicit; older
+Browser protocol version 10 carries questions and consent requests as discriminated
+interactions, with a nullable tagged question `response` instead of nullable
+answer-type/value fields. Choice, literal text, and skip responses are explicit; older
 clients must reload.
 
 The icon is disabled and grayed out while stopping, without adding transient
@@ -1198,6 +1200,11 @@ waiting for tools to finish. This metadata is persisted for reloads, but cannot
 be reconstructed for older stopped responses that never recorded it.
 
 #### Upgrading question skips
+
+The following legacy-table instructions apply only to older host revisions.
+The unified-store prototype instead refuses old storage and requires the
+[data-preserving offline cutover](user-requests-refactor-plan.md#offline-cutover-detect--why--fix--verify--rollback).
+Do not apply legacy-table DDL to a canonical-store database.
 
 Fresh installations support `skipped` directly. Existing databases whose
 `questions.answer_type` CHECK constraint allows only `choice` and `text` need

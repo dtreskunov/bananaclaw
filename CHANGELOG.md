@@ -4,6 +4,14 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Unified current-state interaction storage.** Questions,
+  confirmations, account setup and access grants now share `interactions`;
+  private execution progress remains separate. Existing records require the
+  explicit [offline cutover and rollback](docs/user-requests-refactor-plan.md#offline-cutover-detect--why--fix--verify--rollback).
+  There is no startup conversion or request reset. Reload browser clients for
+  conversation protocol 10. New group archives use format 3; old archive shapes
+  require their original host and the documented offline cutover.
+
 - **[BREAKING] Retained approval storage.** One approval record owns request
   metadata and lifecycle; private account progress no longer mirrors it.
   Archives cancel pending decisions, refuse applying effects, and restore

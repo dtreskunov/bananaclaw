@@ -375,20 +375,22 @@ describe('sessions', () => {
   function seedDeletionDependents(): void {
     getDb()
       .prepare(
-        `INSERT INTO questions
-        (question_id, session_id, message_out_id, question_text, response_mode, options_json, created_at)
-       VALUES ('q-delete', 'sess-1', 'msg-delete', 'Continue?', 'choice', '[]', ?)`,
+        `INSERT INTO interactions
+        (id, kind, session_id, message_out_id, input_json, created_at, updated_at)
+       VALUES ('q-delete', 'question', 'sess-1', 'msg-delete', '{"question":"Continue?","responseMode":"choice","options":[]}', ?, 'created')`,
       )
       .run(now());
     createApproval({
-      approval_id: 'appr-delete',
+      id: 'appr-delete',
       session_id: 'sess-1',
       request_id: 'req-delete',
-      action: 'install_packages',
-      payload: '{}',
       created_at: now(),
-      title: 'Install packages',
-      options_json: '[]',
+      input: {
+        action: 'install_packages',
+        payload: JSON.parse('{}'),
+        title: 'Install packages',
+        options: JSON.parse('[]'),
+      },
     });
   }
 
@@ -421,13 +423,12 @@ describe('sessions', () => {
     expect(getApproval('appr-delete')).toBeDefined();
   });
 
-  it('refuses incomplete approval storage without deleting questions or the session', () => {
+  it('refuses incomplete interaction storage without deleting the session', () => {
     createSession(sess());
     seedDeletionDependents();
-    getDb().exec('DROP TABLE approvals');
+    getDb().exec('DROP TABLE interactions');
 
-    expect(() => deleteSession('sess-1')).toThrow('no such table: approvals');
-    expect(getQuestion('q-delete')).toBeDefined();
+    expect(() => deleteSession('sess-1')).toThrow('no such table: interactions');
     expect(getSession('sess-1')).toBeDefined();
   });
 });
@@ -458,61 +459,66 @@ describe('durable questions', () => {
 
   it('should create and retrieve', () => {
     createQuestion({
-      question_id: 'q-1',
+      id: 'q-1',
       session_id: 'sess-1',
       message_out_id: 'msg-out-1',
       in_reply_to: 'msg-in-1',
       platform_id: 'chan-1',
       channel_type: 'discord',
       thread_id: null,
-      question_text: 'Choose one',
-      response_mode: 'choice',
-      options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
       created_at: now(),
+      input: {
+        question: 'Choose one',
+        responseMode: 'choice',
+        options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
+      },
     });
     const result = getQuestion('q-1');
     expect(result).toBeDefined();
     expect(result!.session_id).toBe('sess-1');
-    expect(result!.question_text).toBe('Choose one');
+    expect(result!.input.question).toBe('Choose one');
     expect(result).not.toHaveProperty('title');
-    expect(result!.options[0].value).toBe('yes');
-    expect(getAskQuestionRender('q-1')).toEqual({ question: 'Choose one', options: result!.options });
+    expect(result!.input.options[0].value).toBe('yes');
+    expect(getAskQuestionRender('q-1')).toEqual({ question: 'Choose one', options: result!.input.options });
   });
 
   it('retains separate approval titles in channel render metadata', () => {
     createApproval({
-      approval_id: 'approval',
+      id: 'approval',
       request_id: 'request',
-      action: 'install_packages',
-      payload: '{}',
       created_at: now(),
-      title: 'Approval required',
-      options_json: '[]',
+      input: {
+        action: 'install_packages',
+        payload: JSON.parse('{}'),
+        title: 'Approval required',
+        options: JSON.parse('[]'),
+      },
     });
     expect(getAskQuestionRender('approval')).toEqual({ title: 'Approval required', options: [] });
   });
 
   it('retains the answer', () => {
     createQuestion({
-      question_id: 'q-1',
+      id: 'q-1',
       session_id: 'sess-1',
       message_out_id: 'msg-out-1',
       in_reply_to: null,
       platform_id: null,
       channel_type: null,
       thread_id: null,
-      question_text: 'What should happen?',
-      response_mode: 'choice_or_text',
-      options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
       created_at: now(),
+      input: {
+        question: 'What should happen?',
+        responseMode: 'choice_or_text',
+        options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
+      },
     });
     expect(
       answerQuestion('q-1', { value: 'Something else', responseType: 'text', userId: 'user-1', answeredAt: now() }),
     ).toBe(true);
     const result = getQuestion('q-1');
     expect(result?.status).toBe('answered');
-    expect(result?.answer_value).toBe('Something else');
-    expect(result?.answer_type).toBe('text');
+    expect(result?.response).toEqual({ responseType: 'text', value: 'Something else' });
     expect(answerQuestion('q-1', { value: 'yes', responseType: 'choice', userId: 'user-1', answeredAt: now() })).toBe(
       false,
     );

@@ -25,10 +25,10 @@ vi.mock('../../container-runner.js', () => ({
 vi.mock('../permissions/user-dm.js', () => ({ ensureUserDm: vi.fn().mockResolvedValue(null) }));
 vi.mock('../../config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../config.js')>()),
-  DATA_DIR: `/tmp/nanoclaw-approval-routing-${process.pid}`,
+  DATA_DIR: `${process.cwd()}/.test-tmp/nanoclaw-approval-routing-${process.pid}`,
 }));
 
-const directory = `/tmp/nanoclaw-approval-routing-${process.pid}`;
+const directory = `${process.cwd()}/.test-tmp/nanoclaw-approval-routing-${process.pid}`;
 const session: Session = {
   id: 'session',
   agent_group_id: 'group',
@@ -105,15 +105,17 @@ async function respond(
   message?: string,
 ) {
   createApproval({
-    approval_id: 'approval',
+    id: 'approval',
     session_id: session.id,
     request_id: 'approval',
-    action,
-    payload: JSON.stringify({ name: 'gmail', url: 'https://gmail.example/mcp' }),
     created_at: 'now',
-    title: 'Approval',
-    options_json: '[]',
     origin_message_id: originMessageId,
+    input: {
+      action: action,
+      payload: { name: 'gmail', url: 'https://gmail.example/mcp' },
+      title: 'Approval',
+      options: JSON.parse('[]'),
+    },
   });
   await handleApprovalsResponse({
     questionId: 'approval',
@@ -290,15 +292,17 @@ describe('approval conversation identity', () => {
   it('idempotently steers workflow outcomes and schedules a restart without killing an active response', async () => {
     input('original');
     createApproval({
-      approval_id: 'workflow',
+      id: 'workflow',
       session_id: session.id,
       request_id: 'workflow',
-      action: 'request_access',
-      payload: '{}',
       created_at: 'now',
-      title: 'Access',
-      options_json: '[]',
       origin_message_id: 'original',
+      input: {
+        action: 'request_access',
+        payload: { resource_url: 'https://example.test/', reason: 'Need access' },
+        title: 'Access',
+        options: [],
+      },
     });
     createApprovalWorkflow('workflow', 'key');
     finishApprovalWorkflow('workflow', 'completed', 'Access granted', true);

@@ -282,12 +282,11 @@ describe('authoritative turn presentation', () => {
       responseMode: 'text',
       options: [],
       status: 'pending',
-      answerValue: null,
-      answerType: null,
       answeredAt: null,
       threadId: 'thread',
       agentGroupId: 'group',
       createdAt: '2026-09-29T00:00:01Z',
+      response: null,
     };
     const asking: Conversation = presentedConversation({
       ...initial,
@@ -322,9 +321,8 @@ describe('authoritative turn presentation', () => {
         {
           ...question,
           status: 'answered',
-          answerValue: responseType === 'skipped' ? null : 'Stale metadata',
-          answerType: responseType,
           answeredAt: '2026-09-29T00:00:09Z',
+          response: responseType === 'skipped' ? { responseType } : { responseType, value: 'Stale metadata' },
         },
       ],
     };
@@ -385,12 +383,11 @@ describe('authoritative turn presentation', () => {
         responseMode: 'text',
         options: [],
         status: 'pending',
-        answerValue: null,
-        answerType: null,
         answeredAt: null,
         threadId: 'thread',
         agentGroupId: 'group',
         createdAt: '2026-09-29T00:00:01Z',
+        response: null,
       };
       const activity = recorded
         ? [

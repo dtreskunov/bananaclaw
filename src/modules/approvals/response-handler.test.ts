@@ -21,10 +21,10 @@ vi.mock('../../container-runner.js', () => ({
 
 vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-approval-response-authz' };
+  return { ...actual, DATA_DIR: process.cwd() + '/.test-tmp/nanoclaw-test-approval-response-authz' };
 });
 
-const TEST_DIR = '/tmp/nanoclaw-test-approval-response-authz';
+const TEST_DIR = process.cwd() + '/.test-tmp/nanoclaw-test-approval-response-authz';
 
 function now() {
   return new Date().toISOString();
@@ -64,14 +64,16 @@ describe('approval response authorization', () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     registerApprovalHandler('cancelled_install', handler);
     createApproval({
-      approval_id: 'appr-cancelled',
+      id: 'appr-cancelled',
       session_id: 'sess-1',
       request_id: 'appr-cancelled',
-      action: 'cancelled_install',
-      payload: '{}',
       created_at: now(),
-      title: 'Install packages',
-      options_json: '[]',
+      input: {
+        action: 'cancelled_install',
+        payload: JSON.parse('{}'),
+        title: 'Install packages',
+        options: JSON.parse('[]'),
+      },
     });
 
     expect(deleteSession('sess-1', true)).toBe(1);
@@ -95,14 +97,16 @@ describe('approval response authorization', () => {
     registerApprovalHandler('install_packages', handler);
 
     createApproval({
-      approval_id: 'appr-1',
+      id: 'appr-1',
       session_id: 'sess-1',
       request_id: 'appr-1',
-      action: 'install_packages',
-      payload: JSON.stringify({ packages: ['left-pad'] }),
       created_at: now(),
-      title: 'Install packages',
-      options_json: JSON.stringify([]),
+      input: {
+        action: 'install_packages',
+        payload: { packages: ['left-pad'] },
+        title: 'Install packages',
+        options: [],
+      },
     });
 
     const claimed = await handleApprovalsResponse({
@@ -129,14 +133,16 @@ describe('approval response authorization', () => {
     registerApprovalHandler('install_packages_allowed', handler);
 
     createApproval({
-      approval_id: 'appr-2',
+      id: 'appr-2',
       session_id: 'sess-1',
       request_id: 'appr-2',
-      action: 'install_packages_allowed',
-      payload: JSON.stringify({ packages: ['left-pad'] }),
       created_at: now(),
-      title: 'Install packages',
-      options_json: JSON.stringify([]),
+      input: {
+        action: 'install_packages_allowed',
+        payload: { packages: ['left-pad'] },
+        title: 'Install packages',
+        options: [],
+      },
     });
 
     const claimed = await handleApprovalsResponse({
@@ -179,15 +185,17 @@ describe('approval response authorization', () => {
     registerApprovalHandler('global_admin_allowed', handler);
 
     createApproval({
-      approval_id: 'appr-3',
+      id: 'appr-3',
       session_id: 'sess-1',
       agent_group_id: null,
       request_id: 'appr-3',
-      action: 'global_admin_allowed',
-      payload: JSON.stringify({ packages: ['left-pad'] }),
       created_at: now(),
-      title: 'Install packages',
-      options_json: JSON.stringify([]),
+      input: {
+        action: 'global_admin_allowed',
+        payload: { packages: ['left-pad'] },
+        title: 'Install packages',
+        options: [],
+      },
     });
 
     const claimed = await handleApprovalsResponse({
@@ -218,14 +226,16 @@ describe('approval response authorization', () => {
     registerApprovalHandler('web_install_allowed', handler);
 
     createApproval({
-      approval_id: 'appr-4',
+      id: 'appr-4',
       session_id: 'sess-1',
       request_id: 'appr-4',
-      action: 'web_install_allowed',
-      payload: JSON.stringify({ packages: ['left-pad'] }),
       created_at: now(),
-      title: 'Install packages',
-      options_json: JSON.stringify([]),
+      input: {
+        action: 'web_install_allowed',
+        payload: { packages: ['left-pad'] },
+        title: 'Install packages',
+        options: [],
+      },
     });
 
     const claimed = await handleApprovalsResponse({

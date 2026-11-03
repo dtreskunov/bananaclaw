@@ -1,47 +1,39 @@
+import { getApproval } from '../../db/approvals.js';
+import { queryInteractions } from '../../db/interactions.js';
+import type { Approval } from '../../types.js';
 import { registerResource } from '../crud.js';
 
+const filters = ['id', 'session_id', 'request_id', 'agent_group_id', 'kind', 'status', 'created_at', 'expires_at'];
 registerResource({
   name: 'approval',
   plural: 'approvals',
-  table: 'approvals',
-  description:
-    'Retained approval records. Filter --status pending for requests awaiting a decision. Private account selections and recovery state are never listed.',
-  idColumn: 'approval_id',
-  columns: [
-    {
-      name: 'approval_id',
-      type: 'string',
-      description: 'Unique approval identifier (also used as the card questionId).',
+  table: 'interactions',
+  idColumn: 'id',
+  description: 'Current confirmation and account interactions; private progress is never listed.',
+  columns: filters.map((name) => ({ name, type: 'string', description: name })),
+  operations: {},
+  customOperations: {
+    list: {
+      access: 'open',
+      description: 'List retained approval interactions; filter --status pending for decisions awaiting a response.',
+      handler: async (args) => {
+        const selected = Object.entries(args).filter(([key]) => filters.includes(key));
+        return queryInteractions<Approval>(
+          `SELECT * FROM interactions WHERE kind!='question'
+          ${selected.map(([key]) => `AND ${key}=?`).join(' ')} LIMIT ?`,
+          ...selected.map(([, value]) => value),
+          Math.max(1, Number(args.limit ?? 200)),
+        );
+      },
     },
-    {
-      name: 'session_id',
-      type: 'string',
-      description: 'Session that requested the approval. Null for sessionless administrative approvals.',
+    get: {
+      access: 'open',
+      description: 'Get an approval interaction by --id.',
+      handler: async (args) => {
+        const approval = getApproval(String(args.id ?? ''));
+        if (!approval) throw new Error('Approval not found');
+        return approval;
+      },
     },
-    {
-      name: 'request_id',
-      type: 'string',
-      description: 'Original request identifier (source request UUID or same as approval_id).',
-    },
-    {
-      name: 'action',
-      type: 'string',
-      description:
-        'Action type — matches the registered approval handler (e.g. install_packages, add_mcp_server, request_access).',
-    },
-    { name: 'payload', type: 'json', description: 'JSON payload carried through to the approval handler.' },
-    { name: 'created_at', type: 'string', description: 'Auto-set.' },
-    { name: 'agent_group_id', type: 'string', description: 'Originating agent group.' },
-    { name: 'kind', type: 'string', description: 'confirmation, account_setup, or access_grant.' },
-    { name: 'expires_at', type: 'string', description: 'When this approval expires (request TTL).' },
-    {
-      name: 'status',
-      type: 'string',
-      description: 'Current status.',
-      enum: ['pending', 'applying', 'approved', 'completed', 'rejected', 'expired', 'failed', 'cancelled'],
-    },
-    { name: 'title', type: 'string', description: 'Card title shown to the admin.' },
-    { name: 'options_json', type: 'json', description: 'Card button options as JSON array.' },
-  ],
-  operations: { list: 'open', get: 'open' },
+  },
 });

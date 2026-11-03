@@ -8,6 +8,7 @@ import {
   reduceConversation,
 } from '../../shared/conversation-protocol.js';
 import type { ConversationMessage } from '../../shared/conversation.js';
+import type { Question } from '../../../types.js';
 import { projectConversation } from './conversation.js';
 
 let db: Database.Database;
@@ -173,31 +174,46 @@ describe('authoritative conversation projection', () => {
 
   describe('questions', () => {
     const question: Parameters<typeof projectConversation>[5][number] = {
-      question_id: 'q',
+      id: 'q',
       session_id: 's',
       message_out_id: 'question-output',
       in_reply_to: null,
       channel_type: 'web',
       platform_id: 'group:g',
       thread_id: 't',
-      question_text: 'Choose?',
-      response_mode: 'text',
-      options_json: '[]',
+      kind: 'question',
+      input: {
+        question: 'Choose?',
+        responseMode: 'text',
+        options: [],
+        placeholder: 'Explain your choice',
+        multiline: true,
+      },
       status: 'pending',
-      answer_value: null,
-      answer_type: null,
-      answered_by: null,
-      answered_at: null,
-      cancelled_at: null,
+      response: null,
+      revision: 1,
+      agent_group_id: null,
+      origin_message_id: null,
+      dedupe_key: null,
+      outcome_message: null,
+      updated_at: '2026-09-29T00:00:01Z',
+      expires_at: null,
+      responded_by: null,
+      responded_at: null,
+      resolved_at: null,
       created_at: '2026-09-29T00:00:01Z',
     };
     const questionInput = {
-      question: question.question_text,
-      responseMode: question.response_mode,
+      question: question.input.question,
+      responseMode: question.input.responseMode,
       options: [],
       placeholder: 'Explain your choice',
       multiline: true,
     };
+    const withStatus = (status: Question['status']): Question =>
+      status === 'answered'
+        ? { ...question, status, response: { responseType: 'text', value: 'Yes' }, responded_at: 'answered' }
+        : { ...question, status };
     beforeEach(() => {
       db.prepare('INSERT INTO messages_out (id, kind, timestamp, content, turn_id) VALUES (?, ?, ?, ?, ?)').run(
         question.message_out_id,
@@ -212,7 +228,7 @@ describe('authoritative conversation projection', () => {
       db.prepare(
         'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
       ).run(question.message_out_id, 3, '1', 'question work', turn.id);
-      const readQuestions = (status: typeof question.status) =>
+      const readQuestions = (status: Question['status']) =>
         projectConversation(
           db,
           context,
@@ -220,17 +236,17 @@ describe('authoritative conversation projection', () => {
           'g',
           [],
           [
-            { ...question, status },
-            { ...question, question_id: 'private', platform_id: 'private', message_out_id: 'missing-private-output' },
+            withStatus(status),
+            { ...question, id: 'private', platform_id: 'private', message_out_id: 'missing-private-output' },
             {
               ...question,
-              question_id: 'off-thread',
+              id: 'off-thread',
               thread_id: 'private-thread',
               message_out_id: 'missing-thread-output',
             },
             {
               ...question,
-              question_id: 'off-channel',
+              id: 'off-channel',
               channel_type: 'telegram',
               message_out_id: 'missing-channel-output',
             },
@@ -270,31 +286,30 @@ describe('authoritative conversation projection', () => {
         );
         putTurn(db, { ...turn, phase: 'settled', outcome: 'replied' });
         const reply = { ...output, timelinePosition: base + 2_000_000 };
-        const readQuestion = (current: typeof question, inputs: ConversationMessage[] = []) =>
+        const readQuestion = (current: Question, inputs: ConversationMessage[] = []) =>
           projectConversation(db, context, 't', 'g', [reply, ...inputs], [current], signals);
         const pending = readQuestion({ ...question, created_at: '2026-09-29T00:00:10Z' });
         expect(pending.interactions[0]).toMatchObject({ timelinePosition: base + 1_000_000 });
         expect(pending.timeline.map((row) => row.kind)).toEqual(['interaction', 'message']);
 
-        const answered: typeof question = {
+        const answered: Question = {
           ...question,
           status: 'answered',
-          answer_value: responseType === 'skipped' ? null : 'Yes',
-          answer_type: responseType,
-          answered_at: '2026-09-29T00:00:03Z',
+          response: responseType === 'skipped' ? { responseType } : { responseType, value: 'Yes' },
+          responded_at: '2026-09-29T00:00:03Z',
         };
         const queued = readQuestion(answered);
         expect(queued.interactions[0]).toMatchObject({ timelinePosition: base + 1_000_000 });
         expect(queued.interactions[0].createdAt).toBe(pending.interactions[0].createdAt);
         expect(queued.timeline).toEqual(pending.timeline);
 
-        const inputId = `question-response:${question.question_id}`;
+        const inputId = `question-response:${question.id}`;
         putTurn(db, { ...turn, id: 'answer-turn' });
         linkTurnInput(db, { turn_id: 'answer-turn', message_in_id: inputId, association: 'consumed' });
         const answerInput: ConversationMessage = {
           id: inputId,
           direction: 'in',
-          questionId: question.question_id,
+          questionId: question.id,
           text: responseType === 'skipped' ? 'Question skipped' : 'Yes',
           questionResponseType: responseType,
           timestamp: '2026-09-29T00:00:00Z',
@@ -328,7 +343,7 @@ describe('authoritative conversation projection', () => {
     );
 
     it('keeps a question-only asking turn before the answer and anchors the consuming turn after it', () => {
-      const inputId = `question-response:${question.question_id}`;
+      const inputId = `question-response:${question.id}`;
       db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
         JSON.stringify({ ...questionInput, timelinePosition: 200 }),
         question.message_out_id,
@@ -353,7 +368,7 @@ describe('authoritative conversation projection', () => {
           {
             id: inputId,
             direction: 'in',
-            questionId: question.question_id,
+            questionId: question.id,
             questionResponseType: 'text',
             text: 'Yes',
             timestamp: 'invalid',
@@ -364,16 +379,15 @@ describe('authoritative conversation projection', () => {
           {
             ...question,
             status: 'answered',
-            answer_value: 'Yes',
-            answer_type: 'text',
-            answered_at: '2026-09-29T00:00:03Z',
+            response: { responseType: 'text', value: 'Yes' },
+            responded_at: '2026-09-29T00:00:03Z',
           },
         ],
         signals,
       );
       expect(view.timeline).toMatchObject([
         { kind: 'message', messageId: 'start' },
-        { kind: 'interaction', interactionId: question.question_id },
+        { kind: 'interaction', interactionId: question.id },
         { kind: 'turn', turnId: turn.id, afterId: question.message_out_id, trace: { turnId: turn.id, ownsTurn: true } },
         { kind: 'message', messageId: inputId },
         {
@@ -393,20 +407,20 @@ describe('authoritative conversation projection', () => {
         question.message_out_id,
       );
       for (const status of ['pending', 'answered', 'cancelled'] as const) {
-        const view = projectConversation(db, context, 't', 'g', [], [{ ...question, status }], signals);
+        const view = projectConversation(db, context, 't', 'g', [], [withStatus(status)], signals);
         expect(view.interactions[0]).toMatchObject({ timelinePosition: 100 });
         expect(view.turns[0].inputIds).toEqual([]);
       }
     });
     it.each([{ placeholder: 42 }, { multiline: 'true' }])(
-      'rejects malformed stored input %j rather than losing fields',
+      'reads complete canonical input independently of legacy anchor hints %j',
       (invalid) => {
         db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
           JSON.stringify({ ...questionInput, ...invalid }),
           question.message_out_id,
         );
-        expect(() => projectConversation(db, context, 't', 'g', [], [question], signals)).toThrow(
-          'Invalid stored question input',
+        expect(projectConversation(db, context, 't', 'g', [], [question], signals).interactions[0]).toMatchObject(
+          question.input,
         );
       },
     );

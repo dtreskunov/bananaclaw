@@ -1094,21 +1094,21 @@ describe('chat turn snapshots and events', () => {
         );
       questionDb.close();
       createQuestion({
-        question_id: 'q',
+        id: 'q',
         session_id: 'session-1',
         message_out_id: 'question-output',
         in_reply_to: null,
         channel_type: 'web',
         platform_id: 'group:agent',
         thread_id: 'thread-1',
-        question_text: 'Continue?',
-        response_mode: 'text',
-        options: [],
         created_at: NOW,
+        input: { question: 'Continue?', responseMode: 'text', options: [] },
       });
       await vi.waitFor(() => expect(socketView(frames).interactions[0]?.status).toBe('pending'));
       answerQuestion('q', { value: 'yes', responseType: 'text', userId: null, answeredAt: NOW });
-      await vi.waitFor(() => expect(socketView(frames).interactions[0]).toMatchObject({ answerValue: 'yes' }));
+      await vi.waitFor(() =>
+        expect(socketView(frames).interactions[0]).toMatchObject({ response: { responseType: 'text', value: 'yes' } }),
+      );
       writeSessionMessage('agent', 'session-1', {
         id: 'question-response:q',
         kind: 'interactive_response',

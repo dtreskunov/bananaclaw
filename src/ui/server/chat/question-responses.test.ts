@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const runtime = vi.hoisted(() => ({
-  root: `/tmp/nanoclaw-question-responses-${process.pid}`,
+  root: `${process.cwd()}/.test-tmp/nanoclaw-question-responses-${process.pid}`,
   userId: 'web:member' as string | null,
   wake: vi.fn().mockResolvedValue(true),
 }));
@@ -54,17 +54,19 @@ beforeEach(() => {
   `);
   initSessionFolder('agent', 'session');
   createQuestion({
-    question_id: 'q',
+    id: 'q',
     session_id: 'session',
     message_out_id: 'out',
     in_reply_to: null,
     platform_id: 'group:agent',
     channel_type: 'web',
     thread_id: 'thread',
-    question_text: 'Which option?',
-    response_mode: 'choice',
-    options: [{ label: 'Yes', selectedLabel: 'Selected yes', value: 'yes' }],
     created_at: NOW,
+    input: {
+      question: 'Which option?',
+      responseMode: 'choice',
+      options: [{ label: 'Yes', selectedLabel: 'Selected yes', value: 'yes' }],
+    },
   });
   runtime.userId = 'web:member';
   runtime.wake.mockReset().mockResolvedValue(true);
@@ -103,14 +105,16 @@ describe('approval response messages', () => {
       UPDATE sessions SET messaging_group_id='mg',thread_id='thread' WHERE id='session';
     `);
     createApproval({
-      approval_id: 'message-approval',
+      id: 'message-approval',
       session_id: 'session',
       request_id: 'request',
-      action: 'message-test',
-      payload: '{"requested":"unchanged"}',
-      title: 'Test approval',
-      options_json: '[]',
       created_at: NOW,
+      input: {
+        action: 'message-test',
+        payload: JSON.parse('{"requested":"unchanged"}'),
+        title: 'Test approval',
+        options: JSON.parse('[]'),
+      },
     });
     registerApprovalHandler('message-test', async ({ payload, notify }) => {
       applied(payload);
@@ -152,7 +156,7 @@ describe('approval response messages', () => {
     expect((await respond({ value: 'approve', message }, 'message-approval')).status).toBe(400);
     expect(applied).not.toHaveBeenCalled();
     expect(notificationRows()).toEqual([]);
-    expect(getDb().prepare("SELECT status FROM approvals WHERE approval_id='message-approval'").pluck().get()).toBe(
+    expect(getDb().prepare("SELECT status FROM interactions WHERE id='message-approval'").pluck().get()).toBe(
       'pending',
     );
   });
@@ -170,7 +174,7 @@ describe('approval response messages', () => {
     expect(applied).toHaveBeenCalledOnce();
   });
   it('rejects notes for sessionless approvals rather than silently discarding them', async () => {
-    getDb().exec("UPDATE approvals SET session_id=NULL WHERE approval_id='message-approval'");
+    getDb().exec("UPDATE interactions SET session_id=NULL WHERE id='message-approval'");
     expect((await respond({ value: 'approve', message: 'A note' }, 'message-approval')).status).toBe(400);
     expect(applied).not.toHaveBeenCalled();
   });
@@ -186,9 +190,8 @@ describe('typed responses through the existing endpoint', () => {
     const saved = getQuestion('q');
     expect(saved).toMatchObject({
       status: 'answered',
-      answer_type: 'skipped',
-      answer_value: null,
-      answered_by: 'web:member',
+      responded_by: 'web:member',
+      response: { responseType: 'skipped' },
     });
     expect((await respond({ responseType: 'skipped' })).status).toBe(200);
     expect(getQuestion('q')).toEqual(saved);
@@ -208,7 +211,7 @@ describe('typed responses through the existing endpoint', () => {
         questionId: 'q',
         questionResponseType: 'skipped',
         text: 'Question skipped',
-        timestamp: saved?.answered_at,
+        timestamp: saved?.responded_at,
       }),
     ]);
     expect(runtime.wake).toHaveBeenCalled();
@@ -220,8 +223,7 @@ describe('typed responses through the existing endpoint', () => {
     await respond(first === 'answer' ? answer : skip);
     await respond(first === 'answer' ? skip : answer);
     expect(getQuestion('q')).toMatchObject({
-      answer_type: first === 'answer' ? 'choice' : 'skipped',
-      answer_value: first === 'answer' ? 'yes' : null,
+      response: first === 'answer' ? { responseType: 'choice', value: 'yes' } : { responseType: 'skipped' },
     });
     const db = openInboundDb('agent', 'session');
     try {
@@ -237,7 +239,7 @@ describe('typed responses through the existing endpoint', () => {
     runtime.userId = 'web:other';
     expect((await respond({ responseType: 'skipped' })).status).toBe(403);
     runtime.userId = 'web:member';
-    getDb().exec("UPDATE questions SET platform_id = 'private-recipient' WHERE question_id = 'q'");
+    getDb().exec("UPDATE interactions SET platform_id = 'private-recipient' WHERE id = 'q'");
     expect((await respond({ responseType: 'skipped' })).status).toBe(403);
     expect(getQuestion('q')?.status).toBe('pending');
     expect(runtime.wake).not.toHaveBeenCalled();
@@ -257,18 +259,15 @@ describe('typed responses through the existing endpoint', () => {
 
   it('rejects cancelled and unknown questions and never treats a skip as an approval', async () => {
     expect((await respond({ responseType: 'skipped' }, 'missing')).status).toBe(404);
-    getDb().exec("UPDATE questions SET status = 'cancelled' WHERE question_id = 'q'");
+    getDb().exec("UPDATE interactions SET status = 'cancelled' WHERE id = 'q'");
     expect((await respond({ responseType: 'skipped' })).status).toBe(409);
     getDb().exec(`INSERT INTO user_roles (user_id, role, granted_at) VALUES ('web:member', 'owner', '${NOW}')`);
     createApproval({
-      approval_id: 'approval',
+      id: 'approval',
       session_id: 'session',
       request_id: 'request',
-      action: 'test',
-      payload: '{}',
-      title: 'Test approval',
-      options_json: '[]',
       created_at: NOW,
+      input: { action: 'test', payload: JSON.parse('{}'), title: 'Test approval', options: JSON.parse('[]') },
     });
     expect((await respond({ responseType: 'skipped' }, 'approval')).body.error).toBe('approval_cannot_be_skipped');
     expect(

@@ -597,11 +597,11 @@ src/db/
   migrations/
     index.ts                 ← runner: checks version, applies pending
     001-initial.ts           ← initial schema
-    002-pending-questions.ts ← example: adds pending_questions table
+    049-interactions.ts         ← canonical interaction store, rejects old storage
     ...                      ← skills append new numbered files
   agent-groups.ts            ← CRUD for agent_groups
   messaging-groups.ts        ← CRUD for messaging_groups + messaging_group_agents
-  sessions.ts                ← CRUD for sessions + pending_questions
+  sessions.ts               ← sessions + specialized canonical question mutations
   index.ts                   ← barrel: re-exports everything
 ```
 
@@ -778,23 +778,14 @@ CREATE TABLE sessions (
 CREATE INDEX idx_sessions_agent_group ON sessions(agent_group_id);
 CREATE INDEX idx_sessions_lookup ON sessions(messaging_group_id, thread_id);
 
--- Pending interactive questions (cards waiting for user response)
--- Host writes when delivering a question card, deletes when response received
-CREATE TABLE pending_questions (
-  question_id    TEXT PRIMARY KEY,
-  session_id     TEXT NOT NULL REFERENCES sessions(id),
-  message_out_id TEXT NOT NULL,     -- the messages_out row that sent the card
-  platform_id    TEXT,              -- where the card was delivered
-  channel_type   TEXT,
-  thread_id      TEXT,
-  created_at     TEXT NOT NULL
-);
+-- Current-state interactions and private account progress:
+-- see src/db/migrations/049-interactions.ts and docs/db-central.md.
 ```
 
 ### Pending Question Flow
 
 When the host delivers a messages_out row with `type: 'ask_question'`:
-1. Host validates the normalized input and records its `questions` row
+1. Host validates the full normalized input and records a question-kind `interactions` row
 2. Host delivers the card via the channel adapter
 
 When a Chat SDK `ActionEvent` (button click) arrives:
@@ -808,7 +799,9 @@ When a Chat SDK `ActionEvent` (button click) arrives:
 
 This avoids scanning session DBs. The central DB is the routing lookup — same pattern as message routing.
 
-Also used for host-generated approval cards: when the host sends an approval request to the admin's DM, it writes a `pending_questions` row. The admin's response is routed back to the originating session.
+Host-generated approval cards use confirmation/account kinds in the same store.
+Their operation-specific permissions, handlers and private account progress stay
+distinct. The admin's response is routed back to the originating session.
 
 ### Container lifecycle states
 

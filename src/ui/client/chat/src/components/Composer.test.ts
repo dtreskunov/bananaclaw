@@ -802,12 +802,11 @@ describe('main composer pending edits', () => {
     responseMode: 'choice_or_text',
     options: [{ label: 'First', selectedLabel: 'Chosen first', value: 'first' }],
     status: 'pending',
-    answerValue: null,
-    answerType: null,
     answeredAt: null,
     threadId: 'thread',
     agentGroupId: 'group',
     createdAt: '2026-10-05T17:00:00Z',
+    response: null,
   };
 
   describe('question dock controls', () => {
@@ -961,7 +960,7 @@ describe('main composer pending edits', () => {
       mount();
       find(tree, 'button', 'Skip question and notify agent').props.onClick();
       await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledOnce());
-      mount({ ...dockQuestion, status: 'answered', answerType: 'skipped' });
+      mount({ ...dockQuestion, status: 'answered', response: { responseType: 'skipped' } });
       expect(find(tree, 'textarea').props.value).toBe('Unsaved answer');
       expect(find(tree, 'p').props.role).toBe('alert');
       const retry = find(tree, 'button', 'Skip question and notify agent');

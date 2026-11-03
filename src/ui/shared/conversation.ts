@@ -58,8 +58,7 @@ export interface ConversationQuestion extends QuestionInput {
   kind: 'question';
   id: string;
   status: 'pending' | 'answered' | 'cancelled';
-  answerValue: string | null;
-  answerType: 'choice' | 'text' | 'skipped' | null;
+  response: QuestionResponse | null;
   answeredAt: string | null;
   activity?: { ts: string; text: string }[];
   turnId?: string;

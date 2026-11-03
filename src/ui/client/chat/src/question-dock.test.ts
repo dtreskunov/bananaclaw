@@ -10,13 +10,12 @@ const question: PendingQuestionDto = {
   responseMode: 'text',
   options: [],
   status: 'pending',
-  answerValue: null,
-  answerType: null,
   answeredAt: null,
   threadId: 'thread',
   agentGroupId: 'group',
   createdAt: '2026-10-05T17:00:00Z',
   timelinePosition: 100,
+  response: null,
 };
 const answer: ConversationMessage = {
   id: 'question-response:q',
@@ -28,7 +27,11 @@ const answer: ConversationMessage = {
 describe('question input dock', () => {
   it('keeps pending and metadata-only answered prompts until an actual input answer is available', () => {
     expect(dockQuestions([question], [], 'group', 'thread')).toEqual([question]);
-    const answered: PendingQuestionDto = { ...question, status: 'answered', answerValue: 'Yes' };
+    const answered: PendingQuestionDto = {
+      ...question,
+      status: 'answered',
+      response: { responseType: 'text', value: 'Yes' },
+    };
     expect(dockQuestions([answered], [], 'group', 'thread')).toEqual([answered]);
     expect(dockQuestions([answered], [answer], 'group', 'thread')).toEqual([]);
     expect(dockQuestions([question], [answer], 'group', 'thread')).toEqual([]);
@@ -50,7 +53,7 @@ describe('question input dock', () => {
     ).toEqual(['q', 'unthreaded']);
   });
   it('waits for the actual skip event, then removes only the resolved prompt', () => {
-    const skipped: PendingQuestionDto = { ...question, status: 'answered', answerType: 'skipped' };
+    const skipped: PendingQuestionDto = { ...question, status: 'answered', response: { responseType: 'skipped' } };
     const other = { ...question, id: 'other' };
     expect(dockQuestions([skipped, other], [], 'group', 'thread')).toEqual([skipped, other]);
     expect(

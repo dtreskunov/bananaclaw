@@ -74,17 +74,19 @@ afterEach(() => closeDb());
 
 function seedQuestion(responseMode: 'choice' | 'text' | 'choice_or_text'): void {
   createQuestion({
-    question_id: QUESTION_ID,
+    id: QUESTION_ID,
     session_id: 'session-1',
     message_out_id: 'message-out-1',
     in_reply_to: 'message-in-1',
     platform_id: 'user-1',
     channel_type: 'web',
     thread_id: 'thread-1',
-    question_text: 'Which environment?',
-    response_mode: responseMode,
-    options: [{ label: 'Production', selectedLabel: 'Production', value: 'prod' }],
     created_at: '2026-01-01T00:00:00Z',
+    input: {
+      question: 'Which environment?',
+      responseMode: responseMode,
+      options: [{ label: 'Production', selectedLabel: 'Production', value: 'prod' }],
+    },
   });
 }
 
@@ -120,17 +122,15 @@ describe('handleInteractiveResponse', () => {
       const question = getQuestion(QUESTION_ID)!;
       expect(question).toMatchObject({
         status: 'answered',
-        answer_type: 'skipped',
-        answer_value: null,
-        answered_by: 'skipper',
-        cancelled_at: null,
+        responded_by: 'skipper',
+        response: { responseType: 'skipped' },
       });
-      expect(question.answered_at).toBeTruthy();
+      expect(question.responded_at).toBeTruthy();
       const message = mockWriteSessionMessage.mock.calls[0][2];
       expect(message).toMatchObject({
         id: `question-response:${QUESTION_ID}`,
         kind: 'interactive_response',
-        timestamp: question.answered_at,
+        timestamp: question.responded_at,
         idempotent: true,
         platformId: 'user-1',
         channelType: 'web',
@@ -152,8 +152,7 @@ describe('handleInteractiveResponse', () => {
     const requests = first === 'answer' ? [response('First'), skip()] : [skip(), response('Later')];
     await Promise.all(requests.map(handleInteractiveResponse));
     expect(getQuestion(QUESTION_ID)).toMatchObject({
-      answer_type: first === 'answer' ? 'text' : 'skipped',
-      answer_value: first === 'answer' ? 'First' : null,
+      response: first === 'answer' ? { responseType: 'text', value: 'First' } : { responseType: 'skipped' },
     });
     expect(mockWriteSessionMessage.mock.calls[0][2]).toEqual(mockWriteSessionMessage.mock.calls[1][2]);
   });
@@ -175,7 +174,7 @@ describe('handleInteractiveResponse', () => {
   it('does not route unknown or cancelled questions as skips', async () => {
     expect(await handleInteractiveResponse(skip())).toBe(false);
     seedQuestion('text');
-    getDb().prepare("UPDATE questions SET status = 'cancelled' WHERE question_id = ?").run(QUESTION_ID);
+    getDb().prepare("UPDATE interactions SET status = 'cancelled' WHERE id = ?").run(QUESTION_ID);
     expect(await handleInteractiveResponse(skip())).toBe(true);
     expect(mockWriteSessionMessage).not.toHaveBeenCalled();
     expect(mockWakeContainer).not.toHaveBeenCalled();
@@ -193,8 +192,7 @@ describe('handleInteractiveResponse', () => {
     expect(await handleInteractiveResponse(response('Staging'))).toBe(true);
     expect(getQuestion(QUESTION_ID)).toMatchObject({
       status: 'answered',
-      answer_value: 'Staging',
-      answer_type: 'text',
+      response: { responseType: 'text', value: 'Staging' },
     });
 
     expect(mockWriteSessionMessage).toHaveBeenCalledWith(
@@ -218,7 +216,7 @@ describe('handleInteractiveResponse', () => {
     async (responseType) => {
       seedQuestion('choice_or_text');
       await handleInteractiveResponse(response('prod', responseType));
-      expect(getQuestion(QUESTION_ID)).toMatchObject({ answer_type: responseType, answer_value: 'prod' });
+      expect(getQuestion(QUESTION_ID)).toMatchObject({ response: { responseType, value: 'prod' } });
       expect(JSON.parse(mockWriteSessionMessage.mock.calls[0][2].content)).toMatchObject({
         responseType,
         value: 'prod',
@@ -241,7 +239,7 @@ describe('handleInteractiveResponse', () => {
     await handleInteractiveResponse(response('First'));
     await handleInteractiveResponse(response('Second'));
 
-    expect(getQuestion(QUESTION_ID)?.answer_value).toBe('First');
+    expect(getQuestion(QUESTION_ID)?.response?.value).toBe('First');
     expect(mockWriteSessionMessage).toHaveBeenCalledTimes(2);
     const replay = mockWriteSessionMessage.mock.calls[1][2] as { content: string };
     expect(JSON.parse(replay.content).value).toBe('First');

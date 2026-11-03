@@ -212,57 +212,70 @@ export interface MessageOut {
   content: string; // JSON blob
 }
 
-// ── Durable questions (central DB) ──
+// ── Current-state interactions (central DB) ──
 
-export interface Question {
-  question_id: string;
+interface InteractionRecord {
+  id: string;
+  session_id: string | null;
+  agent_group_id: string | null;
+  origin_message_id: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string | null;
+  revision: number;
+  dedupe_key: string | null;
+  responded_by: string | null;
+  responded_at: string | null;
+  resolved_at: string | null;
+  outcome_message: string | null;
+}
+
+interface QuestionRecord extends InteractionRecord {
+  kind: 'question';
   session_id: string;
   message_out_id: string;
   in_reply_to: string | null;
   platform_id: string | null;
   channel_type: string | null;
   thread_id: string | null;
-  question_text: string;
-  response_mode: 'choice' | 'text' | 'choice_or_text';
-  options: import('./channels/ask-question.js').NormalizedOption[];
-  status: 'pending' | 'answered' | 'cancelled';
-  answer_value: string | null;
-  answer_type: 'choice' | 'text' | 'skipped' | null;
-  answered_by: string | null;
-  answered_at: string | null;
-  cancelled_at: string | null;
-  created_at: string;
+  input: import('./ui/shared/question.js').QuestionInput;
 }
 
-// ── Approvals (central DB) ──
+export type Question = QuestionRecord &
+  (
+    | { status: 'answered'; response: import('./ui/shared/question.js').QuestionResponse; responded_at: string }
+    | { status: 'pending' | 'cancelled'; response: null }
+  );
 
-interface ApprovalRecord {
-  approval_id: string;
-  origin_message_id: string | null;
-  session_id: string | null;
-  request_id: string;
+export interface ApprovalInput {
   action: string;
-  payload: string; // JSON
-  created_at: string;
-  agent_group_id: string | null;
-  expires_at: string | null;
+  payload: Record<string, unknown>;
   title: string;
-  options_json: string;
-  dedupe_key: string | null;
-  revision: number;
-  updated_at: string;
+  options: import('./ui/shared/question.js').QuestionOption[];
+}
+
+export interface ApprovalResponse {
   decision: string | null;
-  responded_by: string | null;
-  response_message: string | null;
-  outcome_message: string | null;
-  resolved_at: string | null;
+  message: string | null;
+}
+
+interface ApprovalRecord extends InteractionRecord {
+  request_id: string;
+  input: ApprovalInput;
+  response: ApprovalResponse;
 }
 
 export type Approval = ApprovalRecord &
   (
     | { kind: 'confirmation'; status: import('./ui/shared/approval.js').ConfirmationInteraction['status'] }
-    | { kind: 'account_setup' | 'access_grant'; status: import('./ui/shared/approval.js').AccountRequestStatus }
+    | {
+        kind: 'account_setup' | 'access_grant';
+        input: ApprovalInput & { payload: import('./ui/shared/approval.js').AccountRequirements };
+        status: import('./ui/shared/approval.js').AccountRequestStatus;
+      }
   );
+
+export type Interaction = Question | Approval;
 
 // ── Agent destinations (central DB) ──
 

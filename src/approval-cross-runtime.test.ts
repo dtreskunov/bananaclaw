@@ -115,15 +115,17 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
         notify('The new configuration is loaded; verify it now.', { afterRestart: true });
       });
       createApproval({
-        approval_id: 'approval',
+        id: 'approval',
         session_id: session.id,
         request_id: 'approval',
         origin_message_id: 'original',
-        action: 'cross-runtime-approval',
-        payload: '{}',
         created_at: timestamp,
-        title: 'Approve',
-        options_json: '[]',
+        input: {
+          action: 'cross-runtime-approval',
+          payload: JSON.parse('{}'),
+          title: 'Approve',
+          options: JSON.parse('[]'),
+        },
       });
       await handleApprovalsResponse({
         questionId: 'approval',

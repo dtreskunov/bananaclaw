@@ -433,17 +433,21 @@ async function deliverMessage(
     if (typeof questionId !== 'string' || !questionId || !isQuestionInput(content))
       throw new Error('Invalid outbound question input');
     const inserted = createQuestion({
-      question_id: questionId,
+      id: questionId,
       session_id: session.id,
       message_out_id: msg.id,
       in_reply_to: msg.in_reply_to,
       platform_id: msg.platform_id,
       channel_type: msg.channel_type,
       thread_id: msg.thread_id,
-      question_text: content.question,
-      response_mode: content.responseMode,
-      options: content.options,
       created_at: new Date().toISOString(),
+      input: {
+        question: content.question,
+        responseMode: content.responseMode,
+        options: content.options,
+        placeholder: content.placeholder,
+        multiline: content.multiline,
+      },
     });
     if (inserted) {
       log.info('Pending question created', { questionId, sessionId: session.id });

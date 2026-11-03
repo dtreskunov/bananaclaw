@@ -26,13 +26,12 @@ function question(overrides: Partial<ConversationQuestion> = {}): ConversationQu
     responseMode: 'text',
     options: [],
     status: 'pending',
-    answerValue: null,
-    answerType: null,
     answeredAt: null,
     threadId: 'thread-1',
     agentGroupId: 'group-1',
     createdAt: '2026-07-15 05:34:20',
     ...overrides,
+    response: null,
   };
 }
 
@@ -89,10 +88,9 @@ describe('host question presentation order', () => {
       [
         question({
           status: 'answered',
-          answerValue: 'Dude',
-          answerType: 'text',
           createdAt: '2026-07-15T05:52:33.695Z',
           answeredAt: '2026-07-15T05:53:18.606Z',
+          response: { responseType: 'text', value: 'Dude' },
         }),
       ],
       'thread-1',
@@ -121,11 +119,10 @@ describe('host question presentation order', () => {
       [
         question({
           status: 'answered',
-          answerValue: 'Dude',
-          answerType: 'text',
           createdAt: '2026-07-15T05:52:10Z',
           answeredAt: '2026-07-15T05:52:15Z',
           timelinePosition: base + 10_000_000,
+          response: { responseType: 'text', value: 'Dude' },
         }),
       ],
       'thread-1',

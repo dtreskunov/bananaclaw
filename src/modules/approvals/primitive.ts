@@ -206,17 +206,14 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
   const normalizedOptions = normalizeOptions(options);
   getDb().transaction(() => {
     const created = createApproval({
-      approval_id: approvalId,
+      id: approvalId,
       session_id: session.id,
       request_id: approvalId,
-      action,
-      payload: JSON.stringify(payload),
       created_at: new Date().toISOString(),
-      title,
-      options_json: JSON.stringify(normalizedOptions),
       origin_message_id: opts.originMessageId ?? null,
       ...(opts.workflowKey ? { agent_group_id: session.agent_group_id } : {}),
       expires_at: opts.expiresAt ?? null,
+      input: { action: action, payload: payload, title: title, options: normalizedOptions },
     });
     if (created && opts.workflowKey) createApprovalWorkflow(approvalId, opts.workflowKey);
   })();

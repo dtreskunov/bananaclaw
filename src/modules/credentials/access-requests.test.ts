@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   messages: new Map<string, unknown>(),
   get: vi.fn(),
   grant: vi.fn(),
-  directory: `/tmp/nanoclaw-access-${process.pid}`,
+  directory: `${process.cwd()}/.test-tmp/nanoclaw-access-${process.pid}`,
   origin: {
     id: 'human-request',
     sender_user_id: 'alice',
@@ -257,10 +257,10 @@ describe('assisted access approvals', () => {
     const request = await seed();
     prepareAccountRequest('alice', request.id, { request_revision: request.revision });
     const approval = getApproval(request.id)!;
-    await getInteractiveApprovalHandler(approval.action)!(
+    await getInteractiveApprovalHandler(approval.input.action)!(
       approval,
       {
-        questionId: approval.approval_id,
+        questionId: approval.id,
         userId: 'alice',
         channelType: 'web',
         platformId: 'admin',
@@ -291,10 +291,10 @@ describe('assisted access approvals', () => {
   it('includes a decline message without granting access or changing the decision', async () => {
     const request = await seed();
     const approval = getApproval(request.id)!;
-    await getInteractiveApprovalHandler(approval.action)!(
+    await getInteractiveApprovalHandler(approval.input.action)!(
       approval,
       {
-        questionId: approval.approval_id,
+        questionId: approval.id,
         userId: 'alice',
         channelType: 'web',
         platformId: 'admin',
@@ -439,8 +439,8 @@ describe('assisted access approvals', () => {
     expect(first.id).toBe(duplicate.id);
     expect(getAccountRequest('appr-access-duplicate', session.id).id).toBe(first.id);
     expect(first.status).toBe('pending');
-    expect(getApproval(first.id)?.action).toBe('request_access');
-    expect(getDb().prepare('SELECT COUNT(*) n FROM approvals').get()).toEqual({ n: 1 });
+    expect(getApproval(first.id)?.input.action).toBe('request_access');
+    expect(getDb().prepare('SELECT COUNT(*) n FROM interactions').get()).toEqual({ n: 1 });
     expect(mocks.grant).not.toHaveBeenCalled();
     expect(getDb().pragma('foreign_key_check')).toEqual([]);
   });
@@ -517,7 +517,7 @@ describe('assisted access approvals', () => {
           mcp_server: 'tavily',
         }),
       ).rejects.toThrow('no longer matches');
-      expect(getDb().prepare('SELECT COUNT(*) n FROM approvals').get()).toEqual({ n: 0 });
+      expect(getDb().prepare('SELECT COUNT(*) n FROM interactions').get()).toEqual({ n: 0 });
       expect(mocks.grant).not.toHaveBeenCalled();
     },
   );
@@ -543,10 +543,10 @@ describe('assisted access approvals', () => {
     const request = await seed();
     const approval = getApproval(request.id)!;
     await expect(
-      getInteractiveApprovalHandler(approval.action)!(
+      getInteractiveApprovalHandler(approval.input.action)!(
         approval,
         {
-          questionId: approval.approval_id,
+          questionId: approval.id,
           userId: 'alice',
           channelType: 'web',
           platformId: 'alice',
@@ -788,7 +788,7 @@ describe('assisted access approvals', () => {
     const failed = getAccountRequest(request.id);
     expect(() => retryAccessRequest('member', request.id, { request_revision: failed.revision })).toThrow();
     expect(() => retryAccessRequest('alice', request.id, { request_revision: 1 })).toThrow('failed request');
-    getDb().prepare('UPDATE approvals SET expires_at=? WHERE approval_id=?').run('2000-01-01', request.id);
+    getDb().prepare('UPDATE interactions SET expires_at=? WHERE id=?').run('2000-01-01', request.id);
     expect(() => retryAccessRequest('alice', request.id, { request_revision: failed.revision })).toThrow('expired');
     expect(getApprovalWorkflow(request.id)?.status).toBe('failed');
     expect(mocks.grant).not.toHaveBeenCalled();
@@ -825,10 +825,10 @@ describe('assisted access approvals', () => {
     mocks.origin.id = 'new-human-request';
     const rejected = await seed('appr-access-reject');
     const approval = getApproval(rejected.id)!;
-    await getInteractiveApprovalHandler(approval.action)!(
+    await getInteractiveApprovalHandler(approval.input.action)!(
       approval,
       {
-        questionId: approval.approval_id,
+        questionId: approval.id,
         userId: 'alice',
         channelType: 'web',
         platformId: 'alice',
@@ -841,7 +841,7 @@ describe('assisted access approvals', () => {
     expect((await seed('appr-access-reject-repeat')).id).toBe(rejected.id);
     mocks.origin.id = 'another-human-request';
     const expired = await seed('appr-access-expire');
-    getDb().prepare('UPDATE approvals SET expires_at=? WHERE approval_id=?').run('2000-01-01', expired.id);
+    getDb().prepare('UPDATE interactions SET expires_at=? WHERE id=?').run('2000-01-01', expired.id);
     await recoverAccessRequests();
     expect(getAccountRequest(expired.id).status).toBe('expired');
     expect(mocks.grant).not.toHaveBeenCalled();

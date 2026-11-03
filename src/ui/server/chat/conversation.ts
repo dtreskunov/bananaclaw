@@ -1,9 +1,8 @@
 import type Database from 'better-sqlite3';
 import { reduceActivityLines } from '../../../activity.js';
 import type { Question } from '../../../types.js';
-import { isQuestionInput } from '../../shared/conversation-protocol.js';
 import type { ConversationApproval } from '../../shared/approval.js';
-import { getDb } from '../../../db/connection.js';
+import { queryInteractions } from '../../../db/interactions.js';
 import { outboundTimelinePosition } from '../../../input-timeline.js';
 import { conversationTimeline } from './conversation-timeline.js';
 import { approvalTranscript } from './approval-transcript.js';
@@ -35,7 +34,6 @@ export function routeMatches(
 }
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
-type QuestionRow = Omit<Question, 'options'> & { options_json: string };
 
 function displayActivity(lines: ConversationTurn['activity']): ConversationTurn['activity'] {
   const groups = new Map<string, ConversationTurn['activity']>();
@@ -113,7 +111,7 @@ export function projectConversation(
   threadId: string,
   groupId: string,
   history: ConversationMessage[],
-  questions: QuestionRow[],
+  questions: Question[],
   signals: Signals,
   approvals: ConversationApproval[] = [],
 ): Conversation {
@@ -137,8 +135,7 @@ export function projectConversation(
   );
   const messages: ConversationMessage[] = history
     .filter((message) => {
-      if (message.questionId && !visibleQuestions.some((question) => question.question_id === message.questionId))
-        return false;
+      if (message.questionId && !visibleQuestions.some((question) => question.id === message.questionId)) return false;
       const turn = message.turnId ? byId.get(message.turnId) : undefined;
       return !(turn && turn.phase !== 'settled' && message.deliveryOrigin === 'response');
     })
@@ -244,20 +241,13 @@ export function projectConversation(
     if (!anchor?.turn_id || !byId.has(anchor.turn_id))
       throw new Error('Missing conversation question turn association');
     const timelinePosition = outboundTimelinePosition(anchor.content);
-    const input: unknown = JSON.parse(anchor.content);
-    if (!isQuestionInput(input)) throw new Error('Invalid stored question input');
     return {
       kind: 'question',
-      id: q.question_id,
-      question: input.question,
-      responseMode: input.responseMode,
-      options: input.options,
-      placeholder: input.placeholder,
-      multiline: input.multiline,
+      id: q.id,
+      ...q.input,
       status: q.status,
-      answerValue: q.answer_value,
-      answerType: q.answer_type,
-      answeredAt: q.answered_at,
+      response: q.response,
+      answeredAt: q.responded_at,
       threadId: q.thread_id,
       agentGroupId: groupId,
       createdAt: anchor.timestamp,
@@ -309,9 +299,10 @@ export function readConversation(
   const outDb = context.sessionId ? openOutboundDb(groupId, context.sessionId) : null;
   try {
     const questions = context.sessionId
-      ? (getDb()
-          .prepare('SELECT * FROM questions WHERE session_id = ? ORDER BY created_at, question_id')
-          .all(context.sessionId) as QuestionRow[])
+      ? queryInteractions<Question>(
+          "SELECT * FROM interactions WHERE session_id = ? AND kind='question' ORDER BY created_at, id",
+          context.sessionId,
+        )
       : [];
     return projectConversation(
       outDb,

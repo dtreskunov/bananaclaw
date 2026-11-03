@@ -4,6 +4,7 @@
  * Actual creation is done by migrations — do not use this at runtime.
  */
 import { TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA, TURN_SCHEMA } from './turns.js';
+import { INTERACTION_SCHEMA } from './migrations/049-interactions.js';
 
 export const SCHEMA = `
 -- Agent workspaces: folder, skills, CLAUDE.md.
@@ -121,28 +122,7 @@ CREATE TABLE sessions (
 CREATE INDEX idx_sessions_agent_group ON sessions(agent_group_id);
 CREATE INDEX idx_sessions_lookup ON sessions(messaging_group_id, thread_id);
 
--- Durable interactive questions and their responses
-CREATE TABLE questions (
-  question_id     TEXT PRIMARY KEY,
-  session_id      TEXT NOT NULL REFERENCES sessions(id),
-  message_out_id  TEXT NOT NULL,
-  in_reply_to     TEXT,
-  platform_id     TEXT,
-  channel_type    TEXT,
-  thread_id       TEXT,
-  question_text   TEXT NOT NULL,
-  response_mode   TEXT NOT NULL CHECK(response_mode IN ('choice', 'text', 'choice_or_text')),
-  options_json    TEXT NOT NULL,
-  status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'answered', 'cancelled')),
-  answer_value    TEXT,
-  answer_type     TEXT CHECK(answer_type IS NULL OR answer_type IN ('choice', 'text', 'skipped')),
-  answered_by     TEXT,
-  answered_at     TEXT,
-  cancelled_at    TEXT,
-  created_at      TEXT NOT NULL,
-  CHECK(answer_type != 'skipped' OR answer_value IS NULL)
-);
-CREATE INDEX idx_questions_session_status ON questions(session_id, status);
+${INTERACTION_SCHEMA}
 
 -- Pending approvals for unknown senders (unknown_sender_policy='request_approval').
 -- In-flight dedup via UNIQUE(messaging_group_id, sender_identity): a second

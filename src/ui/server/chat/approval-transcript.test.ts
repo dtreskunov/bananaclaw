@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../config.js')>()),
-  DATA_DIR: `/tmp/nanoclaw-approval-transcript-${process.pid}`,
+  DATA_DIR: `${process.cwd()}/.test-tmp/nanoclaw-approval-transcript-${process.pid}`,
 }));
 vi.mock('../../../container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(true),
@@ -28,7 +28,7 @@ import {
   reduceConversation,
 } from '../../shared/conversation-protocol.js';
 
-const root = `/tmp/nanoclaw-approval-transcript-${process.pid}`;
+const root = `${process.cwd()}/.test-tmp/nanoclaw-approval-transcript-${process.pid}`;
 beforeEach(() => {
   runMigrations(initTestDb());
   getDb().exec(`
@@ -63,16 +63,19 @@ afterEach(() => {
 });
 function request(action = 'history-test', payload: Record<string, unknown> = {}) {
   createApproval({
-    approval_id: 'approval',
+    id: 'approval',
     session_id: 's',
     origin_message_id: 'source',
     request_id: 'request',
-    action,
-    payload: JSON.stringify(payload),
-    title: 'Install tool',
-    options_json:
-      '[{"label":"Approve","selectedLabel":"Approved","value":"approve"},{"label":"Reject","selectedLabel":"Declined","value":"reject"}]',
     created_at: new Date().toISOString(),
+    input: {
+      action: action,
+      payload: payload,
+      title: 'Install tool',
+      options: JSON.parse(
+        '[{"label":"Approve","selectedLabel":"Approved","value":"approve"},{"label":"Reject","selectedLabel":"Declined","value":"reject"}]',
+      ),
+    },
   });
 }
 const view = (thread = 'source-thread', user = 'owner') => readConversation(user, 'g', thread);
@@ -82,7 +85,7 @@ describe('retained approval transcript', () => {
   it('retains account-setup purpose and its responder after completion and reload', () => {
     request('request_access', { resource_url: 'https://api.example.com/', reason: 'Read the report' });
     createApprovalWorkflow('approval', 'account-setup');
-    getDb().prepare("UPDATE approvals SET kind='account_setup' WHERE approval_id='approval'").run();
+    getDb().prepare("UPDATE interactions SET kind='account_setup' WHERE id='approval'").run();
     expect(approvals()[0]).toMatchObject({
       kind: 'account_setup',
       status: 'pending',
@@ -182,14 +185,14 @@ describe('retained approval transcript', () => {
 
   it('does not infer an actionable thread when a recorded origin is missing', () => {
     request();
-    getDb().prepare("UPDATE approvals SET origin_message_id='missing' WHERE approval_id='approval'").run();
+    getDb().prepare("UPDATE interactions SET origin_message_id='missing' WHERE id='approval'").run();
     expect(approvalOrigin('owner', getApproval('approval')!)).toBeNull();
     expect(approvals()).toEqual([]);
   });
 
   it('does not invent a root thread for legacy unanchored shared sessions', () => {
     request();
-    getDb().prepare("UPDATE approvals SET origin_message_id=NULL WHERE approval_id='approval'").run();
+    getDb().prepare("UPDATE interactions SET origin_message_id=NULL WHERE id='approval'").run();
     expect(approvalOrigin('owner', getApproval('approval')!)).toBeNull();
   });
 

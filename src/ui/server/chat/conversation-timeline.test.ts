@@ -253,12 +253,11 @@ describe('explicit host trace placement', () => {
         responseMode: 'text',
         options: [],
         status: 'pending',
-        answerValue: null,
-        answerType: null,
         answeredAt: null,
         threadId: 'thread',
         agentGroupId: 'group',
         createdAt: 'not-an-order-key',
+        response: null,
       },
     ];
     view.timeline = conversationTimeline(view);

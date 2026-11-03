@@ -1,9 +1,7 @@
 import type { Approval, Question, Session } from '../types.js';
 import type { QuestionResponse } from '../ui/shared/question.js';
 import { getDb, hasTable } from './connection.js';
-import { invalidateConversation } from '../conversation-events.js';
-
-import { getApproval } from './approvals.js';
+import { createInteraction, getInteraction, interactionChanged } from './interactions.js';
 
 // ── Sessions ──
 
@@ -111,8 +109,8 @@ export class SessionApprovalInProgressError extends Error {
 const executingApprovals = new Map<string, string>();
 
 export function beginApprovalExecution(approval: Approval): boolean {
-  if (executingApprovals.has(approval.approval_id)) return false;
-  if (approval.session_id) executingApprovals.set(approval.approval_id, approval.session_id);
+  if (executingApprovals.has(approval.id)) return false;
+  if (approval.session_id) executingApprovals.set(approval.id, approval.session_id);
   return true;
 }
 
@@ -127,11 +125,11 @@ export function isApprovalExecuting(approvalId: string): boolean {
 export function assertGroupApprovalsIdle(groupId: string): void {
   const approvals = getDb()
     .prepare(
-      `SELECT approval_id,status FROM approvals WHERE agent_group_id=?
+      `SELECT id,status FROM interactions WHERE agent_group_id=?
      OR session_id IN (SELECT id FROM sessions WHERE agent_group_id=?)`,
     )
-    .all(groupId, groupId) as Pick<Approval, 'approval_id' | 'status'>[];
-  if (approvals.some((row) => row.status === 'applying' || isApprovalExecuting(row.approval_id)))
+    .all(groupId, groupId) as Pick<Approval, 'id' | 'status'>[];
+  if (approvals.some((row) => row.status === 'applying' || isApprovalExecuting(row.id)))
     throw new Error(
       'An approval is being processed for this group. Wait for it to finish before archiving or deleting.',
     );
@@ -141,15 +139,16 @@ export function deleteSession(id: string, cancelApprovals = false): number {
   if ([...executingApprovals.values()].includes(id)) throw new SessionApprovalInProgressError();
   const db = getDb();
   return db.transaction(() => {
-    if (db.prepare("SELECT 1 FROM approvals WHERE session_id=? AND status='applying'").get(id))
+    if (db.prepare("SELECT 1 FROM interactions WHERE session_id=? AND status='applying'").get(id))
       throw new SessionApprovalInProgressError();
-    const approval = db.prepare("SELECT 1 FROM approvals WHERE session_id = ? AND status='pending' LIMIT 1").get(id);
+    const approval = db
+      .prepare("SELECT 1 FROM interactions WHERE session_id = ? AND kind!='question' AND status='pending' LIMIT 1")
+      .get(id);
     if (approval && !cancelApprovals) throw new SessionApprovalCancellationRequiredError();
     const cancelledApprovals = db
-      .prepare("DELETE FROM approvals WHERE session_id = ? AND status='pending'")
+      .prepare("DELETE FROM interactions WHERE session_id = ? AND kind!='question' AND status='pending'")
       .run(id).changes;
-    db.prepare('DELETE FROM approvals WHERE session_id = ?').run(id);
-    db.prepare('DELETE FROM questions WHERE session_id = ?').run(id);
+    db.prepare('DELETE FROM interactions WHERE session_id = ?').run(id);
     db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
     return cancelledApprovals;
   })();
@@ -157,41 +156,26 @@ export function deleteSession(id: string, cancelApprovals = false): number {
 
 // ── Durable Questions ──
 
-/**
- * Insert a pending question row. Idempotent: when delivery fails and retries,
- * the second attempt calls this with the same question_id — without `OR
- * IGNORE` that would throw UNIQUE and prevent the retry from reaching the
- * actual send step. Returns true if a new row was inserted.
- */
 export function createQuestion(
-  question: Omit<Question, 'status' | 'answer_value' | 'answer_type' | 'answered_by' | 'answered_at' | 'cancelled_at'>,
+  question: Pick<
+    Question,
+    | 'id'
+    | 'session_id'
+    | 'message_out_id'
+    | 'in_reply_to'
+    | 'platform_id'
+    | 'channel_type'
+    | 'thread_id'
+    | 'input'
+    | 'created_at'
+  >,
 ): boolean {
-  const result = getDb()
-    .prepare(
-      `INSERT OR IGNORE INTO questions
-         (question_id, session_id, message_out_id, in_reply_to, platform_id, channel_type, thread_id,
-          question_text, response_mode, options_json, status, answer_value, answer_type,
-          answered_by, answered_at, cancelled_at, created_at)
-       VALUES
-         (@question_id, @session_id, @message_out_id, @in_reply_to, @platform_id, @channel_type, @thread_id,
-          @question_text, @response_mode, @options_json, 'pending', NULL, NULL,
-          NULL, NULL, NULL, @created_at)`,
-    )
-    .run({
-      ...question,
-      options_json: JSON.stringify(question.options),
-    });
-  if (result.changes) queueMicrotask(() => invalidateConversation(question.session_id));
-  return result.changes > 0;
+  return createInteraction({ ...question, kind: 'question' });
 }
 
 export function getQuestion(questionId: string): Question | undefined {
-  const row = getDb().prepare('SELECT * FROM questions WHERE question_id = ?').get(questionId) as
-    | (Omit<Question, 'options'> & { options_json: string })
-    | undefined;
-  if (!row) return undefined;
-  const { options_json, ...rest } = row;
-  return { ...rest, options: JSON.parse(options_json) };
+  const record = getInteraction(questionId);
+  return record?.kind === 'question' ? record : undefined;
 }
 
 export function answerQuestion(
@@ -203,14 +187,19 @@ export function answerQuestion(
 ): boolean {
   const result = getDb()
     .prepare(
-      `UPDATE questions
-          SET status = 'answered', answer_value = @value, answer_type = @responseType,
-              answered_by = @userId, answered_at = @answeredAt
-        WHERE question_id = @questionId AND status = 'pending'`,
+      `UPDATE interactions
+          SET status = 'answered', response_json = @response,
+              responded_by = @userId, responded_at = @answeredAt, resolved_at = @answeredAt,
+              updated_at = @answeredAt, revision = revision + 1
+        WHERE id = @questionId AND kind='question' AND status = 'pending'`,
     )
-    .run({ questionId, ...answer, value: answer.responseType === 'skipped' ? null : answer.value });
-  const sessionId = result.changes ? getQuestion(questionId)?.session_id : undefined;
-  if (sessionId) queueMicrotask(() => invalidateConversation(sessionId));
+    .run({
+      questionId,
+      userId: answer.userId,
+      answeredAt: answer.answeredAt,
+      response: JSON.stringify(answer, ['responseType', 'value']),
+    });
+  if (result.changes) interactionChanged(questionId);
   return result.changes > 0;
 }
 
@@ -224,10 +213,9 @@ type AskQuestionRender = {
  * ask_user_question) or a pending_approval (self-mod / Agent Vault credential).
  */
 export function getAskQuestionRender(id: string): AskQuestionRender | undefined {
-  const q = getQuestion(id);
-  if (q) return { question: q.question_text, options: q.options };
-  const a = getApproval(id);
-  if (a?.title) return { title: a.title, options: JSON.parse(a.options_json) };
+  const record = getInteraction(id);
+  if (record?.kind === 'question') return { question: record.input.question, options: record.input.options };
+  if (record?.input.title) return { title: record.input.title, options: record.input.options };
 
   // Channel-registration + unknown-sender approvals persist title/options_json
   // the same way approvals does — just SELECT and return.

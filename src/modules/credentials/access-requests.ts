@@ -100,7 +100,7 @@ export async function requestAccess(
     .digest('hex');
   const existing = pendingWorkflow(key);
   if (existing) {
-    const status = getAccountRequest(existing.approval_id, session.id);
+    const status = getAccountRequest(existing.id, session.id);
     if (status.status === 'pending' || status.status === 'applying') {
       if (requestId) linkApprovalSubmission(status.id, requestId);
       return status;
@@ -108,8 +108,8 @@ export async function requestAccess(
   }
   const prior = latestApprovalWorkflow(key);
   if (prior && !(prior.status === 'completed' && prior.kind === 'account_setup')) {
-    if (requestId) linkApprovalSubmission(prior.approval_id, requestId);
-    return getAccountRequest(prior.approval_id, session.id);
+    if (requestId) linkApprovalSubmission(prior.id, requestId);
+    return getAccountRequest(prior.id, session.id);
   }
   const id = requestId ?? `appr-access-${randomUUID()}`;
   if (!/^appr-access-[a-zA-Z0-9-]{1,100}$/.test(id))
@@ -170,7 +170,7 @@ export function prepareAccountRequest(userId: string, id: string, raw: unknown) 
   getDb().transaction(() => {
     if (!updateApprovalStatus(request.id, 'pending', undefined, Number(body.request_revision)))
       throw new ConnectionInputError('The request changed. Refresh before setting up an account.', 409);
-    getDb().prepare("UPDATE approvals SET kind='account_setup' WHERE approval_id=?").run(request.id);
+    getDb().prepare("UPDATE interactions SET kind='account_setup' WHERE id=?").run(request.id);
   })();
   return getAccountRequest(request.id);
 }
@@ -507,26 +507,26 @@ export async function cancelAccessRequest(id: string, sessionId: string) {
 }
 
 registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, userId) => {
-  const request = reviewAccessRequest(userId, approval.approval_id);
+  const request = reviewAccessRequest(userId, approval.id);
   if (request.status !== 'pending') return;
   const message = parseApprovalMessage(response.message);
   const responseMessage = message ? { userId, message } : undefined;
   if (response.value === 'reject') {
     finishApprovalWorkflow(
-      approval.approval_id,
+      approval.id,
       'rejected',
       `Your ${request.kind === 'account_setup' ? 'account setup' : 'access'} request was rejected. No credentials were changed. Do not repeat this request unless the user asks.`,
       false,
       responseMessage,
       userId,
     );
-    await notifyApprovalWorkflow(approval.approval_id);
+    await notifyApprovalWorkflow(approval.id);
   } else if (response.value === 'review') {
     const session = getSession(approval.session_id!);
     if (session)
       notifyAgent(
         session,
-        `Access review is still pending. The user must privately select and confirm a credential in BananaClaw: ${reviewUrl(approval.approval_id)}. Do not poll, search for secrets or treat review as approval.`,
+        `Access review is still pending. The user must privately select and confirm a credential in BananaClaw: ${reviewUrl(approval.id)}. Do not poll, search for secrets or treat review as approval.`,
         approval.origin_message_id,
         responseMessage,
       );
@@ -555,9 +555,9 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
   const rows = recoverableApprovalWorkflows();
   for (const row of rows) {
     try {
-      if (row.status === 'applying' && recoverApplying && !activeApplications.has(row.approval_id)) {
+      if (row.status === 'applying' && recoverApplying && !activeApplications.has(row.id)) {
         const selection = JSON.parse(row.data_json) as ApplySelection;
-        const request = reviewAccessRequest(selection.userId, row.approval_id);
+        const request = reviewAccessRequest(selection.userId, row.id);
         const configReady =
           !selection.configureMcp ||
           Boolean(
@@ -566,7 +566,7 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
             selection.appliedConfigRevision ===
               mcpConfiguration(request.agentGroupId, request.requirements.resource_url, selection.mcpServer).revision,
           );
-        if (configReady && (await selectionGranted(row.approval_id, selection))) {
+        if (configReady && (await selectionGranted(row.id, selection))) {
           const connection = await getConnection(selection.userId, selection.connectionId);
           const runtime = selection.configureMcp
             ? undefined
@@ -581,7 +581,7 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
               throw new ConnectionInputError('MCP reference no longer resolves.', 409);
           }
           finishApprovalWorkflow(
-            row.approval_id,
+            row.id,
             'completed',
             `Your approved access grant was recovered and verified after restart. ${
               selection.configureMcp
@@ -594,7 +594,7 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
           );
         } else {
           finishApprovalWorkflow(
-            row.approval_id,
+            row.id,
             'failed',
             'Access approval was interrupted by restart. Review Credentials; no additional grant was replayed automatically.',
             false,
@@ -603,9 +603,9 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
           );
         }
       } else {
-        getAccountRequest(row.approval_id);
+        getAccountRequest(row.id);
       }
-      await notifyApprovalWorkflow(row.approval_id);
+      await notifyApprovalWorkflow(row.id);
     } catch (error) {
       if (
         row.status === 'applying' &&
@@ -614,14 +614,14 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
           (error instanceof AgentVaultError && !error.unreachable && error.status !== undefined && error.status < 500))
       ) {
         finishApprovalWorkflow(
-          row.approval_id,
+          row.id,
           'failed',
           'Access approval cannot resume because its authority or credential changed. Review Credentials; no additional grant was replayed.',
         );
-        await notifyApprovalWorkflow(row.approval_id);
+        await notifyApprovalWorkflow(row.id);
       }
       // Isolate independent approval recovery; retain undelivered results for retry.
-      log.error('Access approval recovery pending', { approvalId: row.approval_id, error });
+      log.error('Access approval recovery pending', { approvalId: row.id, error });
     }
   }
 }

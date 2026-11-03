@@ -4,12 +4,12 @@ import path from 'path';
 import { Writable } from 'stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-ui-delete-thread';
+const TEST_ROOT = process.cwd() + '/.test-tmp/nanoclaw-test-ui-delete-thread';
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
 vi.mock('../../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../../config.js')>('../../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-ui-delete-thread/data' };
+  return { ...actual, DATA_DIR: process.cwd() + '/.test-tmp/nanoclaw-test-ui-delete-thread/data' };
 });
 
 vi.mock('../../../container-runner.js', () => ({
@@ -109,15 +109,17 @@ function seedSession(id: string, messagingGroupId: string, threadId: string | nu
 
 function seedApproval(id: string, sessionId: string | null): void {
   createApproval({
-    approval_id: id,
+    id: id,
     session_id: sessionId,
     agent_group_id: GROUP_ID,
     request_id: id,
-    action: sessionId ? 'install_packages' : 'sessionless-request',
-    payload: '{}',
     created_at: NOW,
-    title: 'Approval required',
-    options_json: '[]',
+    input: {
+      action: sessionId ? 'install_packages' : 'sessionless-request',
+      payload: JSON.parse('{}'),
+      title: 'Approval required',
+      options: JSON.parse('[]'),
+    },
   });
 }
 
@@ -190,11 +192,12 @@ describe('DELETE chat thread', () => {
     const dir = seedSession('web-session', 'web-mg', 'web-thread');
     getDb()
       .prepare(
-        `INSERT INTO questions
-        (question_id, session_id, message_out_id, question_text, response_mode, options_json, status, created_at)
-       VALUES ('question', 'web-session', 'message', 'Continue?', 'choice', '[]', ?, ?)`,
+        `INSERT INTO interactions
+        (id, kind, session_id, message_out_id, input_json, status, response_json, responded_at, created_at, updated_at)
+       VALUES ('question', 'question', 'web-session', 'message', '{"question":"Continue?","responseMode":"choice","options":[]}', ?,
+       CASE WHEN ?='answered' THEN '{"responseType":"skipped"}' END, CASE WHEN ?='answered' THEN 'answered' END, ?, 'updated')`,
       )
-      .run(status, NOW);
+      .run(status, status, status, NOW);
 
     expect(await deleteThread('web-thread', '')).toEqual({
       status: 200,

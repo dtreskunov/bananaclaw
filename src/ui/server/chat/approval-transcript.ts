@@ -1,4 +1,5 @@
 import { getDb } from '../../../db/connection.js';
+import { queryInteractions } from '../../../db/interactions.js';
 import fs from 'node:fs';
 
 import { getApproval, type Approval } from '../../../db/approvals.js';
@@ -67,11 +68,11 @@ export function approvalOrigin(
 function responseContext(userId: string, row: Approval) {
   const responder = row.responded_by ? getUser(row.responded_by) : undefined;
   return {
-    decision: row.decision,
+    decision: row.response.decision,
     respondedBy: row.responded_by
       ? { userId: row.responded_by, displayName: responder?.display_name || row.responded_by }
       : null,
-    responseMessage: row.response_message,
+    responseMessage: row.response.message,
     origin: approvalOrigin(userId, row),
   };
 }
@@ -83,17 +84,17 @@ export function projectAccountInteraction(userId: string, account: AccountReques
 }
 
 export function projectApproval(userId: string, row: Approval): ConversationApproval {
-  if (row.kind !== 'confirmation') return { ...responseContext(userId, row), ...getAccountRequest(row.approval_id) };
+  if (row.kind !== 'confirmation') return { ...responseContext(userId, row), ...getAccountRequest(row.id) };
   const session = row.session_id ? getSession(row.session_id) : undefined;
   const groupId = row.agent_group_id ?? session?.agent_group_id ?? null;
   return {
     ...responseContext(userId, row),
     kind: 'confirmation',
-    id: row.approval_id,
-    action: row.action,
-    title: row.title,
-    ...presentApproval(row.action, row.payload),
-    options: JSON.parse(row.options_json),
+    id: row.id,
+    action: row.input.action,
+    title: row.input.title,
+    ...presentApproval(row.input.action, row.input.payload),
+    options: row.input.options,
     agentGroupId: groupId,
     agentGroupName: groupId ? (getAgentGroup(groupId)?.name ?? null) : null,
     createdAt: row.created_at,
@@ -106,9 +107,10 @@ export function projectApproval(userId: string, row: Approval): ConversationAppr
 
 export function approvalTranscript(userId: string, groupId: string, context: TurnContext): ConversationApproval[] {
   if (!context.sessionId || !hasAdminPrivilege(userId, groupId)) return [];
-  const rows = getDb()
-    .prepare('SELECT * FROM approvals WHERE session_id=? ORDER BY created_at,approval_id')
-    .all(context.sessionId) as Approval[];
+  const rows = queryInteractions<Approval>(
+    "SELECT * FROM interactions WHERE session_id=? AND kind!='question' ORDER BY created_at,id",
+    context.sessionId,
+  );
   return rows.flatMap((row) => {
     const approval = projectApproval(userId, row);
     const origin = approval.origin;

@@ -65,8 +65,9 @@ objects or introduce a custom schema DSL.
 2. Carry complete input specifications and typed answers through producers,
    storage, host/runner messages, server contracts, and UI.
 3. Consolidate authorized interaction presentation and conversation item shapes.
-4. Consider one current-state interaction record only if replacing existing
-   duplicated storage and coordination is independently net-reducing.
+4. Replace duplicated question/approval storage with one current-state
+   interaction record after preservation and behavior verification. The user
+   explicitly accepted the bounded candidate's small LOC/complexity increase.
 5. Finish integration by reusing shared message types in host read models and
    shared thread/task resource views in the browser, removing obsolete response
    polling and redundant presentation copies. Local thread presentation permits
@@ -77,11 +78,15 @@ Measure each completed change and the cumulative delta against the baseline.
 Report production, tests, documentation, generated assets, and disposable
 cutover tooling separately. Use the same changed-production file set for
 before/after complexity. Commit only improvements that preserve behavior and
-produce a worthwhile reduction; passing tests alone is not sufficient.
+produce a worthwhile simplification; passing tests alone is not sufficient.
+For the unified-store step, the user approved the measured +2 non-reference
+production LOC and +8 cyclomatic points in exchange for one canonical store.
+This exception does not authorize unrelated expansion or a generic engine.
 
 ## Preserved behavior
 
-Keep one outstanding question per session, explicit skip, literal text,
+Keep existing question serialization and single-active-question controls,
+retained pending queues, explicit skip, literal text,
 choice labels, multiline/voice input, pending input controls, transcript
 ordering and attribution, private account management, exact consent and
 revision checks, user-owned credentials, and existing delivery guarantees.
@@ -97,17 +102,24 @@ No legacy compatibility is required. If storage changes, use one explicit,
 offline, disposable cutover script. Do not run it against live data as part
 of development; do not add permanent historical readers or converters.
 
-## Approval storage consolidation
+## Unified current-state storage
 
-`approvals` retains one current-state record for confirmations and accounts:
-request metadata, kind, status, revision, response, outcome and timestamps.
-`approval_workflows` contains only private selections, submission aliases and
-notification/restart flags. Its joined reader uses the canonical lifecycle;
-there is no pending/history copy or mirrored workflow stage.
+The `experiment/unified-interaction-store-20261103` worktree implements the
+next step against immutable `412af3c15`. Promotion and the necessary offline
+database cutover were explicitly authorized on 2026-11-03.
+`interactions` replaces both `questions` and `approvals`; there are no old-table
+views or runtime converters. Its `kind` distinguishes question, confirmation,
+account setup and access grant. Identity, origin associations, current state,
+revision, attribution and timestamps are common. `input_json` stores the complete
+immutable input, including question placeholder/multiline hints. `response_json`
+stores a tagged question choice/text/skip or a consent decision/note, not nullable
+answer-type/value combinations. Original outbound anchors still own turn and
+timeline provenance, not another input definition.
 
-Questions already have one authoritative current-state row. They remain in
-`questions`: forcing unrelated response and effect lifecycles into one table
-would add adapters rather than eliminate them.
+`interaction_progress` holds only private selections/recovery, submission aliases,
+and notification/restart flags. It has no copied input or lifecycle. Specialized
+question and approval mutations and operation-specific authorization remain
+distinct; there is no generic effect/retry engine or new runner protocol.
 
 Generic effects enter `applying` before invocation and cannot replay from any
 non-pending state. A host crash during a generic effect requires operator
@@ -116,24 +128,37 @@ Account effects retain their existing private recovery and explicit retry.
 Notifications derive their identity from the approval ID and terminal revision;
 private notification flags do not own another result/lifecycle snapshot.
 
-Archive format 2 cancels pending approvals, refuses both persisted and
+Archive format 3 now stores one `interactions` collection, cancels pending
+interactions, refuses both persisted and
 process-local applying effects, and exports finalized audit records only.
 Restoring with sessions never resumes private selections, grants, notifications
-or retries. Format 1 archives are deliberately unsupported.
+or retries. Old-shape archives are refused explicitly: restore them with their
+original host in an isolated offline copy, then cut over that copy. Neither old
+archives nor private account progress are silently converted at runtime.
 `ncl approvals list` lists retained public records; `--status pending` narrows
 it to decisions still needed. Private account progress is never listed.
 
 ### Offline cutover: detect / why / fix / verify / rollback
 
-Existing databases with `pending_approvals`, `approval_history` or the old
-`approval_workflows` are refused at startup. Fresh databases need no cutover.
-This intentionally removes old storage rather than carrying compatibility.
+Existing `questions`/`approvals` storage fails closed with this guidance. Fresh
+databases create only the canonical store. Migration application is keyed by
+`current-state-interactions`, not its numeric file prefix. The unrelated
+Agent Vault-only migration/security checks remain required and unchanged.
 
-The one-time reset tool was retired after the verified rollout. For an older
-database, use an isolated checkout of Git commit `64cb24db9`, where
-`scripts/cutover-approval-storage.ts` and its rehearsal test are preserved.
-Restore that checkout's dependencies from its frozen lockfiles. The commands
-below run from that historical checkout, never from a running installation.
+`scripts/cutover-interactions.ts` is a disposable, explicit offline tool for the
+`retained-approvals` schema at `412af3c15`, not a startup migration. It preserves
+IDs, full input specifications, tagged answers, responder attribution, notes,
+timestamps, statuses, revisions, dedupe keys, aliases, private selection/recovery
+JSON and notification/restart flags. It never resets records, calls credential
+APIs, opens runner-state.db, or executes an effect.
+Six retained title-based legacy questions omit outbound `responseMode` and keep
+the short display title in `question_text`. Only when that title exactly matches
+the outbound title does the converter recover the retained response mode and
+preserve the full outbound question as canonical input. Original messages,
+including the short titles, remain untouched; invalid origins still fail closed.
+The source permits multiple retained pending questions in a session (two such
+queues exist in this installation). The replacement uses a non-unique pending
+lookup index as well; cutover never cancels a question to impose new uniqueness.
 
 1. Finish the Agent Vault-only cutover first. Stop the host **and all its
    agent containers**, and prevent automatic restart during this procedure.
@@ -141,20 +166,30 @@ below run from that historical checkout, never from a running installation.
    refuses workflows still marked `applying`; only after inspecting actual
    grants/configuration should the operator explicitly finalize those old
    records. Do not assume stopping a process rolled back an external effect.
-3. Accept discarding **all old approval records and private recovery state**.
-   Questions, other central records, session journals and actual credentials
-   are not reset. No credential grant/revoke or pending effect is executed.
-4. From the new checkout, choose an unused, protected backup path and run:
+3. Rehearse on an isolated copy of the central DB and host-owned session tree.
+   The tool requires explicit `--offline`, no host socket, stopped session
+   container states, no applying effects, and a SQLite writer lock. Reconcile
+   stale container flags only after proving the host and its containers are
+   stopped (or absent in an isolated rehearsal). Never finalize uncertain
+   approval effects merely to bypass these checks. Missing/invalid outbound
+   question provenance and global ID/alias collisions are hard errors.
+4. Choose a new backup file in an operator-owned mode-0700 directory and run
+   **only against the authorized, stopped database** (an isolated copy for
+   rehearsal, then the original installation for the approved cutover):
 
    ```bash
-   pnpm exec tsx scripts/cutover-approval-storage.ts /absolute/path/data/v2.db /absolute/path/before-approvals.db --host-and-containers-stopped --discard-legacy-approvals
+   pnpm exec tsx scripts/cutover-interactions.ts --db /offline/data/v2.db --sessions /offline/data/v2-sessions --backup /private/original.db --offline
    ```
 
-   The one-time script checks integrity, saves the old DB, and resets approval
-   storage transactionally. It is not part of host startup.
-5. Verify the backup, empty `approvals`, `PRAGMA foreign_key_check`, and the
-   `retained-approvals` migration record. Build host/browser together and reload
-   clients (conversation protocol 9); restart only after verification.
+   Before mutation it checks integrity/FKs and makes and verifies a mode-0600
+   SQLite backup through a separate read connection while writers are excluded.
+   It copies current state, removes old stores and adds the named migration
+   record in one transaction. Any conversion failure rolls that transaction back.
+5. Verify exact source/destination inventory and every input/response/progress
+   field against the protected original, integrity/FKs, absence of old stores,
+   and the `current-state-interactions` migration record. Build host/browser
+   together and reload clients (conversation protocol 10). Review, rehearsal,
+   verified backups and explicit authorization are required before promotion.
 6. To roll back, keep everything stopped, restore the complete protected DB
    backup and the pre-cutover code/assets together. Do not restore only old
    tables into the new host. External credential/configuration changes require
@@ -166,3 +201,58 @@ Use focused host/browser tests, host and browser builds/typechecks, and runner
 tests/typechecks whenever runner contracts change. Verify actual response
 shapes and UI behavior, then regenerate checked-in browser assets. Preserve
 unrelated baseline failures rather than masking them.
+
+### Bounded candidate result — promotion approved
+
+The initial candidate was evaluated in `/mnt/ssd/ncl-store` on
+`experiment/unified-interaction-store-20261103`, based on `412af3c15`, without
+changing live data or calling credential APIs. The measurements below describe
+that complete candidate before promotion hardening (including archive format 3).
+
+Validation passed: host build; browser typecheck/build; standalone cutover-tool
+typecheck; 614 tests across 27 files, including Node/Bun response/restart
+integration and 16 synthetic cutover cases. Synthetic fixtures exercise a
+42-question (32 answered / 10 pending), three-approval, nine-group inventory in
+DELETE and WAL modes, byte-preserved private progress/aliases/flags, protected
+original backups, and transactional refusal of locks, active/applying state,
+collisions, malformed/missing provenance, invalid answers/progress, unknown
+columns, and FK violations. Runner sources/protocol were untouched.
+Changed-file lint retains one pre-existing unused `chatMessages` import in
+`stop-actions.test.ts`; new storage/migration modules pass lint.
+
+Using the prescribed measurement scripts on the full integrated changed file
+set (including new/deleted modules), authored production is **458 added /
+476 removed = -18 physical LOC** (6,968 → 6,950; nonblank 6,515 → 6,492).
+Tests are +384 LOC; disposable offline tooling is +262; generated assets are +2;
+fixtures are unchanged. Documentation is +33 LOC, counted separately from
+production. Cyclomatic sum is **1,567 → 1,575 (+8)**, actual branch increments
+**1,223 → 1,222 (-1)**, functions **344 → 353 (+9)**, and maximum complexity
+remains 63. Static imports are 251 → 259; runtime static imports 213 → 219.
+
+Twenty removed lines are the reference-only central schema copy, so other
+integrated authored production is **+2 LOC**, not a runtime-code reduction.
+The initial reduction-only gate rejected this candidate. The user explicitly
+accepted +2 LOC and +8 complexity points as insignificant and approved proceeding.
+The architectural benefit is one canonical current-state store, complete typed
+input/response values and shared persistence/projection, not a LOC claim or a
+generic effect engine. Promotion retains the preservation, authorization and
+recovery requirements above; all nine groups and their access relationships
+remain in the installation.
+
+### Promotion verification
+
+The real-data rehearsal preserved 42 questions (32 answered / 10 pending),
+two approved confirmations, one completed account setup and its private
+progress. All 33 unrelated table fingerprints matched, including identities,
+roles, memberships, group configuration and credential metadata. Integrity/FK
+checks passed, as did restoring the backup and comparing every original table.
+The rehearsal exposed and corrected the historical title-based input conversion
+and an unsupported uniqueness constraint; both now have regression tests.
+
+The complete host/browser suite passed 3,247 tests with the same 21 baseline
+failures. After the rehearsal fixes, 63 focused storage, cutover, archive and
+question-response tests passed, including 19 disposable cutover cases.
+Host/browser builds and typechecks, runner typecheck and standalone converter
+typecheck passed. Deployment evidence is retained with the installation's
+protected upgrade backups rather than treating this document as a live status
+or adding a permanent migration/recovery framework.

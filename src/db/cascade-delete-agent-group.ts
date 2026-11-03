@@ -10,8 +10,7 @@ import { assertGroupApprovalsIdle } from './sessions.js';
 
 export interface CascadeCounts {
   sessions: number;
-  questions: number;
-  approvals: number;
+  interactions: number;
   agent_destinations_owned: number;
   agent_destinations_pointing: number;
   pending_sender_approvals: number;
@@ -44,8 +43,7 @@ export function cascadeDeleteAgentGroup(id: string): CascadeCounts {
     assertGroupApprovalsIdle(groupId);
     const counts: CascadeCounts = {
       sessions: 0,
-      questions: 0,
-      approvals: 0,
+      interactions: 0,
       agent_destinations_owned: 0,
       agent_destinations_pointing: 0,
       pending_sender_approvals: 0,
@@ -64,12 +62,9 @@ export function cascadeDeleteAgentGroup(id: string): CascadeCounts {
         .prepare('DELETE FROM agent_destinations WHERE target_type = ? AND target_id = ?')
         .run('agent', groupId).changes;
     }
-    counts.questions = db
-      .prepare('DELETE FROM questions WHERE session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)')
-      .run(groupId).changes;
-    counts.approvals = db
+    counts.interactions = db
       .prepare(
-        'DELETE FROM approvals WHERE agent_group_id = ? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)',
+        'DELETE FROM interactions WHERE agent_group_id = ? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)',
       )
       .run(groupId, groupId).changes;
     counts.sessions = db.prepare('DELETE FROM sessions WHERE agent_group_id = ?').run(groupId).changes;

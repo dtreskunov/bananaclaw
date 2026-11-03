@@ -18,12 +18,11 @@ const question: PendingQuestionDto = {
   responseMode: 'choice_or_text',
   options: [{ label: 'Monday', selectedLabel: 'Monday selected', value: 'monday' }],
   status: 'answered',
-  answerValue: null,
-  answerType: null,
   answeredAt: null,
   threadId: 'thread',
   agentGroupId: 'group',
   createdAt: '2026-10-05T17:00:00Z',
+  response: null,
 };
 const answer: ChatMessage = {
   id: 'question-response:q',

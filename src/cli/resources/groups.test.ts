@@ -24,10 +24,10 @@ vi.mock('../../container-runner.js', () => ({
 
 vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-cli-groups' };
+  return { ...actual, DATA_DIR: process.cwd() + '/.test-tmp/nanoclaw-test-cli-groups' };
 });
 
-const TEST_DIR = '/tmp/nanoclaw-test-cli-groups';
+const TEST_DIR = process.cwd() + '/.test-tmp/nanoclaw-test-cli-groups';
 
 import { initTestDb, closeDb, runMigrations, createAgentGroup, getDb } from '../../db/index.js';
 import { createSession } from '../../db/sessions.js';
@@ -100,14 +100,14 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     ).run(GID, MGID, now());
 
     db.prepare(
-      `INSERT INTO questions
-         (question_id, session_id, message_out_id, question_text, response_mode, options_json, status, created_at)
-       VALUES (?, ?, 'mout-1', 'question', 'choice', '[]', 'pending', ?)`,
+      `INSERT INTO interactions
+         (id, kind, session_id, message_out_id, input_json, status, created_at, updated_at)
+       VALUES (?, 'question', ?, 'mout-1', '{"question":"question","responseMode":"choice","options":[]}', 'pending', ?, 'updated')`,
     ).run('q-1', SID, now());
 
     db.prepare(
-      `INSERT INTO approvals (approval_id, session_id, request_id, action, payload, created_at, agent_group_id, status, title, options_json)
-       VALUES (?, ?, 'req-1', 'cli_command', '{}', ?, ?, 'pending', '', '[]')`,
+      `INSERT INTO interactions (id, kind, session_id, request_id, input_json, response_json, created_at, updated_at, agent_group_id, status)
+       VALUES (?, 'confirmation', ?, 'req-1', '{"action":"cli_command","payload":{},"title":"","options":[]}', '{"decision":null,"message":null}', ?, 'updated', ?, 'pending')`,
     ).run('pa-1', SID, now(), GID);
 
     db.prepare(
@@ -148,8 +148,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     expect(data.deleted).toBe(GID);
     expect(data.removed).toMatchObject({
       sessions: 1,
-      questions: 1,
-      approvals: 1,
+      interactions: 2,
       agent_destinations_owned: 1,
       agent_destinations_pointing: 0,
       pending_sender_approvals: 1,
@@ -163,8 +162,10 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     // The group and every dependent row must be gone.
     expect(count('SELECT COUNT(*) AS c FROM agent_groups WHERE id = ?', GID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM sessions WHERE agent_group_id = ?', GID)).toBe(0);
-    expect(count('SELECT COUNT(*) AS c FROM questions WHERE session_id = ?', SID)).toBe(0);
-    expect(count('SELECT COUNT(*) AS c FROM approvals WHERE agent_group_id = ? OR session_id = ?', GID, SID)).toBe(0);
+    expect(count('SELECT COUNT(*) AS c FROM interactions WHERE session_id = ?', SID)).toBe(0);
+    expect(count('SELECT COUNT(*) AS c FROM interactions WHERE agent_group_id = ? OR session_id = ?', GID, SID)).toBe(
+      0,
+    );
     expect(count('SELECT COUNT(*) AS c FROM agent_destinations WHERE agent_group_id = ?', GID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM pending_sender_approvals WHERE agent_group_id = ?', GID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM pending_channel_approvals WHERE agent_group_id = ?', GID)).toBe(0);

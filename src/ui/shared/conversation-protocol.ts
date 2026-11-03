@@ -3,7 +3,7 @@ import { isQuestionInteraction } from './conversation.js';
 import { accessRequestInput, ConnectionInputError } from './connection-input.js';
 import type { QuestionInput, QuestionResponse } from './question.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 9;
+export const CONVERSATION_PROTOCOL_VERSION = 10;
 export interface EntityChanges<T> {
   upserts: T[];
   removeIds: string[];
@@ -190,8 +190,7 @@ const question: Check = (value) =>
     kind: oneOf('question'),
     id,
     status: oneOf('pending', 'answered', 'cancelled'),
-    answerValue: nullable(text),
-    answerType: nullable(oneOf('choice', 'text', 'skipped')),
+    response: nullable(isQuestionResponse),
     answeredAt: nullable(text),
     activity: optional(array(trace)),
     turnId: optional(id),

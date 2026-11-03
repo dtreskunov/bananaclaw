@@ -44,7 +44,7 @@ import { moduleResendThreadRoots } from './module-resend-thread-roots.js';
 import { moduleCredentialConnections } from './module-credential-connections.js';
 import { migration044 } from './044-agent-vault-default.js';
 import { migration048 } from './048-agent-vault-only.js';
-import { migration049 } from './049-approvals.js';
+import { migration049 } from './049-interactions.js';
 
 export interface Migration {
   version: number;

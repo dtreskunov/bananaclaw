@@ -204,45 +204,25 @@ CREATE INDEX idx_sessions_lookup     ON sessions(messaging_group_id, thread_id);
   approval_in_progress` until processing finishes, even with cancellation consent.
   The guard releases on success or failure and adds no persistent status or schema.
 
-### 1.9 `questions`
+### 1.9 `interactions` — questions
 
-The `ask_user_question` MCP tool creates a durable question here. Fresh databases
-create this schema directly, including the `skipped` response type. The legacy
-`pending_questions` conversion is no longer registered or shipped.
-Existing installations require the [offline upgrade](ui.md#upgrading-question-skips).
-Question titles are not part of the persisted schema; older installations also
-need the [offline title removal](ui.md#removing-stored-question-titles).
+Migration `049-interactions.ts` defines the current-state table for all four
+interaction kinds. `src/db/interactions.ts` owns canonical serialization;
+`src/db/sessions.ts` specializes question creation and first-response-wins CAS.
+`Question` in `src/types.ts` distinguishes answered records with a required
+`QuestionResponse` and response time from unanswered records with a null response.
+The immutable `QuestionInput` is complete, including optional placeholder and
+multiline hints. The original host-owned outbound row still supplies turn/timeline
+provenance. There is one pending question per session.
+
 The original question remains stored after resolution. Answers and
 skips arrive in the session input journal as `interactive_response` events
 linked by `questionId`; they never relocate the original question output.
 
-```sql
-CREATE TABLE questions (
-  question_id    TEXT PRIMARY KEY,
-  session_id     TEXT NOT NULL REFERENCES sessions(id),
-  message_out_id TEXT NOT NULL,
-  in_reply_to    TEXT,
-  platform_id    TEXT,
-  channel_type   TEXT,
-  thread_id      TEXT,
-  question_text  TEXT NOT NULL,
-  response_mode  TEXT NOT NULL CHECK(response_mode IN ('choice', 'text', 'choice_or_text')),
-  options_json   TEXT NOT NULL,
-  status         TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'answered', 'cancelled')),
-  answer_value   TEXT,
-  answer_type    TEXT CHECK(answer_type IS NULL OR answer_type IN ('choice', 'text', 'skipped')),
-  answered_by    TEXT,
-  answered_at    TEXT,
-  cancelled_at   TEXT,
-  created_at     TEXT NOT NULL,
-  CHECK(answer_type != 'skipped' OR answer_value IS NULL)
-);
-CREATE INDEX idx_questions_session_status ON questions(session_id, status);
-```
-
-A skip is a resolved response (`status = 'answered'`, `answer_type = 'skipped'`,
-`answer_value = NULL`), not cancellation or a fabricated answer. `answered_by`
-and `answered_at` record the actor and time for either response. The conditional
+A skip is a resolved response (`status = 'answered'`,
+`response_json = '{"responseType":"skipped"}'`), not cancellation or a fabricated
+answer. Literal text matching an option remains text. `responded_by` and
+`responded_at` record the actor and time for either response. The conditional
 pending-to-answered update makes the first response win; journal retries use the
 same `question-response:<questionId>` identity and saved outcome.
 
@@ -270,7 +250,7 @@ must still invoke `writeDestinations()` so a running agent sees the update.
 
 Access layer: `src/db/agent-destinations.ts`.
 
-### 1.11 `approvals` and private account progress
+### 1.11 `interactions` — confirmations/accounts and private progress
 
 Migration 049 defines the canonical schema; `src/db/approvals.ts` owns mutations.
 One retained row contains request identity, kind, session/group and immutable
@@ -284,7 +264,7 @@ An active dedupe key is unique across pending/applying rows. Revision checks
 claim account operations atomically. Generic applying effects never replay
 automatically after a crash; uncertain effects require operator review.
 
-`approval_workflows` is a private sidecar: selection/recovery JSON, submission
+`interaction_progress` is a private sidecar keyed by the interaction ID: selection/recovery JSON, submission
 aliases, restart flag and notification acknowledgement. It owns neither
 lifecycle nor copied request metadata. Public/CLI projections never select
 its private fields.
@@ -400,14 +380,14 @@ Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMig
 
 | # | File | Introduces |
 |---|------|------------|
-| 001 | `001-initial.ts` | Core tables: `agent_groups`, `messaging_groups`, `messaging_group_agents`, `users`, `user_roles`, `agent_group_members`, `user_dms`, `sessions`, `questions` |
+| 001 | `001-initial.ts` | Core tables: `agent_groups`, `messaging_groups`, `messaging_group_agents`, `users`, `user_roles`, `agent_group_members`, `user_dms`, `sessions` |
 | 002 | `002-chat-sdk-state.ts` | `chat_sdk_kv`, `chat_sdk_subscriptions`, `chat_sdk_locks`, `chat_sdk_lists` |
 | 004 | `004-agent-destinations.ts` | `agent_destinations` + backfill from existing `messaging_group_agents` wirings |
 | 008 | `008-dropped-messages.ts` | `unregistered_senders` |
 | 009 | `009-drop-pending-credentials.ts` | Drop the defunct `pending_credentials` table |
 | 014 | `014-container-configs.ts` | `container_configs` — per-agent-group container runtime config |
 | 015 | `015-cli-scope.ts` | `ALTER TABLE container_configs ADD COLUMN cli_scope` |
-| 049 | `049-approvals.ts` | Retained `approvals` and private `approval_workflows`; refuses legacy approval storage |
+| 049 | `049-interactions.ts` | Canonical `interactions` and private `interaction_progress`; refuses old storage until explicit offline cutover |
 
 Numbers 005 and 006 are intentionally absent — migrations were renumbered during early development.
 Migration 028 was retired after offline upgrades; historical applied records remain untouched.

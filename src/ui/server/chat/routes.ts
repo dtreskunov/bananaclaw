@@ -14,7 +14,8 @@ import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getMessagingGroupByPlatform } from '../../../db/messaging-groups.js';
 import { getDb } from '../../../db/connection.js';
-import { getQuestion, getSession } from '../../../db/sessions.js';
+import { getInteraction, queryInteractions } from '../../../db/interactions.js';
+import { getSession } from '../../../db/sessions.js';
 import { log } from '../../../log.js';
 import {
   listAccessibleAgentGroups,
@@ -566,9 +567,9 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
   // approvals are unbounded global rows; filter to those the user
   // is eligible to approve. Owner/global-admin sees all (incl. agent_group_id IS NULL);
   // a scoped admin sees only rows for their agent groups.
-  const rows = getDb()
-    .prepare("SELECT * FROM approvals WHERE status IN ('pending','applying') ORDER BY created_at DESC")
-    .all() as Approval[];
+  const rows = queryInteractions<Approval>(
+    "SELECT * FROM interactions WHERE kind!='question' AND status IN ('pending','applying') ORDER BY created_at DESC",
+  );
   const elevated = isOwner(userId) || isGlobalAdmin(userId);
   const visible: ApprovalDto[] = [];
   for (const r of rows) {
@@ -624,12 +625,9 @@ async function handleSync(ctx: Ctx, userId: string): Promise<void> {
 }
 
 async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: string): Promise<void> {
-  const row = getDb().prepare('SELECT * FROM approvals WHERE approval_id = ?').get(approvalId) as Approval | undefined;
-
-  // If the ID doesn't match a pending approval, it might be a pending question
-  // (ask_user_question). Both use the same dispatchResponse chain, so fall
-  // through to the shared handler below.
-  if (row) {
+  const row = getInteraction(approvalId);
+  if (!row) return json(ctx, 404, { error: 'not_found' });
+  if (row.kind !== 'question') {
     if (row.status !== 'pending') return json(ctx, 409, { error: 'not_pending' });
     const scope = approvalGroupId(row);
     if (scope == null) {
@@ -655,14 +653,13 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   if (message && !row?.session_id)
     return json(ctx, 400, { error: 'This approval has no originating conversation for a message.' });
   let response: QuestionResponse | { value: string };
-  if (row) {
+  if (row.kind !== 'question') {
     if (body?.responseType === 'skipped') return json(ctx, 400, { error: 'approval_cannot_be_skipped' });
     if (body?.responseType !== undefined) return json(ctx, 400, { error: 'invalid_response_type' });
     if (typeof body?.value !== 'string' || !body.value) return json(ctx, 400, { error: 'value_required' });
     response = { value: body.value };
   } else {
-    const question = getQuestion(approvalId);
-    if (!question) return json(ctx, 404, { error: 'not_found' });
+    const question = row;
     if (question.status === 'cancelled') return json(ctx, 409, { error: 'question_cancelled' });
     const session = getSession(question.session_id);
     const mg =
@@ -682,7 +679,10 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
       !routeMatches(context, question.channel_type, question.platform_id, question.thread_id)
     )
       return json(ctx, 403, { error: 'forbidden' });
-    if (!isQuestionResponse(body) || !questionAcceptsResponse(question.response_mode, question.options, body))
+    if (
+      !isQuestionResponse(body) ||
+      !questionAcceptsResponse(question.input.responseMode, question.input.options, body)
+    )
       return json(ctx, 400, { error: 'invalid_question_response' });
     response = body;
   }

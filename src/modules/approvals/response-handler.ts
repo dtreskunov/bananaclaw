@@ -32,35 +32,35 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
 
   if (!isAuthorizedApprovalClick(approval, payload)) {
     log.warn('Ignoring unauthorized approval response', {
-      approvalId: approval.approval_id,
-      action: approval.action,
+      approvalId: approval.id,
+      action: approval.input.action,
       userId: payload.userId,
       channelType: payload.channelType,
     });
     return true;
   }
   if (approval.status !== 'pending') {
-    log.info('Ignoring response to an approval that is no longer pending', { approvalId: approval.approval_id });
+    log.info('Ignoring response to an approval that is no longer pending', { approvalId: approval.id });
     return true;
   }
   const message = parseApprovalMessage(payload.message);
   if (message && !approval.session_id)
     throw new ApprovalMessageError('This approval has no originating conversation for a message.');
 
-  const interactive = getInteractiveApprovalHandler(approval.action);
+  const interactive = getInteractiveApprovalHandler(approval.input.action);
   if (interactive) {
     await interactive(approval, payload, namespacedUserId(payload) ?? '');
     return true;
   }
 
   if (!beginApprovalExecution(approval)) {
-    log.info('Ignoring duplicate response to an approval being processed', { approvalId: approval.approval_id });
+    log.info('Ignoring duplicate response to an approval being processed', { approvalId: approval.id });
     return true;
   }
   try {
     await handleRegisteredApproval(approval, payload.value, namespacedUserId(payload) ?? '', message);
   } finally {
-    endApprovalExecution(approval.approval_id);
+    endApprovalExecution(approval.id);
   }
   return true;
 }
@@ -74,8 +74,8 @@ async function handleRegisteredApproval(
   const session = approval.session_id ? getSession(approval.session_id) : undefined;
   if (!session) {
     const outcome = 'Approval cannot be applied because its originating conversation is unavailable.';
-    log.warn(outcome, { approvalId: approval.approval_id });
-    updateApprovalStatus(approval.approval_id, 'cancelled', { outcome });
+    log.warn(outcome, { approvalId: approval.id });
+    updateApprovalStatus(approval.id, 'cancelled', { outcome });
     return;
   }
 
@@ -87,49 +87,49 @@ async function handleRegisteredApproval(
       originMessageId: approval.origin_message_id,
       ...options,
       responseMessage,
-      approvalId: approval.approval_id,
+      approvalId: approval.id,
     });
     responseMessage = undefined;
     if (!options?.afterRestart || !outcomeMessage) outcomeMessage = text;
   };
 
   if (selectedOption !== 'approve') {
-    notify(`Your ${approval.action} request was rejected by admin.`);
-    log.info('Approval rejected', { approvalId: approval.approval_id, action: approval.action, userId });
-    updateApprovalStatus(approval.approval_id, 'rejected', { ...response, outcome: outcomeMessage });
+    notify(`Your ${approval.input.action} request was rejected by admin.`);
+    log.info('Approval rejected', { approvalId: approval.id, action: approval.input.action, userId });
+    updateApprovalStatus(approval.id, 'rejected', { ...response, outcome: outcomeMessage });
     await wakeContainer(session);
     return;
   }
 
   // Approved — dispatch to the module that registered for this action.
-  const handler = getApprovalHandler(approval.action);
+  const handler = getApprovalHandler(approval.input.action);
   if (!handler) {
     log.warn('No approval handler registered', {
-      approvalId: approval.approval_id,
-      action: approval.action,
+      approvalId: approval.id,
+      action: approval.input.action,
     });
-    notify(`Your ${approval.action} was approved, but no handler is installed to apply it.`);
-    updateApprovalStatus(approval.approval_id, 'failed', { ...response, outcome: outcomeMessage });
+    notify(`Your ${approval.input.action} was approved, but no handler is installed to apply it.`);
+    updateApprovalStatus(approval.id, 'failed', { ...response, outcome: outcomeMessage });
     await wakeContainer(session);
     return;
   }
 
-  const payload = JSON.parse(approval.payload);
-  updateApprovalStatus(approval.approval_id, 'applying', response);
+  const payload = approval.input.payload;
+  updateApprovalStatus(approval.id, 'applying', response);
   let outcome: 'approved' | 'failed' = 'approved';
   try {
     await handler({ session, payload, userId, notify, originMessageId: approval.origin_message_id });
-    if (responseMessage) notify(`Your ${approval.action} request was approved.`);
-    log.info('Approval handled', { approvalId: approval.approval_id, action: approval.action, userId });
+    if (responseMessage) notify(`Your ${approval.input.action} request was approved.`);
+    log.info('Approval handled', { approvalId: approval.id, action: approval.input.action, userId });
   } catch (err) {
     outcome = 'failed';
-    log.error('Approval handler threw', { approvalId: approval.approval_id, action: approval.action, err });
+    log.error('Approval handler threw', { approvalId: approval.id, action: approval.input.action, err });
     notify(
-      `Your ${approval.action} was approved, but applying it failed: ${err instanceof Error ? err.message : String(err)}.`,
+      `Your ${approval.input.action} was approved, but applying it failed: ${err instanceof Error ? err.message : String(err)}.`,
     );
   }
 
-  updateApprovalStatus(approval.approval_id, outcome, { ...response, outcome: outcomeMessage });
+  updateApprovalStatus(approval.id, outcome, { ...response, outcome: outcomeMessage });
   await wakeContainer(session);
 }
 

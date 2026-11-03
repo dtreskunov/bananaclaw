@@ -13,15 +13,7 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-export function presentApproval(action: string, payloadJson: string): ApprovalPresentation {
-  let payload: Record<string, unknown>;
-  try {
-    payload = JSON.parse(payloadJson) as Record<string, unknown>;
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
-    return { details: null, packages: null };
-  }
-
+export function presentApproval(action: string, payload: Record<string, unknown>): ApprovalPresentation {
   if (action === 'install_packages') {
     const packages = {
       apt: stringArray(payload.apt),

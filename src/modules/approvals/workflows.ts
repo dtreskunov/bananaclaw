@@ -1,11 +1,12 @@
 import { getDb } from '../../db/connection.js';
 import { getApproval, updateApprovalStatus, type Approval } from '../../db/approvals.js';
+import { getInteraction, queryInteractions } from '../../db/interactions.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { writeApprovalNotification } from './notification.js';
 import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
-import { accessRequestInput, ConnectionInputError } from '../../ui/shared/connection-input.js';
+import { ConnectionInputError } from '../../ui/shared/connection-input.js';
 import type { AccountRequestData, AccountRequestStatus } from '../../ui/shared/approval.js';
 
 export type ApprovalWorkflow = Approval & {
@@ -16,15 +17,15 @@ export type ApprovalWorkflow = Approval & {
 };
 
 const workflowSelect = `SELECT a.*,w.data_json,w.submission_ids_json,w.notified,w.restart
-  FROM approvals a JOIN approval_workflows w ON w.approval_id=a.approval_id`;
+  FROM interactions a JOIN interaction_progress w ON w.id=a.id`;
 
 export function getApprovalWorkflow(id: string): ApprovalWorkflow | undefined {
-  return getDb()
-    .prepare(
-      `${workflowSelect} WHERE a.approval_id=?
+  return queryInteractions<ApprovalWorkflow>(
+    `${workflowSelect} WHERE a.id=?
       OR EXISTS(SELECT 1 FROM json_each(w.submission_ids_json) WHERE value=?)`,
-    )
-    .get(id, id) as ApprovalWorkflow | undefined;
+    id,
+    id,
+  )[0];
 }
 
 export function getAccountRequest(id: string, sessionId?: string): AccountRequestData {
@@ -42,16 +43,16 @@ export function getAccountRequest(id: string, sessionId?: string): AccountReques
     throw new ConnectionInputError('Account recovery state unavailable; review this request on the host.', 409);
   if (approval.status === 'pending' && approval.expires_at && approval.expires_at <= new Date().toISOString()) {
     finishApprovalWorkflow(
-      approval.approval_id,
+      approval.id,
       'expired',
       'Your access request expired without changing credentials. Request access again if still needed.',
     );
     return getAccountRequest(id, sessionId);
   }
   return {
-    id: approval.approval_id,
+    id: approval.id,
     kind: approval.kind,
-    requirements: accessRequestInput(JSON.parse(approval.payload)),
+    requirements: approval.input.payload,
     status: approval.status,
     revision: approval.revision,
     retryable: approval.status === 'failed' && workflow !== undefined,
@@ -65,43 +66,41 @@ export function getAccountRequest(id: string, sessionId?: string): AccountReques
 }
 
 export function linkApprovalSubmission(id: string, submissionId: string): void {
-  const existing = getApproval(submissionId) ?? getApprovalWorkflow(submissionId);
+  const existing = getInteraction(submissionId) ?? getApprovalWorkflow(submissionId);
   if (existing) {
-    if (existing.approval_id !== id) throw new Error('Approval submission is already associated with another request');
+    if (existing.id !== id) throw new Error('Approval submission is already associated with another request');
     return;
   }
   getDb()
-    .prepare(
-      "UPDATE approval_workflows SET submission_ids_json=json_insert(submission_ids_json,'$[#]',?) WHERE approval_id=?",
-    )
+    .prepare("UPDATE interaction_progress SET submission_ids_json=json_insert(submission_ids_json,'$[#]',?) WHERE id=?")
     .run(submissionId, id);
 }
 
 export function pendingWorkflow(key: string): ApprovalWorkflow | undefined {
-  return getDb().prepare(`${workflowSelect} WHERE a.dedupe_key=? AND a.status IN ('pending','applying')`).get(key) as
-    | ApprovalWorkflow
-    | undefined;
+  return queryInteractions<ApprovalWorkflow>(
+    `${workflowSelect} WHERE a.dedupe_key=? AND a.status IN ('pending','applying')`,
+    key,
+  )[0];
 }
 
 export function latestApprovalWorkflow(key: string): ApprovalWorkflow | undefined {
-  return getDb()
-    .prepare(`${workflowSelect} WHERE a.dedupe_key=? ORDER BY a.updated_at DESC,a.rowid DESC LIMIT 1`)
-    .get(key) as ApprovalWorkflow | undefined;
+  return queryInteractions<ApprovalWorkflow>(
+    `${workflowSelect} WHERE a.dedupe_key=? ORDER BY a.updated_at DESC,a.rowid DESC LIMIT 1`,
+    key,
+  )[0];
 }
 
 export function recoverableApprovalWorkflows(): ApprovalWorkflow[] {
-  return getDb()
-    .prepare(
-      `${workflowSelect}
-    WHERE a.action='request_access' AND (a.status IN ('pending','applying') OR w.notified=0)`,
-    )
-    .all() as ApprovalWorkflow[];
+  return queryInteractions<ApprovalWorkflow>(
+    `${workflowSelect}
+    WHERE json_extract(a.input_json,'$.action')='request_access' AND (a.status IN ('pending','applying') OR w.notified=0)`,
+  );
 }
 
 export function createApprovalWorkflow(id: string, key: string): void {
   getDb().transaction(() => {
-    getDb().prepare('UPDATE approvals SET dedupe_key=? WHERE approval_id=?').run(key, id);
-    getDb().prepare('INSERT INTO approval_workflows(approval_id) VALUES(?)').run(id);
+    getDb().prepare('UPDATE interactions SET dedupe_key=? WHERE id=?').run(key, id);
+    getDb().prepare('INSERT INTO interaction_progress(id) VALUES(?)').run(id);
   })();
 }
 
@@ -112,7 +111,7 @@ export function claimApprovalWorkflow(id: string, revision: number, data: Record
     const stored = JSON.parse(previous.data_json) as Record<string, unknown>;
     if (
       !updateApprovalStatus(
-        previous.approval_id,
+        previous.id,
         'applying',
         {
           userId: typeof data.userId === 'string' ? data.userId : undefined,
@@ -124,10 +123,10 @@ export function claimApprovalWorkflow(id: string, revision: number, data: Record
     )
       return false;
     getDb()
-      .prepare('UPDATE approval_workflows SET data_json=? WHERE approval_id=?')
+      .prepare('UPDATE interaction_progress SET data_json=? WHERE id=?')
       .run(
         JSON.stringify({ ...data, ...(stored.attempt_history ? { attempt_history: stored.attempt_history } : {}) }),
-        previous.approval_id,
+        previous.id,
       );
     return true;
   })();
@@ -138,8 +137,8 @@ export function updateApprovalWorkflowData(id: string, data: Record<string, unkn
   if (!workflow || workflow.status !== 'applying') throw new Error('Approval is not being applied');
   const stored = JSON.parse(workflow.data_json) as Record<string, unknown>;
   getDb()
-    .prepare('UPDATE approval_workflows SET data_json=? WHERE approval_id=?')
-    .run(JSON.stringify({ ...stored, ...data }), workflow.approval_id);
+    .prepare('UPDATE interaction_progress SET data_json=? WHERE id=?')
+    .run(JSON.stringify({ ...stored, ...data }), workflow.id);
 }
 
 export function retryApprovalWorkflow(id: string, revision: number, userId: string): boolean {
@@ -166,10 +165,10 @@ export function retryApprovalWorkflow(id: string, revision: number, userId: stri
         },
       ],
     };
-    if (!updateApprovalStatus(workflow.approval_id, 'pending', undefined, revision)) return false;
+    if (!updateApprovalStatus(workflow.id, 'pending', undefined, revision)) return false;
     getDb()
-      .prepare('UPDATE approval_workflows SET data_json=?,restart=0,notified=0 WHERE approval_id=?')
-      .run(JSON.stringify(data), workflow.approval_id);
+      .prepare('UPDATE interaction_progress SET data_json=?,restart=0,notified=0 WHERE id=?')
+      .run(JSON.stringify(data), workflow.id);
     return true;
   })();
 }
@@ -187,20 +186,20 @@ export function finishApprovalWorkflow(
     if (!workflow || !['pending', 'applying'].includes(workflow.status)) return;
     const data = JSON.parse(workflow.data_json) as { userId?: string };
     updateApprovalStatus(
-      workflow.approval_id,
+      workflow.id,
       status,
       {
         userId: resolvedBy ?? responseMessage?.userId ?? data.userId,
         decision:
           status === 'rejected' ? 'reject' : status === 'completed' || status === 'failed' ? 'approve' : undefined,
-        message: responseMessage?.message ?? workflow.response_message ?? undefined,
+        message: responseMessage?.message ?? workflow.response.message ?? undefined,
         outcome: message,
       },
       workflow.revision,
     );
     getDb()
-      .prepare('UPDATE approval_workflows SET restart=?,notified=0 WHERE approval_id=?')
-      .run(restart ? 1 : 0, workflow.approval_id);
+      .prepare('UPDATE interaction_progress SET restart=?,notified=0 WHERE id=?')
+      .run(restart ? 1 : 0, workflow.id);
   })();
 }
 
@@ -208,13 +207,13 @@ export async function notifyApprovalWorkflow(id: string): Promise<void> {
   const workflow = getApprovalWorkflow(id);
   if (!workflow || workflow.notified || workflow.outcome_message === null || workflow.resolved_at === null) return;
   const session = workflow.session_id ? getSession(workflow.session_id) : undefined;
-  if (!session) throw new Error(`Approval notification session unavailable: ${workflow.approval_id}`);
+  if (!session) throw new Error(`Approval notification session unavailable: ${workflow.id}`);
   const options = {
     originMessageId: workflow.origin_message_id,
-    id: `approval-result-${workflow.approval_id}-r${workflow.revision}`,
+    id: `approval-result-${workflow.id}-r${workflow.revision}`,
     idempotent: true,
     timestamp: workflow.resolved_at,
-    approvalId: workflow.approval_id,
+    approvalId: workflow.id,
   };
   writeApprovalNotification(
     session,
@@ -224,8 +223,8 @@ export async function notifyApprovalWorkflow(id: string): Promise<void> {
     {
       ...options,
       responseMessage:
-        workflow.responded_by && workflow.response_message
-          ? { userId: workflow.responded_by, message: workflow.response_message }
+        workflow.responded_by && workflow.response.message
+          ? { userId: workflow.responded_by, message: workflow.response.message }
           : undefined,
     },
   );
@@ -238,8 +237,8 @@ export async function notifyApprovalWorkflow(id: string): Promise<void> {
   await wakeContainer(session);
   getDb()
     .prepare(
-      `UPDATE approval_workflows SET notified=1 WHERE approval_id=?
-    AND EXISTS(SELECT 1 FROM approvals WHERE approval_id=? AND revision=?)`,
+      `UPDATE interaction_progress SET notified=1 WHERE id=?
+    AND EXISTS(SELECT 1 FROM interactions WHERE id=? AND revision=?)`,
     )
-    .run(workflow.approval_id, workflow.approval_id, workflow.revision);
+    .run(workflow.id, workflow.id, workflow.revision);
 }
