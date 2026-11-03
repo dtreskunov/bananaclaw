@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getDb } from '../../db/connection.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
-import { beginApprovalExecution, endApprovalExecution, getPendingApproval, getSession } from '../../db/sessions.js';
+import { beginApprovalExecution, endApprovalExecution, getSession } from '../../db/sessions.js';
+import { getApproval, updateApprovalStatus } from '../../db/approvals.js';
 import { getContainerConfig, updateContainerConfigJson } from '../../db/container-configs.js';
 import type { McpServerConfig } from '../../container-config.js';
 import { registerDeliveryAction, onDeliveryAdapterReady } from '../../delivery.js';
@@ -33,7 +34,7 @@ import {
   linkApprovalSubmission,
   retryApprovalWorkflow,
   updateApprovalWorkflowData,
-  type ApprovalWorkflow,
+  recoverableApprovalWorkflows,
 } from '../approvals/workflows.js';
 import {
   ConnectionInputError,
@@ -45,7 +46,6 @@ import {
   type SharedConnection,
 } from './shared-connections.js';
 import { AgentVaultError, usesAgentVault } from './agent-vault-client.js';
-import { updateApprovalHistory } from '../../db/approval-history.js';
 
 export const ACCESS_ACTION = 'request_access';
 const TTL_MS = 24 * 60 * 60_000;
@@ -84,7 +84,8 @@ export async function requestAccess(
     throw new ConnectionInputError('The originating conversation message no longer exists.', 409);
   if (requestId && !/^appr-access-[a-zA-Z0-9-]{1,100}$/.test(requestId))
     throw new ConnectionInputError('Invalid access request identifier');
-  if (requestId && getApprovalWorkflow(requestId)) return getAccountRequest(requestId, session.id);
+  if (requestId && (getApproval(requestId) || getApprovalWorkflow(requestId)))
+    return getAccountRequest(requestId, session.id);
   const key = createHash('sha256')
     .update(
       JSON.stringify([
@@ -106,17 +107,14 @@ export async function requestAccess(
     }
   }
   const prior = latestApprovalWorkflow(key);
-  if (
-    prior &&
-    !(prior.stage === 'completed' && (JSON.parse(prior.origin_json) as { purpose?: string }).purpose === 'account')
-  ) {
+  if (prior && !(prior.status === 'completed' && prior.kind === 'account_setup')) {
     if (requestId) linkApprovalSubmission(prior.approval_id, requestId);
     return getAccountRequest(prior.approval_id, session.id);
   }
   const id = requestId ?? `appr-access-${randomUUID()}`;
   if (!/^appr-access-[a-zA-Z0-9-]{1,100}$/.test(id))
     throw new ConnectionInputError('Invalid access request identifier');
-  const previous = getPendingApproval(id);
+  const previous = getApproval(id);
   if (previous) return getAccountRequest(id, session.id);
   const group = getAgentGroup(session.agent_group_id);
   const created = await requestApproval({
@@ -126,7 +124,6 @@ export async function requestAccess(
     action: ACCESS_ACTION,
     approvalId: id,
     workflowKey: key,
-    workflowOrigin: { messageId: origin?.id ?? null, userId: origin?.sender_user_id ?? null },
     expiresAt: new Date(Date.now() + TTL_MS).toISOString(),
     payload: { ...input },
     title: `${group?.name ?? 'Agent'} requests access`,
@@ -171,14 +168,9 @@ export function prepareAccountRequest(userId: string, id: string, raw: unknown) 
     throw new ConnectionInputError('The request changed. Refresh before setting up an account.', 409);
   if (request.kind === 'account_setup') return request;
   getDb().transaction(() => {
-    const changed = getDb()
-      .prepare(
-        `UPDATE approval_workflows SET origin_json=json_set(origin_json,'$.purpose','account'),
-       revision=revision+1,updated_at=? WHERE approval_id=? AND stage='pending' AND revision=?`,
-      )
-      .run(new Date().toISOString(), request.id, body.request_revision).changes;
-    if (!changed) throw new ConnectionInputError('The request changed. Refresh before setting up an account.', 409);
-    updateApprovalHistory(request.id, 'pending');
+    if (!updateApprovalStatus(request.id, 'pending', undefined, Number(body.request_revision)))
+      throw new ConnectionInputError('The request changed. Refresh before setting up an account.', 409);
+    getDb().prepare("UPDATE approvals SET kind='account_setup' WHERE approval_id=?").run(request.id);
   })();
   return getAccountRequest(request.id);
 }
@@ -384,7 +376,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
     if (!(error instanceof McpAuthenticationError)) throw error;
     throw new ConnectionInputError(error.message);
   }
-  if (!beginApprovalExecution(getPendingApproval(id)!))
+  if (!beginApprovalExecution(getApproval(id)!))
     throw new ConnectionInputError('This approval is already being applied.', 409);
   if (!claimApprovalWorkflow(id, Number(body.request_revision), { ...selection })) {
     endApprovalExecution(id);
@@ -560,15 +552,10 @@ registerDeliveryAction(ACCESS_ACTION, async (content, session, _inDb, context) =
 });
 
 export async function recoverAccessRequests(recoverApplying = false): Promise<void> {
-  const rows = getDb()
-    .prepare(
-      `SELECT w.* FROM approval_workflows w JOIN pending_approvals a ON a.approval_id=w.approval_id
-    WHERE a.action=? AND (w.stage IN ('pending','applying') OR w.notified=0)`,
-    )
-    .all(ACCESS_ACTION) as ApprovalWorkflow[];
+  const rows = recoverableApprovalWorkflows();
   for (const row of rows) {
     try {
-      if (row.stage === 'applying' && recoverApplying && !activeApplications.has(row.approval_id)) {
+      if (row.status === 'applying' && recoverApplying && !activeApplications.has(row.approval_id)) {
         const selection = JSON.parse(row.data_json) as ApplySelection;
         const request = reviewAccessRequest(selection.userId, row.approval_id);
         const configReady =
@@ -621,7 +608,7 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
       await notifyApprovalWorkflow(row.approval_id);
     } catch (error) {
       if (
-        row.stage === 'applying' &&
+        row.status === 'applying' &&
         recoverApplying &&
         (error instanceof ConnectionInputError ||
           (error instanceof AgentVaultError && !error.unreachable && error.status !== undefined && error.status < 500))

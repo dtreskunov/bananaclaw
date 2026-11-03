@@ -13,11 +13,10 @@ export function ApprovalCardFrame({ approvalId, title, children }: {
   </section>;
 }
 
-export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
+export function ApprovalCard({ approval: a, busy, onRespond }: {
   approval: ConfirmationInteraction;
   busy: boolean;
   onRespond: (value: string, message?: string) => void;
-  onReview: () => void;
 }) {
   const status = a.status;
   const pending = status === 'pending';
@@ -43,8 +42,6 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
         {a.responseMessage ? <p class="approval-response-text">{a.responseMessage}</p> : null}
         {status === 'failed' && a.outcomeMessage ? <p class="approval-response-text" role="alert">{a.outcomeMessage}</p> : null}
       </div> : null}
-      {here && status === 'failed' && a.reviewRequired ? <button type="button" class="approval-btn"
-        disabled={busy} onClick={() => { if (isApprovalThread(a.origin)) onReview(); }}>Review failure</button> : null}
       {here && pending && a.supportsResponseMessage ? <ApprovalMessageInput approvalId={a.id}
         disabled={busy} /> : null}
     </div>
@@ -54,12 +51,9 @@ export function ApprovalCard({ approval: a, busy, onRespond, onReview }: {
           disabled={busy} key={option.value}
           onClick={() => {
             if (!isApprovalThread(a.origin)) return;
-            if (a.reviewRequired && option.value === 'review') onReview();
-            else {
-              const message = a.supportsResponseMessage ? approvalMessageDrafts.value[a.id]?.trim() : undefined;
-              if (message) onRespond(option.value, message);
-              else onRespond(option.value);
-            }
+            const message = a.supportsResponseMessage ? approvalMessageDrafts.value[a.id]?.trim() : undefined;
+            if (message) onRespond(option.value, message);
+            else onRespond(option.value);
           }}>
           {option.label}
         </button>)}

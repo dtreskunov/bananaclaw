@@ -1,12 +1,13 @@
 import { getDb } from '../../../db/connection.js';
 import fs from 'node:fs';
-import { getApprovalHistory, type ApprovalHistoryRow } from '../../../db/approval-history.js';
+
+import { getApproval, type Approval } from '../../../db/approvals.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
-import { getSession, isApprovalExecuting } from '../../../db/sessions.js';
+import { getSession } from '../../../db/sessions.js';
 import { getMessagingGroup } from '../../../db/messaging-groups.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
-import { getAccountRequest, getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
+import { getAccountRequest } from '../../../modules/approvals/workflows.js';
 import type { AccountInteraction, AccountRequestData } from '../../shared/approval.js';
 import { inboundDbPath, openInboundDb } from '../../../session-manager.js';
 import type { ApprovalOrigin, ConversationApproval } from '../../shared/approval.js';
@@ -63,12 +64,7 @@ export function approvalOrigin(
   return { agentGroupId: session.agent_group_id, threadId, channelType: route.channel_type, messagingGroupId };
 }
 
-export type ApprovalViewRecord = Omit<ApprovalHistoryRow, 'session_id'> & {
-  session_id: string | null;
-  agent_group_id?: string | null;
-};
-
-function responseContext(userId: string, row: ApprovalViewRecord) {
+function responseContext(userId: string, row: Approval) {
   const responder = row.responded_by ? getUser(row.responded_by) : undefined;
   return {
     decision: row.decision,
@@ -81,17 +77,15 @@ function responseContext(userId: string, row: ApprovalViewRecord) {
 }
 
 export function projectAccountInteraction(userId: string, account: AccountRequestData): AccountInteraction {
-  const history = getApprovalHistory(account.id);
-  if (!history) throw new Error('Account request history unavailable');
-  return { ...responseContext(userId, history), ...account };
+  const approval = getApproval(account.id);
+  if (!approval) throw new Error('Account request unavailable');
+  return { ...responseContext(userId, approval), ...account };
 }
 
-export function projectApproval(userId: string, row: ApprovalViewRecord): ConversationApproval {
-  if (row.action === 'request_access') return projectAccountInteraction(userId, getAccountRequest(row.approval_id));
+export function projectApproval(userId: string, row: Approval): ConversationApproval {
+  if (row.kind !== 'confirmation') return { ...responseContext(userId, row), ...getAccountRequest(row.approval_id) };
   const session = row.session_id ? getSession(row.session_id) : undefined;
   const groupId = row.agent_group_id ?? session?.agent_group_id ?? null;
-  const status = row.status === 'pending' && isApprovalExecuting(row.approval_id) ? 'applying' : row.status;
-  const workflow = getApprovalWorkflow(row.approval_id);
   return {
     ...responseContext(userId, row),
     kind: 'confirmation',
@@ -104,8 +98,7 @@ export function projectApproval(userId: string, row: ApprovalViewRecord): Conver
     agentGroupName: groupId ? (getAgentGroup(groupId)?.name ?? null) : null,
     createdAt: row.created_at,
     supportsResponseMessage: row.session_id !== null,
-    reviewRequired: !!workflow,
-    status,
+    status: row.status,
     resolvedAt: row.resolved_at,
     outcomeMessage: row.outcome_message,
   };
@@ -114,8 +107,8 @@ export function projectApproval(userId: string, row: ApprovalViewRecord): Conver
 export function approvalTranscript(userId: string, groupId: string, context: TurnContext): ConversationApproval[] {
   if (!context.sessionId || !hasAdminPrivilege(userId, groupId)) return [];
   const rows = getDb()
-    .prepare('SELECT * FROM approval_history WHERE session_id=? ORDER BY created_at,approval_id')
-    .all(context.sessionId) as ApprovalHistoryRow[];
+    .prepare('SELECT * FROM approvals WHERE session_id=? ORDER BY created_at,approval_id')
+    .all(context.sessionId) as Approval[];
   return rows.flatMap((row) => {
     const approval = projectApproval(userId, row);
     const origin = approval.origin;
@@ -152,7 +145,7 @@ export function isRepresentedApprovalOutcome(
     !hasAdminPrivilege(userId, groupId)
   )
     return false;
-  const row = getApprovalHistory(payload.approvalId);
+  const row = getApproval(payload.approvalId);
   if (!row || row.session_id !== context.sessionId) return false;
   const origin = approvalOrigin(userId, row);
   return (

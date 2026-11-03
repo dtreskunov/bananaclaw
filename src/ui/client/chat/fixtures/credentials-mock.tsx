@@ -4,7 +4,6 @@ import {
   type OAuthAppConfiguration, type SignInInput, type SignInProgress,
 } from '../src/components/CredentialsApi';
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
-import { serviceMatchesResource } from '../src/components/GroupCredentialAccess';
 import { connectionMatchesAccess, parseAccessAuthentication } from '../../../shared/access-authentication';
 import { isOAuthScope } from '../../../shared/oauth-app';
 import type { AccountInteraction } from '../../../shared/approval';
@@ -112,6 +111,7 @@ export function getAccessApproval(): AccountInteraction {
       mcp_server: params.get('request_server') || undefined,
     },
     createdAt: accessCreatedAt, status: accessStage, revision: accessRevision, expiresAt: null,
+    retryable: accessStage === 'failed',
     outcomeMessage: accessStage === 'completed' ? accessPurpose === 'account'
       ? 'Account setup confirmed. No agent access was granted. The agent must request access separately.'
       : 'Access granted. The agent will safely verify the original operation.'

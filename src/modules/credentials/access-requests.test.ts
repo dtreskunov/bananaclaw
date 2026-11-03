@@ -46,7 +46,8 @@ vi.mock('../approvals/primitive.js', async (importOriginal) => ({
 }));
 import { closeDb, getDb, initTestDb } from '../../db/connection.js';
 import { runMigrations } from '../../db/migrations/index.js';
-import { createSession, deleteSession, getPendingApproval } from '../../db/sessions.js';
+import { createSession, deleteSession } from '../../db/sessions.js';
+import { getApproval } from '../../db/approvals.js';
 import { grantRole } from '../permissions/db/user-roles.js';
 import { getInteractiveApprovalHandler } from '../approvals/primitive.js';
 import {
@@ -162,8 +163,7 @@ const selection = (revision = 1) => ({
   request_revision: revision,
 });
 function resultMessage(id: string) {
-  const result = JSON.parse(getApprovalWorkflow(id)!.result_json!) as { notification_id?: string };
-  return mocks.messages.get(result.notification_id ?? `approval-result-${id}`);
+  return mocks.messages.get(`approval-result-${id}-r${getApprovalWorkflow(id)!.revision}`);
 }
 
 describe('assisted access approvals', () => {
@@ -256,7 +256,7 @@ describe('assisted access approvals', () => {
   it('rejects account setup without silently provisioning or granting access', async () => {
     const request = await seed();
     prepareAccountRequest('alice', request.id, { request_revision: request.revision });
-    const approval = getPendingApproval(request.id)!;
+    const approval = getApproval(request.id)!;
     await getInteractiveApprovalHandler(approval.action)!(
       approval,
       {
@@ -290,7 +290,7 @@ describe('assisted access approvals', () => {
 
   it('includes a decline message without granting access or changing the decision', async () => {
     const request = await seed();
-    const approval = getPendingApproval(request.id)!;
+    const approval = getApproval(request.id)!;
     await getInteractiveApprovalHandler(approval.action)!(
       approval,
       {
@@ -439,8 +439,8 @@ describe('assisted access approvals', () => {
     expect(first.id).toBe(duplicate.id);
     expect(getAccountRequest('appr-access-duplicate', session.id).id).toBe(first.id);
     expect(first.status).toBe('pending');
-    expect(getPendingApproval(first.id)?.action).toBe('request_access');
-    expect(getDb().prepare('SELECT COUNT(*) n FROM pending_approvals').get()).toEqual({ n: 1 });
+    expect(getApproval(first.id)?.action).toBe('request_access');
+    expect(getDb().prepare('SELECT COUNT(*) n FROM approvals').get()).toEqual({ n: 1 });
     expect(mocks.grant).not.toHaveBeenCalled();
     expect(getDb().pragma('foreign_key_check')).toEqual([]);
   });
@@ -517,7 +517,7 @@ describe('assisted access approvals', () => {
           mcp_server: 'tavily',
         }),
       ).rejects.toThrow('no longer matches');
-      expect(getDb().prepare('SELECT COUNT(*) n FROM pending_approvals').get()).toEqual({ n: 0 });
+      expect(getDb().prepare('SELECT COUNT(*) n FROM approvals').get()).toEqual({ n: 0 });
       expect(mocks.grant).not.toHaveBeenCalled();
     },
   );
@@ -541,7 +541,7 @@ describe('assisted access approvals', () => {
   });
   it('requires private review; generic approve does not execute credentials', async () => {
     const request = await seed();
-    const approval = getPendingApproval(request.id)!;
+    const approval = getApproval(request.id)!;
     await expect(
       getInteractiveApprovalHandler(approval.action)!(
         approval,
@@ -557,7 +557,7 @@ describe('assisted access approvals', () => {
       ),
     ).rejects.toThrow('Review access');
     expect(mocks.grant).not.toHaveBeenCalled();
-    expect(getApprovalWorkflow(request.id)?.stage).toBe('pending');
+    expect(getApprovalWorkflow(request.id)?.status).toBe('pending');
   });
   it.each(['static', 'oauth_app', 'mcp_oauth'] as const)(
     'grants a reviewed %s and notifies the original thread once',
@@ -788,9 +788,9 @@ describe('assisted access approvals', () => {
     const failed = getAccountRequest(request.id);
     expect(() => retryAccessRequest('member', request.id, { request_revision: failed.revision })).toThrow();
     expect(() => retryAccessRequest('alice', request.id, { request_revision: 1 })).toThrow('failed request');
-    getDb().prepare('UPDATE pending_approvals SET expires_at=? WHERE approval_id=?').run('2000-01-01', request.id);
+    getDb().prepare('UPDATE approvals SET expires_at=? WHERE approval_id=?').run('2000-01-01', request.id);
     expect(() => retryAccessRequest('alice', request.id, { request_revision: failed.revision })).toThrow('expired');
-    expect(getApprovalWorkflow(request.id)?.stage).toBe('failed');
+    expect(getApprovalWorkflow(request.id)?.status).toBe('failed');
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('does not let an old failure notification acknowledge a newer retry outcome', async () => {
@@ -806,17 +806,6 @@ describe('assisted access approvals', () => {
     await notifyApprovalWorkflow(request.id);
     expect(getApprovalWorkflow(request.id)?.notified).toBe(1);
     expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(2);
-  });
-  it('deduplicates pre-upgrade notification receipts using their legacy message ID', async () => {
-    const request = await seed();
-    finishApprovalWorkflow(request.id, 'failed', 'legacy failure');
-    getDb()
-      .prepare('UPDATE approval_workflows SET result_json=? WHERE approval_id=?')
-      .run(JSON.stringify({ message: 'legacy failure' }), request.id);
-    await notifyApprovalWorkflow(request.id);
-    expect(mocks.messages.has(`approval-result-${request.id}`)).toBe(true);
-    await notifyApprovalWorkflow(request.id);
-    expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(1);
   });
   it('guards session deletion during application and does not treat resolved workflows as pending', async () => {
     const request = await seed();
@@ -835,7 +824,7 @@ describe('assisted access approvals', () => {
     expect(getAccountRequest(cancelled.id).status).toBe('cancelled');
     mocks.origin.id = 'new-human-request';
     const rejected = await seed('appr-access-reject');
-    const approval = getPendingApproval(rejected.id)!;
+    const approval = getApproval(rejected.id)!;
     await getInteractiveApprovalHandler(approval.action)!(
       approval,
       {
@@ -852,7 +841,7 @@ describe('assisted access approvals', () => {
     expect((await seed('appr-access-reject-repeat')).id).toBe(rejected.id);
     mocks.origin.id = 'another-human-request';
     const expired = await seed('appr-access-expire');
-    getDb().prepare('UPDATE pending_approvals SET expires_at=? WHERE approval_id=?').run('2000-01-01', expired.id);
+    getDb().prepare('UPDATE approvals SET expires_at=? WHERE approval_id=?').run('2000-01-01', expired.id);
     await recoverAccessRequests();
     expect(getAccountRequest(expired.id).status).toBe('expired');
     expect(mocks.grant).not.toHaveBeenCalled();
@@ -884,7 +873,7 @@ describe('assisted access approvals', () => {
     const request = await seed();
     mocks.wake.mockRejectedValueOnce(new Error('temporary wake failure'));
     await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('temporary wake failure');
-    expect(getApprovalWorkflow(request.id)).toMatchObject({ stage: 'completed', notified: 0 });
+    expect(getApprovalWorkflow(request.id)).toMatchObject({ status: 'completed', notified: 0 });
     await recoverAccessRequests();
     expect(getApprovalWorkflow(request.id)?.notified).toBe(1);
     expect([...mocks.messages.keys()].filter((key) => key.startsWith('approval-result-'))).toHaveLength(1);

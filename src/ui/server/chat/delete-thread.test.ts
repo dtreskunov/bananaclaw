@@ -20,9 +20,9 @@ vi.mock('../../../container-runner.js', () => ({
 import { killContainer, wakeContainer } from '../../../container-runner.js';
 import {
   closeDb,
-  createPendingApproval,
+  createApproval,
   getDb,
-  getPendingApproval,
+  getApproval,
   getQuestion,
   initTestDb,
   runMigrations,
@@ -108,7 +108,7 @@ function seedSession(id: string, messagingGroupId: string, threadId: string | nu
 }
 
 function seedApproval(id: string, sessionId: string | null): void {
-  createPendingApproval({
+  createApproval({
     approval_id: id,
     session_id: sessionId,
     agent_group_id: GROUP_ID,
@@ -214,7 +214,7 @@ describe('DELETE chat thread', () => {
 
     expect(result.status).toBe(409);
     expect(result.json).toMatchObject({ error: 'approval_cancellation_required' });
-    expect(getPendingApproval('approval')).toBeDefined();
+    expect(getApproval('approval')).toBeDefined();
     expect(getDb().prepare('SELECT id FROM sessions WHERE id = ?').get('web-session')).toBeDefined();
     expect(getThreadFork(GROUP_ID, 'web-mg', 'web-thread')).toBeDefined();
     expect(fs.existsSync(dir)).toBe(true);
@@ -233,9 +233,9 @@ describe('DELETE chat thread', () => {
       status: 200,
       json: { ok: true, removed: 1, cancelledApprovals: 1 },
     });
-    expect(getPendingApproval('approval')).toBeUndefined();
-    expect(getPendingApproval('other-approval')).toBeDefined();
-    expect(getPendingApproval('sessionless-approval')).toBeDefined();
+    expect(getApproval('approval')).toBeUndefined();
+    expect(getApproval('other-approval')).toBeDefined();
+    expect(getApproval('sessionless-approval')).toBeDefined();
     expect(fs.existsSync(otherDir)).toBe(true);
   });
 
@@ -277,7 +277,7 @@ describe('DELETE chat thread', () => {
         expect(killContainer).not.toHaveBeenCalled();
       };
       vi.mocked(wakeContainer).mockImplementationOnce(async () => {
-        expect(getPendingApproval('child-approval')).toBeUndefined();
+        expect(getApproval('child-approval')?.status).toBe(fails ? 'failed' : 'approved');
         await assertBlocked();
         return true;
       });
@@ -285,7 +285,7 @@ describe('DELETE chat thread', () => {
       const resolution = handleApprovalsResponse(responsePayload);
       try {
         await assertBlocked();
-        expect(getPendingApproval('child-approval')).toBeDefined();
+        expect(getApproval('child-approval')).toBeDefined();
         expect(await handleApprovalsResponse(responsePayload)).toBe(true);
         expect(handler).toHaveBeenCalledTimes(1);
       } finally {
@@ -310,7 +310,7 @@ describe('DELETE chat thread', () => {
     expect((await deleteThread('parent', '?cascade=1')).status).toBe(409);
     expect(getDb().prepare('SELECT id FROM sessions').all()).toHaveLength(2);
     expect(getThreadFork(GROUP_ID, 'web-mg', 'child')).toBeDefined();
-    expect(getPendingApproval('child-approval')).toBeDefined();
+    expect(getApproval('child-approval')).toBeDefined();
     expect(fs.existsSync(parentDir)).toBe(true);
     expect(fs.existsSync(childDir)).toBe(true);
     expect(killContainer).not.toHaveBeenCalled();
@@ -321,7 +321,7 @@ describe('DELETE chat thread', () => {
     });
     expect(getDb().prepare('SELECT id FROM sessions').all()).toHaveLength(0);
     expect(getThreadFork(GROUP_ID, 'web-mg', 'child')).toBeUndefined();
-    expect(getPendingApproval('child-approval')).toBeUndefined();
+    expect(getApproval('child-approval')).toBeUndefined();
     expect(fs.existsSync(parentDir)).toBe(false);
     expect(fs.existsSync(childDir)).toBe(false);
   });

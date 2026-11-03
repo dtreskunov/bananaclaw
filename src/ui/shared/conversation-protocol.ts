@@ -3,7 +3,7 @@ import { isQuestionInteraction } from './conversation.js';
 import { accessRequestInput, ConnectionInputError } from './connection-input.js';
 import type { QuestionInput, QuestionResponse } from './question.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 8;
+export const CONVERSATION_PROTOCOL_VERSION = 9;
 export interface EntityChanges<T> {
   upserts: T[];
   removeIds: string[];
@@ -222,7 +222,6 @@ const approval = shape({
   packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
   options: array(shape({ label: text, selectedLabel: text, value: text })),
   supportsResponseMessage: bool,
-  reviewRequired: bool,
   status: oneOf('pending', 'applying', 'approved', 'rejected', 'failed', 'cancelled', 'expired'),
 });
 const requirements: Check = (value) => {
@@ -239,6 +238,7 @@ const account = shape({
   kind: oneOf('account_setup', 'access_grant'),
   requirements,
   revision: integer,
+  retryable: bool,
   expiresAt: nullable(text),
   agentGroupId: id,
   agentGroupName: text,

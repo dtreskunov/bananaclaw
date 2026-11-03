@@ -27,11 +27,11 @@ import { createGroup, GroupCreateError } from '../../../modules/groups/create.js
 import { deleteSubscriptionByEndpoint, upsertSubscription } from '../../../modules/push/db.js';
 import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
-import type { PendingApproval } from '../../../types.js';
+import type { Approval } from '../../../types.js';
 import { questionAcceptsResponse, type QuestionResponse } from '../../shared/question.js';
 import { isQuestionResponse } from '../../shared/conversation-protocol.js';
 import { ApprovalMessageError, parseApprovalMessage } from '../../shared/approval-message.js';
-import { projectApproval, type ApprovalViewRecord } from './approval-transcript.js';
+import { projectApproval } from './approval-transcript.js';
 import { isVoiceDiagnostic } from '../../shared/voice.js';
 import type { ConversationApproval } from '../../shared/approval.js';
 import { authenticate, recordAccess } from '../auth.js';
@@ -563,17 +563,12 @@ function approvalGroupId(row: { agent_group_id?: string | null; session_id: stri
 }
 
 function listApprovalsForUser(userId: string): ApprovalDto[] {
-  // pending_approvals are unbounded global rows; filter to those the user
+  // approvals are unbounded global rows; filter to those the user
   // is eligible to approve. Owner/global-admin sees all (incl. agent_group_id IS NULL);
   // a scoped admin sees only rows for their agent groups.
   const rows = getDb()
-    .prepare(
-      `SELECT a.*, COALESCE(h.status,a.status) AS status,
-      h.decision,h.responded_by,h.response_message,h.outcome_message,h.resolved_at
-      FROM pending_approvals a LEFT JOIN approval_history h ON h.approval_id=a.approval_id
-      WHERE a.status='pending' ORDER BY a.created_at DESC`,
-    )
-    .all() as ApprovalViewRecord[];
+    .prepare("SELECT * FROM approvals WHERE status IN ('pending','applying') ORDER BY created_at DESC")
+    .all() as Approval[];
   const elevated = isOwner(userId) || isGlobalAdmin(userId);
   const visible: ApprovalDto[] = [];
   for (const r of rows) {
@@ -629,9 +624,7 @@ async function handleSync(ctx: Ctx, userId: string): Promise<void> {
 }
 
 async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: string): Promise<void> {
-  const row = getDb().prepare('SELECT * FROM pending_approvals WHERE approval_id = ?').get(approvalId) as
-    | PendingApproval
-    | undefined;
+  const row = getDb().prepare('SELECT * FROM approvals WHERE approval_id = ?').get(approvalId) as Approval | undefined;
 
   // If the ID doesn't match a pending approval, it might be a pending question
   // (ask_user_question). Both use the same dispatchResponse chain, so fall

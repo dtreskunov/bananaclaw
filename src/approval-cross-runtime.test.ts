@@ -21,7 +21,8 @@ vi.mock('./modules/typing/index.js', () => ({
 }));
 
 import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrations } from './db/index.js';
-import { createPendingApproval } from './db/sessions.js';
+
+import { createApproval } from './db/approvals.js';
 import { restartAgentGroupContainers } from './container-restart.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
 import { registerApprovalHandler } from './modules/approvals/primitive.js';
@@ -113,7 +114,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
         notify('Approved. Finish this response before restarting.');
         notify('The new configuration is loaded; verify it now.', { afterRestart: true });
       });
-      createPendingApproval({
+      createApproval({
         approval_id: 'approval',
         session_id: session.id,
         request_id: 'approval',
@@ -143,25 +144,32 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
       });
       const inbound = openInboundDb('group', session.id);
       try {
-        const rows = inbound.prepare(
-          "SELECT content FROM messages_in WHERE json_extract(content,'$.approvalResponse.message')=?",
-        ).all('Keep existing labels and finish this report.') as { content: string }[];
+        const rows = inbound
+          .prepare("SELECT content FROM messages_in WHERE json_extract(content,'$.approvalResponse.message')=?")
+          .all('Keep existing labels and finish this report.') as { content: string }[];
         expect(rows).toHaveLength(1);
         const content = JSON.parse(rows[0].content);
         expect(content.text).toContain('Approved. Finish this response before restarting.');
         expect(content.text).toContain('Keep existing labels and finish this report.');
         expect(content.approvalResponse.userId).toBe('owner');
-      } finally { inbound.close(); }
+      } finally {
+        inbound.close();
+      }
     } else {
       expect(restartAgentGroupContainers('group', 'settings changed', undefined, true)).toBe(1);
       await wait(() => {
         const inbound = openInboundDb('group', session.id);
         try {
           expect(inbound.prepare('SELECT COUNT(*) FROM pending_host_events').pluck().get()).toBe(0);
-        } finally { inbound.close(); }
+        } finally {
+          inbound.close();
+        }
       });
-      expect(outbound.prepare("SELECT 1 FROM session_state WHERE key LIKE 'input:%' AND json_extract(value,'$.status')='applied'").get())
-        .toBeUndefined();
+      expect(
+        outbound
+          .prepare("SELECT 1 FROM session_state WHERE key LIKE 'input:%' AND json_extract(value,'$.status')='applied'")
+          .get(),
+      ).toBeUndefined();
     }
     expect(getSessionActiveTurn(session.id).turn?.id).toBe(turnId);
     expect(child.exitCode).toBeNull();

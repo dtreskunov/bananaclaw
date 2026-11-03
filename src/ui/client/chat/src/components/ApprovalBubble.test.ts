@@ -12,7 +12,7 @@ const approval: PendingApprovalDto = {
   kind: 'confirmation',
   status: 'pending',
   supportsResponseMessage: false,
-  reviewRequired: false,
+
   id: 'approval',
   action: 'install_packages',
   title: 'Install package',
@@ -29,7 +29,7 @@ describe('shared approval bubble chrome', () => {
     currentUserId.value = 'current-user';
   });
   it.each([false, true])('uses the common sender and timestamp for reference=%s', (reference) => {
-    const node = ApprovalBubble({ approval, busy: false, onReview: vi.fn(), onRespond: vi.fn(), reference });
+    const node = ApprovalBubble({ approval, busy: false, onRespond: vi.fn(), reference });
     expect(node.type).toBe(MessageBubble);
     expect(node.props.from).toBe('Research agent');
     expect(node.props.timestamp).toBe(approval.createdAt);
@@ -43,14 +43,14 @@ describe('shared approval bubble chrome', () => {
       resolvedAt: '2026-10-31T01:01:00Z',
       respondedBy: { userId: 'another-user', displayName: 'Another user' },
     };
-    const node = ApprovalBubble({ approval: resolved, busy: false, onReview: vi.fn(), onRespond: vi.fn() });
+    const node = ApprovalBubble({ approval: resolved, busy: false, onRespond: vi.fn() });
     expect(node.props.timestamp).toBe(resolved.resolvedAt);
     expect(node.props.from).toBe('Another user');
     expect(node.props.class).toContain('msg in');
   });
   it('omits attribution for a request from the current agent', () => {
     groupId.value = approval.agentGroupId;
-    const node = ApprovalBubble({ approval, busy: false, onReview: vi.fn(), onRespond: vi.fn() });
+    const node = ApprovalBubble({ approval, busy: false, onRespond: vi.fn() });
     expect(node.props.from).toBeUndefined();
     expect(node.props.class).toContain('msg out');
   });
@@ -58,7 +58,7 @@ describe('shared approval bubble chrome', () => {
     const node = ApprovalBubble({
       approval: { ...approval, status, respondedBy: { userId: 'current-user', displayName: 'Current user' } },
       busy: false,
-      onReview: vi.fn(),
+
       onRespond: vi.fn(),
     });
     expect(node.props.from).toBeUndefined();
@@ -81,7 +81,7 @@ describe('shared approval bubble chrome', () => {
           messagingGroupId: 'web-agent',
         },
       });
-      const node = ApprovalBubble({ approval: access, busy: false, onReview: vi.fn(), onRespond: vi.fn() });
+      const node = ApprovalBubble({ approval: access, busy: false, onRespond: vi.fn() });
       expect(node.type).toBe(MessageBubble);
       expect(node.props.class).toContain('markdown access-approval-message');
       expect(node.props.children.type).toBe(AccessRequestCard);
@@ -106,7 +106,7 @@ describe('shared approval bubble chrome', () => {
     const reference = ApprovalBubble({
       approval: access,
       busy: false,
-      onReview: vi.fn(),
+
       onRespond: vi.fn(),
       reference: true,
     });
@@ -115,9 +115,25 @@ describe('shared approval bubble chrome', () => {
     const resolved = ApprovalBubble({
       approval: { ...access, status: 'completed' },
       busy: false,
-      onReview: vi.fn(),
+
       onRespond: vi.fn(),
     });
     expect(resolved.props.children.type).toBe(AccountRequestSummary);
+  });
+  it('renders restored failures as audit-only without loading accounts or offering private retry', () => {
+    groupId.value = 'agent';
+    threadId.value = 'requesting-thread';
+    channelType.value = 'web';
+    const node = ApprovalBubble({
+      approval: testAccountInteraction({
+        status: 'failed',
+        retryable: false,
+        agentGroupId: 'agent',
+        origin: { agentGroupId: 'agent', threadId: 'requesting-thread', channelType: 'web', messagingGroupId: 'web' },
+      }),
+      busy: false,
+      onRespond: vi.fn(),
+    });
+    expect(node.props.children.type).toBe(AccountRequestSummary);
   });
 });

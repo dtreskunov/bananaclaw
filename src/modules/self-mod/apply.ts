@@ -2,7 +2,7 @@
  * Approval handlers for self-modification actions.
  *
  * The approvals module calls these when an admin clicks Approve on a
- * pending_approvals row whose action matches. Each handler mutates the
+ * approval row whose action matches. Each handler mutates the
  * container config in the DB, rebuilds the image as needed, and queues
  * verification for a replacement container after the active response settles.
  *

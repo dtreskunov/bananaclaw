@@ -10,7 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
 import { createAgentGroup } from '../../db/agent-groups.js';
-import { createSession, createPendingApproval, deleteSession, getPendingApproval } from '../../db/sessions.js';
+import { createSession, deleteSession } from '../../db/sessions.js';
+import { createApproval, getApproval } from '../../db/approvals.js';
 import { upsertUser } from '../permissions/db/users.js';
 import { grantRole } from '../permissions/db/user-roles.js';
 
@@ -62,7 +63,7 @@ describe('approval response authorization', () => {
     const { handleApprovalsResponse } = await import('./response-handler.js');
     const handler = vi.fn().mockResolvedValue(undefined);
     registerApprovalHandler('cancelled_install', handler);
-    createPendingApproval({
+    createApproval({
       approval_id: 'appr-cancelled',
       session_id: 'sess-1',
       request_id: 'appr-cancelled',
@@ -93,7 +94,7 @@ describe('approval response authorization', () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     registerApprovalHandler('install_packages', handler);
 
-    createPendingApproval({
+    createApproval({
       approval_id: 'appr-1',
       session_id: 'sess-1',
       request_id: 'appr-1',
@@ -115,7 +116,7 @@ describe('approval response authorization', () => {
 
     expect(claimed).toBe(true);
     expect(handler).not.toHaveBeenCalled();
-    expect(getPendingApproval('appr-1')).toBeDefined();
+    expect(getApproval('appr-1')).toBeDefined();
   });
 
   it('allows an owner/admin click to dispatch the registered approval handler', async () => {
@@ -127,7 +128,7 @@ describe('approval response authorization', () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     registerApprovalHandler('install_packages_allowed', handler);
 
-    createPendingApproval({
+    createApproval({
       approval_id: 'appr-2',
       session_id: 'sess-1',
       request_id: 'appr-2',
@@ -150,7 +151,16 @@ describe('approval response authorization', () => {
     expect(claimed).toBe(true);
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ userId: 'telegram:owner' }));
-    expect(getPendingApproval('appr-2')).toBeUndefined();
+    expect(getApproval('appr-2')?.status).toBe('approved');
+    await handleApprovalsResponse({
+      questionId: 'appr-2',
+      value: 'approve',
+      userId: 'owner',
+      channelType: 'telegram',
+      platformId: 'dm-owner',
+      threadId: null,
+    });
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it('allows global admins to resolve approvals without a session-scoped agent group', async () => {
@@ -168,7 +178,7 @@ describe('approval response authorization', () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     registerApprovalHandler('global_admin_allowed', handler);
 
-    createPendingApproval({
+    createApproval({
       approval_id: 'appr-3',
       session_id: 'sess-1',
       agent_group_id: null,
@@ -191,7 +201,7 @@ describe('approval response authorization', () => {
 
     expect(claimed).toBe(true);
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(getPendingApproval('appr-3')).toBeUndefined();
+    expect(getApproval('appr-3')?.status).toBe('approved');
   });
 
   it('allows a web click carrying a canonical (non-namespaced) user id', async () => {
@@ -207,7 +217,7 @@ describe('approval response authorization', () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     registerApprovalHandler('web_install_allowed', handler);
 
-    createPendingApproval({
+    createApproval({
       approval_id: 'appr-4',
       session_id: 'sess-1',
       request_id: 'appr-4',
@@ -230,6 +240,6 @@ describe('approval response authorization', () => {
     expect(claimed).toBe(true);
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ userId: 'e5a1f280-uuid' }));
-    expect(getPendingApproval('appr-4')).toBeUndefined();
+    expect(getApproval('appr-4')?.status).toBe('approved');
   });
 });

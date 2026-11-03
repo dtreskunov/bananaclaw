@@ -12,6 +12,7 @@ export function testAccountInteraction(
     kind: 'access_grant',
     status: 'pending',
     revision: 1,
+    retryable: overrides.status === 'failed',
     agentGroupId: 'one',
     agentGroupName: 'One',
     createdAt: '2026-01-01T00:00:00Z',

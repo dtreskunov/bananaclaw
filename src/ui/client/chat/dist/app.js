@@ -18879,7 +18879,7 @@ function accessRequestInput(raw) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 8;
+var CONVERSATION_PROTOCOL_VERSION = 9;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -19045,7 +19045,6 @@ var approval = shape({
   packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
   options: array(shape({ label: text, selectedLabel: text, value: text })),
   supportsResponseMessage: bool,
-  reviewRequired: bool,
   status: oneOf("pending", "applying", "approved", "rejected", "failed", "cancelled", "expired")
 });
 var requirements = (value) => {
@@ -19062,6 +19061,7 @@ var account = shape({
   kind: oneOf("account_setup", "access_grant"),
   requirements,
   revision: integer,
+  retryable: bool,
   expiresAt: nullable(text),
   agentGroupId: id,
   agentGroupName: text,
@@ -24064,7 +24064,7 @@ function ApprovalCardFrame({ approvalId, title, children }) {
     children
   ] });
 }
-function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
+function ApprovalCard({ approval: a4, busy, onRespond }) {
   const status = a4.status;
   const pending4 = status === "pending";
   const here = isApprovalThread(a4.origin);
@@ -24089,18 +24089,6 @@ function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
         a4.responseMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", children: a4.responseMessage }) : null,
         status === "failed" && a4.outcomeMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", role: "alert", children: a4.outcomeMessage }) : null
       ] }) : null,
-      here && status === "failed" && a4.reviewRequired ? /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "approval-btn",
-          disabled: busy,
-          onClick: () => {
-            if (isApprovalThread(a4.origin)) onReview();
-          },
-          children: "Review failure"
-        }
-      ) : null,
       here && pending4 && a4.supportsResponseMessage ? /* @__PURE__ */ u4(
         ApprovalMessageInput,
         {
@@ -24117,12 +24105,9 @@ function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
         disabled: busy,
         onClick: () => {
           if (!isApprovalThread(a4.origin)) return;
-          if (a4.reviewRequired && option.value === "review") onReview();
-          else {
-            const message2 = a4.supportsResponseMessage ? approvalMessageDrafts.value[a4.id]?.trim() : void 0;
-            if (message2) onRespond(option.value, message2);
-            else onRespond(option.value);
-          }
+          const message2 = a4.supportsResponseMessage ? approvalMessageDrafts.value[a4.id]?.trim() : void 0;
+          if (message2) onRespond(option.value, message2);
+          else onRespond(option.value);
         },
         children: option.label
       },
@@ -25005,7 +24990,7 @@ function AccessRequestReview({
     !setup ? /* @__PURE__ */ u4("blockquote", { class: "access-request-reason", children: requirements2.reason }) : null,
     request.status !== "pending" ? /* @__PURE__ */ u4("div", { children: [
       !failed ? /* @__PURE__ */ u4("p", { role: "status", children: accountRequestStatusText(request) }) : null,
-      request.status === "failed" && here ? /* @__PURE__ */ u4(
+      request.retryable && here ? /* @__PURE__ */ u4(
         "button",
         {
           type: "button",
@@ -26891,11 +26876,11 @@ function AccessRequestCard({ request, disabled }) {
 }
 
 // src/components/ApprovalBubble.tsx
-function ApprovalBubble({ approval: approval2, busy, onReview, onRespond, reference }) {
+function ApprovalBubble({ approval: approval2, busy, onRespond, reference }) {
   const status = approval2.status;
   const answered = approval2.decision === "approve" || approval2.decision === "reject" || status === "approved" || status === "completed" || status === "rejected";
   const from = answered ? approval2.respondedBy && approval2.respondedBy.userId !== currentUserId.value ? approval2.respondedBy.displayName : void 0 : approval2.agentGroupId !== groupId.value ? approval2.agentGroupName || "Global" : void 0;
-  const access = approval2.kind !== "confirmation" && isApprovalThread(approval2.origin) && ["pending", "applying", "failed"].includes(status);
+  const access = approval2.kind !== "confirmation" && isApprovalThread(approval2.origin) && (status === "pending" || status === "applying" || approval2.retryable);
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
@@ -26903,7 +26888,7 @@ function ApprovalBubble({ approval: approval2, busy, onReview, onRespond, refere
       "data-msg-id": approval2.id,
       from,
       timestamp: approval2.resolvedAt ?? approval2.createdAt,
-      children: approval2.kind === "confirmation" ? /* @__PURE__ */ u4(ApprovalCard, { approval: approval2, busy, onReview, onRespond }) : access ? /* @__PURE__ */ u4(AccessRequestCard, { request: approval2, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(AccountRequestSummary, { request: approval2 })
+      children: approval2.kind === "confirmation" ? /* @__PURE__ */ u4(ApprovalCard, { approval: approval2, busy, onRespond }) : access ? /* @__PURE__ */ u4(AccessRequestCard, { request: approval2, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(AccountRequestSummary, { request: approval2 })
     }
   );
 }
@@ -28014,7 +27999,6 @@ function ApprovalRow({ approval: approval2, reference }) {
       approval: approval2,
       reference,
       busy: respondingApprovalIds.value.has(approval2.id),
-      onReview: () => openCredentials({ approvalId: approval2.id }),
       onRespond: (value, message2) => {
         void respondApproval(approval2.id, value, message2).catch(console.error);
       }

@@ -27,7 +27,8 @@ vi.mock('../../../modules/typing/index.js', () => ({
 }));
 
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { createPendingApproval, createQuestion, getQuestion } from '../../../db/sessions.js';
+import { createQuestion, getQuestion } from '../../../db/sessions.js';
+import { createApproval } from '../../../db/approvals.js';
 import { initSessionFolder, openInboundDb } from '../../../session-manager.js';
 import '../../../modules/interactive/index.js';
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
@@ -101,7 +102,7 @@ describe('approval response messages', () => {
       INSERT INTO user_roles(user_id,role,granted_at) VALUES('web:member','owner','${NOW}');
       UPDATE sessions SET messaging_group_id='mg',thread_id='thread' WHERE id='session';
     `);
-    createPendingApproval({
+    createApproval({
       approval_id: 'message-approval',
       session_id: 'session',
       request_id: 'request',
@@ -151,9 +152,9 @@ describe('approval response messages', () => {
     expect((await respond({ value: 'approve', message }, 'message-approval')).status).toBe(400);
     expect(applied).not.toHaveBeenCalled();
     expect(notificationRows()).toEqual([]);
-    expect(
-      getDb().prepare("SELECT status FROM pending_approvals WHERE approval_id='message-approval'").pluck().get(),
-    ).toBe('pending');
+    expect(getDb().prepare("SELECT status FROM approvals WHERE approval_id='message-approval'").pluck().get()).toBe(
+      'pending',
+    );
   });
   it('does not deliver a note from an unauthorized responder', async () => {
     runtime.userId = 'web:other';
@@ -169,7 +170,7 @@ describe('approval response messages', () => {
     expect(applied).toHaveBeenCalledOnce();
   });
   it('rejects notes for sessionless approvals rather than silently discarding them', async () => {
-    getDb().exec("UPDATE pending_approvals SET session_id=NULL WHERE approval_id='message-approval'");
+    getDb().exec("UPDATE approvals SET session_id=NULL WHERE approval_id='message-approval'");
     expect((await respond({ value: 'approve', message: 'A note' }, 'message-approval')).status).toBe(400);
     expect(applied).not.toHaveBeenCalled();
   });
@@ -259,7 +260,7 @@ describe('typed responses through the existing endpoint', () => {
     getDb().exec("UPDATE questions SET status = 'cancelled' WHERE question_id = 'q'");
     expect((await respond({ responseType: 'skipped' })).status).toBe(409);
     getDb().exec(`INSERT INTO user_roles (user_id, role, granted_at) VALUES ('web:member', 'owner', '${NOW}')`);
-    createPendingApproval({
+    createApproval({
       approval_id: 'approval',
       session_id: 'session',
       request_id: 'request',

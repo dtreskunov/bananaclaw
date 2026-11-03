@@ -1,7 +1,6 @@
 // Chat main: message log, status, context chip, pending tray, readonly
 // banner, composer.
 import './ChatMain.css';
-import { openCredentials } from '../credentials-navigation';
 import { signal } from '@preact/signals';
 import type { JSX, RefObject } from 'preact';
 import { memo } from 'preact/compat';
@@ -40,7 +39,7 @@ import { activityTimestamp, executionTime } from '../../../../shared/activity-ti
 import {
   activityChapters, headlineSummary, isOutcomeTraceStep, isSyntheticTraceStep, isTitleStep, isTodoStep, stepBody,
   todoItems, traceStatus, traceStatusClass, TRACE_STATUS_LABELS, TRACE_STEP_THRESHOLD_MS,
-  type ModelTime, type StepHeadline, type TraceChapter, type TraceEntry, type TraceStatus, type TraceStep,
+  type ModelTime, type StepHeadline, type TraceChapter, type TraceEntry, type TraceStep,
 } from '../../../../shared/activity-presentation';
 import { formatStopwatch } from '../duration-format';
 import { chatTranscript, completedResponse, conversationState } from '../conversation-state';
@@ -953,7 +952,6 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
 function ApprovalRow({ approval, reference }: { approval: PendingApprovalDto; reference?: boolean }) {
   return <ApprovalBubble approval={approval} reference={reference}
     busy={respondingApprovalIds.value.has(approval.id)}
-    onReview={() => openCredentials({ approvalId: approval.id })}
     onRespond={(value, message) => { void respondApproval(approval.id, value, message).catch(console.error); }} />;
 }
 

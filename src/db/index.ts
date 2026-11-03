@@ -36,12 +36,8 @@ export {
   createQuestion,
   getQuestion,
   answerQuestion,
-  createPendingApproval,
-  getPendingApproval,
-  updatePendingApprovalStatus,
-  deletePendingApproval,
-  getPendingApprovalsByAction,
 } from './sessions.js';
+export { createApproval, getApproval, updateApprovalStatus } from './approvals.js';
 export {
   getContainerConfig,
   getAllContainerConfigs,

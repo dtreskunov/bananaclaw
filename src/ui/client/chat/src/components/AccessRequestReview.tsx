@@ -232,7 +232,7 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
       {!setup ? <blockquote class="access-request-reason">{requirements.reason}</blockquote> : null}
       {request.status !== 'pending' ? <div>
         {!failed ? <p role="status">{accountRequestStatusText(request)}</p> : null}
-        {request.status === 'failed' && here ? <button type="button" class="approval-btn" disabled={blocked}
+        {request.retryable && here ? <button type="button" class="approval-btn" disabled={blocked}
           onClick={() => void retry()}>Review and retry</button> : null}
       </div> : !here ? <p>{request.origin
         ? <a href={approvalThreadHref(request.origin)}>Open requesting thread</a>

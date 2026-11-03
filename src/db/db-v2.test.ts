@@ -32,8 +32,8 @@ import {
   createQuestion,
   getQuestion,
   answerQuestion,
-  createPendingApproval,
-  getPendingApproval,
+  createApproval,
+  getApproval,
 } from './index.js';
 import { getAskQuestionRender } from './sessions.js';
 
@@ -380,7 +380,7 @@ describe('sessions', () => {
        VALUES ('q-delete', 'sess-1', 'msg-delete', 'Continue?', 'choice', '[]', ?)`,
       )
       .run(now());
-    createPendingApproval({
+    createApproval({
       approval_id: 'appr-delete',
       session_id: 'sess-1',
       request_id: 'req-delete',
@@ -399,12 +399,12 @@ describe('sessions', () => {
     expect(() => deleteSession('sess-1')).toThrow('requires confirmation');
     expect(getSession('sess-1')).toBeDefined();
     expect(getQuestion('q-delete')).toBeDefined();
-    expect(getPendingApproval('appr-delete')).toBeDefined();
+    expect(getApproval('appr-delete')).toBeDefined();
 
     expect(deleteSession('sess-1', true)).toBe(1);
     expect(getSession('sess-1')).toBeUndefined();
     expect(getQuestion('q-delete')).toBeUndefined();
-    expect(getPendingApproval('appr-delete')).toBeUndefined();
+    expect(getApproval('appr-delete')).toBeUndefined();
   });
 
   it('rolls back dependent cleanup when session deletion fails', () => {
@@ -418,17 +418,17 @@ describe('sessions', () => {
     expect(() => deleteSession('sess-1', true)).toThrow('blocked deletion');
     expect(getSession('sess-1')).toBeDefined();
     expect(getQuestion('q-delete')).toBeDefined();
-    expect(getPendingApproval('appr-delete')).toBeDefined();
+    expect(getApproval('appr-delete')).toBeDefined();
   });
 
-  it('deletes questions even when the optional approvals table is absent', () => {
+  it('refuses incomplete approval storage without deleting questions or the session', () => {
     createSession(sess());
     seedDeletionDependents();
-    getDb().exec('DROP TABLE pending_approvals');
+    getDb().exec('DROP TABLE approvals');
 
-    expect(deleteSession('sess-1')).toBe(0);
-    expect(getQuestion('q-delete')).toBeUndefined();
-    expect(getSession('sess-1')).toBeUndefined();
+    expect(() => deleteSession('sess-1')).toThrow('no such table: approvals');
+    expect(getQuestion('q-delete')).toBeDefined();
+    expect(getSession('sess-1')).toBeDefined();
   });
 });
 
@@ -480,7 +480,7 @@ describe('durable questions', () => {
   });
 
   it('retains separate approval titles in channel render metadata', () => {
-    createPendingApproval({
+    createApproval({
       approval_id: 'approval',
       request_id: 'request',
       action: 'install_packages',

@@ -34,7 +34,7 @@ export interface RestoreResult {
     sessions: number;
     pending_sender_approvals: number;
     pending_channel_approvals: number;
-    pending_approvals: number;
+    approvals: number;
     questions: number;
   };
 }
@@ -83,7 +83,7 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
   const archivedDir = resolveArchivedFolder(folderArg);
   const archiveJsonPath = path.join(archivedDir, 'archive.json');
   const dump = JSON.parse(fs.readFileSync(archiveJsonPath, 'utf-8')) as ArchiveDump;
-  if (dump.version !== 1) {
+  if (dump.version !== 2) {
     throw new Error(`archive.json version ${dump.version} not supported`);
   }
   const group = dump.agent_group as { id: string; folder: string; name: string };
@@ -116,7 +116,7 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
     sessions: 0,
     pending_sender_approvals: 0,
     pending_channel_approvals: 0,
-    pending_approvals: 0,
+    approvals: 0,
     questions: 0,
   };
 
@@ -163,17 +163,16 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
         insertRow('pending_channel_approvals', a);
         counts.pending_channel_approvals += 1;
       }
-      if (hasTable(db, 'pending_approvals')) {
-        for (const a of dump.pending_approvals) {
-          insertRow('pending_approvals', a);
-          counts.pending_approvals += 1;
-        }
+      for (const a of dump.approvals) {
+        if (a.status === 'pending' || a.status === 'applying')
+          throw new Error('Cannot restore an in-flight approval; archives must contain finalized audit records only.');
+        insertRow('approvals', a);
+        counts.approvals += 1;
       }
       for (const q of dump.questions) {
         insertRow('questions', q);
         counts.questions += 1;
       }
-      for (const approval of dump.approval_history ?? []) insertRow('approval_history', approval);
     }
   });
   tx();

@@ -19,7 +19,7 @@ export interface PendingChannelApproval {
   created_at: string;
   /** Card title shown at creation and re-used by getAskQuestionRender on click. */
   title: string;
-  /** Normalized options (JSON-encoded NormalizedOption[]) — same shape persisted on pending_approvals. */
+  /** Normalized options (JSON-encoded NormalizedOption[]) — same shape persisted on approvals. */
   options_json: string;
 }
 

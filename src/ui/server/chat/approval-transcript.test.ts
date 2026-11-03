@@ -11,8 +11,9 @@ vi.mock('../../../container-runner.js', () => ({
   killContainer: vi.fn(),
 }));
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { createPendingApproval, getPendingApproval, deleteSession } from '../../../db/sessions.js';
-import { getApprovalHistory } from '../../../db/approval-history.js';
+import { deleteSession } from '../../../db/sessions.js';
+import { createApproval, getApproval } from '../../../db/approvals.js';
+
 import { inboundDbPath, initSessionFolder, openInboundDb, writeSessionMessage } from '../../../session-manager.js';
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
 import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
@@ -61,7 +62,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 function request(action = 'history-test', payload: Record<string, unknown> = {}) {
-  createPendingApproval({
+  createApproval({
     approval_id: 'approval',
     session_id: 's',
     origin_message_id: 'source',
@@ -80,7 +81,8 @@ const approvals = (conversation = view()) => conversation.interactions.filter((i
 describe('retained approval transcript', () => {
   it('retains account-setup purpose and its responder after completion and reload', () => {
     request('request_access', { resource_url: 'https://api.example.com/', reason: 'Read the report' });
-    createApprovalWorkflow('approval', 'account-setup', { messageId: 'source', purpose: 'account' });
+    createApprovalWorkflow('approval', 'account-setup');
+    getDb().prepare("UPDATE approvals SET kind='account_setup' WHERE approval_id='approval'").run();
     expect(approvals()[0]).toMatchObject({
       kind: 'account_setup',
       status: 'pending',
@@ -101,7 +103,7 @@ describe('retained approval transcript', () => {
   });
   it('places a request only in its exact originating thread, even in a shared session', () => {
     request();
-    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toEqual({
+    expect(approvalOrigin('owner', getApproval('approval')!)).toEqual({
       agentGroupId: 'g',
       threadId: 'source-thread',
       channelType: 'web',
@@ -117,7 +119,7 @@ describe('retained approval transcript', () => {
   });
 
   it.each(['approve', 'reject'])(
-    'retains the request, %s decision, actor and message after pending-row deletion and reload',
+    'retains the request, %s decision, actor and message in its authoritative row after reload',
     async (value) => {
       request();
       const before = view();
@@ -130,7 +132,7 @@ describe('retained approval transcript', () => {
         threadId: null,
         message: 'Keep existing work.',
       });
-      expect(getPendingApproval('approval')).toBeUndefined();
+      expect(getApproval('approval')?.status).toBe(value === 'approve' ? 'approved' : 'rejected');
       const after = view();
       const bubble = approvals(after).find((item) => item.id === 'approval');
       expect(bubble).toMatchObject({
@@ -180,22 +182,22 @@ describe('retained approval transcript', () => {
 
   it('does not infer an actionable thread when a recorded origin is missing', () => {
     request();
-    getDb().prepare("UPDATE approval_history SET origin_message_id='missing' WHERE approval_id='approval'").run();
-    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
+    getDb().prepare("UPDATE approvals SET origin_message_id='missing' WHERE approval_id='approval'").run();
+    expect(approvalOrigin('owner', getApproval('approval')!)).toBeNull();
     expect(approvals()).toEqual([]);
   });
 
   it('does not invent a root thread for legacy unanchored shared sessions', () => {
     request();
-    getDb().prepare("UPDATE approval_history SET origin_message_id=NULL WHERE approval_id='approval'").run();
-    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
+    getDb().prepare("UPDATE approvals SET origin_message_id=NULL WHERE approval_id='approval'").run();
+    expect(approvalOrigin('owner', getApproval('approval')!)).toBeNull();
   });
 
   it('treats a missing session store as an unavailable origin without creating another database', () => {
     request();
     const file = inboundDbPath('g', 's');
     fs.rmSync(file);
-    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
+    expect(approvalOrigin('owner', getApproval('approval')!)).toBeNull();
     expect(fs.existsSync(file)).toBe(false);
   });
 
@@ -221,6 +223,6 @@ describe('retained approval transcript', () => {
     request();
     expect(() => deleteSession('s')).toThrow('approval');
     deleteSession('s', true);
-    expect(getApprovalHistory('approval')).toBeUndefined();
+    expect(getApproval('approval')).toBeUndefined();
   });
 });

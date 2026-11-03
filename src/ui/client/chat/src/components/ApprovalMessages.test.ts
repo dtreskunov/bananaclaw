@@ -82,7 +82,7 @@ function button(value: unknown, label: string): Node {
 const approval: PendingApprovalDto = {
   kind: 'confirmation',
   status: 'pending',
-  reviewRequired: false,
+
   id: 'approval',
   action: 'install_packages',
   title: 'Install package',
@@ -151,14 +151,14 @@ afterEach(() => {
 describe('optional approval messages', () => {
   it('links off-thread requests without decision controls or a message input', () => {
     threadId.value = 'another-thread';
-    const tree = ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond: vi.fn() });
+    const tree = ApprovalCard({ approval, busy: false, onRespond: vi.fn() });
     expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
     expect(nodes(tree).some((node) => node.type === ApprovalMessageInput)).toBe(false);
     expect(nodes(tree).find((node) => node.type === 'a')?.props.href).toBe('#g/group/t/thread');
   });
   it('does not submit a captured approval callback after navigating away', () => {
     const onRespond = vi.fn();
-    const tree = ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond });
+    const tree = ApprovalCard({ approval, busy: false, onRespond });
     threadId.value = 'another-thread';
     button(tree, 'Approve').props.onClick!();
     expect(onRespond).not.toHaveBeenCalled();
@@ -174,7 +174,7 @@ describe('optional approval messages', () => {
           respondedBy: { userId: 'owner', displayName: 'Owner' },
         },
         busy: false,
-        onReview: vi.fn(),
+
         onRespond: vi.fn(),
       });
       expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
@@ -205,37 +205,27 @@ describe('optional approval messages', () => {
   it.each(['Approve', 'Reject'])('includes the note with %s while retaining the separate decision value', (label) => {
     approvalMessageDrafts.value = { approval: '  Keep the original account.  ' };
     const onRespond = vi.fn();
-    const tree = ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond });
+    const tree = ApprovalCard({ approval, busy: false, onRespond });
     button(tree, label).props.onClick!();
     expect(onRespond).toHaveBeenCalledWith(label.toLowerCase(), 'Keep the original account.');
   });
 
-  it('retains a draft when opening private credential review, and hides the input for unsupported approvals', () => {
+  it('retains a draft for private credential review, and hides the input for unsupported approvals', () => {
     approvalMessageDrafts.value = { approval: 'Keep the original account.' };
-    const onReview = vi.fn();
-    const reviewed = {
-      ...approval,
-      reviewRequired: true,
-      options: [{ label: 'Review', selectedLabel: 'Review', value: 'review' }],
-    };
-    const tree = ApprovalCard({ approval: reviewed, busy: false, onReview, onRespond: vi.fn() });
-    button(tree, 'Review').props.onClick!();
-    expect(onReview).toHaveBeenCalledOnce();
-    expect(approvalMessageDrafts.value.approval).toBe('Keep the original account.');
     const unsupported = ApprovalCard({
       approval: { ...approval, supportsResponseMessage: false },
       busy: false,
-      onReview,
       onRespond: vi.fn(),
     });
     expect(nodes(unsupported).some((node) => node.type === ApprovalMessageInput)).toBe(false);
     const { tree: review } = accessReview();
     expect(nodes(review).find((node) => node.type === ApprovalMessageInput)?.props.approvalId).toBe('approval');
+    expect(approvalMessageDrafts.value.approval).toBe('Keep the original account.');
   });
 
   it('keeps decisions without messages backward compatible', () => {
     const onRespond = vi.fn();
-    button(ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond }), 'Approve').props.onClick!();
+    button(ApprovalCard({ approval, busy: false, onRespond }), 'Approve').props.onClick!();
     expect(onRespond).toHaveBeenCalledWith('approve');
   });
 

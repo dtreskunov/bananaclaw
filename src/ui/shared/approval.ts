@@ -27,7 +27,6 @@ export interface ConfirmationInteraction extends InteractionIdentity, Interactio
   packages: { apt: string[]; npm: string[]; pip: string[] } | null;
   options: { label: string; selectedLabel: string; value: string }[];
   supportsResponseMessage: boolean;
-  reviewRequired: boolean;
   status: 'pending' | 'applying' | 'approved' | 'rejected' | 'failed' | 'cancelled' | 'expired';
   outcomeMessage?: string | null;
   resolvedAt?: string | null;
@@ -51,6 +50,7 @@ export interface AccountRequestData extends InteractionIdentity {
   requirements: AccountRequirements;
   status: AccountRequestStatus;
   revision: number;
+  retryable: boolean;
   agentGroupId: string;
   agentGroupName: string;
   expiresAt: string | null;

@@ -5,7 +5,7 @@
  * importing `requestApproval` / `registerApprovalHandler` from this module.
  *
  * Registers:
- *   - A response handler that claims pending_approvals rows and dispatches
+ *   - A response handler that claims approvals rows and dispatches
  *     to whatever module registered for the row's `action` string.
  *
  * Self-mod flows (install_packages, add_mcp_server) moved out to

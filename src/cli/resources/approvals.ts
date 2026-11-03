@@ -3,9 +3,9 @@ import { registerResource } from '../crud.js';
 registerResource({
   name: 'approval',
   plural: 'approvals',
-  table: 'pending_approvals',
+  table: 'approvals',
   description:
-    'Pending approval — in-flight approval cards waiting for an admin response. Created by requestApproval() (self-mod install_packages/add_mcp_server) and credential access requests. Rows are deleted after the admin approves/rejects or the request expires.',
+    'Retained approval records. Filter --status pending for requests awaiting a decision. Private account selections and recovery state are never listed.',
   idColumn: 'approval_id',
   columns: [
     {
@@ -32,19 +32,13 @@ registerResource({
     { name: 'payload', type: 'json', description: 'JSON payload carried through to the approval handler.' },
     { name: 'created_at', type: 'string', description: 'Auto-set.' },
     { name: 'agent_group_id', type: 'string', description: 'Originating agent group.' },
-    { name: 'channel_type', type: 'string', description: 'Channel the approval card was delivered on.' },
-    { name: 'platform_id', type: 'string', description: 'Platform chat ID the card was delivered to.' },
-    {
-      name: 'platform_message_id',
-      type: 'string',
-      description: 'Platform message ID of the delivered card (for editing on expiry).',
-    },
+    { name: 'kind', type: 'string', description: 'confirmation, account_setup, or access_grant.' },
     { name: 'expires_at', type: 'string', description: 'When this approval expires (request TTL).' },
     {
       name: 'status',
       type: 'string',
       description: 'Current status.',
-      enum: ['pending', 'approved', 'rejected', 'expired'],
+      enum: ['pending', 'applying', 'approved', 'completed', 'rejected', 'expired', 'failed', 'cancelled'],
     },
     { name: 'title', type: 'string', description: 'Card title shown to the admin.' },
     { name: 'options_json', type: 'json', description: 'Card button options as JSON array.' },

@@ -37,6 +37,7 @@ Interaction variants are question, confirmation, account setup, and access
 grant. Keep meaningful states and responses variant-specific:
 
 Account interactions carry `requirements` and the workflow revision directly.
+`retryable` is an explicit current capability, false for restored audit records.
 Their core data is shared by native/CLI readers and the authorized browser view;
 only viewer-specific origin, attribution, and response context are added for
 the browser. Account setup/grants use `completed`, not an approval-shaped
@@ -88,6 +89,63 @@ or stronger delivery guarantees are bundled into this consolidation.
 No legacy compatibility is required. If storage changes, use one explicit,
 offline, disposable cutover script. Do not run it against live data as part
 of development; do not add permanent historical readers or converters.
+
+## Approval storage consolidation
+
+`approvals` retains one current-state record for confirmations and accounts:
+request metadata, kind, status, revision, response, outcome and timestamps.
+`approval_workflows` contains only private selections, submission aliases and
+notification/restart flags. Its joined reader uses the canonical lifecycle;
+there is no pending/history copy or mirrored workflow stage.
+
+Questions already have one authoritative current-state row. They remain in
+`questions`: forcing unrelated response and effect lifecycles into one table
+would add adapters rather than eliminate them.
+
+Generic effects enter `applying` before invocation and cannot replay from any
+non-pending state. A host crash during a generic effect requires operator
+review of uncertain effects; it never triggers automatic reapplication.
+Account effects retain their existing private recovery and explicit retry.
+Notifications derive their identity from the approval ID and terminal revision;
+private notification flags do not own another result/lifecycle snapshot.
+
+Archive format 2 cancels pending approvals, refuses both persisted and
+process-local applying effects, and exports finalized audit records only.
+Restoring with sessions never resumes private selections, grants, notifications
+or retries. Format 1 archives are deliberately unsupported.
+`ncl approvals list` lists retained public records; `--status pending` narrows
+it to decisions still needed. Private account progress is never listed.
+
+### Offline cutover: detect / why / fix / verify / rollback
+
+Existing databases with `pending_approvals`, `approval_history` or the old
+`approval_workflows` are refused at startup. Fresh databases need no cutover.
+This intentionally removes old storage rather than carrying compatibility.
+
+1. Finish the Agent Vault-only cutover first. Stop the host **and all its
+   agent containers**, and prevent automatic restart during this procedure.
+2. Review outstanding approvals and uncertain external effects. The script
+   refuses workflows still marked `applying`; only after inspecting actual
+   grants/configuration should the operator explicitly finalize those old
+   records. Do not assume stopping a process rolled back an external effect.
+3. Accept discarding **all old approval records and private recovery state**.
+   Questions, other central records, session journals and actual credentials
+   are not reset. No credential grant/revoke or pending effect is executed.
+4. From the new checkout, choose an unused, protected backup path and run:
+
+   ```bash
+   pnpm exec tsx scripts/cutover-approval-storage.ts /absolute/path/data/v2.db /absolute/path/before-approvals.db --host-and-containers-stopped --discard-legacy-approvals
+   ```
+
+   The one-time script checks integrity, saves the old DB, and resets approval
+   storage transactionally. It is not part of host startup.
+5. Verify the backup, empty `approvals`, `PRAGMA foreign_key_check`, and the
+   `retained-approvals` migration record. Build host/browser together and reload
+   clients (conversation protocol 9); restart only after verification.
+6. To roll back, keep everything stopped, restore the complete protected DB
+   backup and the pre-cutover code/assets together. Do not restore only old
+   tables into the new host. External credential/configuration changes require
+   their own review; restoring SQLite does not undo external effects.
 
 ## Validation
 

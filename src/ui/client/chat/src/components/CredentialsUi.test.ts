@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppInfo, Connection, CredentialGroup, Service } from './CredentialsApi';
-import type { AccountInteraction, ConfirmationInteraction } from '../../../../shared/approval';
+import type { AccountInteraction } from '../../../../shared/approval';
 import { testAccountInteraction } from '../conversation-test-fixtures';
 import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnectionDialog } from './CredentialsDialogs';
 import {
@@ -22,7 +22,7 @@ import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
 import type { OAuthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
-import { ApprovalCard, ApprovalCardFrame } from './ApprovalCard';
+import { ApprovalCardFrame } from './ApprovalCard';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { AccessRequestReview } from './AccessRequestReview';
 import { AccessRequestCard } from './AccessRequestCard';
@@ -347,52 +347,6 @@ describe('assisted credential approval UI', () => {
     expect(onAuthenticationChange).not.toHaveBeenCalled();
     expect(JSON.stringify(node)).not.toContain('Sign in as yourself');
     expect(JSON.stringify(node)).not.toContain('Account for these tools');
-  });
-  it('uses a non-authorizing review action while retaining ordinary approval buttons', () => {
-    const onReview = vi.fn(),
-      onRespond = vi.fn();
-    const approval: ConfirmationInteraction = {
-      kind: 'confirmation',
-      supportsResponseMessage: false,
-      id: 'access-one',
-      action: 'cli_command',
-      title: 'Request access',
-      details: 'Read calendar',
-      packages: null,
-      options: [
-        { label: 'Review access', value: 'review', selectedLabel: 'Review' },
-        { label: 'Reject', value: 'reject', selectedLabel: 'Rejected' },
-      ],
-      agentGroupId: 'one',
-      agentGroupName: 'One',
-      createdAt: '2026-01-01',
-      origin: { agentGroupId: 'one', threadId: 'thread-one', channelType: 'web', messagingGroupId: 'web-one' },
-      reviewRequired: true,
-      status: 'pending',
-    };
-    const card = ApprovalCard({ approval, busy: false, onReview, onRespond });
-    const buttons = descendants(card).filter((node) => node.type === 'button');
-    buttons[0].props.onClick();
-    expect(onReview).toHaveBeenCalledOnce();
-    expect(onRespond).not.toHaveBeenCalled();
-    buttons[1].props.onClick();
-    expect(onRespond).toHaveBeenCalledWith('reject');
-    const simple = ApprovalCard({
-      approval: {
-        ...approval,
-        kind: 'confirmation',
-        action: 'install_packages',
-        reviewRequired: false,
-        options: [{ label: 'Approve', value: 'approve', selectedLabel: 'Approved' }],
-      },
-      busy: false,
-      onReview,
-      onRespond,
-    });
-    descendants(simple)
-      .find((node) => node.type === 'button')!
-      .props.onClick();
-    expect(onRespond).toHaveBeenCalledWith('approve');
   });
 
   it('reopens failed requests without granting access or retaining the account or server choice', async () => {

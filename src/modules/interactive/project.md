@@ -9,4 +9,4 @@ The container-side MCP tool `ask_user_question` writes a chat-sdk card and retur
 
 The `questions` table is core schema. Removing the module disables the response path only; cards are still delivered.
 
-`getAskQuestionRender` in `src/db/sessions.ts` resolves card render metadata for `chat-sdk-bridge.ts`. It reads both `questions` and `pending_approvals` and degrades via `hasTable`. Stays in core.
+`getAskQuestionRender` in `src/db/sessions.ts` resolves card render metadata for `chat-sdk-bridge.ts`. It reads `questions`, retained `approvals`, and separate permission-registration cards. Stays in core.

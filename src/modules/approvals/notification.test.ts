@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeDb, getDb, initTestDb } from '../../db/connection.js';
 import { runMigrations } from '../../db/migrations/index.js';
 import { createMessagingGroup } from '../../db/messaging-groups.js';
-import { createPendingApproval, createSession, getPendingApproval } from '../../db/sessions.js';
+import { createSession } from '../../db/sessions.js';
+import { createApproval, getApproval } from '../../db/approvals.js';
 import { initSessionFolder, openInboundDb, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { grantRole } from '../permissions/db/user-roles.js';
@@ -103,7 +104,7 @@ async function respond(
   originMessageId: string | null = 'original',
   message?: string,
 ) {
-  createPendingApproval({
+  createApproval({
     approval_id: 'approval',
     session_id: session.id,
     request_id: 'approval',
@@ -167,7 +168,7 @@ describe('approval conversation identity', () => {
           platformId: 'admin-dm',
           threadId: null,
         }),
-      ).toBe(false);
+      ).toBe(true);
       expect(notifications()).toHaveLength(1);
     },
   );
@@ -219,7 +220,7 @@ describe('approval conversation identity', () => {
       title: 'Approve',
       question: 'Approve?',
     });
-    expect(getPendingApproval(id!)?.origin_message_id).toBe('original');
+    expect(getApproval(id!)?.origin_message_id).toBe('original');
     expectOriginalRoute(notifications()[0]);
   });
 
@@ -288,7 +289,7 @@ describe('approval conversation identity', () => {
 
   it('idempotently steers workflow outcomes and schedules a restart without killing an active response', async () => {
     input('original');
-    createPendingApproval({
+    createApproval({
       approval_id: 'workflow',
       session_id: session.id,
       request_id: 'workflow',
@@ -297,8 +298,9 @@ describe('approval conversation identity', () => {
       created_at: 'now',
       title: 'Access',
       options_json: '[]',
+      origin_message_id: 'original',
     });
-    createApprovalWorkflow('workflow', 'key', { messageId: 'original' });
+    createApprovalWorkflow('workflow', 'key');
     finishApprovalWorkflow('workflow', 'completed', 'Access granted', true);
     await notifyApprovalWorkflow('workflow');
     await notifyApprovalWorkflow('workflow');

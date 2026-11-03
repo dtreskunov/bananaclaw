@@ -106,7 +106,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     ).run('q-1', SID, now());
 
     db.prepare(
-      `INSERT INTO pending_approvals (approval_id, session_id, request_id, action, payload, created_at, agent_group_id, status, title, options_json)
+      `INSERT INTO approvals (approval_id, session_id, request_id, action, payload, created_at, agent_group_id, status, title, options_json)
        VALUES (?, ?, 'req-1', 'cli_command', '{}', ?, ?, 'pending', '', '[]')`,
     ).run('pa-1', SID, now(), GID);
 
@@ -149,7 +149,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     expect(data.removed).toMatchObject({
       sessions: 1,
       questions: 1,
-      pending_approvals: 1,
+      approvals: 1,
       agent_destinations_owned: 1,
       agent_destinations_pointing: 0,
       pending_sender_approvals: 1,
@@ -164,9 +164,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     expect(count('SELECT COUNT(*) AS c FROM agent_groups WHERE id = ?', GID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM sessions WHERE agent_group_id = ?', GID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM questions WHERE session_id = ?', SID)).toBe(0);
-    expect(
-      count('SELECT COUNT(*) AS c FROM pending_approvals WHERE agent_group_id = ? OR session_id = ?', GID, SID),
-    ).toBe(0);
+    expect(count('SELECT COUNT(*) AS c FROM approvals WHERE agent_group_id = ? OR session_id = ?', GID, SID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM agent_destinations WHERE agent_group_id = ?', GID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM pending_sender_approvals WHERE agent_group_id = ?', GID)).toBe(0);
     expect(count('SELECT COUNT(*) AS c FROM pending_channel_approvals WHERE agent_group_id = ?', GID)).toBe(0);

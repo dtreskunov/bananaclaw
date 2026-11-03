@@ -1523,9 +1523,11 @@ captured callbacks refuse submission after navigating away.
 The host still delivers its normal outcome notification to the agent. When a
 retained approval bubble represents that outcome, the UI omits the duplicate
 host-only notification; model context and delivery are unchanged. Retained
-requests survive reload and session-inclusive archive/restore. Existing
-session-bound approvals are backfilled where records still exist; previously
-deleted requests are not reconstructed or guessed.
+requests survive reload and session-inclusive format-2 archive/restore as
+finalized audit records. Archiving cancels pending approvals and refuses
+applying effects. Restored account records cannot resume private recovery or
+retry. Old storage is reset only by the explicit
+[offline cutover](user-requests-refactor-plan.md#offline-cutover-detect--why--fix--verify--rollback).
 
 ### Messages with approval decisions
 
@@ -1546,7 +1548,7 @@ outcome notification, attributed to the authenticated responder. It uses the
 existing conversation routing and steering/queueing path; it does not produce a
 separate chat turn or alter the approved packages, command, credential or grant.
 It appears once even when the change also schedules post-restart verification.
-Legacy sessionless gateway approvals do not offer this field because they have
+Sessionless approvals do not offer this field because they have
 no originating conversation; the server rejects a non-empty message for them.
 
 ### Applying Agent Settings
