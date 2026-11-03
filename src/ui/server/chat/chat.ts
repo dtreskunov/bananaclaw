@@ -1629,22 +1629,6 @@ function turnMatchesContext(turn: SessionActiveTurn, context: TurnContext): bool
   );
 }
 
-/** Never expose another conversation's active turn from a shared session. */
-export function readChatActiveTurn(
-  userId: string,
-  groupId: string,
-  threadId: string,
-  override?: { channelType: string; messagingGroupId: string },
-): { activeTurn: ChatActiveTurn | null; connected: boolean } {
-  const context = resolveTurnContext(userId, groupId, threadId, override);
-  if (!context?.sessionId) return { activeTurn: null, connected: false };
-  const current = getSessionActiveTurn(context.sessionId);
-  return {
-    activeTurn: current.turn && turnMatchesContext(current.turn, context) ? publicActiveTurn(current.turn) : null,
-    connected: current.connected,
-  };
-}
-
 /**
  * Cross-channel web send: ship the viewer's message out through the
  * named channel's existing adapter.deliver, then log it as an inbound

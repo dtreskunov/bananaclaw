@@ -463,13 +463,6 @@ export function clearChat(): void {
 // non-web thread's history. Web threads use the WS for live updates;
 // /api/sync does NOT fetch history for them. Pauses when the tab is
 // hidden; resumes via the visibilitychange handler in installLivenessHandlers.
-export function stopSyncPoll(): void {
-  if (refs.syncTimer) {
-    clearInterval(refs.syncTimer);
-    refs.syncTimer = null;
-  }
-}
-
 export function startSyncPoll(): void {
   if (refs.syncTimer) return;
   runSync().catch(() => {

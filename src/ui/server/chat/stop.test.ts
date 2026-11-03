@@ -76,7 +76,8 @@ import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
 import { createWebAdapter } from '../../../channels/web.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { COOKIE_NAME } from '../auth.js';
-import { handleChatRequest, handleChatUpgrade, matchChatPath, readChatActiveTurn, readChatHistory } from './chat.js';
+import { handleChatRequest, handleChatUpgrade, matchChatPath, readChatHistory } from './chat.js';
+import { readConversation } from './conversation.js';
 import { handle } from './routes.js';
 import { invalidateConversation } from '../../../conversation-events.js';
 import { putTurn } from '../../../db/turns.js';
@@ -336,11 +337,9 @@ describe('native steering submissions', () => {
 
   it('binds JSON steering to the authorized web context and exposes only the advertised capability', async () => {
     signal.turn = { ...TURN, supportsSteering: true };
-    expect(readChatActiveTurn('web:member', 'agent', 'thread-1', OVERRIDE).activeTurn).toEqual({
-      id: TURN.id,
-      status: 'running',
-      supportsSteering: true,
-    });
+    const view = readConversation('web:member', 'agent', 'thread-1', OVERRIDE);
+    expect(view.connection.activeTurnId).toBe(TURN.id);
+    expect(view.capabilities.steer).toBe(true);
     expect((await send()).status).toBe(200);
     expect(signal.submit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1009,10 +1008,10 @@ describe('chat stop authorization', () => {
     const context = { thread: '__dm:mail-mg', query: '?channel=resend&mg=mail-mg' };
     expect((await stop(context)).status).toBe(409);
     expect(
-      readChatActiveTurn('web:member', 'agent', context.thread, {
+      readConversation('web:member', 'agent', context.thread, {
         channelType: 'resend',
         messagingGroupId: 'mail-mg',
-      }).activeTurn,
+      }).connection.activeTurnId,
     ).toBeNull();
     signal.turn.platformId = 'resend:member@example.com';
     expect((await stop(context)).status).toBe(202);
@@ -1170,17 +1169,15 @@ describe('chat turn snapshots and events', () => {
   });
 
   it('publishes only public fields to the authorized matching conversation', () => {
-    expect(readChatActiveTurn('web:member', 'agent', 'thread-1', OVERRIDE)).toEqual({
-      activeTurn: { id: TURN.id, status: 'running' },
-      connected: true,
-    });
-    expect(readChatActiveTurn('web:member', 'agent', 'thread-2', OVERRIDE).activeTurn).toBeNull();
-    expect(readChatActiveTurn('web:member', 'other', 'thread-1', OVERRIDE)).toEqual({
-      activeTurn: null,
-      connected: false,
-    });
+    const view = readConversation('web:member', 'agent', 'thread-1', OVERRIDE);
+    expect(view.connection).toEqual({ activeTurnId: TURN.id, connected: true });
+    const turn = view.turns.find((turn) => turn.id === TURN.id);
+    expect(turn).toMatchObject({ phase: 'running' });
+    for (const field of ['channelType', 'platformId', 'threadId', 'sessionId']) expect(turn).not.toHaveProperty(field);
+    expect(readConversation('web:member', 'agent', 'thread-2', OVERRIDE).connection.activeTurnId).toBeNull();
+    expect(() => readConversation('web:member', 'other', 'thread-1', OVERRIDE)).toThrow('not accessible');
     signal.turn = { ...TURN, channelType: 'resend' };
-    expect(readChatActiveTurn('web:member', 'agent', 'thread-1', OVERRIDE).activeTurn).toBeNull();
+    expect(readConversation('web:member', 'agent', 'thread-1', OVERRIDE).connection.activeTurnId).toBeNull();
   });
 
   it('bootstraps a snapshot, isolates turn switches and reports authoritative disconnects', async () => {
