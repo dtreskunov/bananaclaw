@@ -335,6 +335,29 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it.each([false, true])('projects large results consistently on the wire and in history with economy=%s', async (economyMode) => {
+    const complete = `start\n${'detail '.repeat(8000)}\nUNIQUE_END_OF_LARGE_RESULT`;
+    fs.writeFileSync(path.join(root, 'large-result.txt'), complete);
+    scriptedToolCalls = [['read', '{"path":"large-result.txt"}']];
+    const events = await collect(new NativeProvider({ model: 'local/stub', economyMode }));
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests.at(-1))).toContain(economyMode ? 'Abbreviated' : 'UNIQUE_END_OF_LARGE_RESULT');
+    if (economyMode) {
+      expect(JSON.stringify(requests.at(-1))).not.toContain('UNIQUE_END_OF_LARGE_RESULT');
+      const results = path.join(root, 'tool-results');
+      const files = fs.readdirSync(results);
+      expect(files).toHaveLength(1);
+      expect(JSON.parse(fs.readFileSync(path.join(results, files[0]), 'utf8'))).toEqual({ type: 'text', value: complete });
+    }
+    const init = events.find(event => event.type === 'init');
+    if (init?.type !== 'init') throw new Error('Missing continuation');
+    const store = new NativeStore();
+    try {
+      expect(JSON.stringify(store.messages(init.continuation)).includes('UNIQUE_END_OF_LARGE_RESULT')).toBe(!economyMode);
+    } finally { store.close(); }
+  });
+
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jv1sAAAAASUVORK5CYII=';
   const gif = 'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
   function vision(protocol: nativeCatalog.NativeProtocol) {
@@ -1595,9 +1618,9 @@ describe('NativeProvider', () => {
     });
   });
 
-  it('keeps already-delivered sends and todo state while steering', async () => {
+  it.each([false, true])('keeps already-delivered sends and todo state while steering with economy=%s', async (economyMode) => {
     todoToolMode = true;
-    const query = new NativeProvider({ model: 'local/test-model' }).query({ prompt: 'hello', cwd: root });
+    const query = new NativeProvider({ model: 'local/test-model', economyMode }).query({ prompt: 'hello', cwd: root });
     let steered = false;
     for await (const event of query.events) {
       if (event.type === 'assistant_message' && !steered) {
@@ -2474,9 +2497,9 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests[1]?.messages)).toContain('Return SKILL-LOADED.');
   });
 
-  it('keeps todo state across model steps but out of the next turn', async () => {
+  it.each([false, true])('keeps todo state across model steps but out of the next turn with economy=%s', async (economyMode) => {
     todoToolMode = true;
-    const provider = new NativeProvider({ model: 'local/test-model' });
+    const provider = new NativeProvider({ model: 'local/test-model', economyMode });
     const first = await collect(provider);
     const continuation = (first.find((event) => event.type === 'init') as { continuation: string }).continuation;
 

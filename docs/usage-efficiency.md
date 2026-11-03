@@ -14,6 +14,19 @@ ncl groups restart --id <group-id>
 Disable with `--economy-mode false` and restart. The equivalent settings API
 field is the boolean `economy_mode`. These operations use existing permissions.
 
+## Large tool results
+
+Economy mode limits aggregate text from each tool result to 16 KiB, including
+an explicit abbreviation notice. Complete typed results are saved privately
+under the session's `native-state/tool-results/`, not the shared agent workspace
+or public Pages. Errors remain errors; media is not truncated. Stored history
+and subsequent requests use the same bounded projection.
+
+Use `read({path, startLine, lineCount})` for up to 200 lines, or query a saved
+JSON result with `bash` and return only relevant fields. Whole-file reads keep
+their existing 256 KiB limit; ranges also reject oversized individual lines.
+Ranged reads support files up to 16 MiB; use targeted queries for larger files.
+
 ## Private memory migration
 
 Do this offline first, inside a private copy of the group's workspace:

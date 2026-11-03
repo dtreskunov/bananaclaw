@@ -42,6 +42,8 @@ import {
   stepBudgetInstructions,
 } from './native/reply.js';
 import { DeferredMcpTools, mcpToolSearchMode } from './native/tool-search.js';
+import { boundToolResults } from './native/tool-results.js';
+import path from 'node:path';
 
 export const MAX_STEPS = 100;
 
@@ -291,6 +293,9 @@ export class NativeProvider implements AgentProvider {
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
+    const project = (messages: ModelMessage[]) => options.economyMode
+      ? boundToolResults(messages, path.join(store.directory, 'tool-results')) : messages;
+    const history = (messages: ModelMessage[]) => project(portableHistory(messages));
     const seenBrokerGuidance = new Set<string>();
     const pendingBrokerGuidance = new Set<string>();
     const mcpManager = lazyMcpManager(options.mcpServers, input.cwd, (guidance) => {
@@ -338,7 +343,7 @@ export class NativeProvider implements AgentProvider {
               const todoState = new NativeTodoState();
               const configuredModel = options.model ?? process.env.NATIVE_MODEL;
               if (!configuredModel) throw new Error('native requires a canonical model setting');
-              const prior = portableHistory(store.contextMessages(continuation));
+              const prior = history(store.contextMessages(continuation));
               const turnJournal = new NativeTurnJournal(store, continuation, { role: 'user', content: turn.text });
               journal = turnJournal;
               abortController.signal.throwIfAborted();
@@ -429,7 +434,7 @@ export class NativeProvider implements AgentProvider {
                         reasoningTokens: usage.outputTokenDetails?.reasoningTokens };
                     },
                   });
-                  messages.splice(0, messages.length, ...portableHistory(store.contextMessages(conversation)));
+                  messages.splice(0, messages.length, ...history(store.contextMessages(conversation)));
                   compactionPolicy.observe(undefined);
                   yield* flushCallUsage();
                   yield { type: 'progress', step: {
@@ -489,7 +494,7 @@ export class NativeProvider implements AgentProvider {
               const inputStarted = Date.now();
               const incoming = yield* prepareInput(turn.text, turn.files);
               journal.updateInput(incoming);
-              messages.splice(0, messages.length, ...portableHistory(store.contextMessages(continuation)));
+              messages.splice(0, messages.length, ...history(store.contextMessages(continuation)));
               const inputPreparationMs = Date.now() - inputStarted;
               const discoveryStarted = Date.now();
               const lazyServers = !turn.toolsDisabled && toolSearchMode === 'always'
@@ -650,7 +655,7 @@ export class NativeProvider implements AgentProvider {
                   continue;
                 }
 
-                const responseMessages = (await result.responseMessages) as ModelMessage[];
+                const responseMessages = project((await result.responseMessages) as ModelMessage[]);
                 await journal.settle();
                 yield* flushCallUsage();
                 if (abortController.signal.aborted) throw new Error('Turn stopped');

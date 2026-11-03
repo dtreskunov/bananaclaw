@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { ModelMessage } from 'ai';
 
 const DEFAULT_PATH = '/workspace/native-state/native-state.db';
@@ -23,8 +24,10 @@ interface CompactionRow {
 
 export class NativeStore {
   private readonly db: Database;
+  readonly directory: string;
 
   constructor(filename = process.env.NATIVE_STATE_PATH || DEFAULT_PATH) {
+    this.directory = path.dirname(filename);
     this.db = new Database(filename, { create: true });
     this.db.exec('PRAGMA journal_mode = DELETE');
     this.db.exec('PRAGMA busy_timeout = 5000');
