@@ -400,7 +400,7 @@ export class NativeProvider implements AgentProvider {
               let wrappingUp = false;
               // Text written alongside tool calls, which is never delivered.
               let undeliveredChars = 0;
-              const compactionPolicy = createCompactionPolicy(resolved.contextWindow);
+              const compactionPolicy = createCompactionPolicy(resolved.contextWindow, options.economyMode ? 100_000 : Infinity);
               async function* compactContext(plan: NativeCompactionPlan): AsyncGenerator<ProviderEvent> {
                 abortController.signal.throwIfAborted();
                 const compactStartedAt = Date.now();
@@ -415,6 +415,7 @@ export class NativeProvider implements AgentProvider {
                     store, conversation, protectedInputs: turnJournal.inputRefs(),
                     attempt: plan.attempt, contextWindow: resolved.contextWindow, maxOutputTokens: resolved.maxOutputTokens,
                     reasoning: resolved.reasoning === true || miniMaxFlash,
+                    maxRequests: options.economyMode ? 4 : undefined,
                     signal: abortController.signal,
                     summarize: async (prompt, request) => {
                       const compacted = streamText({
@@ -456,10 +457,12 @@ export class NativeProvider implements AgentProvider {
                 const plan = compactionPolicy.proactive();
                 if (!plan) return;
                 if (plan === 'limit') {
+                  if (options.economyMode) { wrappingUp = true; nudge = STEP_LIMIT_PROMPT; }
                   yield { type: 'progress', step: {
                     kind: 'notification', id: `native-compaction-limit-${continuation}-${startedAt}`,
                     text: 'Automatic compaction limit reached for this turn',
-                    detail: 'Continuing normally; context-overflow and media recovery remain available.',
+                    detail: options.economyMode ? 'Economy mode is stopping tools and preparing a handoff.'
+                      : 'Continuing normally; context-overflow and media recovery remain available.',
                   } };
                   return;
                 }
@@ -468,10 +471,12 @@ export class NativeProvider implements AgentProvider {
                 } catch (error) {
                   abortController.signal.throwIfAborted();
                   compactionPolicy.disableProactive();
+                  if (options.economyMode) { wrappingUp = true; nudge = STEP_LIMIT_PROMPT; }
                   log(`Proactive compaction failed; retaining context: ${errorMessage(error)}`);
                   yield { type: 'progress', step: {
                     kind: 'notification', id: `native-compaction-${continuation}-${plan.ordinal}-${startedAt}-fallback`,
-                    text: 'Automatic compaction failed; continuing with existing context',
+                    text: options.economyMode ? 'Automatic compaction failed; preparing a handoff'
+                      : 'Automatic compaction failed; continuing with existing context',
                     detail: errorMessage(error),
                   } };
                 }

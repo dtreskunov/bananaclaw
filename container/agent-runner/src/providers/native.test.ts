@@ -1064,12 +1064,12 @@ describe('NativeProvider', () => {
     expect(replyTexts(events)).toEqual([['hello from stub']]);
   });
 
-  function knownContext() {
+  function knownContext(economyMode = false) {
     catalogModels = { local: { models: { 'test-model': {
       modalities: { input: ['text'], output: ['text'] },
       limit: { context: 1_000_000, output: 8192 },
     } } } };
-    return new NativeProvider({ model: 'local/test-model' });
+    return new NativeProvider({ model: 'local/test-model', economyMode });
   }
 
   function compactions(events: ProviderEvent[], status: 'running' | 'completed' | 'error') {
@@ -1161,6 +1161,29 @@ describe('NativeProvider', () => {
       expect(requests.filter((request) => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS))).toHaveLength(1);
     },
   );
+
+  it('compacts economy mode at 100k context tokens without replaying completed actions', async () => {
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    scriptedUsage = [{ prompt_tokens: 99_998, completion_tokens: 2 }];
+    const events = await collect(knownContext(true), history());
+    expect(compactions(events, 'completed')).toHaveLength(1);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain('Earlier requirements '.repeat(250));
+  });
+
+  it('turns off tools for a handoff when economical compaction fails', async () => {
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    scriptedUsage = [{ prompt_tokens: 99_998, completion_tokens: 2 }];
+    rejectCompaction = true;
+    const events = await collect(knownContext(true), history());
+    expect(compactions(events, 'error')).toHaveLength(1);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(events.some(event => event.type === 'result' && event.replies?.length)).toBe(true);
+    expect(JSON.stringify(requests.at(-1))).toContain('Write your final message now');
+    expect(requests.at(-1)?.tools).toBeUndefined();
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+  });
 
   it.each([
     { name: 'below threshold', usage: { prompt_tokens: 749_997, completion_tokens: 2 }, known: true },

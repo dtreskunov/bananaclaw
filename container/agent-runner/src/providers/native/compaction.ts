@@ -17,10 +17,10 @@ export const COMPACTION_INSTRUCTIONS =
   'Do not infer contents of omitted media. Keep chronological source labels and distinguish superseded decisions ' +
   'from current decisions. Return only a concise factual continuation summary.';
 
-export function shouldCompactContext(tokens: number | undefined, window: number | undefined): boolean {
+export function shouldCompactContext(tokens: number | undefined, window: number | undefined, maxTokens = Infinity): boolean {
   return tokens !== undefined && Number.isFinite(tokens) && tokens >= 0 &&
     window !== undefined && Number.isFinite(window) && window > 0 &&
-    tokens / window >= COMPACTION_THRESHOLD;
+    tokens >= Math.min(window * COMPACTION_THRESHOLD, maxTokens);
 }
 
 export interface NativeCompactionPlan {
@@ -29,7 +29,7 @@ export interface NativeCompactionPlan {
   detail: string;
 }
 
-export function createCompactionPolicy(window: number | undefined) {
+export function createCompactionPolicy(window: number | undefined, maxTokens = Infinity) {
   let emergencyAttempts = 0;
   let proactiveAttempts = 0;
   let proactiveDisabled = false;
@@ -41,7 +41,7 @@ export function createCompactionPolicy(window: number | undefined) {
     disableProactive() { proactiveDisabled = true; },
     canRecover() { return emergencyAttempts < MAX_COMPACTION_ATTEMPTS; },
     proactive(): NativeCompactionPlan | 'limit' | undefined {
-      if (proactiveDisabled || tokens === undefined || window === undefined || !shouldCompactContext(tokens, window))
+      if (proactiveDisabled || tokens === undefined || window === undefined || !shouldCompactContext(tokens, window, maxTokens))
         return undefined;
       if (proactiveAttempts >= MAX_PROACTIVE_COMPACTIONS) {
         proactiveDisabled = true;
@@ -233,6 +233,7 @@ export async function compactNativeContext(options: {
   contextWindow?: number;
   maxOutputTokens?: number;
   reasoning?: boolean;
+  maxRequests?: number;
   signal: AbortSignal;
   summarize: (prompt: string, request: CompactionRequest) => Promise<string | CompactionSummary>;
 }): Promise<{ sourceBytes: number; leafChunks: number; requests: number }> {
@@ -259,6 +260,7 @@ export async function compactNativeContext(options: {
   const cancellation = new AbortController();
   const compactSignal = AbortSignal.any([signal, cancellation.signal, AbortSignal.timeout(COMPACTION_TIMEOUT_MS)]);
   let requests = 0;
+  const maxRequests = options.maxRequests ?? MAX_COMPACTION_REQUESTS;
 
   async function summarize(text: string, budget: SummaryBudget, leaf: boolean): Promise<string> {
     compactSignal.throwIfAborted();
@@ -269,8 +271,8 @@ export async function compactNativeContext(options: {
     let retried = false;
     while (true) {
       compactSignal.throwIfAborted();
-      if (requests >= MAX_COMPACTION_REQUESTS) {
-        throw new Error(`Compaction exceeds the ${MAX_COMPACTION_REQUESTS}-request budget; full transcript was preserved`);
+      if (requests >= maxRequests) {
+        throw new Error(`Compaction exceeds the ${maxRequests}-request budget; full transcript was preserved`);
       }
       const requestId = ++requests;
       let response: string | CompactionSummary;

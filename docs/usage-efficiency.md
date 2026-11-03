@@ -27,6 +27,15 @@ JSON result with `bash` and return only relevant fields. Whole-file reads keep
 their existing 256 KiB limit; ranges also reject oversized individual lines.
 Ranged reads support files up to 16 MiB; use targeted queries for larger files.
 
+## Context
+
+Economy mode triggers compaction at the smaller of 100,000 context tokens and
+75% of the model's context window. Each compaction can make at most four model
+requests; existing transcript-preservation and two-proactive-attempt safeguards
+remain in place. If compaction fails or reaches that limit, tools are disabled
+and the runner asks for a progress handoff instead of continuing an expensive
+tool loop. Other groups keep the existing policy.
+
 ## Private memory migration
 
 Do this offline first, inside a private copy of the group's workspace:

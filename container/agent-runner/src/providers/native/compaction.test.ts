@@ -20,6 +20,15 @@ afterEach(() => {
 });
 
 describe('context overflow detection', () => {
+  it('uses the economy target or model safety threshold, whichever is smaller', () => {
+    expect(shouldCompactContext(99_999, 1_000_000, 100_000)).toBe(false);
+    expect(shouldCompactContext(100_000, 1_000_000, 100_000)).toBe(true);
+    expect(shouldCompactContext(100_000, 1_000_000)).toBe(false);
+    expect(shouldCompactContext(96_000, 128_000, 100_000)).toBe(true);
+    const policy = createCompactionPolicy(1_000_000, 100_000);
+    policy.observe(100_000);
+    expect(policy.proactive()).toMatchObject({ attempt: 1 });
+  });
   it.each([
     new Error('invalid params, context window exceeds limit (2013)'),
     { responseBody: '{"error":{"message":"context window exceeds limit (2013)"}}' },
@@ -185,6 +194,18 @@ it('does not save a partial summary if a later fragment fails', async () => {
     }),
   ).rejects.toThrow('Second fragment failed');
   expect(calls).toBe(2);
+  expect(store.contextMessages(conversation)).toEqual(before);
+});
+
+it('preserves the full transcript when a smaller compaction-call budget is exhausted', async () => {
+  const { conversation, protectedRef } = seed();
+  const before = store.contextMessages(conversation);
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...compactionOptions(conversation, protectedRef), maxRequests: 1,
+    summarize: async () => { calls++; throw new Error('context_length_exceeded'); },
+  })).rejects.toThrow('1-request budget');
+  expect(calls).toBe(1);
   expect(store.contextMessages(conversation)).toEqual(before);
 });
 
