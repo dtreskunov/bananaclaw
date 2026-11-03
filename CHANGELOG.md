@@ -8,6 +8,8 @@ All notable changes to NanoClaw will be documented in this file.
   are preserved privately with bounded model-visible text. Native tasks no
   longer have a 100-step ceiling or changing step-budget prompts; confirmed
   MiniMax plan exhaustion is terminal. No optional mode or new tuning settings.
+  Healthy tasks survive beyond 30 minutes; the watchdog uses session-link
+  inactivity, not input age, while retaining stuck/dead-process recovery.
   See [detect / why / fix / verify / rollback](docs/usage-efficiency.md#detect--why--fix--verify--rollback).
 
 - **[BREAKING] Retained approval storage.** One approval record owns request

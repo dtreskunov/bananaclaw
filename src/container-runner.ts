@@ -636,7 +636,7 @@ export function killContainer(sessionId: string, reason: string, onExit?: () => 
   // Forensic snapshot before kill — the container runs with --rm so its
   // filesystem and per-container log entries cease to be queryable once it's
   // gone. Limited to silent-stuck reasons so normal shutdowns stay quiet.
-  if (reason === 'absolute-ceiling' || reason === 'claim-stuck') {
+  if (reason === 'idle-timeout' || reason === 'claim-stuck') {
     const procs = dumpContainerProcesses(entry.containerName);
     if (procs) {
       log.warn('Container process snapshot before kill', {

@@ -15,7 +15,7 @@
  *   tries++. Existing retry machinery does the rest.
  *
  *   If the container IS running:
- *     1. Absolute ceiling: signal age > max(30 min, current_bash_timeout)
+ *     1. Idle ceiling: signal age > max(30 min, current_bash_timeout)
  *        → kill. Covers the "alive but silent for 30 min" case. Extended
  *        only while Bash is declared as running longer, honouring the
  *        user's own timeout directive. Kill then resets processing rows.
@@ -68,7 +68,7 @@ const SWEEP_INTERVAL_MS = 60_000;
 // Absolute idle ceiling for a running container. If the session link hasn't
 // reported activity in this long, the container is either stuck or doing genuinely
 // nothing — kill and restart on the next inbound.
-export const ABSOLUTE_CEILING_MS = 30 * 60 * 1000;
+export const IDLE_CEILING_MS = 30 * 60 * 1000;
 // Stuck tolerance window applied per 'processing' claim — "did we see any
 // signs of life since this message was claimed?"
 export const CLAIM_STUCK_MS = 60 * 1000;
@@ -78,7 +78,7 @@ const BACKOFF_BASE_MS = 5000;
 
 export type StuckDecision =
   | { action: 'ok' }
-  | { action: 'kill-ceiling'; activeAgeMs: number; ceilingMs: number }
+  | { action: 'kill-idle'; signalAgeMs: number; idleMs: number }
   | { action: 'kill-claim'; messageId: string; claimAgeMs: number; toleranceMs: number };
 
 /**
@@ -100,14 +100,6 @@ export function decideStuckAction(args: {
     return { action: 'ok' };
   }
 
-  const ceiling = Math.max(ABSOLUTE_CEILING_MS, declaredBashMs ?? 0);
-  for (const claim of claims) {
-    const claimedAt = parseSqliteUtc(claim.status_changed);
-    if (Number.isNaN(claimedAt)) continue;
-    const activeAgeMs = now - claimedAt;
-    if (activeAgeMs > ceiling) return { action: 'kill-ceiling', activeAgeMs, ceilingMs: ceiling };
-  }
-
   // Ceiling check only applies after the runner has sent a signal. A freshly
   // spawned container has not connected yet; if we treated that as infinitely stale we'd
   // kill every container within seconds of spawn. Genuinely-dead containers
@@ -117,8 +109,9 @@ export function decideStuckAction(args: {
   // claim-stuck check below handles it.
   if (lastSignalAtMs !== 0) {
     const signalAgeMs = now - lastSignalAtMs;
-    if (signalAgeMs > ceiling) {
-      return { action: 'kill-ceiling', activeAgeMs: signalAgeMs, ceilingMs: ceiling };
+    const idleMs = Math.max(IDLE_CEILING_MS, declaredBashMs ?? 0);
+    if (signalAgeMs > idleMs) {
+      return { action: 'kill-idle', signalAgeMs, idleMs };
     }
   }
 
@@ -237,7 +230,7 @@ async function sweepSession(session: Session): Promise<void> {
 
     const alive = isContainerRunning(session.id);
 
-    // 3. Running-container SLA: absolute ceiling + per-claim stuck rules.
+    // 3. Running-container SLA: signal inactivity + unacknowledged claims.
     // Skip on the same iteration that just woke the container — it hasn't
     // had a chance to clear stale processing_ack rows from a previous crash
     // yet. Without this grace period, stale claims cause an immediate
@@ -294,14 +287,14 @@ function enforceRunningContainerSla(
 
   if (decision.action === 'ok') return;
 
-  if (decision.action === 'kill-ceiling') {
-    log.warn('Killing container past absolute ceiling', {
+  if (decision.action === 'kill-idle') {
+    log.warn('Killing container after session-link inactivity', {
       sessionId: session.id,
-      activeAgeMs: decision.activeAgeMs,
-      ceilingMs: decision.ceilingMs,
+      signalAgeMs: decision.signalAgeMs,
+      idleMs: decision.idleMs,
     });
-    killContainer(session.id, 'absolute-ceiling');
-    resetStuckProcessingRows(inDb, outDb, session, 'absolute-ceiling');
+    killContainer(session.id, 'idle-timeout');
+    resetStuckProcessingRows(inDb, outDb, session, 'idle-timeout');
     return;
   }
 
@@ -388,7 +381,7 @@ function resetStuckProcessingRows(
         platformId: routing.platform_id,
         channelType: routing.channel_type,
         threadId: routing.thread_id,
-        text: "⚠️ Your last message couldn't be processed after several attempts. Please try sending it again.",
+        text: "⚠️ Your last message couldn't be processed after several attempts. External actions may already have completed; review the saved conversation before trying again.",
       });
       log.warn('Bounced failure notice to user', { messageId: id, sessionId: session.id, reason });
     }

@@ -143,7 +143,9 @@ describe('host sweep justWoke grace period', () => {
     try {
       inbound.prepare("UPDATE messages_in SET status='completed' WHERE id='m-1'").run();
       outbound.prepare('DELETE FROM processing_ack').run();
-      outbound.prepare("INSERT INTO turns (id,phase,outcome,provenance) VALUES ('turn-1','running','pending','native')").run();
+      outbound
+        .prepare("INSERT INTO turns (id,phase,outcome,provenance) VALUES ('turn-1','running','pending','native')")
+        .run();
     } finally {
       inbound.close();
       outbound.close();
@@ -158,8 +160,12 @@ describe('host sweep justWoke grace period', () => {
     vi.mocked(recoverStoppedSession).mockImplementation(async () => {
       const db = openOutboundDbRw(AG, SESS);
       try {
-        db.prepare("UPDATE processing_ack SET status='completed',status_changed=datetime('now') WHERE message_id='m-1'").run();
-      } finally { db.close(); }
+        db.prepare(
+          "UPDATE processing_ack SET status='completed',status_changed=datetime('now') WHERE message_id='m-1'",
+        ).run();
+      } finally {
+        db.close();
+      }
       return true;
     });
     await runSweepTick();
@@ -188,7 +194,7 @@ describe('host sweep justWoke grace period', () => {
     await runSweepTick();
     expect(wakeContainer).toHaveBeenCalledTimes(1); // no second wake
     expect(killContainer).toHaveBeenCalledTimes(1);
-    expect(killContainer).toHaveBeenCalledWith(SESS, 'absolute-ceiling');
+    expect(killContainer).toHaveBeenCalledWith(SESS, 'claim-stuck');
   });
 
   it('reruns a session sweep when a batch notification arrives during wake', async () => {
@@ -220,6 +226,6 @@ describe('host sweep justWoke grace period', () => {
     await Promise.all([first, overlapping]);
 
     expect(killContainer).toHaveBeenCalledTimes(1);
-    expect(killContainer).toHaveBeenCalledWith(SESS, 'absolute-ceiling');
+    expect(killContainer).toHaveBeenCalledWith(SESS, 'claim-stuck');
   });
 });

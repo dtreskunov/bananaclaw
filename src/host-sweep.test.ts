@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import { deleteOrphanProcessingClaims, getProcessingClaims } from './db/session-db.js';
 import {
-  ABSOLUTE_CEILING_MS,
+  IDLE_CEILING_MS,
   CLAIM_STUCK_MS,
   SESSION_LINK_START_GRACE_MS,
   _resetStuckProcessingRowsForTesting,
@@ -35,18 +35,18 @@ describe('decideStuckAction', () => {
     ).toEqual({ action: 'ok' });
   });
 
-  it('returns kill-ceiling when the latest signal is older than 30 min', () => {
-    const lastSignalAtMs = BASE - ABSOLUTE_CEILING_MS - 1_000;
+  it('returns kill-idle when the latest signal is older than 30 min', () => {
+    const lastSignalAtMs = BASE - IDLE_CEILING_MS - 1_000;
     const res = decideStuckAction({
       now: BASE,
       lastSignalAtMs,
       containerState: null,
       claims: [],
     });
-    expect(res.action).toBe('kill-ceiling');
-    if (res.action !== 'kill-ceiling') return;
-    expect(res.ceilingMs).toBe(ABSOLUTE_CEILING_MS);
-    expect(res.activeAgeMs).toBeGreaterThan(ABSOLUTE_CEILING_MS);
+    expect(res.action).toBe('kill-idle');
+    if (res.action !== 'kill-idle') return;
+    expect(res.idleMs).toBe(IDLE_CEILING_MS);
+    expect(res.signalAgeMs).toBeGreaterThan(IDLE_CEILING_MS);
   });
 
   it('skips the ceiling check when a fresh container has not signaled yet', () => {
@@ -115,24 +115,23 @@ describe('decideStuckAction', () => {
     expect(res.action).toBe('ok');
   });
 
-  it('kills a turn past the absolute ceiling even while heartbeats remain fresh', () => {
-    const res = decideStuckAction({
-      now: BASE,
-      lastSignalAtMs: BASE - 1_000,
-      containerState: null,
-      claims: [claim('msg-1', ABSOLUTE_CEILING_MS + 1)],
-    });
-    expect(res).toEqual({
-      action: 'kill-ceiling',
-      activeAgeMs: ABSOLUTE_CEILING_MS + 1,
-      ceilingMs: ABSOLUTE_CEILING_MS,
-    });
-  });
+  it.each([IDLE_CEILING_MS + 1, 24 * 60 * 60 * 1000])(
+    'keeps a %sms-old task alive while signals remain fresh',
+    (age) => {
+      const res = decideStuckAction({
+        now: BASE,
+        lastSignalAtMs: BASE - 1_000,
+        containerState: null,
+        claims: [claim('msg-1', age)],
+      });
+      expect(res).toEqual({ action: 'ok' });
+    },
+  );
 
   it('caps an untrusted declared Bash timeout', () => {
     const res = decideStuckAction({
       now: BASE,
-      lastSignalAtMs: BASE - 1_000,
+      lastSignalAtMs: BASE - 7 * 60 * 60 * 1000,
       containerState: {
         current_tool: 'Bash',
         tool_declared_timeout_ms: Number.MAX_SAFE_INTEGER,
@@ -140,7 +139,7 @@ describe('decideStuckAction', () => {
       },
       claims: [claim('msg-1', 7 * 60 * 60 * 1000)],
     });
-    expect(res.action).toBe('kill-ceiling');
+    expect(res).toEqual({ action: 'kill-idle', signalAgeMs: 7 * 60 * 60 * 1000, idleMs: 6 * 60 * 60 * 1000 });
   });
 
   it('returns kill-claim when a claim is past 60s and the signal timestamp has not moved', () => {
@@ -407,6 +406,7 @@ describe('resetStuckProcessingRows — failure bounce', () => {
     expect(rows[0].channel_type).toBe('web');
     expect(rows[0].thread_id).toBe('thread-1');
     expect(JSON.parse(rows[0].content).text).toContain("couldn't be processed");
+    expect(JSON.parse(rows[0].content).text).toContain('External actions may already have completed');
 
     // Orphan claim still cleared.
     expect(getProcessingClaims(outDb)).toEqual([]);

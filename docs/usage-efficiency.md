@@ -33,6 +33,16 @@ episode, reset by a successful normal model step, not by a summary.
 Quota exhaustion is terminal; ordinary transient errors retain bounded SDK
 retries. No paid-credit fallback or credential changes are performed.
 
+## Long-running versus stuck
+
+The host never kills a task solely because its input was claimed 30 minutes
+ago. A fresh validated session-link signal keeps an old task alive. Thirty
+minutes without a signal still triggers idle cleanup; a claim that never
+receives a subsequent signal retains its shorter startup/stuck check. Declared
+Bash timeouts extend both tolerances, within the existing safety bound.
+Dead-process recovery and checkpoint journals are unchanged. Recovered tool
+outcomes can be uncertain; inspect completed work before repeating actions.
+
 Actual consumption remains in the existing turn-usage records, not a second
 request ledger. Raw input/cache/output token totals are not MiniMax's weighted
 plan quota; reasoning tokens are already part of output. Fewer steps are not
@@ -67,7 +77,8 @@ Review and deploy the complete branch, then rebuild/restart through the normal
 host/container paths. No live memory or service is changed by the worktree.
 
 Verify a task beyond 100 model steps, steering, cancellation, large-result
-retrieval across restart/fork, and memory recall. Use bounded live canaries:
+retrieval across restart/fork, fresh signals on an old claim versus genuinely
+stale signals, and memory recall. Use bounded live canaries:
 removing a step cap does not guarantee account quota will last. Actual
 token savings and recall quality require provider-backed verification.
 Rollback is a code deployment plus restoring the original memory file.
