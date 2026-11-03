@@ -330,9 +330,12 @@ The agent uses MCP tools; the agent-runner translates tool calls into structured
 3. Host delivers as interactive card through adapter (e.g., Slack Block Kit buttons)
 4. User clicks an option
 5. Platform sends event back to adapter → host writes messages_in with the response
-6. Agent-runner reads messages_in, matches to pending tool call, returns selection to agent as tool result
+6. Agent-runner receives a typed response in a later provider turn
 
-The agent-runner holds the tool call open while waiting for the user's response in messages_in. The round-trip goes: agent → messages_out → host → platform → user clicks → platform → host → messages_in → agent-runner → agent.
+The tool returns immediately. The host owns question state and journals the
+explicit choice, text, or skip response back to the runner. The round-trip goes:
+agent → messages_out → host → platform → user input → host → messages_in →
+agent-runner → a later provider turn.
 
 **Approvals:**
 
@@ -359,7 +362,7 @@ Agent calls `add_reaction` tool with message ID and emoji. Agent-runner writes m
 { "text": "LGTM" }
 
 // Interactive card
-{ "type": "ask_question", "questionId": "q-1", "question": "Approve deployment?", "responseMode": "choice", "options": ["Yes", "No", "Defer"] }
+{ "type": "ask_question", "questionId": "q-1", "question": "Which deployment?", "responseMode": "choice", "options": [{ "label": "Staging", "selectedLabel": "Staging selected", "value": "staging" }] }
 
 // Edit existing message
 { "operation": "edit", "messageId": "3", "text": "Updated: LGTM with minor comments" }
@@ -790,16 +793,18 @@ CREATE TABLE pending_questions (
 
 ### Pending Question Flow
 
-When the host delivers a messages_out row with `operation: 'ask_question'`:
-1. Host delivers the card via the channel adapter
-2. Host writes a `pending_questions` row mapping `question_id` → `session_id`
+When the host delivers a messages_out row with `type: 'ask_question'`:
+1. Host validates the normalized input and records its `questions` row
+2. Host delivers the card via the channel adapter
 
 When a Chat SDK `ActionEvent` (button click) arrives:
 1. Bridge extracts `actionId` from the event
-2. Host looks up `pending_questions` by `question_id` (derived from actionId — the bridge maintains the mapping)
-3. Host finds the target session, writes a messages_in row with `questionId` + `selectedOption`
-4. Host deletes the `pending_questions` row
-5. Agent-runner picks up the messages_in row, matches to the pending tool call, returns the selection
+2. Host resolves the question by its ID and validates the explicit response type
+3. Host records the first answer or skip and journals one correlated
+   `interactive_response` input with `questionId`, `responseType`, and an answer
+   `value` only when one was supplied
+4. The question remains available for display and audit
+5. Agent-runner receives the typed response in a later turn
 
 This avoids scanning session DBs. The central DB is the routing lookup — same pattern as message routing.
 
@@ -873,7 +878,7 @@ MCP tools write directly to the session DB.
 
 | Tool | What it does |
 |------|-------------|
-| `ask_user_question` | Write `messages_out` with question card. Hold tool call open, poll `messages_in` for response matching `questionId`. Return selection as tool result. |
+| `ask_user_question` | Write a durable normalized question and return immediately. An explicit choice, text, or skip response arrives in a later provider turn. |
 | `edit_message` | Write `messages_out` with `operation: 'edit'` |
 | `add_reaction` | Write `messages_out` with `operation: 'reaction'` |
 | `send_to_agent` | Write `messages_out` with `channel_type: 'agent'`, `platform_id: '{target}'` |
@@ -887,7 +892,9 @@ See [agent-runner-details.md](agent-runner-details.md) for full MCP tool paramet
 
 **Host-initiated (approval cards):** When an action requires approval, the host generates a standardized approval card and sends it to the admin's DM. These are not agent-initiated — the agent doesn't know about the approval step. The card format is fixed (action description + approve/deny buttons).
 
-**Inbound (card responses):** Not a card — it's a messages_in row with `questionId` + `selectedOption` in the content. Agent-runner matches to the pending `ask_user_question` tool call and returns the selection as the tool result.
+**Inbound (card responses):** A typed `interactive_response` input identifies
+the question and response type. Choice and text carry an explicit value; skip
+carries no answer. The runner consumes it in a later provider turn.
 
 ### Commands
 

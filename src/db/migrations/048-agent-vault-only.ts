@@ -9,10 +9,10 @@ export const migration048: Migration = {
       .get() as { count: number };
     if (unsupported.count)
       throw new Error('Complete the reviewed credential cutovers before deploying the Agent Vault-only host');
-    const pending = db
-      .prepare("SELECT COUNT(*) AS count FROM pending_approvals WHERE action='onecli_credential'")
-      .get() as { count: number };
-    if (pending.count) throw new Error('Resolve retired gateway approvals before deploying the Agent Vault-only host');
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pending_approvals'").get()) {
+      const pending = db.prepare("SELECT 1 FROM pending_approvals WHERE action='onecli_credential'").get();
+      if (pending) throw new Error('Resolve retired gateway approvals before deploying the Agent Vault-only host');
+    }
 
     db.exec(`
       ALTER TABLE container_configs RENAME COLUMN credential_backend TO retired_credential_backend;

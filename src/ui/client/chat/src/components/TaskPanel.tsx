@@ -15,7 +15,7 @@ import { showToast } from './Toast';
 import { renderMarkdown } from '../utils';
 import { formatDuration as fmtDuration } from '../duration-format';
 import { highlightCode } from '../highlight';
-import type { TaskDetailDto } from '../types';
+import type { TaskDetailDto } from '../../../../shared/thread';
 
 interface TasksResponse {
   tasks: TaskDetailDto[];

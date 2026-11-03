@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { reduceActivityLines } from '../../../activity.js';
 import type { Question } from '../../../types.js';
+import { isQuestionInput } from '../../shared/conversation-protocol.js';
+import type { ConversationApproval } from '../../shared/approval.js';
 import { getDb } from '../../../db/connection.js';
 import { outboundTimelinePosition } from '../../../input-timeline.js';
 import { conversationTimeline } from './conversation-timeline.js';
@@ -113,6 +115,7 @@ export function projectConversation(
   history: ConversationMessage[],
   questions: QuestionRow[],
   signals: Signals,
+  approvals: ConversationApproval[] = [],
 ): Conversation {
   const records = outDb ? (outDb.prepare('SELECT * FROM turns ORDER BY started_at, id').all() as TurnRow[]) : [];
   const byId = new Map(records.map((turn) => [turn.id, turn]));
@@ -146,7 +149,7 @@ export function projectConversation(
         const { turnId: _turn, ...visible } = message;
         return visible;
       }
-      return { ...message };
+      return message;
     });
   const visibleOutputIds = new Set(messages.filter((m) => m.direction === 'out').map((m) => m.id));
   for (const id of questionAnchors.keys()) visibleOutputIds.add(id);
@@ -241,11 +244,16 @@ export function projectConversation(
     if (!anchor?.turn_id || !byId.has(anchor.turn_id))
       throw new Error('Missing conversation question turn association');
     const timelinePosition = outboundTimelinePosition(anchor.content);
+    const input: unknown = JSON.parse(anchor.content);
+    if (!isQuestionInput(input)) throw new Error('Invalid stored question input');
     return {
-      questionId: q.question_id,
-      question: q.question_text,
-      responseMode: q.response_mode,
-      options: JSON.parse(q.options_json),
+      kind: 'question',
+      id: q.question_id,
+      question: input.question,
+      responseMode: input.responseMode,
+      options: input.options,
+      placeholder: input.placeholder,
+      multiline: input.multiline,
       status: q.status,
       answerValue: q.answer_value,
       answerType: q.answer_type,
@@ -272,7 +280,7 @@ export function projectConversation(
     threadId,
     messages,
     turns,
-    questions: scopedQuestions,
+    interactions: [...scopedQuestions, ...approvals],
     connection: { connected, activeTurnId: active?.id ?? null },
     capabilities: {
       canSend: context.canSend,
@@ -298,7 +306,6 @@ export function readConversation(
     includeCancelled: true,
     hideApprovalOutcomes: true,
   });
-  history.push(...approvalTranscript(userId, groupId, context));
   const outDb = context.sessionId ? openOutboundDb(groupId, context.sessionId) : null;
   try {
     const questions = context.sessionId
@@ -314,6 +321,7 @@ export function readConversation(
       history,
       questions,
       getSessionTurnSignals(context.sessionId ?? ''),
+      approvalTranscript(userId, groupId, context),
     );
   } finally {
     outDb?.close();

@@ -270,59 +270,30 @@ must still invoke `writeDestinations()` so a running agent sees the update.
 
 Access layer: `src/db/agent-destinations.ts`.
 
-### 1.11 `pending_approvals`
+### 1.11 `approvals` and private account progress
 
-Two workflows share this table:
+Migration 049 defines the canonical schema; `src/db/approvals.ts` owns mutations.
+One retained row contains request identity, kind, session/group and immutable
+origin, input/presentation, current status/revision, decision, responder,
+optional note, outcome and timestamps. There is no separate history snapshot.
 
-- **Session-bound MCP approvals** — `install_packages`, `add_mcp_server`. `session_id` is set.
-- **Agent Vault credential approvals** — `session_id` may be NULL; `agent_group_id` + `channel_type` + `platform_id` route the admin card.
+Kinds are `confirmation`, `account_setup` and `access_grant`. All support
+`pending`, `applying`, `rejected`, `failed`, `cancelled` and `expired`;
+confirmations finish as `approved`, while accounts finish as `completed`.
+An active dedupe key is unique across pending/applying rows. Revision checks
+claim account operations atomically. Generic applying effects never replay
+automatically after a crash; uncertain effects require operator review.
 
-```sql
-CREATE TABLE pending_approvals (
-  approval_id         TEXT PRIMARY KEY,
-  session_id          TEXT REFERENCES sessions(id),
-  request_id          TEXT NOT NULL,
-  action              TEXT NOT NULL,
-  payload             TEXT NOT NULL,
-  created_at          TEXT NOT NULL,
-  agent_group_id      TEXT REFERENCES agent_groups(id),
-  channel_type        TEXT,
-  platform_id         TEXT,
-  platform_message_id TEXT,
-  expires_at          TEXT,
-  status              TEXT NOT NULL DEFAULT 'pending',
-  title               TEXT NOT NULL DEFAULT '',
-  options_json        TEXT NOT NULL DEFAULT '[]',
-  origin_message_id   TEXT
-);
-CREATE INDEX idx_pending_approvals_action_status ON pending_approvals(action, status);
-```
+`approval_workflows` is a private sidecar: selection/recovery JSON, submission
+aliases, restart flag and notification acknowledgement. It owns neither
+lifecycle nor copied request metadata. Public/CLI projections never select
+its private fields.
 
-- `status`: `pending` | `approved` | `rejected` | `expired`.
-- `platform_message_id` lets the host edit the admin card in place after a decision.
-- `origin_message_id` identifies the requesting input in the session's inbound DB,
-  independently of the administrator's delivery channel. Approval outcomes inherit
-  that input's channel, platform, thread and agent-to-agent source session. Legacy
-  approvals without it use their workflow origin or the session's messaging group;
-  a host notification is never fabricated as an agent-to-agent message to itself.
-- Access layer: `src/db/sessions.ts`; sweep + delivery: `src/modules/approvals/primitive.ts`.
-
-#### Retained approval history
-
-`approval_history` (migration 047) snapshots each session-bound request separately
-from the transient pending row. It retains the originating input, original
-presentation payload, creation timestamp, status, decision, responder, optional
-response message, outcome/error text and resolution time. Removing a pending
-approval does not remove its transcript bubble. Session deletion cascades the
-history; group archives include it and `--with-sessions` restores it.
-
-Only the authorized requesting conversation projects these records as synthetic
-outbound transcript messages. They are UI projections, not new runner inputs.
-Normal handlers expose in-progress execution from the process-local execution
-guard, avoiding an unrecoverable persisted busy state after a host restart;
-credential workflows keep their existing durable application/recovery state.
-The migration backfills surviving session-bound approvals and workflow results.
-Sessionless gateway approvals do not acquire an invented conversation.
+Authorized conversation interactions and polling use the same approval
+projection. Session deletion cascades records. Group archives cancel pending
+approvals, refuse applying effects and restore finalized records as audit-only,
+without private recovery or retry. See the
+[offline cutover](user-requests-refactor-plan.md#offline-cutover-detect--why--fix--verify--rollback).
 
 ### 1.12 `unregistered_senders`
 
@@ -423,22 +394,24 @@ CREATE TABLE container_configs (
 Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMigrations()` in `src/db/migrations/index.ts`. It:
 
 1. Creates `schema_version` if absent.
-2. Reads `MAX(version)` — call it `current`.
-3. For each migration with `version > current`, executes `up(db)` inside a transaction and appends a `schema_version` row.
+2. Reads applied migration **names**.
+3. For each unapplied name, executes `up(db)` inside a transaction and appends
+   an applied-order `schema_version` row. File numbers are ordering hints.
 
 | # | File | Introduces |
 |---|------|------------|
 | 001 | `001-initial.ts` | Core tables: `agent_groups`, `messaging_groups`, `messaging_group_agents`, `users`, `user_roles`, `agent_group_members`, `user_dms`, `sessions`, `questions` |
 | 002 | `002-chat-sdk-state.ts` | `chat_sdk_kv`, `chat_sdk_subscriptions`, `chat_sdk_locks`, `chat_sdk_lists` |
-| 003 | `003-pending-approvals.ts` | `pending_approvals` (session-bound + Agent Vault fields) |
 | 004 | `004-agent-destinations.ts` | `agent_destinations` + backfill from existing `messaging_group_agents` wirings |
-| 007 | `007-pending-approvals-title-options.ts` | `ALTER TABLE pending_approvals` add `title`, `options_json` (retrofits DBs created between 003 and 007) |
 | 008 | `008-dropped-messages.ts` | `unregistered_senders` |
 | 009 | `009-drop-pending-credentials.ts` | Drop the defunct `pending_credentials` table |
 | 014 | `014-container-configs.ts` | `container_configs` — per-agent-group container runtime config |
 | 015 | `015-cli-scope.ts` | `ALTER TABLE container_configs ADD COLUMN cli_scope` |
+| 049 | `049-approvals.ts` | Retained `approvals` and private `approval_workflows`; refuses legacy approval storage |
 
 Numbers 005 and 006 are intentionally absent — migrations were renumbered during early development.
 Migration 028 was retired after offline upgrades; historical applied records remain untouched.
+Approval migrations 003, 007 and 045–047 are replaced by 049; their old applied
+names remain audit metadata, not compatibility behavior.
 
 Session DB schemas (`INBOUND_SCHEMA`, `OUTBOUND_SCHEMA`) are **not** versioned here. They describe the complete shape created for every new session; this deployment's existing session DBs are normalized before code begins relying on a newly required table or column. See [db-session.md](db-session.md).

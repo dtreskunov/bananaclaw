@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppInfo, Connection, CredentialGroup, Service } from './CredentialsApi';
+import type { AccountInteraction } from '../../../../shared/approval';
+import { testAccountInteraction } from '../conversation-test-fixtures';
 import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnectionDialog } from './CredentialsDialogs';
 import {
   ConfirmCredentialAction,
@@ -20,7 +22,7 @@ import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
 import type { OAuthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
-import { ApprovalCard, ApprovalCardFrame } from './ApprovalCard';
+import { ApprovalCardFrame } from './ApprovalCard';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { AccessRequestReview } from './AccessRequestReview';
 import { AccessRequestCard } from './AccessRequestCard';
@@ -35,6 +37,7 @@ const hooks = vi.hoisted(() => {
     effects: [] as (() => void | (() => void))[],
     urls: [] as string[],
     resource: { data: null as unknown, error: '', loading: false, refresh: vi.fn().mockResolvedValue(undefined) },
+    request: null as AccountInteraction | null,
   };
 });
 vi.mock('preact/hooks', () => ({
@@ -61,16 +64,7 @@ vi.mock('./CredentialsParts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./CredentialsParts')>()),
   useCredentialResource: (url: string) => {
     hooks.urls.push(url);
-    const data = hooks.resource.data;
-    return data && typeof data === 'object' && 'request_id' in data
-      ? {
-          ...hooks.resource,
-          data: {
-            ...data,
-            origin: { agentGroupId: 'one', threadId: 'thread-one', channelType: 'web', messagingGroupId: 'web-one' },
-          },
-        }
-      : hooks.resource;
+    return hooks.resource;
   },
 }));
 vi.mock('./Toast', () => ({ showToast: vi.fn() }));
@@ -111,6 +105,7 @@ beforeEach(() => {
   hooks.cursor = 0;
   hooks.effects = [];
   hooks.urls = [];
+  hooks.request = testAccountInteraction();
   hooks.resource = {
     data: structuredClone(original),
     error: '',
@@ -192,17 +187,13 @@ function render(node: { type: unknown; props: unknown }): TestNode {
 
 describe('assisted credential approval UI', () => {
   it('surfaces a newly created credential that did not receive requested scopes without choosing a fallback', () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      status: 'pending',
-      resource_url: 'https://api.example.com/',
-      reason: 'Read mail',
-      revision: 1,
-      agent_group_id: 'one',
-      result: null,
-      authentication: { type: 'mcp_oauth' },
-      scopes: ['read'],
-    };
+    hooks.request = testAccountInteraction({
+      requirements: {
+        reason: 'Read mail',
+        authentication: { type: 'mcp_oauth' },
+        scopes: ['read'],
+      },
+    });
     const created: Connection = {
       ...original,
       id: 'new-oauth',
@@ -212,7 +203,7 @@ describe('assisted credential approval UI', () => {
     };
     const onManage = vi.fn();
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [original, created],
       preferredConnectionId: created.id,
       onCreate: vi.fn(),
@@ -231,17 +222,12 @@ describe('assisted credential approval UI', () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
   it('lists only URL/mechanism-compatible credentials and starts setup separately before creation', async () => {
-    const request = {
-      request_id: 'access-one',
-      status: 'pending',
-      resource_url: 'https://api.example.com/',
-      reason: 'Read the report',
-      revision: 1,
-      agent_group_id: 'one',
-      result: null,
-      authentication: { type: 'basic' as const },
-    };
-    hooks.resource.data = request;
+    const request = testAccountInteraction({
+      requirements: {
+        authentication: { type: 'basic' as const },
+      },
+    });
+    hooks.request = request;
     const wrongUrl = {
       ...original,
       id: 'wrong-url',
@@ -254,7 +240,7 @@ describe('assisted credential approval UI', () => {
     };
     const onCreate = vi.fn();
     const node = AccessRequestReview({
-      id: request.request_id,
+      request: hooks.request!,
       connections: [original, wrongUrl, wrongMethod],
       onCreate,
       onManage: vi.fn(),
@@ -268,7 +254,7 @@ describe('assisted credential approval UI', () => {
     await descendants(node)
       .find((child) => child.type === 'button' && child.props.children === 'Add account')!
       .props.onClick();
-    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining(request));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining(request.requirements));
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/ui/chat/api/credentials/access-requests/access-one/setup');
   });
   it('prefills researched MCP OAuth settings but starts consent only on an explicit action', () => {
@@ -362,70 +348,24 @@ describe('assisted credential approval UI', () => {
     expect(JSON.stringify(node)).not.toContain('Sign in as yourself');
     expect(JSON.stringify(node)).not.toContain('Account for these tools');
   });
-  it('uses a non-authorizing review action while retaining ordinary approval buttons', () => {
-    const onReview = vi.fn(),
-      onRespond = vi.fn();
-    const approval = {
-      approvalId: 'access-one',
-      action: 'request_access',
-      title: 'Request access',
-      details: 'Read calendar',
-      packages: null,
-      options: [
-        { label: 'Review access', value: 'review', selectedLabel: 'Review' },
-        { label: 'Reject', value: 'reject', selectedLabel: 'Rejected' },
-      ],
-      agentGroupId: 'one',
-      agentGroupName: 'One',
-      createdAt: '2026-01-01',
-      origin: { agentGroupId: 'one', threadId: 'thread-one', channelType: 'web', messagingGroupId: 'web-one' },
-      reviewRequired: true,
-      stage: 'pending',
-    };
-    const card = ApprovalCard({ approval, busy: false, onReview, onRespond });
-    const buttons = descendants(card).filter((node) => node.type === 'button');
-    buttons[0].props.onClick();
-    expect(onReview).toHaveBeenCalledOnce();
-    expect(onRespond).not.toHaveBeenCalled();
-    buttons[1].props.onClick();
-    expect(onRespond).toHaveBeenCalledWith('reject');
-    const simple = ApprovalCard({
-      approval: {
-        ...approval,
-        action: 'install_packages',
-        reviewRequired: false,
-        options: [{ label: 'Approve', value: 'approve', selectedLabel: 'Approved' }],
-      },
-      busy: false,
-      onReview,
-      onRespond,
-    });
-    descendants(simple)
-      .find((node) => node.type === 'button')!
-      .props.onClick();
-    expect(onRespond).toHaveBeenCalledWith('approve');
-  });
 
   it('reopens failed requests without granting access or retaining the account or server choice', async () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
+    hooks.request = testAccountInteraction({
       status: 'failed',
       revision: 3,
-      resource_url: 'https://api.example.com/',
-      reason: 'Read the report',
-      result: { message: 'Grant may already exist.' },
-    };
+      outcomeMessage: { message: 'Grant may already exist.' }.message,
+    });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')));
     const onSaved = vi.fn();
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [original],
       onCreate: vi.fn(),
       onManage: vi.fn(),
       onSaved,
     }) as TestNode;
     hooks.slots[0] = original.id;
-    hooks.slots[4] = true;
+    hooks.slots[5] = true;
     const retry = descendants(node).find(
       (child) => child.type === 'button' && child.props.children === 'Review and retry',
     )!;
@@ -435,29 +375,21 @@ describe('assisted credential approval UI', () => {
     const [url, options] = vi.mocked(fetch).mock.calls[0];
     expect(url).toBe('/ui/chat/api/credentials/access-requests/access-one/retry');
     expect(JSON.parse(String(options?.body))).toEqual({ request_revision: 3 });
-    expect(hooks.resource.refresh).toHaveBeenCalled();
+    expect(hooks.urls).not.toContain('/ui/chat/api/credentials/access-requests/access-one');
     expect(hooks.slots[0]).toBe('');
-    expect(hooks.slots[4]).toBe(false);
+    expect(hooks.slots[5]).toBe(false);
   });
 
   it('uses the Allow access button as confirmation without a checkbox or permission notice', async () => {
-    const request = {
-      request_id: 'access-one',
-      status: 'pending',
-      resource_url: 'https://api.example.com/',
-      reason: 'Read the report',
-      revision: 1,
-      agent_group_id: 'one',
-      result: null,
-    };
-    hooks.resource.data = request;
+    const request = testAccountInteraction({});
+    hooks.request = request;
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(
         async () =>
           new Response(
             JSON.stringify({
-              request,
+              requestRevision: request.revision,
               connection: original,
               matches: true,
               grantBreadth: 'All current and future URL patterns.',
@@ -466,11 +398,11 @@ describe('assisted credential approval UI', () => {
           ),
       ),
     );
-    const props = { id: 'access-one', connections: [original], onCreate: vi.fn(), onManage: vi.fn(), onSaved: vi.fn() };
+    const props = { connections: [original], onCreate: vi.fn(), onManage: vi.fn(), onSaved: vi.fn() };
     const draw = (): TestNode => {
       hooks.cursor = 0;
       hooks.effects = [];
-      return AccessRequestReview(props) as TestNode;
+      return AccessRequestReview({ ...props, request: hooks.request! }) as TestNode;
     };
     let node = draw();
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
@@ -525,27 +457,29 @@ describe('assisted credential approval UI', () => {
       request_revision: 1,
       configure_mcp: false,
     });
+    node = draw();
+    expect(allow().props.disabled).toBe(true);
+    expect(descendants(node).some((child) => child.props.children === 'Waiting for confirmation…')).toBe(true);
+    expect(hooks.urls).not.toContain('/ui/chat/api/credentials/access-requests/access-one');
+    hooks.request = { ...hooks.request!, status: 'completed', revision: hooks.request!.revision + 1 };
+    node = draw();
+    expect(descendants(node).some((child) => child.props.children === 'Access granted.')).toBe(true);
   });
 
   it('keeps named MCP setup compact and defaults the nickname to the selected account', async () => {
-    const request = {
-      request_id: 'access-one',
-      status: 'pending',
-      resource_url: 'https://api.example.com/',
-      reason: 'Read the report',
-      revision: 1,
-      agent_group_id: 'one',
-      mcp_server: 'search',
-      result: null,
-    };
-    hooks.resource.data = request;
+    const request = testAccountInteraction({
+      requirements: {
+        mcp_server: 'search',
+      },
+    });
+    hooks.request = request;
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(
         async () =>
           new Response(
             JSON.stringify({
-              request,
+              requestRevision: request.revision,
               connection: original,
               matches: true,
               grantBreadth: 'Full access',
@@ -565,7 +499,7 @@ describe('assisted credential approval UI', () => {
       hooks.cursor = 0;
       hooks.effects = [];
       return AccessRequestReview({
-        id: request.request_id,
+        request: hooks.request!,
         connections: [original],
         onCreate: vi.fn(),
         onManage: vi.fn(),
@@ -614,21 +548,20 @@ describe('assisted credential approval UI', () => {
 
 describe('transcript access review presentation', () => {
   it('opens account setup without showing permission controls in the transcript', async () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      purpose: 'account',
-      status: 'pending',
+    hooks.request = testAccountInteraction({
+      kind: 'account_setup',
       revision: 2,
-      resource_url: 'https://mcp.example.com/mcp',
-      authentication: { type: 'mcp_oauth' },
-      result: null,
-    };
+      requirements: {
+        resource_url: 'https://mcp.example.com/mcp',
+        authentication: { type: 'mcp_oauth' },
+      },
+    });
     const onCreate = vi.fn();
     const draw = () => {
       hooks.cursor = 0;
       hooks.effects = [];
       return AccessRequestReview({
-        id: 'access-one',
+        request: hooks.request!,
         connections: [],
         onCreate,
         onManage: vi.fn(),
@@ -645,16 +578,12 @@ describe('transcript access review presentation', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
   it('filters ready accounts by enabled permissions, not previously requested permissions', () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      purpose: 'access',
-      status: 'pending',
-      revision: 1,
-      resource_url: 'https://api.example.com/',
-      authentication: { type: 'mcp_oauth' },
-      scopes: ['read'],
-      result: null,
-    };
+    hooks.request = testAccountInteraction({
+      requirements: {
+        authentication: { type: 'mcp_oauth' },
+        scopes: ['read'],
+      },
+    });
     const account: Connection = {
       ...original,
       kind: 'mcp_oauth',
@@ -663,7 +592,7 @@ describe('transcript access review presentation', () => {
       scope_source: 'provider',
     };
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [
         account,
         { ...account, id: 'missing-permission', granted_scopes: ['write'] },
@@ -683,29 +612,30 @@ describe('transcript access review presentation', () => {
     ).toHaveLength(2);
   });
   it('shows all enabled account permissions rather than implying the request is a permission ceiling', async () => {
-    const request = {
-      request_id: 'access-one',
-      status: 'pending',
-      revision: 1,
-      purpose: 'access',
-      resource_url: 'https://api.example.com/',
-      authentication: { type: 'mcp_oauth' },
-      scopes: ['read'],
-      result: null,
-    };
+    const request = testAccountInteraction({
+      requirements: {
+        authentication: { type: 'mcp_oauth' },
+        scopes: ['read'],
+      },
+    });
     const account: Connection = {
       ...original,
       kind: 'mcp_oauth',
       granted_scopes: ['read', 'write'],
       scope_source: 'provider',
     };
-    hooks.resource.data = request;
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ request, connection: account, matches: true })));
+    hooks.request = request;
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(Response.json({ requestRevision: request.revision, connection: account, matches: true })),
+    );
     const draw = () => {
       hooks.cursor = 0;
       hooks.effects = [];
       return AccessRequestReview({
-        id: 'access-one',
+        request: hooks.request!,
         connections: [account],
         onCreate: vi.fn(),
         onManage: vi.fn(),
@@ -739,7 +669,7 @@ describe('transcript access review presentation', () => {
     const draw = () => {
       hooks.cursor = 0;
       hooks.effects = [];
-      return AccessRequestCard({ id: 'access-one' }) as TestNode;
+      return AccessRequestCard({ request: hooks.request! }) as TestNode;
     };
     let node = draw();
     const review = find(node, AccessRequestReview);
@@ -750,19 +680,18 @@ describe('transcript access review presentation', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
   it('shows only relevant OAuth setup information with no empty account picker', () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      purpose: 'account',
-      status: 'pending',
+    hooks.request = testAccountInteraction({
+      kind: 'account_setup',
       revision: 2,
-      resource_url: 'https://mcp.example.com/mcp',
-      reason: 'A lengthy explanation of the missing account.',
-      authentication: { type: 'mcp_oauth', app_id: 'provider' },
-      scopes: ['read'],
-      result: null,
-    };
+      requirements: {
+        resource_url: 'https://mcp.example.com/mcp',
+        reason: 'A lengthy explanation of the missing account.',
+        authentication: { type: 'mcp_oauth', app_id: 'provider' },
+        scopes: ['read'],
+      },
+    });
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [],
       apps: [
         {
@@ -800,23 +729,20 @@ describe('transcript access review presentation', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
   it('reports an unavailable setup API without flashing a dialog or starting sign-in', async () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      purpose: 'access',
-      status: 'pending',
-      revision: 1,
-      resource_url: 'https://mcp.example.com/mcp',
-      authentication: { type: 'mcp_oauth' },
-      scopes: ['read'],
-      result: null,
-    };
+    hooks.request = testAccountInteraction({
+      requirements: {
+        resource_url: 'https://mcp.example.com/mcp',
+        authentication: { type: 'mcp_oauth' },
+        scopes: ['read'],
+      },
+    });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ error: 'not_found' }, { status: 404 })));
     const onCreate = vi.fn();
     const draw = () => {
       hooks.cursor = 0;
       hooks.effects = [];
       return AccessRequestReview({
-        id: 'access-one',
+        request: hooks.request!,
         connections: [],
         onCreate,
         onManage: vi.fn(),
@@ -836,17 +762,15 @@ describe('transcript access review presentation', () => {
     expect(onCreate).not.toHaveBeenCalled();
   });
   it('hides draft account controls while OAuth sign-in is pending', () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      purpose: 'account',
-      status: 'pending',
+    hooks.request = testAccountInteraction({
+      kind: 'account_setup',
       revision: 2,
-      resource_url: 'https://api.example.com/',
-      authentication: { type: 'mcp_oauth' },
-      result: null,
-    };
+      requirements: {
+        authentication: { type: 'mcp_oauth' },
+      },
+    });
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [{ ...original, kind: 'mcp_oauth', status: 'draft' }],
       signingIn: true,
       signInMessage: 'Sign in',
@@ -867,7 +791,7 @@ describe('transcript access review presentation', () => {
     const draw = () => {
       hooks.cursor = 0;
       hooks.effects = [];
-      return AccessRequestCard({ id: 'access-one' }) as TestNode;
+      return AccessRequestCard({ request: hooks.request! }) as TestNode;
     };
     let node = draw();
     const review = find(node, AccessRequestReview);
@@ -889,17 +813,13 @@ describe('transcript access review presentation', () => {
     expect(wide.props.maxWidth).toBe('760px');
   });
   it('shows an account setup request without an impossible Allow access action', () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      status: 'pending',
-      revision: 1,
-      purpose: 'access',
-      resource_url: 'https://api.example.com/',
-      reason: 'Finish the report',
-      result: null,
-    };
+    hooks.request = testAccountInteraction({
+      requirements: {
+        reason: 'Finish the report',
+      },
+    });
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [],
       onCreate: vi.fn(),
       onManage: vi.fn(),
@@ -919,17 +839,13 @@ describe('transcript access review presentation', () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
   it('treats a ready account with suspended agent access as an access request', () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      status: 'pending',
-      revision: 1,
-      purpose: 'access',
-      resource_url: 'https://api.example.com/',
-      reason: 'Finish the report',
-      result: null,
-    };
+    hooks.request = testAccountInteraction({
+      requirements: {
+        reason: 'Finish the report',
+      },
+    });
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [{ ...original, grants: [{ vault: 'one', services: ['basic'], status: 'suspended' }] }],
       onCreate: vi.fn(),
       onManage: vi.fn(),
@@ -942,21 +858,19 @@ describe('transcript access review presentation', () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
   it('confirms setup using a metadata-only endpoint, never the grant endpoint', async () => {
-    const request = {
-      request_id: 'access-one',
-      purpose: 'account',
-      status: 'pending',
+    const request = testAccountInteraction({
+      kind: 'account_setup',
       revision: 2,
-      resource_url: 'https://api.example.com/',
-      reason: 'Finish the report',
-      result: null,
-    };
-    hooks.resource.data = request;
+      requirements: {
+        reason: 'Finish the report',
+      },
+    });
+    hooks.request = request;
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
         Response.json({
-          request,
+          requestRevision: request.revision,
           connection: original,
           matches: true,
           mcp: { names: ['search'], revision: 'config' },
@@ -968,7 +882,7 @@ describe('transcript access review presentation', () => {
       hooks.cursor = 0;
       hooks.effects = [];
       return AccessRequestReview({
-        id: 'access-one',
+        request: hooks.request!,
         connections: [original],
         onCreate: vi.fn(),
         onManage: vi.fn(),
@@ -1004,18 +918,15 @@ describe('transcript access review presentation', () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/apply'))).toBe(false);
   });
   it('reuses approval-card framing and distinguishes identically named tools and accounts', () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      status: 'pending',
-      revision: 1,
-      resource_url: 'https://api.example.com/',
-      reason: 'Finish the report',
-      agent_group_name: 'My Agent',
-      mcp_server: 'SnapTrade',
-      result: null,
-    };
+    hooks.request = testAccountInteraction({
+      agentGroupName: 'My Agent',
+      requirements: {
+        reason: 'Finish the report',
+        mcp_server: 'SnapTrade',
+      },
+    });
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [{ ...original, label: 'SnapTrade', account: 'you@example.com' }],
       onCreate: vi.fn(),
       onManage: vi.fn(),
@@ -1039,7 +950,7 @@ describe('transcript access review presentation', () => {
     const draw = () => {
       hooks.cursor = 0;
       hooks.effects = [];
-      return AccessRequestCard({ id: 'access-one' }) as TestNode;
+      return AccessRequestCard({ request: hooks.request! }) as TestNode;
     };
     let node = draw();
     const review = descendants(node).find((child) => child.type === AccessRequestReview)!;
@@ -1060,17 +971,14 @@ describe('transcript access review presentation', () => {
   });
 
   it('keeps loading failures retryable without enabling approval', () => {
-    hooks.resource.data = {
-      request_id: 'access-one',
-      status: 'pending',
-      revision: 1,
-      resource_url: 'https://api.example.com/',
-      reason: 'Read',
-      result: null,
-    };
+    hooks.request = testAccountInteraction({
+      requirements: {
+        reason: 'Read',
+      },
+    });
     const onReloadAccounts = vi.fn();
     const node = AccessRequestReview({
-      id: 'access-one',
+      request: hooks.request!,
       connections: [],
       accountsError: 'Could not load accounts',
       onReloadAccounts,
@@ -1090,7 +998,7 @@ describe('transcript access review presentation', () => {
   });
 
   it('opens the original chat from an existing private review link without applying access', () => {
-    hooks.resource.data = { request_id: 'access-one' };
+    hooks.resource.data = hooks.request;
     vi.stubGlobal('location', {
       href: 'https://nanoclaw.example/?access_request=access-one#credentials',
       hash: '#credentials',

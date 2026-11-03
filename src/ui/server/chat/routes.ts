@@ -27,13 +27,13 @@ import { createGroup, GroupCreateError } from '../../../modules/groups/create.js
 import { deleteSubscriptionByEndpoint, upsertSubscription } from '../../../modules/push/db.js';
 import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
-import type { PendingApproval } from '../../../types.js';
-import type { QuestionResponse } from '../../shared/question-response.js';
+import type { Approval } from '../../../types.js';
+import { questionAcceptsResponse, type QuestionResponse } from '../../shared/question.js';
+import { isQuestionResponse } from '../../shared/conversation-protocol.js';
 import { ApprovalMessageError, parseApprovalMessage } from '../../shared/approval-message.js';
-import { approvalOrigin } from './approval-transcript.js';
+import { projectApproval } from './approval-transcript.js';
 import { isVoiceDiagnostic } from '../../shared/voice.js';
-import { presentApproval, type ApprovalPackageLists } from './approval-presentation.js';
-import { getApprovalWorkflow } from '../../../modules/approvals/workflows.js';
+import type { ConversationApproval } from '../../shared/approval.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
 import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js';
@@ -52,7 +52,7 @@ import {
   resolveTurnContext,
   viewerHasContent,
 } from './chat.js';
-import type { ThreadSummary } from './chat.js';
+import type { ThreadSummary } from '../../shared/thread.js';
 import { handleGroupAdminRequest } from './group-admin.js';
 import { handleCredentialsRequest } from './credentials-admin.js';
 import { usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';
@@ -292,12 +292,6 @@ on(
   'POST',
   '/api/groups/:gid/private-web-session',
   authed((ctx, userId, params, sessionHash) => handleCreatePrivateWebSession(ctx, userId, sessionHash, params.gid)),
-);
-// Pending approvals visible to this user (banner inbox in ChatMain).
-on(
-  'GET',
-  '/api/approvals',
-  authed((ctx, userId) => handleListApprovals(ctx, userId)),
 );
 on(
   'POST',
@@ -562,35 +556,20 @@ async function handleCreateGroup(ctx: Ctx, userId: string): Promise<void> {
   });
 }
 
-interface ApprovalDto {
-  approvalId: string;
-  action: string;
-  title: string;
-  details: string | null;
-  packages: ApprovalPackageLists | null;
-  options: { label: string; selectedLabel: string; value: string }[];
-  agentGroupId: string | null;
-  agentGroupName: string | null;
-  createdAt: string;
-  reviewRequired?: boolean;
-  stage?: string;
-  supportsResponseMessage: boolean;
-  origin: ReturnType<typeof approvalOrigin>;
-}
+type ApprovalDto = ConversationApproval;
 
-function approvalGroupId(row: PendingApproval): string | null {
+function approvalGroupId(row: { agent_group_id?: string | null; session_id: string | null }): string | null {
   return row.agent_group_id ?? (row.session_id ? (getSession(row.session_id)?.agent_group_id ?? null) : null);
 }
 
 function listApprovalsForUser(userId: string): ApprovalDto[] {
-  // pending_approvals are unbounded global rows; filter to those the user
+  // approvals are unbounded global rows; filter to those the user
   // is eligible to approve. Owner/global-admin sees all (incl. agent_group_id IS NULL);
   // a scoped admin sees only rows for their agent groups.
   const rows = getDb()
-    .prepare("SELECT * FROM pending_approvals WHERE status = 'pending' ORDER BY created_at DESC")
-    .all() as PendingApproval[];
+    .prepare("SELECT * FROM approvals WHERE status IN ('pending','applying') ORDER BY created_at DESC")
+    .all() as Approval[];
   const elevated = isOwner(userId) || isGlobalAdmin(userId);
-  const groupNameCache = new Map<string, string | null>();
   const visible: ApprovalDto[] = [];
   for (const r of rows) {
     const scope = approvalGroupId(r);
@@ -599,74 +578,9 @@ function listApprovalsForUser(userId: string): ApprovalDto[] {
     } else if (!hasAdminPrivilege(userId, scope)) {
       continue;
     }
-    // Display group: prefer row.agent_group_id; fall back to the session's
-    // agent group (cli_command rows have null agent_group_id but their
-    // session is scoped to one).
-    let displayGroupId: string | null = r.agent_group_id;
-    if (displayGroupId == null && r.session_id) {
-      const s = getSession(r.session_id);
-      displayGroupId = s?.agent_group_id ?? null;
-    }
-    let groupName: string | null = null;
-    if (displayGroupId) {
-      if (groupNameCache.has(displayGroupId)) {
-        groupName = groupNameCache.get(displayGroupId) ?? null;
-      } else {
-        const g = getAgentGroup(displayGroupId);
-        groupName = g?.name ?? null;
-        groupNameCache.set(displayGroupId, groupName);
-      }
-    }
-    let options: { label: string; selectedLabel: string; value: string }[] = [];
-    try {
-      const parsed = JSON.parse(r.options_json) as { label?: string; selectedLabel?: string; value?: string }[];
-      if (Array.isArray(parsed)) {
-        options = parsed
-          .filter((o) => o && typeof o.label === 'string' && typeof o.value === 'string')
-          .map((o) => ({
-            label: o.label as string,
-            selectedLabel: typeof o.selectedLabel === 'string' ? o.selectedLabel : (o.label as string),
-            value: o.value as string,
-          }));
-      }
-    } catch {
-      // ignore — fall back to empty options
-    }
-    const presentation = presentApproval(r.action, r.payload);
-    const workflow = getApprovalWorkflow(r.approval_id);
-    visible.push({
-      approvalId: r.approval_id,
-      action: r.action,
-      title: r.title,
-      details: presentation.details,
-      packages: presentation.packages,
-      options,
-      agentGroupId: displayGroupId,
-      agentGroupName: groupName,
-      createdAt: r.created_at,
-      supportsResponseMessage: r.session_id !== null,
-      origin: approvalOrigin(userId, r),
-      ...(workflow
-        ? {
-            reviewRequired: true,
-            stage: workflow.stage,
-            ...(r.action === 'request_access'
-              ? {
-                  purpose:
-                    (JSON.parse(workflow.origin_json) as { purpose?: string }).purpose === 'account'
-                      ? ('account' as const)
-                      : ('access' as const),
-                }
-              : {}),
-          }
-        : {}),
-    });
+    visible.push(projectApproval(userId, r));
   }
   return visible;
-}
-
-function handleListApprovals(ctx: Ctx, userId: string): void {
-  json(ctx, 200, { approvals: listApprovalsForUser(userId) });
 }
 
 interface SyncResponse {
@@ -710,9 +624,7 @@ async function handleSync(ctx: Ctx, userId: string): Promise<void> {
 }
 
 async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: string): Promise<void> {
-  const row = getDb().prepare('SELECT * FROM pending_approvals WHERE approval_id = ?').get(approvalId) as
-    | PendingApproval
-    | undefined;
+  const row = getDb().prepare('SELECT * FROM approvals WHERE approval_id = ?').get(approvalId) as Approval | undefined;
 
   // If the ID doesn't match a pending approval, it might be a pending question
   // (ask_user_question). Both use the same dispatchResponse chain, so fall
@@ -742,10 +654,13 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   }
   if (message && !row?.session_id)
     return json(ctx, 400, { error: 'This approval has no originating conversation for a message.' });
-  let response: QuestionResponse;
-  if (body?.responseType === 'skipped') {
-    if (body.value !== undefined) return json(ctx, 400, { error: 'skip_has_no_value' });
-    if (row) return json(ctx, 400, { error: 'approval_cannot_be_skipped' });
+  let response: QuestionResponse | { value: string };
+  if (row) {
+    if (body?.responseType === 'skipped') return json(ctx, 400, { error: 'approval_cannot_be_skipped' });
+    if (body?.responseType !== undefined) return json(ctx, 400, { error: 'invalid_response_type' });
+    if (typeof body?.value !== 'string' || !body.value) return json(ctx, 400, { error: 'value_required' });
+    response = { value: body.value };
+  } else {
     const question = getQuestion(approvalId);
     if (!question) return json(ctx, 404, { error: 'not_found' });
     if (question.status === 'cancelled') return json(ctx, 409, { error: 'question_cancelled' });
@@ -767,13 +682,9 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
       !routeMatches(context, question.channel_type, question.platform_id, question.thread_id)
     )
       return json(ctx, 403, { error: 'forbidden' });
-    response = { responseType: 'skipped' };
-  } else {
-    if (body?.responseType !== undefined && body.responseType !== 'answer')
-      return json(ctx, 400, { error: 'invalid_response_type' });
-    const value = typeof body?.value === 'string' ? body.value : null;
-    if (!value) return json(ctx, 400, { error: 'value_required' });
-    response = { value };
+    if (!isQuestionResponse(body) || !questionAcceptsResponse(question.response_mode, question.options, body))
+      return json(ctx, 400, { error: 'invalid_question_response' });
+    response = body;
   }
 
   const claimed = await dispatchResponse({

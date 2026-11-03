@@ -30,9 +30,7 @@ function currentInputKey(id: string): string {
     {
       threadId: threadId.value!,
       channelType: channelType.value,
-      messagingGroupId: messagingGroupId.value ?? undefined,
-      title: '',
-      lastActivityAt: '',
+      messagingGroupId: messagingGroupId.value,
     },
     id,
   );

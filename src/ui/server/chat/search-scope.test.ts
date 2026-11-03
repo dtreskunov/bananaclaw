@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildViewerSearchConversations, type ThreadSummary } from './chat.js';
+import { buildViewerSearchConversations } from './chat.js';
+import type { ThreadSummary } from '../../shared/thread.js';
 
 function thread(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
   return {

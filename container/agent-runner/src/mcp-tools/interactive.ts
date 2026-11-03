@@ -5,7 +5,7 @@
  * The answer arrives as a future interactive_response provider turn.
  */
 import { getCurrentInReplyTo } from '../current-batch.js';
-import { openInboundDb, getOutboundDb } from '../db/connection.js';
+import { getInboundDb, getOutboundDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
 import { registerTools } from './tool-registry.js';
@@ -32,35 +32,11 @@ function err(text: string) {
 }
 
 function hasOutstandingQuestion(): boolean {
-  const outbound = getOutboundDb();
-  const inbound = openInboundDb();
-  try {
-    const questions = outbound
-      .prepare("SELECT content FROM messages_out WHERE kind = 'chat-sdk' AND content LIKE '%\"type\":\"ask_question\"%'")
-      .all() as Array<{ content: string }>;
-    const answered = new Set(
-      (inbound
-        .prepare("SELECT content FROM messages_in WHERE kind = 'interactive_response'")
-        .all() as Array<{ content: string }>).flatMap((row) => {
-          try {
-            const content = JSON.parse(row.content) as { questionId?: string };
-            return content.questionId ? [content.questionId] : [];
-          } catch {
-            return [];
-          }
-        }),
-    );
-    return questions.some((row) => {
-      try {
-        const content = JSON.parse(row.content) as { questionId?: string };
-        return !!content.questionId && !answered.has(content.questionId);
-      } catch {
-        return false;
-      }
-    });
-  } finally {
-    inbound.close();
-  }
+  const response = getInboundDb().prepare("SELECT 1 FROM messages_in WHERE id=? AND kind='interactive_response'");
+  const questions = getOutboundDb().prepare(
+    "SELECT id FROM messages_out WHERE kind='chat-sdk' AND json_extract(content,'$.type')='ask_question'",
+  ).all() as { id: string }[];
+  return questions.some(question => !response.get(`question-response:${question.id}`));
 }
 
 export const askUserQuestion: McpToolDefinition = {
@@ -107,6 +83,12 @@ export const askUserQuestion: McpToolDefinition = {
     const rawOptions = (args.options as unknown[] | undefined) ?? [];
     if (!question || !['choice', 'text', 'choice_or_text'].includes(responseMode)) {
       return err('question and responseMode are required');
+    }
+    if (
+      (args.placeholder !== undefined && typeof args.placeholder !== 'string') ||
+      (args.multiline !== undefined && typeof args.multiline !== 'boolean')
+    ) {
+      return err('placeholder must be text and multiline must be a boolean');
     }
     if (responseMode !== 'text' && rawOptions.length === 0) {
       return err('options are required for choice questions');

@@ -1,7 +1,9 @@
-import type { PendingApproval, Question, Session } from '../types.js';
+import type { Approval, Question, Session } from '../types.js';
+import type { QuestionResponse } from '../ui/shared/question.js';
 import { getDb, hasTable } from './connection.js';
 import { invalidateConversation } from '../conversation-events.js';
-import { archiveApprovalRequest } from './approval-history.js';
+
+import { getApproval } from './approvals.js';
 
 // ── Sessions ──
 
@@ -108,7 +110,7 @@ export class SessionApprovalInProgressError extends Error {
 // Execution is process-local; keep the session guarded through callbacks and wake.
 const executingApprovals = new Map<string, string>();
 
-export function beginApprovalExecution(approval: PendingApproval): boolean {
+export function beginApprovalExecution(approval: Approval): boolean {
   if (executingApprovals.has(approval.approval_id)) return false;
   if (approval.session_id) executingApprovals.set(approval.approval_id, approval.session_id);
   return true;
@@ -122,21 +124,31 @@ export function isApprovalExecuting(approvalId: string): boolean {
   return executingApprovals.has(approvalId);
 }
 
+export function assertGroupApprovalsIdle(groupId: string): void {
+  const approvals = getDb()
+    .prepare(
+      `SELECT approval_id,status FROM approvals WHERE agent_group_id=?
+     OR session_id IN (SELECT id FROM sessions WHERE agent_group_id=?)`,
+    )
+    .all(groupId, groupId) as Pick<Approval, 'approval_id' | 'status'>[];
+  if (approvals.some((row) => row.status === 'applying' || isApprovalExecuting(row.approval_id)))
+    throw new Error(
+      'An approval is being processed for this group. Wait for it to finish before archiving or deleting.',
+    );
+}
+
 export function deleteSession(id: string, cancelApprovals = false): number {
   if ([...executingApprovals.values()].includes(id)) throw new SessionApprovalInProgressError();
   const db = getDb();
   return db.transaction(() => {
-    let cancelledApprovals = 0;
-    if (hasTable(db, 'pending_approvals')) {
-      const approval = db
-        .prepare("SELECT 1 FROM pending_approvals WHERE session_id = ? AND status='pending' LIMIT 1")
-        .get(id);
-      if (approval && !cancelApprovals) throw new SessionApprovalCancellationRequiredError();
-      cancelledApprovals = db
-        .prepare("DELETE FROM pending_approvals WHERE session_id = ? AND status='pending'")
-        .run(id).changes;
-      db.prepare('DELETE FROM pending_approvals WHERE session_id = ?').run(id);
-    }
+    if (db.prepare("SELECT 1 FROM approvals WHERE session_id=? AND status='applying'").get(id))
+      throw new SessionApprovalInProgressError();
+    const approval = db.prepare("SELECT 1 FROM approvals WHERE session_id = ? AND status='pending' LIMIT 1").get(id);
+    if (approval && !cancelApprovals) throw new SessionApprovalCancellationRequiredError();
+    const cancelledApprovals = db
+      .prepare("DELETE FROM approvals WHERE session_id = ? AND status='pending'")
+      .run(id).changes;
+    db.prepare('DELETE FROM approvals WHERE session_id = ?').run(id);
     db.prepare('DELETE FROM questions WHERE session_id = ?').run(id);
     db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
     return cancelledApprovals;
@@ -151,7 +163,9 @@ export function deleteSession(id: string, cancelApprovals = false): number {
  * IGNORE` that would throw UNIQUE and prevent the retry from reaching the
  * actual send step. Returns true if a new row was inserted.
  */
-export function createQuestion(question: Question): boolean {
+export function createQuestion(
+  question: Omit<Question, 'status' | 'answer_value' | 'answer_type' | 'answered_by' | 'answered_at' | 'cancelled_at'>,
+): boolean {
   const result = getDb()
     .prepare(
       `INSERT OR IGNORE INTO questions
@@ -160,8 +174,8 @@ export function createQuestion(question: Question): boolean {
           answered_by, answered_at, cancelled_at, created_at)
        VALUES
          (@question_id, @session_id, @message_out_id, @in_reply_to, @platform_id, @channel_type, @thread_id,
-          @question_text, @response_mode, @options_json, @status, @answer_value, @answer_type,
-          @answered_by, @answered_at, @cancelled_at, @created_at)`,
+          @question_text, @response_mode, @options_json, 'pending', NULL, NULL,
+          NULL, NULL, NULL, @created_at)`,
     )
     .run({
       ...question,
@@ -182,7 +196,7 @@ export function getQuestion(questionId: string): Question | undefined {
 
 export function answerQuestion(
   questionId: string,
-  answer: ({ value: string; type: 'choice' | 'text' } | { value: null; type: 'skipped' }) & {
+  answer: QuestionResponse & {
     userId: string | null;
     answeredAt: string;
   },
@@ -190,74 +204,14 @@ export function answerQuestion(
   const result = getDb()
     .prepare(
       `UPDATE questions
-          SET status = 'answered', answer_value = @value, answer_type = @type,
+          SET status = 'answered', answer_value = @value, answer_type = @responseType,
               answered_by = @userId, answered_at = @answeredAt
         WHERE question_id = @questionId AND status = 'pending'`,
     )
-    .run({ questionId, ...answer });
+    .run({ questionId, ...answer, value: answer.responseType === 'skipped' ? null : answer.value });
   const sessionId = result.changes ? getQuestion(questionId)?.session_id : undefined;
   if (sessionId) queueMicrotask(() => invalidateConversation(sessionId));
   return result.changes > 0;
-}
-
-// ── Pending Approvals ──
-
-/**
- * Insert a pending approval row. Idempotent for the same reason as
- * createQuestion: delivery retries with the same approval_id must not
- * fail on UNIQUE before the send step gets a chance to succeed.
- */
-export function createPendingApproval(
-  pa: Partial<PendingApproval> &
-    Pick<
-      PendingApproval,
-      'approval_id' | 'request_id' | 'action' | 'payload' | 'created_at' | 'title' | 'options_json'
-    >,
-): boolean {
-  return getDb().transaction(() => {
-    const result = getDb()
-      .prepare(
-        `INSERT OR IGNORE INTO pending_approvals
-         (approval_id, session_id, request_id, action, payload, created_at,
-          agent_group_id, channel_type, platform_id, platform_message_id, expires_at, status,
-          title, options_json, origin_message_id)
-       VALUES
-         (@approval_id, @session_id, @request_id, @action, @payload, @created_at,
-          @agent_group_id, @channel_type, @platform_id, @platform_message_id, @expires_at, @status,
-          @title, @options_json, @origin_message_id)`,
-      )
-      .run({
-        session_id: null,
-        agent_group_id: null,
-        channel_type: null,
-        platform_id: null,
-        platform_message_id: null,
-        expires_at: null,
-        status: 'pending',
-        origin_message_id: null,
-        ...pa,
-      });
-    if (result.changes) archiveApprovalRequest(pa.approval_id);
-    return result.changes > 0;
-  })();
-}
-
-export function getPendingApproval(approvalId: string): PendingApproval | undefined {
-  return getDb().prepare('SELECT * FROM pending_approvals WHERE approval_id = ?').get(approvalId) as
-    | PendingApproval
-    | undefined;
-}
-
-export function updatePendingApprovalStatus(approvalId: string, status: PendingApproval['status']): void {
-  getDb().prepare('UPDATE pending_approvals SET status = ? WHERE approval_id = ?').run(status, approvalId);
-}
-
-export function deletePendingApproval(approvalId: string): void {
-  getDb().prepare('DELETE FROM pending_approvals WHERE approval_id = ?').run(approvalId);
-}
-
-export function getPendingApprovalsByAction(action: string): PendingApproval[] {
-  return getDb().prepare('SELECT * FROM pending_approvals WHERE action = ?').all(action) as PendingApproval[];
 }
 
 type AskQuestionRender = {
@@ -272,13 +226,11 @@ type AskQuestionRender = {
 export function getAskQuestionRender(id: string): AskQuestionRender | undefined {
   const q = getQuestion(id);
   if (q) return { question: q.question_text, options: q.options };
-  const a = getDb().prepare('SELECT title, options_json FROM pending_approvals WHERE approval_id = ?').get(id) as
-    | { title: string; options_json: string }
-    | undefined;
+  const a = getApproval(id);
   if (a?.title) return { title: a.title, options: JSON.parse(a.options_json) };
 
   // Channel-registration + unknown-sender approvals persist title/options_json
-  // the same way pending_approvals does — just SELECT and return.
+  // the same way approvals does — just SELECT and return.
   if (hasTable(getDb(), 'pending_channel_approvals')) {
     const c = getDb()
       .prepare('SELECT title, options_json FROM pending_channel_approvals WHERE messaging_group_id = ?')

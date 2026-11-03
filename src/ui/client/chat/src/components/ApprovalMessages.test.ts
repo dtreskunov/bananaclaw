@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection } from './CredentialsApi';
 import type { PendingApprovalDto } from '../types';
+import { testAccountInteraction } from '../conversation-test-fixtures';
 import { approvalMessageDrafts, clearApprovalMessage } from '../approval-messages';
 import { ApprovalCard } from './ApprovalCard';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
@@ -79,7 +80,10 @@ function button(value: unknown, label: string): Node {
 }
 
 const approval: PendingApprovalDto = {
-  approvalId: 'approval',
+  kind: 'confirmation',
+  status: 'pending',
+
+  id: 'approval',
   action: 'install_packages',
   title: 'Install package',
   details: null,
@@ -94,16 +98,14 @@ const approval: PendingApprovalDto = {
   supportsResponseMessage: true,
   origin: { agentGroupId: 'group', threadId: 'thread', channelType: 'web', messagingGroupId: 'web-mg' },
 };
-const request = {
+const request = testAccountInteraction({
   origin: approval.origin,
-  request_id: 'approval',
+  id: 'approval',
   status: 'pending',
-  resource_url: 'https://api.example.com/items',
-  reason: 'Finish the report',
+  requirements: { resource_url: 'https://api.example.com/items', reason: 'Finish the report' },
   revision: 1,
-  agent_group_id: 'group',
-  result: null,
-};
+  agentGroupId: 'group',
+});
 const connection: Connection = {
   id: 'connection',
   label: 'Account',
@@ -119,7 +121,7 @@ function accessReview() {
   mocks.cursor = 0;
   const onSaved = vi.fn();
   const tree = AccessRequestReview({
-    id: 'approval',
+    request,
     connections: [connection],
     onCreate: vi.fn(),
     onManage: vi.fn(),
@@ -149,14 +151,14 @@ afterEach(() => {
 describe('optional approval messages', () => {
   it('links off-thread requests without decision controls or a message input', () => {
     threadId.value = 'another-thread';
-    const tree = ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond: vi.fn() });
+    const tree = ApprovalCard({ approval, busy: false, onRespond: vi.fn() });
     expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
     expect(nodes(tree).some((node) => node.type === ApprovalMessageInput)).toBe(false);
     expect(nodes(tree).find((node) => node.type === 'a')?.props.href).toBe('#g/group/t/thread');
   });
   it('does not submit a captured approval callback after navigating away', () => {
     const onRespond = vi.fn();
-    const tree = ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond });
+    const tree = ApprovalCard({ approval, busy: false, onRespond });
     threadId.value = 'another-thread';
     button(tree, 'Approve').props.onClick!();
     expect(onRespond).not.toHaveBeenCalled();
@@ -172,7 +174,7 @@ describe('optional approval messages', () => {
           respondedBy: { userId: 'owner', displayName: 'Owner' },
         },
         busy: false,
-        onReview: vi.fn(),
+
         onRespond: vi.fn(),
       });
       expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
@@ -203,43 +205,42 @@ describe('optional approval messages', () => {
   it.each(['Approve', 'Reject'])('includes the note with %s while retaining the separate decision value', (label) => {
     approvalMessageDrafts.value = { approval: '  Keep the original account.  ' };
     const onRespond = vi.fn();
-    const tree = ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond });
+    const tree = ApprovalCard({ approval, busy: false, onRespond });
     button(tree, label).props.onClick!();
     expect(onRespond).toHaveBeenCalledWith(label.toLowerCase(), 'Keep the original account.');
   });
 
-  it('retains a draft when opening private credential review, and hides the input for unsupported approvals', () => {
+  it('retains a draft for private credential review, and hides the input for unsupported approvals', () => {
     approvalMessageDrafts.value = { approval: 'Keep the original account.' };
-    const onReview = vi.fn();
-    const reviewed = {
-      ...approval,
-      reviewRequired: true,
-      options: [{ label: 'Review', selectedLabel: 'Review', value: 'review' }],
-    };
-    const tree = ApprovalCard({ approval: reviewed, busy: false, onReview, onRespond: vi.fn() });
-    button(tree, 'Review').props.onClick!();
-    expect(onReview).toHaveBeenCalledOnce();
-    expect(approvalMessageDrafts.value.approval).toBe('Keep the original account.');
     const unsupported = ApprovalCard({
       approval: { ...approval, supportsResponseMessage: false },
       busy: false,
-      onReview,
       onRespond: vi.fn(),
     });
     expect(nodes(unsupported).some((node) => node.type === ApprovalMessageInput)).toBe(false);
     const { tree: review } = accessReview();
     expect(nodes(review).find((node) => node.type === ApprovalMessageInput)?.props.approvalId).toBe('approval');
+    expect(approvalMessageDrafts.value.approval).toBe('Keep the original account.');
   });
 
   it('keeps decisions without messages backward compatible', () => {
     const onRespond = vi.fn();
-    button(ApprovalCard({ approval, busy: false, onReview: vi.fn(), onRespond }), 'Approve').props.onClick!();
+    button(ApprovalCard({ approval, busy: false, onRespond }), 'Approve').props.onClick!();
     expect(onRespond).toHaveBeenCalledWith('approve');
   });
 
   it('submits the note in the same private Allow access request and clears it after success', async () => {
     approvalMessageDrafts.value = { approval: '  Keep the original account.  ' };
-    mocks.slots = ['connection', { request, connection, matches: true }, false, '', false, '', ''];
+    mocks.slots = [
+      'connection',
+      { requestRevision: request.revision, connection, matches: true },
+      false,
+      undefined,
+      '',
+      false,
+      '',
+      '',
+    ];
     const { tree, onSaved } = accessReview();
     expect(button(tree, 'Allow access').props.disabled).toBe(false);
     button(tree, 'Allow access').props.onClick!();
@@ -257,7 +258,16 @@ describe('optional approval messages', () => {
   it('retains the note after failed private access application', async () => {
     approvalMessageDrafts.value = { approval: 'Do not retry automatically.' };
     vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"Test failure"}', { status: 500 }));
-    mocks.slots = ['connection', { request, connection, matches: true }, false, '', false, '', ''];
+    mocks.slots = [
+      'connection',
+      { requestRevision: request.revision, connection, matches: true },
+      false,
+      undefined,
+      '',
+      false,
+      '',
+      '',
+    ];
     const { tree, onSaved } = accessReview();
     button(tree, 'Allow access').props.onClick!();
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce());

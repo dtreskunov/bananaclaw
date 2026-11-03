@@ -11,8 +11,9 @@ vi.mock('../../../container-runner.js', () => ({
   killContainer: vi.fn(),
 }));
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { createPendingApproval, getPendingApproval, deleteSession } from '../../../db/sessions.js';
-import { getApprovalHistory } from '../../../db/approval-history.js';
+import { deleteSession } from '../../../db/sessions.js';
+import { createApproval, getApproval } from '../../../db/approvals.js';
+
 import { inboundDbPath, initSessionFolder, openInboundDb, writeSessionMessage } from '../../../session-manager.js';
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
 import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
@@ -60,14 +61,14 @@ afterEach(() => {
   closeDb();
   fs.rmSync(root, { recursive: true, force: true });
 });
-function request() {
-  createPendingApproval({
+function request(action = 'history-test', payload: Record<string, unknown> = {}) {
+  createApproval({
     approval_id: 'approval',
     session_id: 's',
     origin_message_id: 'source',
     request_id: 'request',
-    action: 'history-test',
-    payload: '{}',
+    action,
+    payload: JSON.stringify(payload),
     title: 'Install tool',
     options_json:
       '[{"label":"Approve","selectedLabel":"Approved","value":"approve"},{"label":"Reject","selectedLabel":"Declined","value":"reject"}]',
@@ -75,14 +76,15 @@ function request() {
   });
 }
 const view = (thread = 'source-thread', user = 'owner') => readConversation(user, 'g', thread);
+const approvals = (conversation = view()) => conversation.interactions.filter((item) => item.kind !== 'question');
 
 describe('retained approval transcript', () => {
   it('retains account-setup purpose and its responder after completion and reload', () => {
-    request();
-    getDb().prepare("UPDATE approval_history SET action='request_access' WHERE approval_id='approval'").run();
-    createApprovalWorkflow('approval', 'account-setup', { messageId: 'source', purpose: 'account' });
-    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
-      purpose: 'account',
+    request('request_access', { resource_url: 'https://api.example.com/', reason: 'Read the report' });
+    createApprovalWorkflow('approval', 'account-setup');
+    getDb().prepare("UPDATE approvals SET kind='account_setup' WHERE approval_id='approval'").run();
+    expect(approvals()[0]).toMatchObject({
+      kind: 'account_setup',
       status: 'pending',
     });
     finishApprovalWorkflow(
@@ -93,31 +95,31 @@ describe('retained approval transcript', () => {
       undefined,
       'owner',
     );
-    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
-      purpose: 'account',
-      status: 'approved',
+    expect(approvals()[0]).toMatchObject({
+      kind: 'account_setup',
+      status: 'completed',
       respondedBy: { userId: 'owner', displayName: 'Owner' },
     });
   });
   it('places a request only in its exact originating thread, even in a shared session', () => {
     request();
-    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toEqual({
+    expect(approvalOrigin('owner', getApproval('approval')!)).toEqual({
       agentGroupId: 'g',
       threadId: 'source-thread',
       channelType: 'web',
       messagingGroupId: 'web',
     });
-    expect(view().messages.find((message) => message.approval)?.approval).toMatchObject({
-      approvalId: 'approval',
+    expect(approvals()[0]).toMatchObject({
+      id: 'approval',
       status: 'pending',
       title: 'Install tool',
     });
-    expect(view('other-thread').messages.filter((message) => message.approval)).toEqual([]);
-    expect(view('source-thread', 'member').messages.filter((message) => message.approval)).toEqual([]);
+    expect(approvals(view('other-thread'))).toEqual([]);
+    expect(approvals(view('source-thread', 'member'))).toEqual([]);
   });
 
   it.each(['approve', 'reject'])(
-    'retains the request, %s decision, actor and message after pending-row deletion and reload',
+    'retains the request, %s decision, actor and message in its authoritative row after reload',
     async (value) => {
       request();
       const before = view();
@@ -130,16 +132,16 @@ describe('retained approval transcript', () => {
         threadId: null,
         message: 'Keep existing work.',
       });
-      expect(getPendingApproval('approval')).toBeUndefined();
+      expect(getApproval('approval')?.status).toBe(value === 'approve' ? 'approved' : 'rejected');
       const after = view();
-      const bubble = after.messages.find((message) => message.id === 'approval:approval');
-      expect(bubble?.approval).toMatchObject({
+      const bubble = approvals(after).find((item) => item.id === 'approval');
+      expect(bubble).toMatchObject({
         status: value === 'approve' ? 'approved' : 'rejected',
         decision: value,
         responseMessage: 'Keep existing work.',
         respondedBy: { userId: 'owner', displayName: 'Owner' },
       });
-      expect(bubble?.timestamp).toBe(before.messages.find((message) => message.approval)?.timestamp);
+      expect(bubble?.createdAt).toBe(approvals(before)[0]?.createdAt);
       expect(after.messages.filter((message) => message.text.includes('User message from'))).toEqual([]);
       expect(
         readChatHistory('owner', 'g', 'source-thread').some((message) => message.text.includes('User message from')),
@@ -173,31 +175,29 @@ describe('retained approval transcript', () => {
           changes: diffConversation(before, after),
         }),
       );
-      expect(settled.conversation.messages.find((message) => message.id === bubble?.id)?.approval).toEqual(
-        bubble?.approval,
-      );
-      expect(view().messages.find((message) => message.id === bubble?.id)?.approval).toEqual(bubble?.approval);
+      expect(approvals(settled.conversation).find((item) => item.id === bubble?.id)).toEqual(bubble);
+      expect(approvals().find((item) => item.id === bubble?.id)).toEqual(bubble);
     },
   );
 
   it('does not infer an actionable thread when a recorded origin is missing', () => {
     request();
-    getDb().prepare("UPDATE approval_history SET origin_message_id='missing' WHERE approval_id='approval'").run();
-    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
-    expect(view().messages.filter((message) => message.approval)).toEqual([]);
+    getDb().prepare("UPDATE approvals SET origin_message_id='missing' WHERE approval_id='approval'").run();
+    expect(approvalOrigin('owner', getApproval('approval')!)).toBeNull();
+    expect(approvals()).toEqual([]);
   });
 
   it('does not invent a root thread for legacy unanchored shared sessions', () => {
     request();
-    getDb().prepare("UPDATE approval_history SET origin_message_id=NULL WHERE approval_id='approval'").run();
-    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
+    getDb().prepare("UPDATE approvals SET origin_message_id=NULL WHERE approval_id='approval'").run();
+    expect(approvalOrigin('owner', getApproval('approval')!)).toBeNull();
   });
 
   it('treats a missing session store as an unavailable origin without creating another database', () => {
     request();
     const file = inboundDbPath('g', 's');
     fs.rmSync(file);
-    expect(approvalOrigin('owner', getApprovalHistory('approval')!)).toBeNull();
+    expect(approvalOrigin('owner', getApproval('approval')!)).toBeNull();
     expect(fs.existsSync(file)).toBe(false);
   });
 
@@ -214,7 +214,7 @@ describe('retained approval transcript', () => {
       platformId: 'admin-dm',
       threadId: null,
     });
-    const approval = view().messages.find((message) => message.approval)?.approval;
+    const approval = approvals()[0];
     expect(approval?.status).toBe('failed');
     expect(approval?.outcomeMessage).toContain('The image build failed');
   });
@@ -223,6 +223,6 @@ describe('retained approval transcript', () => {
     request();
     expect(() => deleteSession('s')).toThrow('approval');
     deleteSession('s', true);
-    expect(getApprovalHistory('approval')).toBeUndefined();
+    expect(getApproval('approval')).toBeUndefined();
   });
 });

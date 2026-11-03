@@ -13,7 +13,7 @@ const empty: Conversation = {
   threadId: 't',
   messages: [],
   turns: [],
-  questions: [],
+  interactions: [],
   timeline: [],
   connection: { connected: false, activeTurnId: null },
   capabilities: { canSend: true, stop: false, steer: false, editInput: false, cancelInput: false },
@@ -51,12 +51,15 @@ describe('conversation protocol', () => {
   it('accepts title-free question records', () => {
     const conversation: Conversation = {
       ...empty,
-      questions: [
+      interactions: [
         {
-          questionId: 'q',
+          kind: 'question',
+          id: 'q',
           question: 'Which day?',
           responseMode: 'text',
           options: [],
+          placeholder: 'Describe the day',
+          multiline: true,
           status: 'pending',
           answerValue: null,
           answerType: null,
@@ -66,7 +69,7 @@ describe('conversation protocol', () => {
           createdAt: 'now',
         },
       ],
-      timeline: [{ kind: 'question', questionId: 'q' }],
+      timeline: [{ kind: 'interaction', interactionId: 'q' }],
     };
     expect(reduceConversation(null, parseConversationFrame({ ...snapshot, conversation })).conversation).toEqual(
       conversation,

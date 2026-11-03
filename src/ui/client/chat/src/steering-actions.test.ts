@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { clearChat, respondApproval, respondQuestion, retryChatSend, sendChat, skipQuestion } from './actions';
+import { clearChat, respondApproval, respondQuestion, retryChatSend, sendChat } from './actions';
 import { approvalMessageDrafts } from './approval-messages';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
@@ -417,15 +417,15 @@ describe('question response requests', () => {
     const files = [{ name: 'draft.txt', size: 1, file: new File(['x'], 'draft.txt') }];
     pending.value = files;
     pinnedContext.value = ['keep/context.txt'];
-    expect(await skipQuestion('q:one')).toBe(true);
+    expect(await respondQuestion('q:one', { responseType: 'skipped' })).toBe(true);
     expect(fetch).toHaveBeenLastCalledWith(
       'api/approvals/q%3Aone/respond',
       expect.objectContaining({ body: JSON.stringify({ responseType: 'skipped' }) }),
     );
-    expect(await respondQuestion('q:one', 'Yes')).toBe(true);
+    expect(await respondQuestion('q:one', { responseType: 'text', value: 'Yes' })).toBe(true);
     expect(fetch).toHaveBeenLastCalledWith(
       'api/approvals/q%3Aone/respond',
-      expect.objectContaining({ body: JSON.stringify({ value: 'Yes' }) }),
+      expect.objectContaining({ body: JSON.stringify({ responseType: 'text', value: 'Yes' }) }),
     );
     expect(pending.value).toBe(files);
     expect(pinnedContext.value).toEqual(['keep/context.txt']);

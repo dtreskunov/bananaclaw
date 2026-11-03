@@ -20,12 +20,12 @@ flowchart TB
     Runner["Container Runner<br/>(src/container-runner.ts)<br/>Agent Vault scoped socket + spawn"]
     Delivery["Delivery<br/>(src/delivery.ts)<br/>event-driven + 60s crash recovery"]
     Sweep["Host Sweep<br/>(src/host-sweep.ts)<br/>liveness, retry, recurrence"]
-    Central[("Central DB<br/>data/v2.db<br/>agent_groups<br/>messaging_groups<br/>messaging_group_agents<br/>sessions<br/>pending_approvals")]
+    Central[("Central DB<br/>data/v2.db<br/>agent_groups<br/>messaging_groups<br/>messaging_group_agents<br/>sessions<br/>approvals")]
+    Approvals["Approval handlers<br/>approvals + private account progress"]
   end
 
   subgraph Agent Vault["Agent Vault Gateway (0.3.1)"]
     Vault["Agent Vault<br/>secrets + OAuth"]
-    Approvals["configureManualApproval<br/>-> pending_approvals"]
   end
 
   subgraph Session["Per-Session State + Container"]
@@ -149,7 +149,7 @@ erDiagram
   agent_groups ||--o{ sessions : runs
   messaging_groups ||--o{ sessions : context
   agent_groups ||--o{ agent_destinations : owns
-  agent_groups ||--o{ pending_approvals : requests
+  agent_groups ||--o{ approvals : requests
 
   agent_groups {
     int id

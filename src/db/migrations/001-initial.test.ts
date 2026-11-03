@@ -24,7 +24,7 @@ describe('current question schema bootstrap', () => {
       expect.arrayContaining([expect.objectContaining({ name: 'title' })]),
     );
     expect(migrations.some((migration) => migration.name === 'durable-questions')).toBe(false);
-    expect(answerQuestion('q', { type: 'skipped', value: null, userId: 'actor', answeredAt: 'skipped' })).toBe(true);
+    expect(answerQuestion('q', { responseType: 'skipped', userId: 'actor', answeredAt: 'skipped' })).toBe(true);
     expect(getQuestion('q')).toMatchObject({
       status: 'answered',
       answer_type: 'skipped',
@@ -42,8 +42,7 @@ describe('current question schema bootstrap', () => {
   it('leaves upgraded data and historical applied-migration records unchanged on startup', () => {
     const db = getDb();
     answerQuestion('q', {
-      type: 'skipped',
-      value: null,
+      responseType: 'skipped',
       userId: 'actor',
       answeredAt: 'skipped',
     });

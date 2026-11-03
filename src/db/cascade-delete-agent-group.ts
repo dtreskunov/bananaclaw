@@ -6,11 +6,12 @@
  * behavior change vs. the original CLI implementation.
  */
 import { getDb, hasTable } from './connection.js';
+import { assertGroupApprovalsIdle } from './sessions.js';
 
 export interface CascadeCounts {
   sessions: number;
   questions: number;
-  pending_approvals: number;
+  approvals: number;
   agent_destinations_owned: number;
   agent_destinations_pointing: number;
   pending_sender_approvals: number;
@@ -38,13 +39,13 @@ export function cascadeDeleteAgentGroup(id: string): CascadeCounts {
   if (!exists) throw new Error(`group not found: ${id}`);
 
   const hasAgentDestinations = hasTable(db, 'agent_destinations');
-  const hasPendingApprovals = hasTable(db, 'pending_approvals');
 
   const cascade = db.transaction((groupId: string): CascadeCounts => {
+    assertGroupApprovalsIdle(groupId);
     const counts: CascadeCounts = {
       sessions: 0,
       questions: 0,
-      pending_approvals: 0,
+      approvals: 0,
       agent_destinations_owned: 0,
       agent_destinations_pointing: 0,
       pending_sender_approvals: 0,
@@ -66,13 +67,11 @@ export function cascadeDeleteAgentGroup(id: string): CascadeCounts {
     counts.questions = db
       .prepare('DELETE FROM questions WHERE session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)')
       .run(groupId).changes;
-    if (hasPendingApprovals) {
-      counts.pending_approvals = db
-        .prepare(
-          'DELETE FROM pending_approvals WHERE agent_group_id = ? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)',
-        )
-        .run(groupId, groupId).changes;
-    }
+    counts.approvals = db
+      .prepare(
+        'DELETE FROM approvals WHERE agent_group_id = ? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id = ?)',
+      )
+      .run(groupId, groupId).changes;
     counts.sessions = db.prepare('DELETE FROM sessions WHERE agent_group_id = ?').run(groupId).changes;
     counts.pending_sender_approvals = db
       .prepare('DELETE FROM pending_sender_approvals WHERE agent_group_id = ?')

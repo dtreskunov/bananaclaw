@@ -4,12 +4,7 @@
  * Container-side `ask_user_question` writes a chat-sdk card and ends its turn.
  * This module records the response, writes a wake-eligible inbound event, and
  * wakes the session so the saved provider continuation resumes with the answer.
- *
- * The `createQuestion` call in `deliverMessage` (delivery.ts) stays inline in
- * core and is guarded by `hasTable('questions')`.
- * modularizing it adds more registry surface than it saves.
  */
-import { getDb, hasTable } from '../../db/connection.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { answerQuestion, getQuestion, getSession } from '../../db/sessions.js';
 import type { Question } from '../../types.js';
@@ -18,23 +13,21 @@ import { registerResponseHandler, type ResponsePayload } from '../../response-re
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import { startTypingRefresh, stopTypingRefresh } from '../typing/index.js';
+import { questionAcceptsResponse } from '../../ui/shared/question.js';
+import { isQuestionResponse } from '../../ui/shared/conversation-protocol.js';
 
 export async function handleInteractiveResponse(payload: ResponsePayload): Promise<boolean> {
-  if (!hasTable(getDb(), 'questions')) return false;
-
   const question = getQuestion(payload.questionId);
   if (!question) return false;
   if (question.status === 'cancelled') return true;
 
   if (question.status === 'pending') {
-    const response =
-      payload.responseType === 'skipped'
-        ? { type: 'skipped' as const, value: null }
-        : answerValue(question, payload.value);
-    if (!response) return true;
+    if (!isQuestionResponse(payload) || !questionAcceptsResponse(question.response_mode, question.options, payload)) {
+      log.warn('Question response does not match the requested input', { questionId: payload.questionId });
+      return true;
+    }
     answerQuestion(payload.questionId, {
-      ...response,
-      userId: payload.userId,
+      ...payload,
       answeredAt: new Date().toISOString(),
     });
   }
@@ -44,16 +37,6 @@ export async function handleInteractiveResponse(payload: ResponsePayload): Promi
   const resolved = getQuestion(payload.questionId);
   if (resolved?.status === 'answered') await routeQuestionResponse(resolved);
   return true;
-}
-
-function answerValue(question: Question, value: string): { type: 'choice' | 'text'; value: string } | null {
-  const matchingOption = question.options.find((option) => option.value === value);
-  if (question.response_mode === 'choice' && !matchingOption) {
-    log.warn('Question response is not one of the allowed choices', { questionId: question.question_id });
-    return null;
-  }
-  if (!value.trim()) return null;
-  return { type: matchingOption ? 'choice' : 'text', value };
 }
 
 async function routeQuestionResponse(question: Question): Promise<void> {

@@ -2,7 +2,7 @@
 
 Admin-gated durable approval flow for self-modification and credential access.
 Agent requests are committed to the host before delivery and stored in
-`pending_approvals`. `approval_history` retains request and resolution records.
+`approvals`, retaining request, decision and outcome in one current-state row.
 
 ### Wiring
 
@@ -20,6 +20,10 @@ approvals. There is no external gateway approval poller or in-memory resolver.
 
 ### Tables
 
-`pending_approvals`, `approval_workflows` and `approval_history` persist requests,
-recovery stages and transcript outcomes. Historical schema fields are retained
-for audit and archive compatibility; removing runtime code does not erase data.
+`approvals` owns public metadata, kind, status, revision and response.
+`approval_workflows` holds private selections, submission aliases and notification
+flags only. Its reader joins the canonical approval; it owns no second lifecycle.
+Questions retain their existing authoritative row. Group archives cancel pending
+approvals, refuse applying effects and restore finalized records as audit-only.
+Legacy storage requires the explicit offline reset documented in
+`docs/user-requests-refactor-plan.md`; there is no runtime compatibility reader.

@@ -11,6 +11,9 @@ import crypto from 'crypto';
 import http from 'http';
 import type internal from 'stream';
 import path from 'path';
+import { isQuestionResponse } from '../../shared/conversation-protocol.js';
+import type { ConversationMessage } from '../../shared/conversation.js';
+import type { ChatStartResponse, TaskAttemptDto, TaskDetailDto, ThreadSummary } from '../../shared/thread.js';
 
 import Busboy from 'busboy';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -90,7 +93,7 @@ function isElevated(userId: string): boolean {
 }
 import { log } from '../../../log.js';
 import { getChannelAdapter } from '../../../channels/channel-registry.js';
-import { normalizeDisplayCardPayload, type DisplayCard } from '../../../channels/display-card.js';
+import { normalizeDisplayCardPayload } from '../../../channels/display-card.js';
 import { shortcodeToEmoji } from './emoji.js';
 import { submitWebInbound, WEB_CHANNEL_TYPE } from '../../../channels/web.js';
 import { onConversationChange } from '../../../conversation-events.js';
@@ -405,7 +408,11 @@ export async function handleChatRequest(
     }
     const messagingGroupId = ensureWebMessagingGroup(m.groupId);
     const threadId = crypto.randomUUID();
-    writeJson(res, 200, { threadId, messagingGroupId, platformId: platformIdFor(m.groupId) });
+    writeJson(res, 200, {
+      threadId,
+      messagingGroupId,
+      platformId: platformIdFor(m.groupId),
+    } satisfies ChatStartResponse);
     return true;
   }
 
@@ -1037,50 +1044,6 @@ export async function handleChatRequest(
   return false;
 }
 
-type SuggestedAction = 'continue' | 'retry' | 'report';
-
-export interface HistoryMessage {
-  questionId?: string;
-  questionResponseType?: 'skipped';
-  turnId?: string;
-  inputState?: InputState;
-  canEditPending?: boolean;
-  timelinePosition?: number;
-  /** Human sender attribution for inbound messages. */
-  author?: { userId: string; displayName: string };
-  direction: 'in' | 'out' | 'event';
-  // messages_in.id / messages_out.id — stable per-row id the client uses
-  // as the dedup key against live WS pushes.
-  id: string;
-  timestamp: string;
-  text: string;
-  /** How an agent chat row was emitted. Absent for legacy/unclassified rows. */
-  deliveryOrigin?: 'send_message' | 'send_file' | 'response';
-  /** True for host/runner notices rather than agent-authored content. */
-  systemGenerated?: boolean;
-  /** Safe next-turn action suggested by the agent runner. */
-  suggestedAction?: SuggestedAction;
-  /** Normalized fire-and-forget display card. `text` remains its fallback. */
-  card?: DisplayCard;
-  files?: { filename: string; size: number; path?: string; url?: string; contentType?: string }[];
-  /** Non-chat timeline event (e.g. a scheduled task firing). Present only
-   *  when `direction === 'event'`; drives distinct rendering client-side. */
-  event?: {
-    kind: 'task-run';
-    taskId?: string;
-    summary: string;
-    recurrence?: string | null;
-    status?: TaskAttemptDto['status'];
-    triggerSource?: 'scheduled' | 'manual';
-    error?: string | null;
-    autoPaused?: boolean;
-  };
-  /** Emoji reactions the agent added to this message, resolved to unicode
-   *  and in the order they were emitted. Folded in from `operation:'reaction'`
-   *  outbound rows targeting this message id. */
-  reactions?: { emoji: string; ts: string }[];
-}
-
 export function publicInboundMessageId(id: string, groupId: string): string {
   const suffix = `:${groupId}`;
   return id.endsWith(suffix) ? id.slice(0, -suffix.length) : id;
@@ -1178,7 +1141,7 @@ export function readChatHistory(
   threadId: string,
   override?: { channelType: string; messagingGroupId: string },
   options: { includeCancelled?: boolean; hideApprovalOutcomes?: boolean } = {},
-): HistoryMessage[] {
+): ConversationMessage[] {
   const context = resolveTurnContext(userId, groupId, threadId, override);
   if (!context) throw new Error('Conversation is not accessible');
   const elevated = isElevated(userId);
@@ -1191,7 +1154,7 @@ export function readChatHistory(
   const viewerHandles = isDm && !elevated ? viewerHandlesForChannel(userId, target.channelType) : [];
   if (isDm && !elevated && viewerHandles.length === 0) return [];
 
-  const messages: HistoryMessage[] = [];
+  const messages: ConversationMessage[] = [];
   try {
     const inDb = openInboundDb(groupId, session.id);
     try {
@@ -1315,16 +1278,12 @@ export function readChatHistory(
           // card after reload. Fire-and-forget cards still need their fallback.
           const content = chatSdkHistoryContent(r.content);
           if (content) {
-            const timelinePosition = parseOutboundContent(r.content).timelinePosition;
             messages.push({
+              ...content,
               direction: 'out',
               id: r.id,
               ...(r.turn_id ? { turnId: r.turn_id } : {}),
               timestamp: r.timestamp,
-              text: content.text,
-              ...(timelinePosition !== undefined ? { timelinePosition } : {}),
-              ...(content.card ? { card: content.card } : {}),
-              files: undefined,
             });
           }
           continue;
@@ -1353,16 +1312,11 @@ export function readChatHistory(
         }
         const parsed = parseOutboundContent(r.content);
         messages.push({
+          ...parsed,
           direction: 'out',
           id: r.id,
           timestamp: r.timestamp,
-          text: parsed.text,
-          files: parsed.files,
           ...(r.turn_id ? { turnId: r.turn_id } : {}),
-          ...(parsed.deliveryOrigin ? { deliveryOrigin: parsed.deliveryOrigin } : {}),
-          ...(parsed.systemGenerated ? { systemGenerated: true } : {}),
-          ...(parsed.suggestedAction ? { suggestedAction: parsed.suggestedAction } : {}),
-          ...(parsed.timelinePosition !== undefined ? { timelinePosition: parsed.timelinePosition } : {}),
         });
       }
 
@@ -1476,13 +1430,18 @@ export function readChatHistory(
   return messages;
 }
 
-export function chatSdkHistoryContent(content: string): { text: string; card?: DisplayCard } | null {
+export function chatSdkHistoryContent(
+  content: string,
+): Pick<ConversationMessage, 'text' | 'card' | 'timelinePosition'> | null {
   try {
-    const normalized = normalizeDisplayCardPayload(JSON.parse(content));
+    const payload = JSON.parse(content);
+    const normalized = normalizeDisplayCardPayload(payload);
     if (!normalized || (!normalized.card && !normalized.fallbackText)) return null;
+    const timelinePosition = parseTimelinePosition(payload?.timelinePosition);
     return {
       text: normalized.fallbackText,
       ...(normalized.card ? { card: normalized.card } : {}),
+      ...(timelinePosition !== undefined ? { timelinePosition } : {}),
     };
   } catch {
     return null;
@@ -1778,29 +1737,24 @@ function parseInboundContent(
   includeAttachmentUrls = false,
   sessionId?: string,
   includeQuestionResponses = false,
-): {
-  text: string;
-  questionId?: string;
-  questionResponseType?: 'skipped';
-  files?: { filename: string; size: number; url?: string; contentType?: string }[];
-  viaWeb?: boolean;
-} | null {
+):
+  | (Pick<ConversationMessage, 'text' | 'questionId' | 'questionResponseType' | 'files'> & {
+      viaWeb?: boolean;
+    })
+  | null {
   try {
     const o = JSON.parse(content);
     if (o?.cancelled === true) return null;
     if (typeof o === 'string') return { text: o };
     if (includeQuestionResponses && o?.type === 'question_response') {
-      if (typeof o.questionId !== 'string' || !o.questionId) {
+      const questionId = o.questionId;
+      if (typeof questionId !== 'string' || !questionId || !isQuestionResponse(o)) {
         log.warn('Invalid question response in chat history');
         return null;
       }
       if (o.responseType === 'skipped')
-        return { text: 'Question skipped', questionId: o.questionId, questionResponseType: 'skipped' };
-      if (typeof o.value !== 'string') {
-        log.warn('Invalid question answer in chat history');
-        return null;
-      }
-      return { text: o.value, questionId: o.questionId };
+        return { text: 'Question skipped', questionId, questionResponseType: 'skipped' };
+      return { text: o.value, questionId, questionResponseType: o.responseType };
     }
     if (typeof o?.text === 'string' || Array.isArray(o?.attachments) || Array.isArray(o?.files)) {
       const text = typeof o?.text === 'string' ? o.text : '';
@@ -2030,14 +1984,12 @@ function serveInboundAttachment(
   fs.createReadStream(realAbs).pipe(res);
 }
 
-export function parseOutboundContent(content: string): {
-  text: string;
-  files?: { filename: string; size: number; path?: string }[];
-  deliveryOrigin?: 'send_message' | 'send_file' | 'response';
-  systemGenerated?: boolean;
-  suggestedAction?: SuggestedAction;
-  timelinePosition?: number;
-} {
+export function parseOutboundContent(
+  content: string,
+): Pick<
+  ConversationMessage,
+  'text' | 'files' | 'deliveryOrigin' | 'systemGenerated' | 'suggestedAction' | 'timelinePosition'
+> {
   const o = JSON.parse(content);
   const timelinePosition = parseTimelinePosition(o?.timelinePosition);
   const text = typeof o?.text === 'string' ? o.text : '';
@@ -2082,53 +2034,6 @@ export function parseOutboundContent(content: string): {
   };
 }
 
-export interface ThreadSummary {
-  threadId: string;
-  sessionId: string;
-  channelType: string;
-  messagingGroupId: string;
-  platformId: string;
-  sessionMode: 'per-thread' | 'shared' | 'agent-shared';
-  title: string;
-  lastActivityAt: string;
-  messageCount: number;
-  counterparty?: string;
-  /** True when the web UI can dispatch a send through this channel's adapter. */
-  canSend?: boolean;
-  /**
-   * 'dm' marks a threadless room — one chat per (channel, mg) with
-   * thread_id IS NULL. Rendered in its own section in the rail; not
-   * sendable from web (yet).
-   */
-  kind?: 'thread' | 'dm';
-  /** Aggregate cost in USD across all turns in this thread. */
-  totalCost?: number;
-  /** Aggregate input + output tokens across all turns. */
-  totalTokens?: number;
-  /** Number of provider turns that have usage data. */
-  turnCount?: number;
-  /**
-   * The live (pending/paused) scheduled tasks keeping this thread alive,
-   * soonest next-run first. Drives the ⏰ badge in the rail so an
-   * auto-active thread reads differently from a conversational one.
-   */
-  liveTasks?: LiveTaskDto[];
-  /** Set when this thread was forked out of another one. */
-  forkedFrom?: {
-    threadId: string;
-    messageId: string;
-    title: string | null;
-    fidelity: 'native' | 'transcript';
-    /** Parent no longer exists — the chip must not offer navigation. */
-    deleted: boolean;
-  };
-  /**
-   * Branches taken out of this thread, oldest first. Only branches the viewer
-   * can actually open are listed — the log renders each one as a link.
-   */
-  forkChildren?: { threadId: string; messageId: string; title: string }[];
-}
-
 export function buildViewerSearchConversations(threads: ThreadSummary[]): SearchConversationScope[] {
   const seen = new Set<string>();
   const scopes: SearchConversationScope[] = [];
@@ -2146,59 +2051,6 @@ export function buildViewerSearchConversations(threads: ThreadSummary[]): Search
     });
   }
   return scopes;
-}
-
-/** One live (pending/paused) scheduled task in a thread. */
-export interface LiveTaskDto {
-  /** series_id — stable across recurrences; focuses the task panel. */
-  seriesId: string;
-  /** ISO timestamp of the next run, or null for a one-off with no wait. */
-  nextRunAt: string | null;
-  /** Cron expression when recurring, else null (one-off). */
-  recurrence: string | null;
-  /** One-line summary of the task's prompt. */
-  summary: string;
-  /** True when the task is paused rather than pending. */
-  paused: boolean;
-}
-
-/** Full per-series detail for the task-management panel. */
-export interface TaskDetailDto {
-  /** series_id — stable across recurrences; the mutation handle. */
-  seriesId: string;
-  status: 'pending' | 'paused';
-  /** ISO timestamp of the next run, or null for a one-off with no wait. */
-  nextRunAt: string | null;
-  /** Cron expression when recurring, else null (one-off). */
-  recurrence: string | null;
-  /** One-line summary of the prompt (for the collapsed row). */
-  summary: string;
-  /** Full prompt text (for the edit form). */
-  prompt: string;
-  /** True when the task also carries a pre-check/exec script. */
-  hasScript: boolean;
-  /** Full script text (empty string when the task has no script). */
-  script: string;
-  /** Bounded wall-clock timeout for the pre-task script. */
-  scriptTimeoutMs: number;
-  /** Consecutive scheduled failures carried into the live occurrence. */
-  consecutiveFailures: number;
-  /** Recent execution attempts, newest first. */
-  attempts: TaskAttemptDto[];
-}
-
-export interface TaskAttemptDto {
-  taskMessageId: string;
-  triggerSource: 'scheduled' | 'manual';
-  status: 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed';
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  exitCode: number | null;
-  signal: string | null;
-  error: string | null;
-  wakeAgent: boolean | null;
-  providerInvoked: boolean;
 }
 
 /** Parse a task row's content JSON into its prompt + script text. */

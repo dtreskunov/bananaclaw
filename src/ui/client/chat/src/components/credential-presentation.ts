@@ -1,4 +1,19 @@
 import type { AppInfo, Connection, CredentialGroup, Service } from './CredentialsApi';
+import type { AccountInteraction } from '../../../../shared/approval';
+
+export function accountRequestStatusText(request: AccountInteraction): string {
+  const labels: Record<AccountInteraction['status'], string> = {
+    pending: 'Waiting for your response.',
+    applying: 'Applying…',
+    completed:
+      request.kind === 'account_setup' ? 'Account setup confirmed. No agent access was granted.' : 'Access granted.',
+    rejected: 'Request declined.',
+    cancelled: 'Request cancelled.',
+    expired: 'Request expired.',
+    failed: 'Could not finish the request.',
+  };
+  return labels[request.status];
+}
 
 const PROVIDERS: Record<string, string> = {
   'openrouter.ai': 'OpenRouter',

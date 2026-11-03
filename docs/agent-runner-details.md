@@ -1065,6 +1065,9 @@ Choice modes require options. A second question is rejected while a previous one
 is awaiting its response, including after Stop. No title or timeout is accepted
 as part of the question contract. Approval and display-card titles are separate
 and unchanged.
+The runner checks the host's durable response identity directly, including
+already-consumed answers and skips; it does not reconstruct an answer registry
+from message bodies or poll a separate question-response helper.
 
 #### edit_message
 

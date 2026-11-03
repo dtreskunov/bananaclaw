@@ -208,6 +208,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     await wait(() => expect(getSessionActiveTurn(session!.id).turn).toBeNull());
     await handleInteractiveResponse({
       questionId,
+      responseType: 'choice',
       value: 'Yes',
       userId: null,
       channelType: 'web',

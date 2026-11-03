@@ -168,7 +168,7 @@ function Fixture(): preact.JSX.Element {
       {credentialsOpen.value ? <CredentialsPage key={fixtureRevision.value} /> : <main class="cred-fixture-page chat-main">
         {params.has('access_request') ? <div class="chat-log"><ApprovalBubble key={fixtureRevision.value}
           approval={getAccessApproval()}
-          busy={false} onReview={() => {}} onRespond={() => {}} /></div> :
+          busy={false} onRespond={() => {}} /></div> :
           <p>Chat fixture. Use personal Credentials or Agent Settings → Credentials.</p>}
         <button type="button" onClick={() => reopen()}>Open Agent Settings</button>
       </main>}

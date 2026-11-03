@@ -119,7 +119,7 @@ These rules are enforced by convention in `src/session-manager.ts` and `containe
 | `sessions`               | central  | `src/db/sessions.ts`, `src/session-manager.ts`         | delivery, sweep, container runner              |
 | `questions`              | central  | `src/db/sessions.ts` (via `ask_user_question`)         | host interactive response handler, chat projection |
 | `agent_destinations`     | central  | `src/db/agent-destinations.ts`, migration 004 backfill | `writeDestinations()`, delivery ACL            |
-| `pending_approvals`      | central  | `src/db/sessions.ts`, `src/modules/approvals/primitive.ts`        | admin-card delivery, sweep                     |
+| `approvals`             | central  | `src/db/approvals.ts`, `src/modules/approvals/workflows.ts`       | authorized interaction projection, recovery    |
 | `unregistered_senders`   | central  | `src/db/dropped-messages.ts`                           | ops tooling                                    |
 | `chat_sdk_*`             | central  | `src/state-sqlite.ts`                                  | Chat SDK bridge                                |
 | `schema_version`         | central  | `src/db/migrations/index.ts`                           | migration runner                               |

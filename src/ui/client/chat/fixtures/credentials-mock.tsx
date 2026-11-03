@@ -4,10 +4,9 @@ import {
   type OAuthAppConfiguration, type SignInInput, type SignInProgress,
 } from '../src/components/CredentialsApi';
 import type { McpServerConfigDto } from '../src/components/GroupAdminMcp';
-import { serviceMatchesResource } from '../src/components/GroupCredentialAccess';
 import { connectionMatchesAccess, parseAccessAuthentication } from '../../../shared/access-authentication';
 import { isOAuthScope } from '../../../shared/oauth-app';
-import type { PendingApprovalDto } from '../src/types';
+import type { AccountInteraction } from '../../../shared/approval';
 
 export const FIXTURE_GROUP = { id: 'assistant', name: 'Assistant' };
 export interface FixtureOptions {
@@ -40,7 +39,7 @@ let seq = 0;
 const detachedForeign = new Set<string>();
 const signIns = new Map<string, SignInProgress & { connection_id: string; input: SignInInput }>();
 let mcpServers: Record<string, McpServerConfigDto>;
-let accessStage = 'pending';
+let accessStage: AccountInteraction['status'] = 'pending';
 let accessPurpose: 'account' | 'access' = 'access';
 let accessCreatedAt = new Date().toISOString();
 let accessResolvedAt: string | null = null;
@@ -100,13 +99,23 @@ export function resetState(): void {
   emit();
 }
 resetState();
-export function getAccessApproval(): PendingApprovalDto {
-  return {
-    approvalId: 'fixture-access', action: 'request_access', title: 'Allow access', details: null,
-    packages: null, options: [], agentGroupId: FIXTURE_GROUP.id, agentGroupName: FIXTURE_GROUP.name,
-    createdAt: accessCreatedAt, reviewRequired: true, purpose: accessPurpose,
-    status: accessStage === 'completed' ? 'approved' : accessStage === 'rejected' ? 'rejected' :
-      accessStage === 'failed' ? 'failed' : 'pending',
+export function getAccessApproval(): AccountInteraction {
+  const params = new URLSearchParams(location.search);
+  return {kind: accessPurpose === 'account' ? 'account_setup' : 'access_grant',
+    id: 'fixture-access', agentGroupId: FIXTURE_GROUP.id, agentGroupName: FIXTURE_GROUP.name,
+    requirements: {
+      resource_url: params.get('request_resource') || 'https://nextcloud.example.org/mcp/tools',
+      reason: 'Finish the requested report.',
+      authentication: params.has('request_auth') ? parseAccessAuthentication(JSON.parse(params.get('request_auth')!)) : undefined,
+      scopes: params.has('request_scopes') ? JSON.parse(params.get('request_scopes')!) : undefined,
+      mcp_server: params.get('request_server') || undefined,
+    },
+    createdAt: accessCreatedAt, status: accessStage, revision: accessRevision, expiresAt: null,
+    retryable: accessStage === 'failed',
+    outcomeMessage: accessStage === 'completed' ? accessPurpose === 'account'
+      ? 'Account setup confirmed. No agent access was granted. The agent must request access separately.'
+      : 'Access granted. The agent will safely verify the original operation.'
+      : accessStage === 'failed' ? 'Access approval failed during grant verification. Some changes may have applied. Review and retry.' : null,
     resolvedAt: accessResolvedAt,
     respondedBy: accessResolvedAt ? { userId: 'fixture-alex', displayName: 'Alex Morgan' } : null,
     origin: { agentGroupId: FIXTURE_GROUP.id, threadId: 'fixture-thread', channelType: 'web', messagingGroupId: 'fixture-web' },
@@ -162,17 +171,8 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
   const access = /^\/ui\/chat\/api\/credentials\/access-requests\/fixture-access(?:\/(preview|apply|retry|setup|account))?$/.exec(path);
   if (access) {
     const params = new URLSearchParams(location.search);
-    const resource = params.get('request_resource') || 'https://nextcloud.example.org/mcp/tools';
-    const authentication = params.has('request_auth') ? parseAccessAuthentication(JSON.parse(params.get('request_auth')!)) : undefined;
-    const scopes: string[] | undefined = params.has('request_scopes') ? JSON.parse(params.get('request_scopes')!) : undefined;
-    const request = { request_id: 'fixture-access', purpose: accessPurpose, status: accessStage, resource_url: resource,
-      origin: { agentGroupId: FIXTURE_GROUP.id, threadId: 'fixture-thread', channelType: 'web', messagingGroupId: 'fixture-web' },
-      authentication, scopes, mcp_server: params.get('request_server') || undefined,
-      reason: 'Finish the requested report.', revision: accessRevision, agent_group_id: FIXTURE_GROUP.id, agent_group_name: FIXTURE_GROUP.name,
-      result: accessStage === 'completed' ? { message: accessPurpose === 'account' ?
-        'Account setup confirmed. No agent access was granted. The agent must request access separately.' :
-        'Access granted. The agent will safely verify the original operation.' } :
-        accessStage === 'failed' ? { message: 'Access approval failed during grant verification. Some changes may have applied. Review and retry.' } : null };
+    const request = getAccessApproval();
+    const resource = request.requirements.resource_url;
     if (!access[1] && method === 'GET') return request;
     const input = body<{ connection_id: string; connection_revision?: string; request_revision?: number;
       configure_mcp?: boolean; mcp_server?: string; account_alias?: string }>(init);
@@ -183,18 +183,19 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
         accessRevision++;
         emit();
       }
-      return { ...request, purpose: accessPurpose, revision: accessRevision };
+      return getAccessApproval();
     }
     if (access[1] === 'retry' && method === 'POST') {
       if (accessStage !== 'failed' || input.request_revision !== accessRevision) throw new HttpError(409, 'Review the current failed request.');
       accessStage = 'pending';
       accessRevision++;
-      return { ...request, status: accessStage, revision: accessRevision, result: null };
+      emit();
+      return getAccessApproval();
     }
     const item = current(input.connection_id);
     const names = Object.entries(mcpServers).filter(([, server]) => 'url' in server && server.url === resource).map(([name]) => name);
     if (access[1] === 'preview' && method === 'POST') return {
-      request, connection: item, matches: connectionMatchesAccess(item, request),
+      requestRevision: request.revision, connection: item, matches: connectionMatchesAccess(item, request.requirements),
       grantBreadth: 'All current and future URL patterns on this connection, not just the requested URL.',
       verification: 'Grant verification only. The agent must verify the authenticated operation after access is granted.',
       mcp: { names, revision: 'fixture-mcp', configured: Object.fromEntries(names.map(name =>
@@ -202,19 +203,19 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
     };
     if (access[1] === 'account' && method === 'POST') {
       if (accessPurpose !== 'account' || accessStage !== 'pending' || input.request_revision !== accessRevision ||
-        input.connection_revision !== item.revision || item.status !== 'ready' || !connectionMatchesAccess(item, request))
+        input.connection_revision !== item.revision || item.status !== 'ready' || !connectionMatchesAccess(item, request.requirements))
         throw new HttpError(409, 'Review the current account setup.');
       accessStage = 'completed';
       accessRevision += 2;
       accessResolvedAt = new Date().toISOString();
       emit();
-      return { ...request, status: accessStage, revision: accessRevision };
+      return getAccessApproval();
     }
     if (access[1] === 'apply' && method === 'POST') {
       if (accessPurpose === 'account') throw new HttpError(409, 'Account setup cannot grant access.');
       if (accessStage !== 'pending' || input.connection_revision !== item.revision || input.request_revision !== accessRevision)
         throw new HttpError(409, 'Review the current request and connection.');
-      if (item.status !== 'ready' || !connectionMatchesAccess(item, request))
+      if (item.status !== 'ready' || !connectionMatchesAccess(item, request.requirements))
         throw new HttpError(409, 'Connect a compatible credential first.');
       if (!item.grants.some(grant => grant.vault === FIXTURE_GROUP.id && grant.status === 'active')) {
         item.grants.push({ vault: FIXTURE_GROUP.id, services: item.services.map(service => service.name), status: 'active' });
@@ -224,6 +225,7 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
         accessFailedOnce = true;
         accessStage = 'failed';
         accessRevision += 2;
+        emit();
         throw new HttpError(409, 'Simulated failure after the grant succeeded; MCP configuration was not saved.');
       }
       if (input.configure_mcp) {
@@ -236,7 +238,7 @@ export function fixtureRoute(method: string, url: URL, init?: RequestInit): unkn
       accessRevision += 2;
       accessResolvedAt = new Date().toISOString();
       emit();
-      return { ...request, status: accessStage, revision: accessRevision };
+      return getAccessApproval();
     }
     throw new HttpError(405, 'Method not allowed');
   }

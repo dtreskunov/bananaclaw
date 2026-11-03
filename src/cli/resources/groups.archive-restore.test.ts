@@ -49,6 +49,14 @@ import {
 } from '../../db/index.js';
 import { dispatch } from '../dispatch.js';
 import './groups.js';
+import './approvals.js';
+import { createApproval, getApproval, updateApprovalStatus } from '../../db/approvals.js';
+import { beginApprovalExecution, endApprovalExecution } from '../../db/sessions.js';
+import {
+  createApprovalWorkflow,
+  finishApprovalWorkflow,
+  getAccountRequest,
+} from '../../modules/approvals/workflows.js';
 
 const NOW = () => new Date().toISOString();
 
@@ -59,6 +67,19 @@ interface SeedRefs {
   messagingGroupId: string;
   wiringId: string;
   sessionId: string;
+}
+
+function seedApproval(refs: SeedRefs, id: string, action = 'request_access') {
+  createApproval({
+    approval_id: id,
+    request_id: id,
+    session_id: refs.sessionId,
+    action,
+    payload: '{"resource_url":"https://api.example.com/","reason":"Read"}',
+    created_at: NOW(),
+    title: 'Request',
+    options_json: '[]',
+  });
 }
 
 function seedGroup(id: string, folder: string): SeedRefs {
@@ -148,6 +169,84 @@ async function restore(folder: string, withSessions = false) {
 }
 
 describe('ncl groups archive ↔ restore round trip', () => {
+  it('cancels pending approvals and restores finalized account records without private recovery or retry', async () => {
+    const refs = seedGroup('audit', 'audit');
+    for (const id of ['pending', 'failed']) {
+      seedApproval(refs, id);
+      createApprovalWorkflow(id, id);
+      getDb()
+        .prepare('UPDATE approval_workflows SET data_json=? WHERE approval_id=?')
+        .run('{"private_selection":"must-not-be-archived"}', id);
+    }
+    finishApprovalWorkflow('failed', 'failed', 'Review uncertain effects.');
+    expect(getAccountRequest('failed').retryable).toBe(true);
+    const listed = await dispatch({ id: 'list', command: 'approvals-get', args: { id: 'failed' } }, { caller: 'host' });
+    expect(listed.ok).toBe(true);
+    expect(JSON.stringify(listed)).not.toContain('must-not-be-archived');
+    expect(JSON.stringify(listed)).not.toContain('data_json');
+    expect((await archive(refs.id)).ok).toBe(true);
+    const dumpText = fs.readFileSync(path.join(TEST_GROUPS_DIR, 'audit~', 'archive.json'), 'utf8');
+    expect(dumpText).not.toContain('must-not-be-archived');
+    expect(JSON.parse(dumpText)).toMatchObject({
+      version: 2,
+      approvals: expect.arrayContaining([
+        expect.objectContaining({ approval_id: 'pending', status: 'cancelled' }),
+        expect.objectContaining({ approval_id: 'failed', status: 'failed' }),
+      ]),
+    });
+    expect((await restore('audit', true)).ok).toBe(true);
+    expect(getApproval('pending')?.status).toBe('cancelled');
+    expect(getAccountRequest('failed')).toMatchObject({
+      kind: 'access_grant',
+      status: 'failed',
+      outcomeMessage: 'Review uncertain effects.',
+      retryable: false,
+    });
+    expect(getDb().prepare('SELECT * FROM approval_workflows').all()).toEqual([]);
+  });
+
+  it.each(['persisted', 'process-local'])(
+    'refuses archive and deletion while approval execution is %s',
+    async (mode) => {
+      const refs = seedGroup('busy', 'busy');
+      seedApproval(refs, 'busy', 'install_packages');
+      if (mode === 'persisted') updateApprovalStatus('busy', 'applying');
+      else beginApprovalExecution(getApproval('busy')!);
+      try {
+        for (const command of ['groups-archive', 'groups-delete']) {
+          const result = await dispatch({ id: command, command, args: { id: refs.id } }, { caller: 'host' });
+          expect(result.ok).toBe(false);
+          if (!result.ok) expect(result.error.message).toContain('being processed');
+        }
+        expect(getApproval('busy')?.status).toBe(mode === 'persisted' ? 'applying' : 'pending');
+        expect(fs.existsSync(path.join(TEST_GROUPS_DIR, 'busy', 'archive.json'))).toBe(false);
+      } finally {
+        endApprovalExecution('busy');
+      }
+    },
+  );
+
+  it('rejects retired archive formats without replaying rows', async () => {
+    const refs = seedGroup('old-format', 'old-format');
+    await archive(refs.id);
+    const file = path.join(TEST_GROUPS_DIR, 'old-format~', 'archive.json');
+    const dump = JSON.parse(fs.readFileSync(file, 'utf8'));
+    dump.version = 1;
+    fs.writeFileSync(file, JSON.stringify(dump));
+    const result = await restore('old-format', true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('not supported');
+    expect(fs.existsSync(file)).toBe(true);
+  });
+
+  it('does not cancel pending decisions when writing the archive fails', async () => {
+    const refs = seedGroup('write-failure', 'write-failure');
+    seedApproval(refs, 'pending');
+    fs.mkdirSync(path.join(TEST_GROUPS_DIR, 'write-failure', 'archive.json'));
+    expect((await archive(refs.id)).ok).toBe(false);
+    expect(getApproval('pending')?.status).toBe('pending');
+  });
+
   it('restores agent_groups, container_configs, members, scoped roles, wirings — IDENTICAL ids and payloads', async () => {
     const refs = seedGroup('ag-rt-1', 'rt-one');
 
@@ -204,18 +303,18 @@ describe('ncl groups archive ↔ restore round trip', () => {
     const db = getDb();
     const seededSession = db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id);
     db.prepare(
-      `INSERT INTO approval_history(
-      approval_id,session_id,action,payload,title,options_json,created_at,status,decision,responded_by,response_message)
-      VALUES('retained-approval',?,'install_packages','{}','Install package','[]',?,'approved','approve',?,'Keep existing work.')`,
+      `INSERT INTO approvals(
+      approval_id,request_id,session_id,action,payload,title,options_json,created_at,status,decision,responded_by,response_message)
+      VALUES('retained-approval','retained-approval',?,'install_packages','{}','Install package','[]',?,'approved','approve',?,'Keep existing work.')`,
     ).run(refs.sessionId, NOW(), refs.userId);
-    const approval = db.prepare("SELECT * FROM approval_history WHERE approval_id='retained-approval'").get();
+    const approval = db.prepare("SELECT * FROM approvals WHERE approval_id='retained-approval'").get();
 
     await archive(refs.id);
     const r = await restore('rt-sess', true);
     expect(r.ok).toBe(true);
 
     expect(db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id)).toEqual(seededSession);
-    expect(db.prepare("SELECT * FROM approval_history WHERE approval_id='retained-approval'").get()).toEqual(approval);
+    expect(db.prepare("SELECT * FROM approvals WHERE approval_id='retained-approval'").get()).toEqual(approval);
   });
 
   it('refuses to restore over a live group with the same folder', async () => {

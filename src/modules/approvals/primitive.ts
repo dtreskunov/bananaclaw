@@ -3,7 +3,7 @@
  *
  * Two surfaces:
  *   - `requestApproval()` — queue an approval request, deliver the card to
- *     the right admin DM, record the pending_approvals row. Used by any
+ *     the right admin DM, record the approvals row. Used by any
  *     module that needs admin confirmation before doing something sensitive.
  *   - `registerApprovalHandler(action, handler)` — called at module import
  *     time. When the admin approves a pending row with matching `action`,
@@ -23,11 +23,12 @@
  */
 import { normalizeOptions, type RawOption } from '../../channels/ask-question.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
-import { createPendingApproval, getSession } from '../../db/sessions.js';
+import { getSession } from '../../db/sessions.js';
+import { createApproval } from '../../db/approvals.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
-import type { MessagingGroup, PendingApproval, Session } from '../../types.js';
+import type { MessagingGroup, Approval, Session } from '../../types.js';
 import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners } from '../permissions/db/user-roles.js';
 import { ensureUserDm } from '../permissions/user-dm.js';
 import { getPrimaryIdentityForChannel } from '../permissions/db/identities.js';
@@ -63,12 +64,12 @@ export type ApprovalHandler = (ctx: ApprovalHandlerContext) => Promise<void>;
 const approvalHandlers = new Map<string, ApprovalHandler>();
 const interactiveHandlers = new Map<
   string,
-  (approval: PendingApproval, response: ResponsePayload, userId: string) => Promise<void>
+  (approval: Approval, response: ResponsePayload, userId: string) => Promise<void>
 >();
 
 export function registerInteractiveApprovalHandler(
   action: string,
-  handler: (approval: PendingApproval, response: ResponsePayload, userId: string) => Promise<void>,
+  handler: (approval: Approval, response: ResponsePayload, userId: string) => Promise<void>,
 ): void {
   if (interactiveHandlers.has(action)) throw new Error(`Interactive approval handler already registered: ${action}`);
   interactiveHandlers.set(action, handler);
@@ -162,7 +163,7 @@ export interface RequestApprovalOptions {
   agentName: string;
   /** Free-form action identifier. Must match the key the consumer registered via registerApprovalHandler. */
   action: string;
-  /** JSON-serializable opaque payload. Carried on the pending_approvals row, handed to the handler on approve. */
+  /** JSON-serializable opaque payload. Carried on the approvals row, handed to the handler on approve. */
   payload: Record<string, unknown>;
   /** Card title shown to the admin. */
   title: string;
@@ -177,14 +178,13 @@ export interface RequestApprovalOptions {
   approverAgentGroupId?: string;
   approvalId?: string;
   workflowKey?: string;
-  workflowOrigin?: Record<string, unknown>;
   options?: RawOption[];
   expiresAt?: string;
 }
 
 /**
  * Queue an approval request. Picks an approver, delivers the card to their
- * DM, and records the pending_approvals row. Fire-and-forget from the
+ * DM, and records the approvals row. Fire-and-forget from the
  * caller's perspective — the admin's response kicks off the registered
  * approval handler for this action via the response dispatcher.
  */
@@ -205,7 +205,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
   const options = opts.options ?? APPROVAL_OPTIONS;
   const normalizedOptions = normalizeOptions(options);
   getDb().transaction(() => {
-    const created = createPendingApproval({
+    const created = createApproval({
       approval_id: approvalId,
       session_id: session.id,
       request_id: approvalId,
@@ -218,7 +218,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
       ...(opts.workflowKey ? { agent_group_id: session.agent_group_id } : {}),
       expires_at: opts.expiresAt ?? null,
     });
-    if (created && opts.workflowKey) createApprovalWorkflow(approvalId, opts.workflowKey, opts.workflowOrigin);
+    if (created && opts.workflowKey) createApprovalWorkflow(approvalId, opts.workflowKey);
   })();
 
   const target = await pickApprovalDelivery(approvers, originChannelType);
@@ -245,7 +245,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
           title,
           question,
           responseMode: 'choice',
-          options,
+          options: normalizedOptions,
         }),
       );
     } catch (err) {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deleteThread, loadThreads } from './actions';
 import { groupId, threadId, threads, toastMessage } from './state';
 import { dismissToast } from './components/Toast';
-import type { Thread } from './types';
+import { testThread } from './conversation-test-fixtures';
 
 vi.hoisted(() => {
   vi.stubGlobal('window', {
@@ -20,7 +20,7 @@ afterEach(() => {
 
 describe('loadThreads', () => {
   it('bypasses caches and replaces the visible thread list', async () => {
-    const freshThread = { threadId: 'fresh', title: 'Fresh thread', channelType: 'web' } as Thread;
+    const freshThread = testThread({ threadId: 'fresh', title: 'Fresh thread', channelType: 'web' });
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -30,7 +30,7 @@ describe('loadThreads', () => {
       } as Response),
     );
     groupId.value = 'agent';
-    threads.value = [{ threadId: 'stale', title: 'Stale thread', channelType: 'web' } as Thread];
+    threads.value = [testThread({ threadId: 'stale', title: 'Stale thread', channelType: 'web' })];
 
     await loadThreads('agent');
 
@@ -54,13 +54,13 @@ describe('deleteThread', () => {
     );
     groupId.value = 'agent';
     threads.value = [
-      {
+      testThread({
         threadId: 'resend:agent@example.com:person@example.net:root',
         sessionId: 'email-session',
         title: 'Email thread',
         channelType: 'resend',
         messagingGroupId: 'mailbox',
-      } as Thread,
+      }),
     ];
 
     await deleteThread(threads.value[0]!);
@@ -82,12 +82,12 @@ describe('deleteThread', () => {
       } as Response),
     );
     groupId.value = 'agent';
-    const thread = {
+    const thread = testThread({
       threadId: 'web-thread',
       sessionId: 'web-session',
       title: 'Web thread',
       channelType: 'web',
-    } as Thread;
+    });
     threads.value = [thread];
 
     await deleteThread(thread);
@@ -99,21 +99,21 @@ describe('deleteThread', () => {
   });
 
   it('removes an unpersisted thread locally and opens the latest thread', async () => {
-    const latest = {
+    const latest = testThread({
       threadId: 'latest',
       sessionId: 'latest-session',
       title: 'Latest thread',
       channelType: 'resend',
       messagingGroupId: 'mailbox',
       canSend: true,
-    } as Thread;
-    const ephemeral = {
+    });
+    const ephemeral = testThread({
       threadId: 'ephemeral',
       sessionId: null,
       title: '(new thread)',
       channelType: 'web',
       messageCount: 0,
-    } as Thread;
+    });
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -136,13 +136,14 @@ describe('deleteThread', () => {
     expect(threads.value).toEqual([latest]);
   });
 
-  it('treats a missing session id as an unpersisted thread', async () => {
-    const ephemeral = {
+  it('closes the only unpersisted thread locally', async () => {
+    const ephemeral = testThread({
       threadId: 'ephemeral',
+      sessionId: null,
       title: '(new thread)',
       channelType: 'web',
       messageCount: 0,
-    } as Thread;
+    });
     vi.stubGlobal('fetch', vi.fn());
     groupId.value = 'agent';
     threadId.value = ephemeral.threadId;
@@ -158,12 +159,12 @@ describe('deleteThread', () => {
   it('shows delete failures as shared error toasts', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 } as Response));
     groupId.value = 'agent';
-    const thread = {
+    const thread = testThread({
       threadId: 'web-thread',
       sessionId: 'web-session',
       title: 'Web thread',
       channelType: 'web',
-    } as Thread;
+    });
     threads.value = [thread];
 
     await deleteThread(thread);
@@ -182,7 +183,7 @@ describe('deleteThread', () => {
       } as Response),
     );
     groupId.value = 'agent';
-    const thread = { threadId: 'web-thread', sessionId: 'web-session', channelType: 'web' } as Thread;
+    const thread = testThread({ threadId: 'web-thread', sessionId: 'web-session', channelType: 'web' });
     threads.value = [thread];
 
     await deleteThread(thread, true);
@@ -211,7 +212,7 @@ describe('deleteThread', () => {
       } as Response),
     );
     groupId.value = 'agent';
-    const thread = { threadId: 'web-thread', sessionId: 'web-session', channelType: 'web' } as Thread;
+    const thread = testThread({ threadId: 'web-thread', sessionId: 'web-session', channelType: 'web' });
     threads.value = [thread];
 
     await deleteThread(thread);

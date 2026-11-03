@@ -4,7 +4,7 @@ import type { ChatMessage } from './types';
 import { testSnapshot } from './conversation-test-fixtures';
 
 function message(id: string, direction: ChatMessage['direction']): ChatMessage {
-  return { id, direction, text: id, files: null, ts: '2026-01-01T00:00:00.000Z' };
+  return { id, direction, text: id, timestamp: '2026-01-01T00:00:00.000Z' };
 }
 
 describe('findEditBranchAnchorId', () => {
@@ -19,11 +19,7 @@ describe('findEditBranchAnchorId', () => {
       { ...message('responseB', 'out'), timelinePosition: base + 5 },
     ];
     const view = testSnapshot({
-      messages: messages.map(({ ts, files: _files, ...message }) => ({
-        ...message,
-        id: message.id!,
-        timestamp: ts,
-      })),
+      messages,
     }).conversation;
     const ordered = view.timeline.flatMap((row) =>
       row.kind === 'message' ? [messages.find((message) => message.id === row.messageId)!] : [],

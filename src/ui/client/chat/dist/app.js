@@ -4934,7 +4934,7 @@ var require_markdown = __commonJS({
         m6.contains = m6.contains.concat(CONTAINABLE);
       });
       CONTAINABLE = CONTAINABLE.concat(BOLD, ITALIC);
-      const HEADER = {
+      const HEADER2 = {
         className: "section",
         variants: [
           {
@@ -4974,7 +4974,7 @@ var require_markdown = __commonJS({
           "mkd"
         ],
         contains: [
-          HEADER,
+          HEADER2,
           INLINE_HTML,
           LIST,
           BOLD,
@@ -18219,6 +18219,11 @@ function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
 
+// ../../shared/conversation.ts
+function isQuestionInteraction(item) {
+  return item.kind === "question";
+}
+
 // ../../shared/activity-presentation.ts
 var TRACE_STATUS_LABELS = {
   queued: "Pending",
@@ -18715,8 +18720,166 @@ function isTurnStartStep(step) {
   return step.kind === "notification" && !!step.id?.startsWith("ui:start:");
 }
 
+// ../../shared/oauth-app.ts
+function isOAuthScope(value) {
+  return typeof value === "string" && value.length > 0 && [...value].every((character) => character >= "!" && character <= "~" && character !== '"' && character !== "\\");
+}
+
+// ../../shared/credential-matching.ts
+function serviceMatchesResource(service, resourceUrl) {
+  const url = URL.parse(resourceUrl);
+  if (!url || service.enabled === false || service.https_only && url.protocol !== "https:") return false;
+  const slash = service.host.indexOf("/");
+  const authority = slash < 0 ? service.host : service.host.slice(0, slash);
+  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
+  const separator = authority.lastIndexOf(":");
+  const explicitPort = separator >= 0 && /^\d+$/.test(authority.slice(separator + 1));
+  const host = explicitPort ? authority.slice(0, separator) : authority;
+  if (explicitPort && authority.slice(separator + 1) !== (url.port || (url.protocol === "https:" ? "443" : "80")))
+    return false;
+  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(value);
+  return glob(host.toLowerCase(), url.hostname.toLowerCase()) && (!path || glob(path, url.pathname));
+}
+
+// ../../shared/access-authentication.ts
+var ACCESS_AUTHENTICATION_LABELS = {
+  mcp_oauth: "Tools sign-in",
+  oauth_app: "App sign-in",
+  bearer: "Bearer token",
+  "api-key": "API key",
+  basic: "Username and password",
+  custom: "Custom headers"
+};
+var AccessAuthenticationError = class extends Error {
+};
+var HEADER = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/;
+var PARAMETER = /^[A-Za-z0-9._~-]{1,128}$/;
+function validHeader(value) {
+  return typeof value === "string" && HEADER.test(value) && !["proxy-authorization", "x-agentvault-binding"].includes(value.toLowerCase());
+}
+function parseAccessAuthentication(value) {
+  if (value === void 0) return void 0;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new AccessAuthenticationError("Authentication hints must describe a mechanism, never credential values.");
+  const hint = value;
+  if (Object.keys(hint).some(
+    (key) => !["type", "app_id", "header", "prefix", "headers", "location", "parameter"].includes(key)
+  ) || !["mcp_oauth", "oauth_app", "bearer", "api-key", "basic", "custom"].includes(String(hint.type)))
+    throw new AccessAuthenticationError(
+      "Choose a supported sign-in method. Never include passwords or access keys in this request."
+    );
+  const type = hint.type;
+  const oauth = type === "mcp_oauth" || type === "oauth_app";
+  if (hint.location !== void 0 && (type !== "api-key" || hint.location !== "header" && hint.location !== "query"))
+    throw new AccessAuthenticationError("API-key placement must be header or query.");
+  const query = type === "api-key" && hint.location === "query";
+  if (hint.app_id !== void 0 && (!oauth || typeof hint.app_id !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(hint.app_id)))
+    throw new AccessAuthenticationError(
+      "An OAuth app suggestion must be a configured app identifier, not a credential or client secret."
+    );
+  if (hint.header !== void 0 && (type !== "api-key" || query))
+    throw new AccessAuthenticationError("A header name is only valid for API-key header placement.");
+  if (type === "api-key" && !query && !validHeader(hint.header))
+    throw new AccessAuthenticationError("API-key authentication requires a valid header name.");
+  if (hint.parameter !== void 0 && !query || query && (typeof hint.parameter !== "string" || !PARAMETER.test(hint.parameter)))
+    throw new AccessAuthenticationError("Query API keys require a public parameter name, never a value.");
+  if (hint.prefix !== void 0 && (type !== "api-key" || query || typeof hint.prefix !== "string" || hint.prefix.length > 128 || [...hint.prefix].some((char) => char < " " || char > "~")))
+    throw new AccessAuthenticationError("Provide only a public API-key header prefix without control characters.");
+  if (hint.headers !== void 0 && type !== "custom" || type === "custom" && (!Array.isArray(hint.headers) || !hint.headers.length || hint.headers.length > 16 || !hint.headers.every(validHeader) || new Set(hint.headers.map((header) => header.toLowerCase())).size !== hint.headers.length))
+    throw new AccessAuthenticationError(
+      "Custom authentication requires distinct header names only, never header values."
+    );
+  return {
+    type,
+    ...hint.app_id === void 0 ? {} : { app_id: hint.app_id },
+    ...hint.header === void 0 ? {} : { header: hint.header },
+    ...hint.prefix === void 0 ? {} : { prefix: hint.prefix },
+    ...hint.location === void 0 ? {} : { location: hint.location },
+    ...hint.parameter === void 0 ? {} : { parameter: hint.parameter },
+    ...hint.headers === void 0 ? {} : { headers: [...hint.headers] }
+  };
+}
+function connectionMatchesAccess(connection2, request) {
+  const destination = URL.parse(request.resource_url);
+  if (!destination || destination.protocol !== "https:") return false;
+  const hint = request.authentication;
+  const oauthHint = hint?.type === "mcp_oauth" || hint?.type === "oauth_app";
+  if (oauthHint && connection2.kind !== hint.type) return false;
+  if (hint?.app_id && connection2.app_id !== hint.app_id) return false;
+  if (request.scopes?.length) {
+    if (connection2.kind === "static") return false;
+    const scopes = connection2.status === "ready" ? connection2.scope_source === "provider" ? connection2.granted_scopes : null : connection2.requested_scopes;
+    if (!scopes || request.scopes.some((scope) => !scopes.includes(scope))) return false;
+  }
+  const services = connection2.services.filter((service) => serviceMatchesResource(service, request.resource_url));
+  if (!services.length) {
+    return connection2.kind === "mcp_oauth" && connection2.status !== "ready" && (!hint || oauthHint || hint.type === "bearer") && URL.parse(connection2.resource_url ?? "")?.href === destination.href;
+  }
+  if (!hint || oauthHint) return true;
+  return services.some((service) => {
+    if (service.auth.type !== hint.type) return false;
+    if (hint.type === "api-key") {
+      if ((service.auth.location ?? "header") !== (hint.location ?? "header")) return false;
+      if (hint.location === "query") return service.auth.parameter === hint.parameter;
+      return (service.auth.header || "Authorization").toLowerCase() === hint.header?.toLowerCase() && (hint.prefix === void 0 || (service.auth.prefix ?? "") === hint.prefix);
+    }
+    if (hint.type === "custom") {
+      const headers = Object.keys(service.auth.headers ?? {}).map((header) => header.toLowerCase());
+      return hint.headers?.every((header) => headers.includes(header.toLowerCase())) ?? false;
+    }
+    return true;
+  });
+}
+
+// ../../shared/connection-input.ts
+var ConnectionInputError = class extends Error {
+  constructor(message2, status = 400) {
+    super(message2);
+    this.status = status;
+  }
+};
+function objectBody(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new ConnectionInputError("Provide a JSON object");
+  return value;
+}
+function accessRequestInput(raw) {
+  const body = objectBody(raw);
+  if (Object.keys(body).some((key) => !["resource_url", "reason", "scopes", "mcp_server", "authentication"].includes(key)))
+    throw new ConnectionInputError(
+      "Access requests accept only resource_url, reason, optional scopes and an optional mcp_server name. Never supply secrets."
+    );
+  const url = typeof body.resource_url === "string" ? URL.parse(body.resource_url) : null;
+  let authentication2;
+  try {
+    authentication2 = parseAccessAuthentication(body.authentication);
+  } catch (error) {
+    if (!(error instanceof AccessAuthenticationError)) throw error;
+    throw new ConnectionInputError(error.message);
+  }
+  if (body.mcp_server !== void 0 && (typeof body.mcp_server !== "string" || !/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(body.mcp_server)))
+    throw new ConnectionInputError("Select an existing named MCP server.");
+  if (!url || url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.href.length > 2048 || [...String(body.resource_url)].some((char) => char.charCodeAt(0) <= 32 || char === "*"))
+    throw new ConnectionInputError(
+      "Provide an exact HTTPS destination without credentials, query, fragment or wildcard."
+    );
+  if (typeof body.reason !== "string" || !body.reason.trim() || body.reason.length > 1e3 || [...body.reason].some((char) => char.charCodeAt(0) < 32 && !["	", "\n", "\r"].includes(char)))
+    throw new ConnectionInputError("Explain the access needed in at most 1000 characters; do not include credentials.");
+  if (body.scopes !== void 0 && (!Array.isArray(body.scopes) || body.scopes.length > 64 || !body.scopes.every((scope) => isOAuthScope(scope) && scope.length <= 2048)))
+    throw new ConnectionInputError("Provide valid scope suggestions, never tokens.");
+  if (Array.isArray(body.scopes) && body.scopes.length && authentication2 && !["mcp_oauth", "oauth_app", "bearer"].includes(authentication2.type))
+    throw new ConnectionInputError("OAuth scope suggestions require an OAuth or bearer authentication request.");
+  return {
+    resource_url: url.href,
+    reason: body.reason.trim(),
+    ...authentication2 ? { authentication: authentication2 } : {},
+    ...body.mcp_server === void 0 ? {} : { mcp_server: body.mcp_server },
+    ...body.scopes === void 0 ? {} : { scopes: [...new Set(body.scopes)].sort() }
+  };
+}
+
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 5;
+var CONVERSATION_PROTOCOL_VERSION = 9;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -18738,6 +18901,21 @@ var array = (check) => (v5) => Array.isArray(v5) && v5.every(check);
 var oneOf = (...values) => (v5) => typeof v5 === "string" && values.includes(v5);
 var shape = (fields) => (v5) => object(v5) && Object.entries(fields).every(([key, check]) => check(v5[key]));
 var strings = array(id);
+var questionInput = shape({
+  question: text,
+  responseMode: oneOf("choice", "text", "choice_or_text"),
+  options: array(shape({ label: text, selectedLabel: text, value: text })),
+  placeholder: optional(text),
+  multiline: optional(bool)
+});
+var questionAnswer = shape({
+  responseType: oneOf("choice", "text"),
+  value: (v5) => typeof v5 === "string" && !!v5.trim()
+});
+var questionSkip = shape({ responseType: oneOf("skipped"), value: (v5) => v5 === void 0 });
+function isQuestionInput(value) {
+  return questionInput(value);
+}
 var trace = shape({ ts: text, text });
 var usageFields = {
   cost_usd: number,
@@ -18762,32 +18940,8 @@ var message = shape({
   direction: oneOf("in", "out", "event"),
   timestamp: text,
   text,
-  approval: optional(
-    shape({
-      approvalId: id,
-      action: text,
-      title: text,
-      details: nullable(text),
-      packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
-      options: array(shape({ label: text, selectedLabel: text, value: text })),
-      agentGroupId: nullable(text),
-      agentGroupName: nullable(text),
-      createdAt: text,
-      supportsResponseMessage: optional(bool),
-      reviewRequired: optional(bool),
-      purpose: optional(oneOf("account", "access")),
-      stage: optional(text),
-      origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
-      status: optional(oneOf("pending", "applying", "approved", "rejected", "failed", "cancelled", "expired")),
-      decision: optional(nullable(text)),
-      respondedBy: optional(nullable(shape({ userId: id, displayName: text }))),
-      responseMessage: optional(nullable(text)),
-      outcomeMessage: optional(nullable(text)),
-      resolvedAt: optional(nullable(text))
-    })
-  ),
   questionId: optional(id),
-  questionResponseType: optional(oneOf("skipped")),
+  questionResponseType: optional(oneOf("choice", "text", "skipped")),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -18855,11 +19009,9 @@ var turn = shape({
     durationMs: nullable(number)
   })
 });
-var question = shape({
-  questionId: id,
-  question: text,
-  responseMode: oneOf("choice", "text", "choice_or_text"),
-  options: array(shape({ label: text, selectedLabel: text, value: text })),
+var question = (value) => isQuestionInput(value) && shape({
+  kind: oneOf("question"),
+  id,
   status: oneOf("pending", "answered", "cancelled"),
   answerValue: nullable(text),
   answerType: nullable(oneOf("choice", "text", "skipped")),
@@ -18871,9 +19023,55 @@ var question = shape({
   createdAt: text,
   messageId: optional(id),
   timelinePosition: optional(integer)
+})(value);
+var consentContext = {
+  id,
+  agentGroupId: nullable(text),
+  agentGroupName: nullable(text),
+  createdAt: text,
+  origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
+  decision: optional(nullable(text)),
+  respondedBy: optional(nullable(shape({ userId: id, displayName: text }))),
+  responseMessage: optional(nullable(text)),
+  outcomeMessage: optional(nullable(text)),
+  resolvedAt: optional(nullable(text))
+};
+var approval = shape({
+  ...consentContext,
+  kind: oneOf("confirmation"),
+  action: text,
+  title: text,
+  details: nullable(text),
+  packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
+  options: array(shape({ label: text, selectedLabel: text, value: text })),
+  supportsResponseMessage: bool,
+  status: oneOf("pending", "applying", "approved", "rejected", "failed", "cancelled", "expired")
 });
+var requirements = (value) => {
+  try {
+    accessRequestInput(value);
+    return true;
+  } catch (error) {
+    if (error instanceof ConnectionInputError) return false;
+    throw error;
+  }
+};
+var account = shape({
+  ...consentContext,
+  kind: oneOf("account_setup", "access_grant"),
+  requirements,
+  revision: integer,
+  retryable: bool,
+  expiresAt: nullable(text),
+  agentGroupId: id,
+  agentGroupName: text,
+  status: oneOf("pending", "applying", "completed", "rejected", "cancelled", "expired", "failed"),
+  outcomeMessage: nullable(text),
+  resolvedAt: nullable(text)
+});
+var interaction = (value) => question(value) || approval(value) || account(value);
 var tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
-var timelineRow = (v5) => shape({ kind: oneOf("message"), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v5) || shape({ kind: oneOf("question"), questionId: id, trace: optional(tracePlacement) })(v5) || shape({ kind: oneOf("turn"), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v5);
+var timelineRow = (v5) => shape({ kind: oneOf("message"), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v5) || shape({ kind: oneOf("interaction"), interactionId: id, trace: optional(tracePlacement) })(v5) || shape({ kind: oneOf("turn"), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v5);
 var connection = shape({ connected: bool, activeTurnId: nullable(id) });
 var capabilities = shape({
   canSend: bool,
@@ -18887,7 +19085,7 @@ var conversation = shape({
   threadId: id,
   messages: array(message),
   turns: array(turn),
-  questions: array(question),
+  interactions: array(interaction),
   timeline: array(timelineRow),
   connection,
   capabilities
@@ -18901,7 +19099,7 @@ function parseConversationFrame(value) {
   if (value.kind === "update" && integer(value.baseRevision) && value.revision === Number(value.baseRevision) + 1 && shape({
     messages: changes(message),
     turns: changes(turn),
-    questions: changes(question),
+    interactions: changes(interaction),
     connection,
     capabilities,
     timeline: array(timelineRow)
@@ -18909,23 +19107,21 @@ function parseConversationFrame(value) {
     return value;
   throw new ConversationProtocolError("invalid_frame");
 }
-function keyOf(entity) {
-  return "id" in entity ? entity.id : entity.questionId;
-}
 function unique(entities) {
-  if (new Set(entities.map(keyOf)).size !== entities.length) throw new ConversationProtocolError("invalid_frame");
+  if (new Set(entities.map((entity) => entity.id)).size !== entities.length)
+    throw new ConversationProtocolError("invalid_frame");
 }
 function applyEntities(prior, delta) {
   unique(delta.upserts);
-  const values = new Map(prior.map((entity) => [keyOf(entity), entity]));
+  const values = new Map(prior.map((entity) => [entity.id, entity]));
   for (const id2 of delta.removeIds) values.delete(id2);
-  for (const entity of delta.upserts) values.set(keyOf(entity), entity);
+  for (const entity of delta.upserts) values.set(entity.id, entity);
   if (new Set(delta.order).size !== delta.order.length || delta.order.length !== values.size || delta.order.some((id2) => !values.has(id2)))
     throw new ConversationProtocolError("invalid_frame");
   return delta.order.map((id2) => values.get(id2));
 }
 function validateTimeline(view) {
-  const questionIds = new Set(view.questions.map((question2) => question2.questionId));
+  const questionIds = new Set(view.interactions.filter(isQuestionInteraction).map((item) => item.id));
   if (view.messages.some(
     (message2) => message2.questionId !== void 0 && (message2.direction !== "in" || !questionIds.has(message2.questionId))
   ))
@@ -18933,14 +19129,14 @@ function validateTimeline(view) {
   const messages = new Set(
     view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map((message2) => message2.id)
   );
-  const questions = new Set(view.questions.map((question2) => question2.questionId));
+  const interactions = new Set(view.interactions.map((item) => item.id));
   const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
   const seenRows = /* @__PURE__ */ new Set();
   const seenActivity = /* @__PURE__ */ new Set();
   const owners = /* @__PURE__ */ new Set();
   const statsHosts = /* @__PURE__ */ new Set();
   for (const row of view.timeline) {
-    const key = row.kind === "message" ? `message:${row.messageId}` : row.kind === "question" ? `question:${row.questionId}` : `turn:${row.turnId}:after:${row.afterId}`;
+    const key = row.kind === "message" ? `message:${row.messageId}` : row.kind === "interaction" ? `interaction:${row.interactionId}` : `turn:${row.turnId}:after:${row.afterId}`;
     if (seenRows.has(key)) throw new ConversationProtocolError("invalid_frame");
     seenRows.add(key);
     if (row.kind === "message") {
@@ -18951,8 +19147,8 @@ function validateTimeline(view) {
         if (statsHosts.has(row.statsTurnId)) throw new ConversationProtocolError("invalid_frame");
         statsHosts.add(row.statsTurnId);
       }
-    } else if (row.kind === "question") {
-      if (!questions.delete(row.questionId)) throw new ConversationProtocolError("invalid_frame");
+    } else if (row.kind === "interaction") {
+      if (!interactions.delete(row.interactionId)) throw new ConversationProtocolError("invalid_frame");
     } else if (!turns.has(row.turnId) || row.trace.turnId !== row.turnId) {
       throw new ConversationProtocolError("invalid_frame");
     }
@@ -18970,7 +19166,7 @@ function validateTimeline(view) {
       seenActivity.add(activityKey);
     }
   }
-  if (messages.size || questions.size || view.turns.some((turn2) => turn2.activity.some((line) => !seenActivity.has(`${turn2.id}:${line.ordinal}`))))
+  if (messages.size || interactions.size || view.turns.some((turn2) => turn2.activity.some((line) => !seenActivity.has(`${turn2.id}:${line.ordinal}`))))
     throw new ConversationProtocolError("invalid_frame");
 }
 function reduceConversation(state, frame) {
@@ -18978,7 +19174,7 @@ function reduceConversation(state, frame) {
     if (state?.streamId === frame.streamId && frame.revision <= state.revision) return state;
     unique(frame.conversation.messages);
     unique(frame.conversation.turns);
-    unique(frame.conversation.questions);
+    unique(frame.conversation.interactions);
     validateTimeline(frame.conversation);
     return frame;
   }
@@ -18995,7 +19191,7 @@ function reduceConversation(state, frame) {
       threadId: state.conversation.threadId,
       messages: applyEntities(state.conversation.messages, changes2.messages),
       turns: applyEntities(state.conversation.turns, changes2.turns),
-      questions: applyEntities(state.conversation.questions, changes2.questions),
+      interactions: applyEntities(state.conversation.interactions, changes2.interactions),
       timeline: changes2.timeline,
       connection: changes2.connection,
       capabilities: changes2.capabilities
@@ -19332,9 +19528,7 @@ function currentInputKey(id2) {
     {
       threadId: threadId.value,
       channelType: channelType.value,
-      messagingGroupId: messagingGroupId.value ?? void 0,
-      title: "",
-      lastActivityAt: ""
+      messagingGroupId: messagingGroupId.value
     },
     id2
   );
@@ -19917,11 +20111,11 @@ function submissionPresentation(transcript, submissions, view, groupId2, threadI
   const seen = new Set(context.inputs.keys());
   const rows = transcript.map((row) => {
     if (row.kind !== "message") return row;
-    if (row.message.id) seen.add(row.message.id);
+    seen.add(row.message.id);
     const id2 = row.message.id;
-    const owned = !!id2 && context.ownedIds.has(id2);
+    const owned = context.ownedIds.has(id2);
     const startupReceipt = owned && row.message.inputState?.status === "queued" && !row.message.inputState.queuedForNextTurn;
-    if (!row.message.id || !startingIds.has(row.message.id) && !startupReceipt) return row;
+    if (!startingIds.has(id2) && !startupReceipt) return row;
     return { ...row, message: { ...row.message, hideInitialQueuedCaption: true } };
   });
   for (const submission of local) {
@@ -19930,7 +20124,7 @@ function submissionPresentation(transcript, submissions, view, groupId2, threadI
       id: submission.messageId,
       direction: "in",
       text: submission.text,
-      ts: submission.timestamp,
+      timestamp: submission.timestamp,
       files: submission.files.map((file) => ({
         filename: file.name,
         size: file.size,
@@ -19960,7 +20154,7 @@ function resetConversation() {
 }
 function conversationPresentation(view) {
   const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
-  const questions = new Map(view.questions.map((question2) => [question2.questionId, question2]));
+  const interactions = new Map(view.interactions.map((interaction2) => [interaction2.id, interaction2]));
   const byId = new Map(
     view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map((message2) => [message2.id, message2])
   );
@@ -19991,8 +20185,7 @@ function conversationPresentation(view) {
     const cached = presentedMessages.get(source);
     if (cached && cached.statsTurn === statsTurn && cached.traceTurn === traceTurn && cached.traceKey === traceKey)
       return cached.message;
-    const { timestamp, ...fields } = source;
-    const message2 = { ...fields, files: fields.files ?? null, ts: timestamp };
+    const message2 = row.statsTurnId || row.trace ? { ...source } : source;
     if (row.statsTurnId) message2.statsTurn = statsTurn;
     if (row.trace) {
       message2.turnId = row.trace.turnId;
@@ -20010,14 +20203,17 @@ function conversationPresentation(view) {
       if (!source) throw new ConversationProtocolError("invalid_frame");
       const message2 = presentMessage(source, row);
       if (message2.questionId) {
-        const question2 = questions.get(message2.questionId);
-        if (!question2 || message2.direction !== "in") throw new ConversationProtocolError("invalid_frame");
+        const question2 = interactions.get(message2.questionId);
+        if (question2?.kind !== "question" || message2.direction !== "in")
+          throw new ConversationProtocolError("invalid_frame");
         return [{ kind: "question-answer", question: question2, answer: message2 }];
       }
       return [{ kind: "message", message: message2 }];
     }
-    if (row.kind === "question") {
-      return [];
+    if (row.kind === "interaction") {
+      const interaction2 = interactions.get(row.interactionId);
+      if (!interaction2) throw new ConversationProtocolError("invalid_frame");
+      return interaction2.kind === "question" ? [] : [{ kind: "interaction", interaction: interaction2 }];
     }
     if (!turn2 || turn2.id !== row.turnId) throw new ConversationProtocolError("invalid_frame");
     return [
@@ -20062,7 +20258,7 @@ function applyConversationFrame(raw, expectedThreadId) {
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
     }
-    pendingQuestions.value = view.questions;
+    pendingQuestions.value = view.interactions.filter(isQuestionInteraction);
     pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, view, groupId.value);
     refs.seenIds = new Set(view.messages.map((m6) => `${m6.direction}:${m6.id}`));
     canSend.value = caps.canSend;
@@ -20402,10 +20598,9 @@ function warmChat() {
     const result = await postJson(
       `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/warmup`
     );
-    if (typeof result.data.sessionId === "string" && groupId.value === gid) {
-      threads.value = threads.value.map(
-        (entry) => entry.threadId === tid ? { ...entry, sessionId: result.data.sessionId } : entry
-      );
+    const sessionId = result.data.sessionId;
+    if (typeof sessionId === "string" && groupId.value === gid) {
+      threads.value = threads.value.map((entry) => entry.threadId === tid ? { ...entry, sessionId } : entry);
     }
     if (!result.ok || !result.data.sessionId) throw new Error(result.data.error || `HTTP ${result.status}`);
   })().catch((err) => {
@@ -20838,14 +21033,15 @@ async function openChat(gid, resumeTid, opts) {
     return;
   }
   threadId.value = started.threadId;
-  messagingGroupId.value = started.messagingGroupId || null;
+  messagingGroupId.value = started.messagingGroupId;
   threads.value = [
     {
       threadId: started.threadId,
       sessionId: null,
       channelType: "web",
-      messagingGroupId: started.messagingGroupId || null,
-      sessionMode: started.sessionMode || "per-thread",
+      messagingGroupId: started.messagingGroupId,
+      platformId: started.platformId,
+      sessionMode: "per-thread",
       title: "(new thread)",
       lastActivityAt: (/* @__PURE__ */ new Date()).toISOString(),
       messageCount: 0
@@ -20856,7 +21052,7 @@ async function openChat(gid, resumeTid, opts) {
   connectChatWs({
     gid,
     tid: started.threadId,
-    mg: started.messagingGroupId || null,
+    mg: started.messagingGroupId,
     generation: generation2
   });
   void runSync();
@@ -21575,7 +21771,7 @@ async function respondApproval(approvalId, value, message2) {
   next.add(approvalId);
   respondingApprovalIds.value = next;
   const before = pendingApprovals.value;
-  pendingApprovals.value = before.filter((a4) => a4.approvalId !== approvalId);
+  pendingApprovals.value = before.filter((a4) => a4.id !== approvalId);
   const verb = value === "approve" ? "Approving" : value === "reject" ? "Rejecting" : "Submitting";
   chatStatus.value = verb + "\u2026";
   try {
@@ -21603,13 +21799,7 @@ async function respondApproval(approvalId, value, message2) {
     respondingApprovalIds.value = cleared;
   }
 }
-async function respondQuestion(questionId, value) {
-  return submitQuestionResponse(questionId, { value });
-}
-async function skipQuestion(questionId) {
-  return submitQuestionResponse(questionId, { responseType: "skipped" });
-}
-async function submitQuestionResponse(questionId, response) {
+async function respondQuestion(questionId, response) {
   if (respondingQuestionIds.value.has(questionId)) return false;
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);
@@ -22284,10 +22474,6 @@ function RelativeTime({ ts, className }) {
 }
 
 // src/components/ThreadsRail.tsx
-function threadCtxOf2(t4) {
-  if (!t4 || !t4.channelType || t4.channelType === "web") return null;
-  return { channelType: t4.channelType, messagingGroupId: t4.messagingGroupId ?? null, canSend: !!t4.canSend };
-}
 function ThreadRow({ t: t4 }) {
   const ct = t4.channelType || "web";
   const meta = channelMeta(ct);
@@ -22305,7 +22491,7 @@ function ThreadRow({ t: t4 }) {
   ].filter(Boolean).join(" \xB7 ") : void 0;
   const onOpen = (ev) => {
     if (ev.target.classList.contains("del")) return;
-    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
+    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
   const onDel = async (ev) => {
@@ -22406,7 +22592,7 @@ function DmRow({ t: t4 }) {
   const meta = channelMeta(ct);
   const active = t4.threadId === threadId.value;
   const onOpen = () => {
-    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
+    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
   return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
@@ -22476,7 +22662,7 @@ function SearchResultRow({ r: r4 }) {
     const tid = r4.threadId || (r4.messagingGroupId ? `__dm:${r4.messagingGroupId}` : null);
     if (!tid) return;
     drawerOpen.threads.value = false;
-    const opts = threadCtxOf2(threads.value.find((t4) => t4.threadId === tid)) ?? {
+    const opts = threadCtxOf(threads.value.find((t4) => t4.threadId === tid)) ?? {
       channelType: r4.channelType || "web",
       messagingGroupId: r4.messagingGroupId,
       canSend: false
@@ -22950,6 +23136,7 @@ function ComposerInput({
   voice: voice2,
   send,
   multiLine,
+  rows = 1,
   listening,
   className = "",
   hidden = false,
@@ -22961,7 +23148,7 @@ function ComposerInput({
       class: `composer-input-wrap${!send && !voice2 ? " composer-passive" : ""}${className ? ` ${className}` : ""}${multiLine ? " multi-line" : ""}${listening ? " voice-listening" : ""}`,
       style: hidden ? "display:none" : "",
       children: [
-        /* @__PURE__ */ u4("textarea", { ...textarea, ref: inputRef, rows: 1, onKeyDown: send ? onComposerKeyDown : void 0 }),
+        /* @__PURE__ */ u4("textarea", { ...textarea, ref: inputRef, rows, onKeyDown: send ? onComposerKeyDown : void 0 }),
         controls,
         voice2 ? /* @__PURE__ */ u4(VoiceButton, { ...voice2 }) : null,
         send ? /* @__PURE__ */ u4(
@@ -23650,10 +23837,10 @@ function QuestionPrompt({ question: q5 }) {
   const tid = threadId.value;
   const channel = channelType.value;
   const mg = messagingGroupId.value;
-  const target = `${gid}:${tid}:question:${q5.questionId}`;
+  const target = `${gid}:${tid}:question:${q5.id}`;
   const voiceState = voice.state.value;
   const active = voiceState.target === target;
-  const busy = respondingQuestionIds.value.has(q5.questionId);
+  const busy = respondingQuestionIds.value.has(q5.id);
   const waiting = !!accepted || q5.status === "answered";
   const skipped = accepted === "skipped" || q5.answerType === "skipped";
   const disconnected = (!channel || channel === "web") && !chatReady.value;
@@ -23665,13 +23852,13 @@ function QuestionPrompt({ question: q5 }) {
   const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
   const canType = q5.responseMode !== "choice";
   const { autosize, multiLine } = useComposerTextarea(textareaRef, answer, null);
-  const submit = async (value = answerRef.current.trim()) => {
+  const submit = async (value = answerRef.current.trim(), responseType = "text") => {
     if (!value.trim() || submitting.current || !current.current || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg)
       return false;
     submitting.current = true;
     setError("");
     try {
-      const sent = await respondQuestion(q5.questionId, value);
+      const sent = await respondQuestion(q5.id, { responseType, value });
       if (sent) setAccepted("answer");
       else setError("Could not submit your answer. Please retry.");
       return sent;
@@ -23686,7 +23873,7 @@ function QuestionPrompt({ question: q5 }) {
     setError("");
     if (voice.state.value.target === target) voice.detach();
     try {
-      const sent = await skipQuestion(q5.questionId);
+      const sent = await respondQuestion(q5.id, { responseType: "skipped" });
       if (sent) setAccepted("skipped");
       else setError("Could not skip this question. Please retry.");
     } finally {
@@ -23728,7 +23915,7 @@ function QuestionPrompt({ question: q5 }) {
     "section",
     {
       class: "question-prompt",
-      "data-question-id": q5.questionId,
+      "data-question-id": q5.id,
       "aria-label": q5.question || "Question",
       "aria-busy": busy || waiting,
       children: [
@@ -23755,7 +23942,7 @@ function QuestionPrompt({ question: q5 }) {
             disabled,
             onClick: () => {
               if (voice.state.value.target === target) voice.detach();
-              void submit(option.value);
+              void submit(option.value, "choice");
             },
             children: option.label
           },
@@ -23775,7 +23962,8 @@ function QuestionPrompt({ question: q5 }) {
               ComposerInput,
               {
                 inputRef: textareaRef,
-                multiLine,
+                multiLine: q5.multiline || multiLine,
+                rows: q5.multiline ? 3 : 1,
                 listening: active && voiceState.phase === "listening",
                 className: "question-response-input-wrap",
                 textarea: {
@@ -23784,7 +23972,7 @@ function QuestionPrompt({ question: q5 }) {
                   disabled,
                   readOnly: voiceLocked,
                   "aria-label": "Your answer",
-                  placeholder: "Type your answer\u2026",
+                  placeholder: q5.placeholder ?? "Type your answer\u2026",
                   onInput: (event) => {
                     answerRef.current = event.currentTarget.value;
                     setAnswer(answerRef.current);
@@ -23870,19 +24058,19 @@ function ApprovalCardFrame({ approvalId, title, children }) {
     children
   ] });
 }
-function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
-  const status = a4.status ?? a4.stage ?? "pending";
+function ApprovalCard({ approval: a4, busy, onRespond }) {
+  const status = a4.status;
   const pending4 = status === "pending";
   const here = isApprovalThread(a4.origin);
   const labels = {
-    approved: a4.purpose === "account" ? "Account setup confirmed" : "Approved",
+    approved: "Approved",
     rejected: "Declined",
     applying: "Applying\u2026",
     failed: "Could not apply",
     cancelled: "Cancelled",
     expired: "Expired"
   };
-  return /* @__PURE__ */ u4(ApprovalCardFrame, { approvalId: a4.approvalId, title: a4.purpose === "account" ? "Set up an account" : a4.action === "add_mcp_server" ? "Add tools" : a4.title || a4.action, children: [
+  return /* @__PURE__ */ u4(ApprovalCardFrame, { approvalId: a4.id, title: a4.action === "add_mcp_server" ? "Add tools" : a4.title || a4.action, children: [
     /* @__PURE__ */ u4("div", { class: "approval-text", children: [
       a4.packages ? /* @__PURE__ */ u4("div", { class: "approval-packages", children: ["apt", "npm", "pip"].map((manager) => a4.packages[manager].length ? /* @__PURE__ */ u4("div", { class: "approval-package-list", children: [
         /* @__PURE__ */ u4("span", { class: "approval-package-manager", children: manager }),
@@ -23891,27 +24079,15 @@ function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
       a4.details ? /* @__PURE__ */ u4("div", { class: "approval-details", children: a4.details }) : null,
       !here ? /* @__PURE__ */ u4("p", { children: a4.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(a4.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : null,
       !pending4 ? /* @__PURE__ */ u4("div", { class: "approval-decision", role: "status", children: [
-        /* @__PURE__ */ u4("strong", { children: labels[status] ?? status }),
+        /* @__PURE__ */ u4("strong", { children: labels[status] }),
         a4.responseMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", children: a4.responseMessage }) : null,
         status === "failed" && a4.outcomeMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", role: "alert", children: a4.outcomeMessage }) : null
       ] }) : null,
-      here && status === "failed" && a4.reviewRequired ? /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "approval-btn",
-          disabled: busy,
-          onClick: () => {
-            if (isApprovalThread(a4.origin)) onReview();
-          },
-          children: "Review failure"
-        }
-      ) : null,
       here && pending4 && a4.supportsResponseMessage ? /* @__PURE__ */ u4(
         ApprovalMessageInput,
         {
-          approvalId: a4.approvalId,
-          disabled: busy || a4.stage === "applying"
+          approvalId: a4.id,
+          disabled: busy
         }
       ) : null
     ] }),
@@ -23920,15 +24096,12 @@ function ApprovalCard({ approval: a4, busy, onRespond, onReview }) {
       {
         type: "button",
         class: "approval-btn approval-" + (option.value === "approve" ? "approve" : option.value === "reject" ? "reject" : "neutral"),
-        disabled: busy || a4.stage === "applying",
+        disabled: busy,
         onClick: () => {
           if (!isApprovalThread(a4.origin)) return;
-          if (a4.reviewRequired && option.value === "review") onReview();
-          else {
-            const message2 = a4.supportsResponseMessage ? approvalMessageDrafts.value[a4.approvalId]?.trim() : void 0;
-            if (message2) onRespond(option.value, message2);
-            else onRespond(option.value);
-          }
+          const message2 = a4.supportsResponseMessage ? approvalMessageDrafts.value[a4.id]?.trim() : void 0;
+          if (message2) onRespond(option.value, message2);
+          else onRespond(option.value);
         },
         children: option.label
       },
@@ -24033,11 +24206,6 @@ function MessageBubble({
     ] }) : null
   ] }) : children;
   return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children: content }) });
-}
-
-// ../../shared/oauth-app.ts
-function isOAuthScope(value) {
-  return typeof value === "string" && value.length > 0 && [...value].every((character) => character >= "!" && character <= "~" && character !== '"' && character !== "\\");
 }
 
 // src/components/CredentialsApi.ts
@@ -24389,6 +24557,18 @@ function useConnectionSignIn(onFinished) {
 }
 
 // src/components/credential-presentation.ts
+function accountRequestStatusText(request) {
+  const labels = {
+    pending: "Waiting for your response.",
+    applying: "Applying\u2026",
+    completed: request.kind === "account_setup" ? "Account setup confirmed. No agent access was granted." : "Access granted.",
+    rejected: "Request declined.",
+    cancelled: "Request cancelled.",
+    expired: "Request expired.",
+    failed: "Could not finish the request."
+  };
+  return labels[request.status];
+}
 var PROVIDERS = {
   "openrouter.ai": "OpenRouter",
   "ai-gateway.vercel.sh": "Vercel AI Gateway",
@@ -24427,63 +24607,6 @@ function accessGroups(connections, groups2) {
     connections.flatMap((connection2) => connection2.grants.map((grant) => grant.vault)).filter((id2) => !result.some((group) => group.id === id2))
   );
   return [...result, ...[...unknown].map((id2) => ({ id: id2, name: "Unavailable agent", canAdmin: false }))];
-}
-
-// ../../shared/credential-matching.ts
-function serviceMatchesResource(service, resourceUrl) {
-  const url = URL.parse(resourceUrl);
-  if (!url || service.enabled === false || service.https_only && url.protocol !== "https:") return false;
-  const slash = service.host.indexOf("/");
-  const authority = slash < 0 ? service.host : service.host.slice(0, slash);
-  const path = service.path ?? (slash < 0 ? void 0 : service.host.slice(slash));
-  const separator = authority.lastIndexOf(":");
-  const explicitPort = separator >= 0 && /^\d+$/.test(authority.slice(separator + 1));
-  const host = explicitPort ? authority.slice(0, separator) : authority;
-  if (explicitPort && authority.slice(separator + 1) !== (url.port || (url.protocol === "https:" ? "443" : "80")))
-    return false;
-  const glob = (pattern, value) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(value);
-  return glob(host.toLowerCase(), url.hostname.toLowerCase()) && (!path || glob(path, url.pathname));
-}
-
-// ../../shared/access-authentication.ts
-var ACCESS_AUTHENTICATION_LABELS = {
-  mcp_oauth: "Tools sign-in",
-  oauth_app: "App sign-in",
-  bearer: "Bearer token",
-  "api-key": "API key",
-  basic: "Username and password",
-  custom: "Custom headers"
-};
-function connectionMatchesAccess(connection2, request) {
-  const destination = URL.parse(request.resource_url);
-  if (!destination || destination.protocol !== "https:") return false;
-  const hint = request.authentication;
-  const oauthHint = hint?.type === "mcp_oauth" || hint?.type === "oauth_app";
-  if (oauthHint && connection2.kind !== hint.type) return false;
-  if (hint?.app_id && connection2.app_id !== hint.app_id) return false;
-  if (request.scopes?.length) {
-    if (connection2.kind === "static") return false;
-    const scopes = connection2.status === "ready" ? connection2.scope_source === "provider" ? connection2.granted_scopes : null : connection2.requested_scopes;
-    if (!scopes || request.scopes.some((scope) => !scopes.includes(scope))) return false;
-  }
-  const services = connection2.services.filter((service) => serviceMatchesResource(service, request.resource_url));
-  if (!services.length) {
-    return connection2.kind === "mcp_oauth" && connection2.status !== "ready" && (!hint || oauthHint || hint.type === "bearer") && URL.parse(connection2.resource_url ?? "")?.href === destination.href;
-  }
-  if (!hint || oauthHint) return true;
-  return services.some((service) => {
-    if (service.auth.type !== hint.type) return false;
-    if (hint.type === "api-key") {
-      if ((service.auth.location ?? "header") !== (hint.location ?? "header")) return false;
-      if (hint.location === "query") return service.auth.parameter === hint.parameter;
-      return (service.auth.header || "Authorization").toLowerCase() === hint.header?.toLowerCase() && (hint.prefix === void 0 || (service.auth.prefix ?? "") === hint.prefix);
-    }
-    if (hint.type === "custom") {
-      const headers = Object.keys(service.auth.headers ?? {}).map((header) => header.toLowerCase());
-      return hint.headers?.every((header) => headers.includes(header.toLowerCase())) ?? false;
-    }
-    return true;
-  });
 }
 
 // src/components/credential-routing.ts
@@ -24652,19 +24775,12 @@ function credentialFields(services) {
 }
 
 // src/components/AccessRequestReview.tsx
-var STATUS_LABELS = {
-  applying: "Applying access...",
-  completed: "Access granted.",
-  rejected: "Request declined.",
-  cancelled: "Request cancelled.",
-  expired: "Request expired."
-};
 function accountNickname(preview, server) {
   const configured = preview.mcp?.configured?.[server];
   return configured?.connection_id === preview.connection.id ? configured.account_alias : connectionName(preview.connection).replace(/\p{Cc}/gu, " ").trim().slice(0, 80);
 }
 function AccessRequestReview({
-  id: id2,
+  request,
   connections,
   preferredConnectionId,
   signingIn,
@@ -24678,36 +24794,36 @@ function AccessRequestReview({
   signInMessage,
   apps = []
 }) {
+  const { id: id2, requirements: requirements2 } = request;
   const path = credentialsPath(`/access-requests/${encodeURIComponent(id2)}`);
-  const request = useCredentialResource(path);
   const [selected, setSelected] = h2("");
   const [preview, setPreview] = h2(null);
   const [busy, setBusy] = h2(false);
+  const [submitted, setSubmitted] = h2();
   const [error, setError] = h2("");
   const [configureMcp, setConfigureMcp] = h2(false);
   const [mcpServer, setMcpServer] = h2("");
   const [accountAlias, setAccountAlias] = h2("");
   const preferred = A2();
   const setupAttempt = A2();
-  const defaults = request.data ? accessCreationDefaults(request.data, apps) : void 0;
-  const effectiveRequest = request.data ? {
-    ...request.data,
+  const defaults = accessCreationDefaults(requirements2, apps);
+  const effectiveRequest = {
+    ...requirements2,
     ...defaults?.scopes.length ? { scopes: defaults.scopes } : {}
-  } : null;
-  const compatible = effectiveRequest ? connections.filter((connection2) => connectionMatchesAccess(connection2, effectiveRequest)) : [];
+  };
+  const compatible = connections.filter((connection2) => connectionMatchesAccess(connection2, effectiveRequest));
   const created = connections.find((connection2) => connection2.id === preferredConnectionId);
   const createdMismatch = created?.status === "ready" && !compatible.some((connection2) => connection2.id === created.id);
-  const reconnect = effectiveRequest ? connections.filter((connection2) => connection2.kind !== "static" && !compatible.some((candidate) => candidate.id === connection2.id) && !(createdMismatch && connection2.id === created.id) && connectionMatchesAccess(connection2, { ...effectiveRequest, scopes: void 0 })) : [];
+  const reconnect = connections.filter((connection2) => connection2.kind !== "static" && !compatible.some((candidate) => candidate.id === connection2.id) && !(createdMismatch && connection2.id === created.id) && connectionMatchesAccess(connection2, { ...effectiveRequest, scopes: void 0 }));
   const compatibleIds = JSON.stringify(compatible.map((connection2) => connection2.id));
   y2(() => {
-    if (!request.data) return;
     if (preferredConnectionId && preferred.current !== preferredConnectionId && compatible.some((connection2) => connection2.id === preferredConnectionId)) {
       preferred.current = preferredConnectionId;
       setSelected(preferredConnectionId);
     } else if (selected && !compatible.some((connection2) => connection2.id === selected)) {
       setSelected("");
     }
-  }, [preferredConnectionId, compatibleIds, selected, request.data]);
+  }, [preferredConnectionId, compatibleIds, selected, request]);
   const connectionVersion = JSON.stringify(connections.map((connection2) => [
     connection2.id,
     connection2.revision,
@@ -24717,25 +24833,26 @@ function AccessRequestReview({
     connection2.scope_source
   ]));
   const chosen = connections.find((connection2) => connection2.id === selected);
-  const here = isApprovalThread(request.data?.origin);
-  const blocked = busy || !!signingIn || !!disabled || !!loadingAccounts || !!accountsError;
-  const setup = request.data?.purpose === "account" || !!request.data && !loadingAccounts && !accountsError && !compatible.some((connection2) => connection2.status === "ready");
+  const here = isApprovalThread(request.origin);
+  const awaiting = submitted === `${id2}:${request.revision}`;
+  const blocked = busy || awaiting || !!signingIn || !!disabled || !!loadingAccounts || !!accountsError;
+  const setup = request.kind === "account_setup" || !loadingAccounts && !accountsError && !compatible.some((connection2) => connection2.status === "ready");
   const oauth = defaults?.kind !== void 0 && defaults.kind !== "static";
   const authorizationUrl = URL.parse(apps.find((app) => app.id === defaults?.appId)?.authorization_endpoint ?? "");
   const signInDestination = authorizationUrl?.protocol === "https:" && !authorizationUrl.username && !authorizationUrl.password ? authorizationUrl.origin + authorizationUrl.pathname : void 0;
-  const canApply = here && !blocked && compatible.some((connection2) => connection2.id === selected) && chosen?.status === "ready" && preview?.matches && preview.connection.status === "ready" && preview.connection.id === selected && chosen?.revision === preview.connection.revision && request.data?.status === "pending" && preview.request.status === "pending" && preview.request.revision === request.data.revision && (setup ? request.data.purpose === "account" : !configureMcp || !!mcpServer && !!accountAlias.trim());
-  const failed = request.data?.status === "failed";
+  const canApply = here && !blocked && compatible.some((connection2) => connection2.id === selected) && chosen?.status === "ready" && preview?.matches && preview.connection.status === "ready" && preview.connection.id === selected && chosen?.revision === preview.connection.revision && request.status === "pending" && preview.requestRevision === request.revision && (setup ? request.kind === "account_setup" : !configureMcp || !!mcpServer && !!accountAlias.trim());
+  const failed = request.status === "failed";
   y2(() => {
     setPreview(null);
     setConfigureMcp(false);
-    if (request.data?.status !== "pending") return;
+    if (request.status !== "pending") return;
     setError("");
     if (!selected) return;
     const controller = new AbortController();
     void credentialRequest(path + "/preview", "POST", { connection_id: selected }, controller.signal).then((value) => {
       if (controller.signal.aborted) return;
       setPreview(value);
-      const name = value.request.mcp_server ?? (value.mcp?.names.length === 1 ? value.mcp.names[0] : "");
+      const name = requirements2.mcp_server ?? (value.mcp?.names.length === 1 ? value.mcp.names[0] : "");
       setMcpServer(name);
       setAccountAlias(accountNickname(value, name));
     }).catch((error2) => {
@@ -24744,35 +24861,34 @@ function AccessRequestReview({
       setError(errorMessage(error2));
     });
     return () => controller.abort();
-  }, [path, selected, connectionVersion, request.data?.revision, request.data?.status]);
+  }, [path, selected, connectionVersion, request.revision, request.status]);
   async function prepareSetup() {
-    if (!request.data || blocked || !here || request.data.status !== "pending") return false;
-    if (request.data.purpose === "account") return true;
+    if (blocked || !here || request.status !== "pending") return false;
+    if (request.kind === "account_setup") return true;
     setBusy(true);
     setError("");
     setPreview(null);
     setConfigureMcp(false);
     try {
-      await credentialRequest(path + "/setup", "POST", { request_revision: request.data.revision });
-      await request.refresh();
+      await credentialRequest(path + "/setup", "POST", { request_revision: request.revision });
+      setSubmitted(`${id2}:${request.revision}`);
       onSaved();
       return true;
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
       setError(error2 instanceof CredentialsError && error2.status === 404 && error2.message === "not_found" ? "Account setup unavailable. Reload and retry." : errorMessage(error2));
-      await request.refresh();
       return false;
     } finally {
       setBusy(false);
     }
   }
   y2(() => {
-    if (!setup || !request.data || request.data.purpose === "account" || request.data.status !== "pending" || blocked || !here || setupAttempt.current === request.data.revision) return;
-    setupAttempt.current = request.data.revision;
+    if (!setup || request.kind === "account_setup" || request.status !== "pending" || blocked || !here || setupAttempt.current === request.revision) return;
+    setupAttempt.current = request.revision;
     void prepareSetup();
-  }, [setup, request.data?.purpose, request.data?.revision, request.data?.status, blocked, here]);
+  }, [setup, request.kind, request.revision, request.status, blocked, here]);
   async function addAccount() {
-    if (!await prepareSetup() || !effectiveRequest) return;
+    if (!await prepareSetup()) return;
     setBusy(true);
     setError("");
     try {
@@ -24784,11 +24900,11 @@ function AccessRequestReview({
       setBusy(false);
     }
   }
-  async function manageAccount(account) {
-    if (await prepareSetup()) onManage(account, effectiveRequest ?? void 0);
+  async function manageAccount(account2) {
+    if (await prepareSetup()) onManage(account2, effectiveRequest);
   }
   async function apply2() {
-    if (!preview || !canApply || !isApprovalThread(request.data?.origin)) return;
+    if (!preview || !canApply || !isApprovalThread(request.origin)) return;
     setBusy(true);
     setError("");
     try {
@@ -24796,7 +24912,7 @@ function AccessRequestReview({
       await credentialRequest(path + (setup ? "/account" : "/apply"), "POST", {
         connection_id: preview.connection.id,
         connection_revision: preview.connection.revision,
-        request_revision: preview.request.revision,
+        request_revision: preview.requestRevision,
         ...!setup ? {
           configure_mcp: configureMcp,
           config_revision: preview.mcp?.revision,
@@ -24805,14 +24921,13 @@ function AccessRequestReview({
         ...message2 ? { message: message2 } : {}
       });
       clearApprovalMessage(id2);
+      setSubmitted(`${id2}:${request.revision}`);
       setPreview(null);
-      await request.refresh();
       onSaved();
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
       setError(errorMessage(error2));
       setPreview(null);
-      await request.refresh();
       onSaved();
     } finally {
       setBusy(false);
@@ -24822,12 +24937,11 @@ function AccessRequestReview({
     if (setup && created?.status === "ready" && selected === created.id && canApply) void apply2();
   }, [setup, created?.id, created?.status, selected, canApply]);
   async function reject() {
-    if (!isApprovalThread(request.data?.origin)) return;
+    if (!isApprovalThread(request.origin)) return;
     setBusy(true);
     setError("");
     try {
       await respondApproval(id2, "reject", approvalMessageDrafts.value[id2]);
-      await request.refresh();
     } catch (error2) {
       setError(errorMessage(error2));
     } finally {
@@ -24835,25 +24949,24 @@ function AccessRequestReview({
     }
   }
   async function retry() {
-    if (!request.data || busy || !isApprovalThread(request.data.origin)) return;
+    if (blocked || !isApprovalThread(request.origin)) return;
     setBusy(true);
     setError("");
     setPreview(null);
     setConfigureMcp(false);
     try {
-      await credentialRequest(path + "/retry", "POST", { request_revision: request.data.revision });
+      await credentialRequest(path + "/retry", "POST", { request_revision: request.revision });
+      setSubmitted(`${id2}:${request.revision}`);
       setSelected("");
       onSaved();
-      await request.refresh();
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
       setError(errorMessage(error2));
-      await request.refresh();
     } finally {
       setBusy(false);
     }
   }
-  const agentName = request.data?.agent_group_name ?? "the agent";
+  const agentName = request.agentGroupName;
   const accountStatus = {
     ready: "Ready",
     draft: "Needs sign-in",
@@ -24861,262 +24974,259 @@ function AccessRequestReview({
     disabled: "Turned off"
   };
   return /* @__PURE__ */ u4(ApprovalCardFrame, { approvalId: id2, title: setup ? "Set up an account" : "Allow account access?", children: /* @__PURE__ */ u4("div", { class: "approval-text access-request-review", children: [
-    /* @__PURE__ */ u4(ErrorNotice, { message: request.error || (failed ? "Couldn't finish setup. Some changes may have applied." : error) }),
-    request.loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading the request\u2026" }) : null,
-    request.error ? /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn", onClick: () => void request.refresh(), children: "Try again" }) : null,
-    request.data ? /* @__PURE__ */ u4(k, { children: [
-      request.data.mcp_server ? /* @__PURE__ */ u4("p", { children: [
-        /* @__PURE__ */ u4("strong", { children: "Tools:" }),
-        " ",
-        request.data.mcp_server
-      ] }) : null,
-      !setup ? /* @__PURE__ */ u4("blockquote", { class: "access-request-reason", children: request.data.reason }) : null,
-      request.data.status !== "pending" ? /* @__PURE__ */ u4("div", { children: [
-        !failed ? /* @__PURE__ */ u4("p", { role: "status", children: setup && request.data.status === "completed" ? "Account setup confirmed. No agent access was granted." : STATUS_LABELS[request.data.status] ?? request.data.status }) : null,
-        request.data.status === "failed" && here ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "approval-btn",
-            disabled: blocked,
-            onClick: () => void retry(),
-            children: "Review and retry"
-          }
-        ) : null
-      ] }) : !here ? /* @__PURE__ */ u4("p", { children: request.data.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(request.data.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : /* @__PURE__ */ u4(k, { children: [
-        loadingAccounts ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading accounts\u2026" }) : null,
-        /* @__PURE__ */ u4(ErrorNotice, { message: accountsError ?? "" }),
-        accountsError ? /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn", onClick: onReloadAccounts, children: "Try again" }) : null,
-        compatible.length && !signingIn ? /* @__PURE__ */ u4("fieldset", { class: "access-accounts", disabled: busy || disabled || loadingAccounts, children: [
-          compatible.length > 1 ? /* @__PURE__ */ u4("legend", { children: "Choose an account" }) : null,
-          compatible.map((connection2) => /* @__PURE__ */ u4("label", { class: "access-account-option", children: [
-            /* @__PURE__ */ u4(
-              "input",
-              {
-                type: "radio",
-                name: `account-${id2}`,
-                "aria-label": `Account: ${connectionName(connection2)}${connection2.account ? ` (${connection2.account})` : ""}`,
-                value: connection2.id,
-                checked: selected === connection2.id,
-                onChange: () => setSelected(connection2.id)
-              }
-            ),
-            /* @__PURE__ */ u4("span", { children: [
-              /* @__PURE__ */ u4("span", { class: "access-account-name", children: [
-                /* @__PURE__ */ u4("strong", { children: "Account:" }),
-                " ",
-                connectionName(connection2)
-              ] }),
-              connection2.account ? /* @__PURE__ */ u4("span", { class: "access-account-identity", children: connection2.account }) : null,
-              /* @__PURE__ */ u4("span", { class: "muted", children: accountStatus[connection2.status] }),
-              connection2.status !== "ready" ? /* @__PURE__ */ u4(
-                "button",
-                {
-                  type: "button",
-                  class: "approval-btn",
-                  disabled: blocked,
-                  onClick: () => void manageAccount(connection2),
-                  children: connection2.status === "disabled" ? "Enable" : connection2.kind === "static" ? "Update account" : "Sign in"
-                }
-              ) : null
-            ] })
-          ] }, connection2.id))
-        ] }) : null,
-        !signingIn ? reconnect.map((connection2) => /* @__PURE__ */ u4("div", { class: "access-account-option", children: [
+    /* @__PURE__ */ u4(ErrorNotice, { message: failed ? "Couldn't finish setup. Some changes may have applied." : error }),
+    awaiting ? /* @__PURE__ */ u4("p", { role: "status", children: "Waiting for confirmation\u2026" }) : null,
+    requirements2.mcp_server ? /* @__PURE__ */ u4("p", { children: [
+      /* @__PURE__ */ u4("strong", { children: "Tools:" }),
+      " ",
+      requirements2.mcp_server
+    ] }) : null,
+    !setup ? /* @__PURE__ */ u4("blockquote", { class: "access-request-reason", children: requirements2.reason }) : null,
+    request.status !== "pending" ? /* @__PURE__ */ u4("div", { children: [
+      !failed ? /* @__PURE__ */ u4("p", { role: "status", children: accountRequestStatusText(request) }) : null,
+      request.retryable && here ? /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "approval-btn",
+          disabled: blocked,
+          onClick: () => void retry(),
+          children: "Review and retry"
+        }
+      ) : null
+    ] }) : !here ? /* @__PURE__ */ u4("p", { children: request.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(request.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : /* @__PURE__ */ u4(k, { children: [
+      loadingAccounts ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading accounts\u2026" }) : null,
+      /* @__PURE__ */ u4(ErrorNotice, { message: accountsError ?? "" }),
+      accountsError ? /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn", onClick: onReloadAccounts, children: "Try again" }) : null,
+      compatible.length && !signingIn ? /* @__PURE__ */ u4("fieldset", { class: "access-accounts", disabled: blocked, children: [
+        compatible.length > 1 ? /* @__PURE__ */ u4("legend", { children: "Choose an account" }) : null,
+        compatible.map((connection2) => /* @__PURE__ */ u4("label", { class: "access-account-option", children: [
+          /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "radio",
+              name: `account-${id2}`,
+              "aria-label": `Account: ${connectionName(connection2)}${connection2.account ? ` (${connection2.account})` : ""}`,
+              value: connection2.id,
+              checked: selected === connection2.id,
+              onChange: () => setSelected(connection2.id)
+            }
+          ),
           /* @__PURE__ */ u4("span", { children: [
             /* @__PURE__ */ u4("span", { class: "access-account-name", children: [
               /* @__PURE__ */ u4("strong", { children: "Account:" }),
               " ",
               connectionName(connection2)
             ] }),
-            connection2.account ? /* @__PURE__ */ u4("span", { class: "access-account-identity", children: connection2.account }) : null
+            connection2.account ? /* @__PURE__ */ u4("span", { class: "access-account-identity", children: connection2.account }) : null,
+            /* @__PURE__ */ u4("span", { class: "muted", children: accountStatus[connection2.status] }),
+            connection2.status !== "ready" ? /* @__PURE__ */ u4(
+              "button",
+              {
+                type: "button",
+                class: "approval-btn",
+                disabled: blocked,
+                onClick: () => void manageAccount(connection2),
+                children: connection2.status === "disabled" ? "Enable" : connection2.kind === "static" ? "Update account" : "Sign in"
+              }
+            ) : null
+          ] })
+        ] }, connection2.id))
+      ] }) : null,
+      !signingIn ? reconnect.map((connection2) => /* @__PURE__ */ u4("div", { class: "access-account-option", children: [
+        /* @__PURE__ */ u4("span", { children: [
+          /* @__PURE__ */ u4("span", { class: "access-account-name", children: [
+            /* @__PURE__ */ u4("strong", { children: "Account:" }),
+            " ",
+            connectionName(connection2)
           ] }),
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn",
-              disabled: blocked,
-              onClick: () => void manageAccount(connection2),
-              children: connection2.status === "disabled" ? "Enable" : "Sign in"
-            }
-          )
-        ] }, connection2.id)) : null,
-        createdMismatch && !selected ? /* @__PURE__ */ u4("div", { role: "alert", children: [
-          "This account doesn't match the request. No access was granted.",
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn",
-              disabled: blocked,
-              onClick: () => onManage(created, effectiveRequest ?? void 0),
-              children: "Review the new account"
-            }
-          )
-        ] }) : null,
-        (compatible.length || reconnect.length) && !signingIn ? /* @__PURE__ */ u4(
+          connection2.account ? /* @__PURE__ */ u4("span", { class: "access-account-identity", children: connection2.account }) : null
+        ] }),
+        /* @__PURE__ */ u4(
           "button",
           {
             type: "button",
             class: "approval-btn",
             disabled: blocked,
-            onClick: () => {
-              setSelected("");
-              setPreview(null);
-              return addAccount();
-            },
-            children: "Add account"
+            onClick: () => void manageAccount(connection2),
+            children: connection2.status === "disabled" ? "Enable" : "Sign in"
           }
-        ) : null,
-        signInMessage,
-        preview ? /* @__PURE__ */ u4(k, { children: [
-          !setup && preview.mcp?.names.length ? /* @__PURE__ */ u4("div", { class: "access-tools-choice", children: [
+        )
+      ] }, connection2.id)) : null,
+      createdMismatch && !selected ? /* @__PURE__ */ u4("div", { role: "alert", children: [
+        "This account doesn't match the request. No access was granted.",
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "approval-btn",
+            disabled: blocked,
+            onClick: () => onManage(created, effectiveRequest),
+            children: "Review the new account"
+          }
+        )
+      ] }) : null,
+      (compatible.length || reconnect.length) && !signingIn ? /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "approval-btn",
+          disabled: blocked,
+          onClick: () => {
+            setSelected("");
+            setPreview(null);
+            return addAccount();
+          },
+          children: "Add account"
+        }
+      ) : null,
+      signInMessage,
+      preview ? /* @__PURE__ */ u4(k, { children: [
+        !setup && preview.mcp?.names.length ? /* @__PURE__ */ u4("div", { class: "access-tools-choice", children: [
+          /* @__PURE__ */ u4("label", { children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "checkbox",
+                checked: configureMcp,
+                disabled: blocked,
+                onChange: (event) => setConfigureMcp(event.currentTarget.checked)
+              }
+            ),
+            "Use this account with ",
+            mcpServer ? `${mcpServer} tools` : "these tools"
+          ] }),
+          configureMcp ? /* @__PURE__ */ u4(k, { children: [
+            !requirements2.mcp_server ? /* @__PURE__ */ u4("label", { children: [
+              "Tools",
+              /* @__PURE__ */ u4(
+                "select",
+                {
+                  "aria-label": "Tools for this account",
+                  value: mcpServer,
+                  disabled: blocked,
+                  onChange: (event) => {
+                    const name = event.currentTarget.value;
+                    setMcpServer(name);
+                    setAccountAlias(accountNickname(preview, name));
+                  },
+                  children: [
+                    /* @__PURE__ */ u4("option", { value: "", children: "Choose tools" }),
+                    preview.mcp.names.map((name) => /* @__PURE__ */ u4("option", { value: name, children: name }, name))
+                  ]
+                }
+              )
+            ] }) : null,
             /* @__PURE__ */ u4("label", { children: [
+              "Name the agent sees",
               /* @__PURE__ */ u4(
                 "input",
                 {
-                  type: "checkbox",
-                  checked: configureMcp,
+                  type: "text",
+                  class: "question-card-input",
+                  "aria-label": "Account name shown to agent",
+                  value: accountAlias,
+                  maxLength: 80,
                   disabled: blocked,
-                  onChange: (event) => setConfigureMcp(event.currentTarget.checked)
+                  onInput: (event) => setAccountAlias(event.currentTarget.value)
                 }
-              ),
-              "Use this account with ",
-              mcpServer ? `${mcpServer} tools` : "these tools"
-            ] }),
-            configureMcp ? /* @__PURE__ */ u4(k, { children: [
-              !preview.request.mcp_server ? /* @__PURE__ */ u4("label", { children: [
-                "Tools",
-                /* @__PURE__ */ u4(
-                  "select",
-                  {
-                    "aria-label": "Tools for this account",
-                    value: mcpServer,
-                    disabled: blocked,
-                    onChange: (event) => {
-                      const name = event.currentTarget.value;
-                      setMcpServer(name);
-                      setAccountAlias(accountNickname(preview, name));
-                    },
-                    children: [
-                      /* @__PURE__ */ u4("option", { value: "", children: "Choose tools" }),
-                      preview.mcp.names.map((name) => /* @__PURE__ */ u4("option", { value: name, children: name }, name))
-                    ]
-                  }
-                )
-              ] }) : null,
-              /* @__PURE__ */ u4("label", { children: [
-                "Name the agent sees",
-                /* @__PURE__ */ u4(
-                  "input",
-                  {
-                    type: "text",
-                    class: "question-card-input",
-                    "aria-label": "Account name shown to agent",
-                    value: accountAlias,
-                    maxLength: 80,
-                    disabled: blocked,
-                    onInput: (event) => setAccountAlias(event.currentTarget.value)
-                  }
-                )
-              ] })
-            ] }) : null
-          ] }) : null,
-          !preview.matches ? /* @__PURE__ */ u4("p", { role: "status", children: "This account doesn't match the request." }) : null,
-          preview.connection.status !== "ready" || !preview.matches ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn",
-              disabled: blocked,
-              onClick: () => void manageAccount(preview.connection),
-              children: "Manage this account"
-            }
-          ) : null
-        ] }) : null
-      ] }),
-      setup ? /* @__PURE__ */ u4(k, { children: !signingIn && signInDestination ? /* @__PURE__ */ u4("p", { class: "access-destination", children: signInDestination }) : null }) : /* @__PURE__ */ u4("section", { class: "access-more-information", "aria-label": "Access details", children: [
-        /* @__PURE__ */ u4("p", { children: [
-          /* @__PURE__ */ u4("strong", { children: "Website:" }),
-          " ",
-          /* @__PURE__ */ u4("span", { class: "access-destination", children: request.data.resource_url })
-        ] }),
-        request.data.authentication ? /* @__PURE__ */ u4("p", { children: [
-          /* @__PURE__ */ u4("strong", { children: "Account type:" }),
-          " ",
-          ACCESS_AUTHENTICATION_LABELS[request.data.authentication.type],
-          request.data.authentication.app_id ? ` \xB7 App: ${request.data.authentication.app_id}` : ""
+              )
+            ] })
+          ] }) : null
         ] }) : null,
-        request.data.authentication?.header ? /* @__PURE__ */ u4("p", { children: [
-          "Sign-in field: ",
-          request.data.authentication.header
-        ] }) : null,
-        request.data.authentication?.parameter ? /* @__PURE__ */ u4("p", { children: [
-          "Sign-in field in the website address: ",
-          request.data.authentication.parameter
-        ] }) : null,
-        request.data.authentication?.prefix !== void 0 ? /* @__PURE__ */ u4("p", { children: [
-          "The value starts with: ",
-          JSON.stringify(request.data.authentication.prefix)
-        ] }) : null,
-        request.data.authentication?.headers?.length ? /* @__PURE__ */ u4("p", { children: [
-          "Sign-in fields: ",
-          request.data.authentication.headers.join(", ")
-        ] }) : null,
-        request.data.scopes?.length ? /* @__PURE__ */ u4(k, { children: [
-          /* @__PURE__ */ u4("p", { children: "Needed permissions:" }),
-          /* @__PURE__ */ u4("ul", { children: request.data.scopes.map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) })
-        ] }) : null,
-        preview ? /* @__PURE__ */ u4(k, { children: [
-          /* @__PURE__ */ u4("p", { children: "This account is set up for:" }),
-          /* @__PURE__ */ u4("ul", { children: preview.connection.services.map((service) => /* @__PURE__ */ u4("li", { children: serviceDestination(service) }, service.name)) }),
-          preview.connection.kind !== "static" ? /* @__PURE__ */ u4("p", { children: [
-            /* @__PURE__ */ u4("strong", { children: "Enabled permissions:" }),
-            " ",
-            preview.connection.scope_source === "provider" ? preview.connection.granted_scopes?.join(", ") || "Not reported." : "Not confirmed by the provider."
-          ] }) : null,
-          /* @__PURE__ */ u4("p", { children: "The agent receives all enabled permissions on this account to act on your behalf." })
-        ] }) : null,
-        failed && error ? /* @__PURE__ */ u4("p", { children: error }) : null,
-        request.data.result?.message && request.data.result.message !== error ? /* @__PURE__ */ u4("p", { children: request.data.result.message }) : null
-      ] }),
-      request.data.status === "pending" && here ? /* @__PURE__ */ u4(k, { children: [
-        !setup && preview && selected ? /* @__PURE__ */ u4("p", { class: "access-decision-summary", children: [
-          agentName,
-          " can use the ",
-          /* @__PURE__ */ u4("strong", { children: [
-            connectionName(preview.connection),
-            " account"
-          ] }),
-          ".",
-          configureMcp ? ` ${mcpServer || "The selected"} tools will also use this account.` : ""
-        ] }) : null,
-        !signingIn && (!setup || compatible.length) ? /* @__PURE__ */ u4(ApprovalMessageInput, { approvalId: id2, disabled: blocked }) : null,
-        /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: [
-          /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn approval-reject", disabled: busy || disabled, onClick: () => void reject(), children: "Decline" }),
-          !compatible.length && !reconnect.length && !signingIn ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn primary",
-              disabled: blocked,
-              onClick: () => addAccount(),
-              children: busy ? "Starting\u2026" : oauth ? "Sign in" : "Add account"
-            }
-          ) : null,
-          !setup || chosen?.status === "ready" ? /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "approval-btn approval-approve primary",
-              disabled: !canApply,
-              onClick: () => void apply2(),
-              children: busy ? "Applying\u2026" : setup ? "Confirm account setup" : "Allow access"
-            }
-          ) : null
-        ] })
+        !preview.matches ? /* @__PURE__ */ u4("p", { role: "status", children: "This account doesn't match the request." }) : null,
+        preview.connection.status !== "ready" || !preview.matches ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "approval-btn",
+            disabled: blocked,
+            onClick: () => void manageAccount(preview.connection),
+            children: "Manage this account"
+          }
+        ) : null
       ] }) : null
+    ] }),
+    setup ? /* @__PURE__ */ u4(k, { children: !signingIn && signInDestination ? /* @__PURE__ */ u4("p", { class: "access-destination", children: signInDestination }) : null }) : /* @__PURE__ */ u4("section", { class: "access-more-information", "aria-label": "Access details", children: [
+      /* @__PURE__ */ u4("p", { children: [
+        /* @__PURE__ */ u4("strong", { children: "Website:" }),
+        " ",
+        /* @__PURE__ */ u4("span", { class: "access-destination", children: requirements2.resource_url })
+      ] }),
+      requirements2.authentication ? /* @__PURE__ */ u4("p", { children: [
+        /* @__PURE__ */ u4("strong", { children: "Account type:" }),
+        " ",
+        ACCESS_AUTHENTICATION_LABELS[requirements2.authentication.type],
+        requirements2.authentication.app_id ? ` \xB7 App: ${requirements2.authentication.app_id}` : ""
+      ] }) : null,
+      requirements2.authentication?.header ? /* @__PURE__ */ u4("p", { children: [
+        "Sign-in field: ",
+        requirements2.authentication.header
+      ] }) : null,
+      requirements2.authentication?.parameter ? /* @__PURE__ */ u4("p", { children: [
+        "Sign-in field in the website address: ",
+        requirements2.authentication.parameter
+      ] }) : null,
+      requirements2.authentication?.prefix !== void 0 ? /* @__PURE__ */ u4("p", { children: [
+        "The value starts with: ",
+        JSON.stringify(requirements2.authentication.prefix)
+      ] }) : null,
+      requirements2.authentication?.headers?.length ? /* @__PURE__ */ u4("p", { children: [
+        "Sign-in fields: ",
+        requirements2.authentication.headers.join(", ")
+      ] }) : null,
+      requirements2.scopes?.length ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("p", { children: "Needed permissions:" }),
+        /* @__PURE__ */ u4("ul", { children: requirements2.scopes.map((scope) => /* @__PURE__ */ u4("li", { children: scope }, scope)) })
+      ] }) : null,
+      preview ? /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4("p", { children: "This account is set up for:" }),
+        /* @__PURE__ */ u4("ul", { children: preview.connection.services.map((service) => /* @__PURE__ */ u4("li", { children: serviceDestination(service) }, service.name)) }),
+        preview.connection.kind !== "static" ? /* @__PURE__ */ u4("p", { children: [
+          /* @__PURE__ */ u4("strong", { children: "Enabled permissions:" }),
+          " ",
+          preview.connection.scope_source === "provider" ? preview.connection.granted_scopes?.join(", ") || "Not reported." : "Not confirmed by the provider."
+        ] }) : null,
+        /* @__PURE__ */ u4("p", { children: "The agent receives all enabled permissions on this account to act on your behalf." })
+      ] }) : null,
+      failed && error ? /* @__PURE__ */ u4("p", { children: error }) : null,
+      request.outcomeMessage && request.outcomeMessage !== error ? /* @__PURE__ */ u4("p", { children: request.outcomeMessage }) : null
+    ] }),
+    request.status === "pending" && here ? /* @__PURE__ */ u4(k, { children: [
+      !setup && preview && selected ? /* @__PURE__ */ u4("p", { class: "access-decision-summary", children: [
+        agentName,
+        " can use the ",
+        /* @__PURE__ */ u4("strong", { children: [
+          connectionName(preview.connection),
+          " account"
+        ] }),
+        ".",
+        configureMcp ? ` ${mcpServer || "The selected"} tools will also use this account.` : ""
+      ] }) : null,
+      !signingIn && (!setup || compatible.length) ? /* @__PURE__ */ u4(ApprovalMessageInput, { approvalId: id2, disabled: blocked }) : null,
+      /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: [
+        /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn approval-reject", disabled: blocked, onClick: () => void reject(), children: "Decline" }),
+        !compatible.length && !reconnect.length && !signingIn ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "approval-btn primary",
+            disabled: blocked,
+            onClick: () => addAccount(),
+            children: busy ? "Starting\u2026" : oauth ? "Sign in" : "Add account"
+          }
+        ) : null,
+        !setup || chosen?.status === "ready" ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "approval-btn approval-approve primary",
+            disabled: !canApply,
+            onClick: () => void apply2(),
+            children: busy ? "Applying\u2026" : setup ? "Confirm account setup" : "Allow access"
+          }
+        ) : null
+      ] })
     ] }) : null
   ] }) });
 }
@@ -25389,12 +25499,12 @@ function CredentialRow({ connection: connection2, groups: groups2, apps, busy, o
     error ? /* @__PURE__ */ u4("tr", { children: /* @__PURE__ */ u4("td", { colSpan: groups2.length + 1, children: /* @__PURE__ */ u4(ErrorNotice, { message: error }) }) }) : null
   ] });
 }
-function CredentialCell({ children, services, account, status, actions }) {
+function CredentialCell({ children, services, account: account2, status, actions }) {
   const destinations = [...new Set(services.map(serviceDestination))];
   const notice = status === "ready" || status === "active" ? "" : status === "disabled" ? "Disabled" : status === "draft" ? "Not connected" : status === "suspended" ? "Access needs review" : "Sign in required";
   return /* @__PURE__ */ u4("th", { scope: "row", class: "credentials-matrix-name", children: [
     children,
-    account ? /* @__PURE__ */ u4("span", { class: "muted", children: account }) : null,
+    account2 ? /* @__PURE__ */ u4("span", { class: "muted", children: account2 }) : null,
     destinations.map((destination) => /* @__PURE__ */ u4("span", { class: "muted credential-destination", children: destination }, destination)),
     notice ? /* @__PURE__ */ u4("span", { class: "ga-cred-warn-text", children: notice }) : null,
     actions
@@ -26662,7 +26772,17 @@ function OAuthAppDialog({ app, canEditInstall, onClose, onSaved }) {
 }
 
 // src/components/AccessRequestCard.tsx
-function AccessRequestCard({ id: id2, disabled }) {
+function AccountRequestSummary({ request }) {
+  return /* @__PURE__ */ u4(ApprovalCardFrame, { approvalId: request.id, title: request.kind === "account_setup" ? "Set up an account" : "Allow account access?", children: /* @__PURE__ */ u4("div", { class: "approval-text", children: [
+    /* @__PURE__ */ u4("p", { children: request.requirements.reason }),
+    /* @__PURE__ */ u4("p", { class: "access-destination", children: request.requirements.resource_url }),
+    !isApprovalThread(request.origin) ? /* @__PURE__ */ u4("p", { children: request.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(request.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : null,
+    request.status !== "pending" ? /* @__PURE__ */ u4("p", { role: "status", children: accountRequestStatusText(request) }) : null,
+    request.responseMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", children: request.responseMessage }) : null,
+    request.status === "failed" && request.outcomeMessage ? /* @__PURE__ */ u4("p", { role: "alert", children: request.outcomeMessage }) : null
+  ] }) });
+}
+function AccessRequestCard({ request, disabled }) {
   const accounts = useCredentialResource(credentialsPath());
   const [dialog, setDialog] = h2(null);
   const [created, setCreated] = h2();
@@ -26676,7 +26796,7 @@ function AccessRequestCard({ id: id2, disabled }) {
     /* @__PURE__ */ u4(
       AccessRequestReview,
       {
-        id: id2,
+        request,
         connections: accounts.data?.connections ?? [],
         apps: accounts.data?.apps ?? [],
         disabled,
@@ -26685,8 +26805,8 @@ function AccessRequestCard({ id: id2, disabled }) {
         onReloadAccounts: saved,
         preferredConnectionId: created,
         signingIn: !!signIn.waiting,
-        onCreate: (request) => setDialog({ kind: "add", request }),
-        onManage: (account, request) => setDialog({ kind: "manage", connection: account, request }),
+        onCreate: (request2) => setDialog({ kind: "add", request: request2 }),
+        onManage: (account2, request2) => setDialog({ kind: "manage", connection: account2, request: request2 }),
         onSaved: saved,
         signInMessage: signIn.waiting ? /* @__PURE__ */ u4("div", { class: "access-sign-in", role: "status", children: [
           /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: [
@@ -26719,7 +26839,7 @@ function AccessRequestCard({ id: id2, disabled }) {
         apps: accounts.data.apps,
         resourceUrl: dialog.request.resource_url,
         accessRequest: dialog.request,
-        onCreated: (account) => setCreated(account.id),
+        onCreated: (account2) => setCreated(account2.id),
         onStart: signIn.start,
         onSaved: saved,
         onClose: close
@@ -26750,19 +26870,19 @@ function AccessRequestCard({ id: id2, disabled }) {
 }
 
 // src/components/ApprovalBubble.tsx
-function ApprovalBubble({ approval, busy, onReview, onRespond, messageId, reference }) {
-  const status = approval.status ?? approval.stage ?? "pending";
-  const answered = approval.decision === "approve" || approval.decision === "reject" || status === "approved" || status === "rejected";
-  const from = answered ? approval.respondedBy && approval.respondedBy.userId !== currentUserId.value ? approval.respondedBy.displayName : void 0 : approval.agentGroupId !== groupId.value ? approval.agentGroupName || "Global" : void 0;
-  const access = approval.action === "request_access" && approval.reviewRequired && isApprovalThread(approval.origin) && ["pending", "applying", "failed"].includes(status);
+function ApprovalBubble({ approval: approval2, busy, onRespond, reference }) {
+  const status = approval2.status;
+  const answered = approval2.decision === "approve" || approval2.decision === "reject" || status === "approved" || status === "completed" || status === "rejected";
+  const from = answered ? approval2.respondedBy && approval2.respondedBy.userId !== currentUserId.value ? approval2.respondedBy.displayName : void 0 : approval2.agentGroupId !== groupId.value ? approval2.agentGroupName || "Global" : void 0;
+  const access = approval2.kind !== "confirmation" && isApprovalThread(approval2.origin) && (status === "pending" || status === "applying" || approval2.retryable);
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
       class: `msg ${answered ? "in" : "out"} approval-message${access ? " markdown access-approval-message" : ""}${reference ? " approval-reference" : ""}`,
-      "data-msg-id": messageId ?? `approval:${approval.approvalId}`,
+      "data-msg-id": approval2.id,
       from,
-      timestamp: approval.resolvedAt ?? approval.createdAt,
-      children: access ? /* @__PURE__ */ u4(AccessRequestCard, { id: approval.approvalId, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(ApprovalCard, { approval, busy, onReview, onRespond })
+      timestamp: approval2.resolvedAt ?? approval2.createdAt,
+      children: approval2.kind === "confirmation" ? /* @__PURE__ */ u4(ApprovalCard, { approval: approval2, busy, onRespond }) : access ? /* @__PURE__ */ u4(AccessRequestCard, { request: approval2, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(AccountRequestSummary, { request: approval2 })
     }
   );
 }
@@ -26777,7 +26897,7 @@ ${response}`;
 
 // src/components/QuestionAnswerBubble.tsx
 function QuestionAnswerBubble({ question: question2, answer }) {
-  const response = answer.questionResponseType === "skipped" ? "Question skipped" : question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text;
+  const response = answer.questionResponseType === "skipped" ? "Question skipped" : answer.questionResponseType === "choice" ? question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text : answer.text;
   const text2 = formatQuestionResponse(question2.question, response);
   const md = renderMarkdown(text2, groupId.value);
   return /* @__PURE__ */ u4(
@@ -26786,7 +26906,7 @@ function QuestionAnswerBubble({ question: question2, answer }) {
       class: `msg in${md != null ? " markdown" : ""}`,
       "data-msg-id": answer.id,
       from: answer.author && answer.author.userId !== currentUserId.value ? answer.author.displayName : void 0,
-      timestamp: answer.ts,
+      timestamp: answer.timestamp,
       reveal: highlightMessageId.value === answer.id ? searchQuery.value : void 0,
       children: md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 })
     }
@@ -26799,7 +26919,7 @@ function dockQuestions(questions, messages, groupId2, threadId2) {
     messages.filter((message2) => message2.direction === "in" && message2.inputState?.status !== "cancelled").map((message2) => message2.questionId)
   );
   return questions.filter(
-    (question2) => question2.agentGroupId === groupId2 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.questionId)
+    (question2) => question2.kind === "question" && question2.agentGroupId === groupId2 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.id)
   ).sort(
     (a4, b5) => timelineSortKey(a4.createdAt, a4.timelinePosition) - timelineSortKey(b5.createdAt, b5.timelinePosition)
   );
@@ -27683,26 +27803,13 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
           /* @__PURE__ */ u4("span", { class: "event-text", children: ev?.summary || m6.text }),
           /* @__PURE__ */ u4("span", { class: "event-meta", children: [
-            /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+            /* @__PURE__ */ u4(RelativeTime, { ts: m6.timestamp }),
             recur
           ] })
         ]
       }
     );
   }
-  const approval = m6.approval;
-  if (approval) return /* @__PURE__ */ u4(
-    ApprovalBubble,
-    {
-      approval,
-      messageId: m6.id,
-      busy: respondingApprovalIds.value.has(approval.approvalId),
-      onReview: () => openCredentials({ approvalId: approval.approvalId }),
-      onRespond: (value, message2) => {
-        void respondApproval(approval.approvalId, value, message2).catch(console.error);
-      }
-    }
-  );
   if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card });
   const md = renderMarkdown(m6.text, groupId.value);
   const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
@@ -27720,7 +27827,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
-  const metadata = m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4(k, { children: [
+  const metadata = m6.timestamp || m6.inputState || activity.length ? /* @__PURE__ */ u4(k, { children: [
     inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
     submission?.status === "sending" && !m6.hideInitialQueuedCaption ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: [
       "Sending",
@@ -27740,7 +27847,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
       "data-msg-id": m6.id,
       elementRef: ref,
       from: m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? m6.author.displayName : void 0,
-      timestamp: m6.ts,
+      timestamp: m6.timestamp,
       metadata,
       reveal: highlightMessageId.value === m6.id ? searchQuery.value : void 0,
       children: [
@@ -27841,8 +27948,8 @@ function DisplayCardMessage({ message: message2, card }) {
     {
       class: "msg out display-card agent-action",
       "data-msg-id": message2.id,
-      timestamp: message2.ts,
-      metadata: message2.ts || activity.length ? /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }) : null,
+      timestamp: message2.timestamp,
+      metadata: message2.timestamp || activity.length ? /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }) : null,
       reveal: highlightMessageId.value === message2.id ? searchQuery.value : void 0,
       children: [
         showTechnicalStatus ? /* @__PURE__ */ u4(
@@ -27879,20 +27986,32 @@ function DisplayCardMessage({ message: message2, card }) {
     }
   );
 }
-function messageKey(message2) {
-  return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
+function ApprovalRow({ approval: approval2, reference }) {
+  return /* @__PURE__ */ u4(
+    ApprovalBubble,
+    {
+      approval: approval2,
+      reference,
+      busy: respondingApprovalIds.value.has(approval2.id),
+      onRespond: (value, message2) => {
+        void respondApproval(approval2.id, value, message2).catch(console.error);
+      }
+    }
+  );
 }
 function groupKey(group, responseTurnId) {
   if (group.kind === "starting" || group.kind === "turn" && group.row.status && group.row.turn.phase !== "settled" && group.row.turn.id === responseTurnId)
     return "response:active";
   if (group.kind === "turn") return `turn:${group.row.turn.id}`;
   if (group.kind === "question-answer") return `question-answer:${group.row.answer.id}`;
-  if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
-  return `single:${messageKey(group.m)}`;
+  if (group.kind === "interaction") return `interaction:${group.row.interaction.id}`;
+  if (group.kind === "events") return `events:${group.events[0].id}`;
+  return `single:${group.m.id}`;
 }
 function groupContains(group, messageId) {
   if (group.kind === "turn" || group.kind === "starting") return false;
   if (group.kind === "question-answer") return group.row.answer.id === messageId;
+  if (group.kind === "interaction") return group.row.interaction.id === messageId;
   if (group.kind === "events") return group.events.some((e4) => e4.id === messageId);
   return group.m.id === messageId;
 }
@@ -27910,6 +28029,7 @@ function groupMessages(list) {
       flushEvents();
       if (row.kind === "starting") out.push({ kind: "starting", row });
       else if (row.kind === "turn") out.push({ kind: "turn", row });
+      else if (row.kind === "interaction") out.push({ kind: "interaction", row });
       else out.push({ kind: "question-answer", row });
       continue;
     }
@@ -27953,27 +28073,14 @@ function EventsGroup({ events }) {
     /* @__PURE__ */ u4("span", { class: "event-text", children: multi ? `${taskCount} tasks attempted ${n3}\xD7${failed ? ` \xB7 ${failed} failed` : ""}` : `Task attempted ${n3}\xD7${failed ? ` \xB7 ${failed} failed` : ""}` }),
     /* @__PURE__ */ u4("span", { class: "event-meta", children: [
       "last\xA0",
-      /* @__PURE__ */ u4(RelativeTime, { ts: last.ts })
+      /* @__PURE__ */ u4(RelativeTime, { ts: last.timestamp })
     ] })
   ] });
 }
 function ApprovalReferences() {
   const list = pendingApprovals.value.filter((a4) => !isApprovalThread(a4.origin));
   if (list.length === 0) return null;
-  const busy = respondingApprovalIds.value;
-  return /* @__PURE__ */ u4(k, { children: list.map((a4) => /* @__PURE__ */ u4(
-    ApprovalBubble,
-    {
-      reference: true,
-      approval: a4,
-      busy: busy.has(a4.approvalId),
-      onReview: () => openCredentials({ approvalId: a4.approvalId }),
-      onRespond: (value, message2) => {
-        void respondApproval(a4.approvalId, value, message2).catch(console.error);
-      }
-    },
-    a4.approvalId
-  )) });
+  return /* @__PURE__ */ u4(k, { children: list.map((a4) => /* @__PURE__ */ u4(ApprovalRow, { reference: true, approval: a4 }, a4.id)) });
 }
 function fmtNextShort(iso) {
   if (!iso) return "";
@@ -28426,6 +28533,7 @@ function MessageLog({ dockRef }) {
   let latestConversationalMessage;
   for (let index = list.length - 1; index >= 0; index--) {
     const row = list[index];
+    if (row.kind === "interaction") break;
     if (row.kind !== "message") continue;
     const message2 = row.message;
     if (message2.direction !== "event") {
@@ -28436,7 +28544,7 @@ function MessageLog({ dockRef }) {
   return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
     chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
       const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
-      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
+      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "interaction" ? /* @__PURE__ */ u4(ApprovalRow, { approval: g8.row.interaction }, key) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
         MessageRow,
         {
           m: g8.m,
@@ -28454,7 +28562,7 @@ function MessageLog({ dockRef }) {
         branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
       ] });
     }),
-    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
+    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${message2.id}`)),
     !chatLoading.value && /* @__PURE__ */ u4(ApprovalReferences, {}),
     /* @__PURE__ */ u4(TaskIndicator, {})
   ] });
@@ -28821,7 +28929,7 @@ function InputDock() {
       {
         question: question2
       },
-      `${groupId.value}:${threadId.value}:${channelType.value}:${messagingGroupId.value}:${question2.questionId}`
+      `${groupId.value}:${threadId.value}:${channelType.value}:${messagingGroupId.value}:${question2.id}`
     )) })
   ] });
 }

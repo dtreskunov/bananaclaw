@@ -64,12 +64,12 @@ export function submissionPresentation(
   const seen = new Set(context.inputs.keys());
   const rows = transcript.map((row): TranscriptRow => {
     if (row.kind !== 'message') return row;
-    if (row.message.id) seen.add(row.message.id);
+    seen.add(row.message.id);
     const id = row.message.id;
-    const owned = !!id && context.ownedIds.has(id);
+    const owned = context.ownedIds.has(id);
     const startupReceipt =
       owned && row.message.inputState?.status === 'queued' && !row.message.inputState.queuedForNextTurn;
-    if (!row.message.id || (!startingIds.has(row.message.id) && !startupReceipt)) return row;
+    if (!startingIds.has(id) && !startupReceipt) return row;
     return { ...row, message: { ...row.message, hideInitialQueuedCaption: true } };
   });
   for (const submission of local) {
@@ -78,7 +78,7 @@ export function submissionPresentation(
       id: submission.messageId,
       direction: 'in',
       text: submission.text,
-      ts: submission.timestamp,
+      timestamp: submission.timestamp,
       files: submission.files.map((file) => ({
         filename: file.name,
         size: file.size,

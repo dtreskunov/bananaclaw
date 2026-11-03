@@ -234,25 +234,35 @@ export interface Question {
   created_at: string;
 }
 
-// ── Pending approvals (central DB) ──
+// ── Approvals (central DB) ──
 
-export interface PendingApproval {
+interface ApprovalRecord {
   approval_id: string;
-  origin_message_id?: string | null;
+  origin_message_id: string | null;
   session_id: string | null;
   request_id: string;
   action: string;
   payload: string; // JSON
   created_at: string;
   agent_group_id: string | null;
-  channel_type: string | null;
-  platform_id: string | null;
-  platform_message_id: string | null;
   expires_at: string | null;
-  status: 'pending' | 'approved' | 'rejected' | 'expired';
   title: string;
   options_json: string;
+  dedupe_key: string | null;
+  revision: number;
+  updated_at: string;
+  decision: string | null;
+  responded_by: string | null;
+  response_message: string | null;
+  outcome_message: string | null;
+  resolved_at: string | null;
 }
+
+export type Approval = ApprovalRecord &
+  (
+    | { kind: 'confirmation'; status: import('./ui/shared/approval.js').ConfirmationInteraction['status'] }
+    | { kind: 'account_setup' | 'access_grant'; status: import('./ui/shared/approval.js').AccountRequestStatus }
+  );
 
 // ── Agent destinations (central DB) ──
 

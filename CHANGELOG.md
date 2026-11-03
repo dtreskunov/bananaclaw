@@ -4,6 +4,13 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Retained approval storage.** One approval record owns request
+  metadata and lifecycle; private account progress no longer mirrors it.
+  Archives cancel pending decisions, refuse applying effects, and restore
+  finalized audit records only. Old approval storage and format-1 archives are
+  not read by the new host. See the explicit
+  [offline cutover and rollback](docs/user-requests-refactor-plan.md#offline-cutover-detect--why--fix--verify--rollback).
+
 - **Request ownership and separate account setup.** Current-agent requests
   omit redundant attribution; approval/denial bubbles use the responder's user
   styling and name only other users. Missing or unready accounts use setup-only

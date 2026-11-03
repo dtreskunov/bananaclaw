@@ -84,20 +84,15 @@ function seedQuestion(responseMode: 'choice' | 'text' | 'choice_or_text'): void 
     question_text: 'Which environment?',
     response_mode: responseMode,
     options: [{ label: 'Production', selectedLabel: 'Production', value: 'prod' }],
-    status: 'pending',
-    answer_value: null,
-    answer_type: null,
-    answered_by: null,
-    answered_at: null,
-    cancelled_at: null,
     created_at: '2026-01-01T00:00:00Z',
   });
 }
 
-function response(value: string) {
+function response(value: string, responseType: 'choice' | 'text' = 'text') {
   return {
     questionId: QUESTION_ID,
     value,
+    responseType,
     userId: null,
     channelType: 'web',
     platformId: 'user-1',
@@ -188,7 +183,7 @@ describe('handleInteractiveResponse', () => {
 
   it('rejects a value outside a choice-only question', async () => {
     seedQuestion('choice');
-    expect(await handleInteractiveResponse(response('staging'))).toBe(true);
+    expect(await handleInteractiveResponse(response('staging', 'choice'))).toBe(true);
     expect(getQuestion(QUESTION_ID)?.status).toBe('pending');
     expect(mockWriteSessionMessage).not.toHaveBeenCalled();
   });
@@ -201,6 +196,7 @@ describe('handleInteractiveResponse', () => {
       answer_value: 'Staging',
       answer_type: 'text',
     });
+
     expect(mockWriteSessionMessage).toHaveBeenCalledWith(
       'group-1',
       'session-1',
@@ -216,6 +212,19 @@ describe('handleInteractiveResponse', () => {
       mockWakeContainer.mock.invocationCallOrder[0],
     );
   });
+
+  it.each(['choice', 'text'] as const)(
+    'preserves an explicit %s when text matches an option value',
+    async (responseType) => {
+      seedQuestion('choice_or_text');
+      await handleInteractiveResponse(response('prod', responseType));
+      expect(getQuestion(QUESTION_ID)).toMatchObject({ answer_type: responseType, answer_value: 'prod' });
+      expect(JSON.parse(mockWriteSessionMessage.mock.calls[0][2].content)).toMatchObject({
+        responseType,
+        value: 'prod',
+      });
+    },
+  );
 
   it('stops typing when the session cannot be woken', async () => {
     seedQuestion('text');

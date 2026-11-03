@@ -15,7 +15,7 @@ import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
 import { getDueOutboundMessages, getDeliveredIds, markDelivered, markDeliveryFailed } from './db/session-db.js';
 import { log } from './log.js';
-import { normalizeOptions } from './channels/ask-question.js';
+import { isQuestionInput } from './ui/shared/conversation-protocol.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
 import { extractOutboundText, indexMessage } from './search-index.js';
 import { setTypingAdapter } from './modules/typing/index.js';
@@ -428,41 +428,25 @@ async function deliverMessage(
     deliverInstance = mg.instance;
   }
 
-  // Track durable questions for ask_user_question flow.
-  // Guarded: without the interactive module, `questions` doesn't
-  // exist and we skip persistence — the card still delivers to the user,
-  // but the response path has nowhere to land and will log unclaimed.
-  if (content.type === 'ask_question' && content.questionId && hasTable(getDb(), 'questions')) {
-    const questionText = content.question as string | undefined;
-    const responseMode = content.responseMode as 'choice' | 'text' | 'choice_or_text' | undefined;
-    const rawOptions = content.options as unknown;
-    if (!questionText || !responseMode || !Array.isArray(rawOptions)) {
-      log.error('ask_question missing required fields — not persisting', {
-        questionId: content.questionId,
-      });
-    } else {
-      const inserted = createQuestion({
-        question_id: content.questionId,
-        session_id: session.id,
-        message_out_id: msg.id,
-        in_reply_to: msg.in_reply_to,
-        platform_id: msg.platform_id,
-        channel_type: msg.channel_type,
-        thread_id: msg.thread_id,
-        question_text: questionText,
-        response_mode: responseMode,
-        options: normalizeOptions(rawOptions as never),
-        status: 'pending',
-        answer_value: null,
-        answer_type: null,
-        answered_by: null,
-        answered_at: null,
-        cancelled_at: null,
-        created_at: new Date().toISOString(),
-      });
-      if (inserted) {
-        log.info('Pending question created', { questionId: content.questionId, sessionId: session.id });
-      }
+  if (content.type === 'ask_question') {
+    const questionId = content.questionId;
+    if (typeof questionId !== 'string' || !questionId || !isQuestionInput(content))
+      throw new Error('Invalid outbound question input');
+    const inserted = createQuestion({
+      question_id: questionId,
+      session_id: session.id,
+      message_out_id: msg.id,
+      in_reply_to: msg.in_reply_to,
+      platform_id: msg.platform_id,
+      channel_type: msg.channel_type,
+      thread_id: msg.thread_id,
+      question_text: content.question,
+      response_mode: content.responseMode,
+      options: content.options,
+      created_at: new Date().toISOString(),
+    });
+    if (inserted) {
+      log.info('Pending question created', { questionId, sessionId: session.id });
     }
   }
 
@@ -481,10 +465,7 @@ async function deliverMessage(
       : undefined;
 
   let adapterContent = msg.content;
-  if (
-    (content.operation === 'edit' || content.operation === 'reaction') &&
-    typeof content.messageId === 'string'
-  ) {
+  if ((content.operation === 'edit' || content.operation === 'reaction') && typeof content.messageId === 'string') {
     const receipt = inDb
       .prepare('SELECT platform_message_id FROM delivered WHERE message_out_id = ? AND status = ?')
       .get(content.messageId, 'delivered') as { platform_message_id: string | null } | undefined;

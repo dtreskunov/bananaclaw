@@ -1,6 +1,6 @@
 import { register } from '../registry.js';
 import { getSession } from '../../db/sessions.js';
-import { accessRequestStatus, cancelAccessRequest, requestAccess } from '../../modules/credentials/access-requests.js';
+import { getAccountRequest, cancelAccessRequest, requestAccess } from '../../modules/credentials/access-requests.js';
 import { ConnectionInputError } from '../../modules/credentials/shared-connections.js';
 
 for (const verb of ['request', 'status', 'cancel'] as const) {
@@ -50,7 +50,7 @@ for (const verb of ['request', 'status', 'cancel'] as const) {
       }
       if (typeof args['request-id'] !== 'string') throw new ConnectionInputError('--request-id is required.');
       return verb === 'status'
-        ? accessRequestStatus(args['request-id'], ctx.sessionId)
+        ? getAccountRequest(args['request-id'], ctx.sessionId)
         : cancelAccessRequest(args['request-id'], ctx.sessionId);
     },
   });

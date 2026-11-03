@@ -45,7 +45,8 @@ it('blocks an unmigrated installation without silently changing access', () => {
 it('blocks pending retired approvals without discarding their audit or response state', () => {
   const db = beforeRetirement();
   db.exec(
-    "INSERT INTO pending_approvals(approval_id,request_id,action,payload,created_at) VALUES('p','p','onecli_credential','{}','created')",
+    'CREATE TABLE pending_approvals(approval_id TEXT,request_id TEXT,action TEXT,payload TEXT,created_at TEXT);' +
+      "INSERT INTO pending_approvals(approval_id,request_id,action,payload,created_at) VALUES('p','p','onecli_credential','{}','created')",
   );
   expect(() => runMigrations(db)).toThrow('Resolve retired gateway approvals');
   expect(db.prepare('SELECT COUNT(*) FROM pending_approvals').pluck().get()).toBe(1);

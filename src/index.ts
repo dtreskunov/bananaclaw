@@ -153,6 +153,7 @@ async function main(): Promise<void> {
         dispatchResponse({
           questionId,
           value: selectedOption,
+          responseType: 'choice',
           userId,
           channelType: adapter.channelType,
           // platformId/threadId aren't surfaced by the current onAction

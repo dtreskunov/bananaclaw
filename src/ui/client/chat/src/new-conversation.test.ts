@@ -5,10 +5,11 @@ import { router } from './router';
 import { chatReady, drawerOpen, groupId, groups, refs, threadId, threads, toastMessage } from './state';
 import { dismissToast } from './components/Toast';
 import type { Thread } from './types';
+import { testThread } from './conversation-test-fixtures';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 
-const latest: Thread = {
+const latest = testThread({
   threadId: 'latest',
   sessionId: 'latest-session',
   channelType: 'web',
@@ -16,7 +17,7 @@ const latest: Thread = {
   title: 'Existing conversation',
   lastActivityAt: '',
   messageCount: 2,
-};
+});
 const blank: Thread = {
   ...latest,
   threadId: 'blank',
@@ -54,7 +55,12 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
-      if (url.endsWith('/chat/start')) return Response.json({ threadId: 'created', messagingGroupId: 'web-context' });
+      if (url.endsWith('/chat/start'))
+        return Response.json({
+          threadId: 'created',
+          messagingGroupId: 'web-context',
+          platformId: 'group:agent',
+        });
       if (url.startsWith('api/sync?')) return Response.json({ approvals: [], threads: serverThreads });
       if (url === 'api/groups/agent/dirs/') return Response.json({ entries: [] });
       throw new Error(`Unexpected request: ${url}`);
@@ -187,6 +193,14 @@ describe('new conversation on startup', () => {
     await vi.waitFor(() => expect(threadId.value).toBe('created'));
 
     expect(parseHash()).toMatchObject({ groupId: 'agent', threadId: 'created' });
+    expect(threads.value.find((thread) => thread.threadId === 'created')).toMatchObject({
+      sessionId: null,
+      channelType: 'web',
+      messagingGroupId: 'web-context',
+      platformId: 'group:agent',
+      sessionMode: 'per-thread',
+      messageCount: 0,
+    });
     expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/start', expect.objectContaining({ method: 'POST' }));
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/warmup'), expect.anything());
   });

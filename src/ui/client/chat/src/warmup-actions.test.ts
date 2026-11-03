@@ -15,6 +15,7 @@ import {
 } from './state';
 import { resetConversation } from './conversation-state';
 import type { Thread } from './types';
+import { testThread } from './conversation-test-fixtures';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 
@@ -35,14 +36,14 @@ beforeEach(() => {
   activeTurn.value = null;
   pending.value = [];
   pendingWebSends.value = [];
-  thread = {
+  thread = testThread({
     threadId: threadId.value,
     sessionId: null,
     channelType: 'web',
     title: '(new thread)',
     lastActivityAt: '',
     messageCount: 0,
-  };
+  });
   threads.value = [thread];
   vi.stubGlobal(
     'fetch',

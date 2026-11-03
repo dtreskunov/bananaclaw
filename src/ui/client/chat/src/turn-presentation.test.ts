@@ -87,6 +87,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('authoritative turn presentation', () => {
+  it('uses undecorated wire messages directly without timestamp or file reshaping', () => {
+    const message = { id: 'input', direction: 'in' as const, text: 'Hello', timestamp: '2026-11-03T00:00:00Z' };
+    const view = testSnapshot({ messages: [message] }).conversation;
+    const presented = conversationPresentation(view).messages[0];
+    expect(presented).toBe(message);
+    expect(presented).not.toHaveProperty('ts');
+    expect(presented).not.toHaveProperty('files');
+  });
+
   it('resolves the supplied layout without parsing timestamps or fabricating messages', () => {
     const view = testSnapshot({
       messages: [{ id: 'input', direction: 'in', text: 'ask', timestamp: 'invalid', timelinePosition: 50 }],
@@ -263,8 +272,9 @@ describe('authoritative turn presentation', () => {
     ['skipped', false],
     ['skipped', true],
   ] as const)('keeps the %s dock lifecycle separate from turn traces; final response = %s', (responseType, final) => {
-    const question: Conversation['questions'][number] = {
-      questionId: 'q',
+    const question: Conversation['interactions'][number] = {
+      kind: 'question',
+      id: 'q',
       messageId: 'q-output',
       turnId: testTurn.id,
       timelinePosition: 100,
@@ -281,7 +291,7 @@ describe('authoritative turn presentation', () => {
     };
     const asking: Conversation = presentedConversation({
       ...initial,
-      questions: [question],
+      interactions: [question],
       messages: final
         ? [
             {
@@ -308,7 +318,7 @@ describe('authoritative turn presentation', () => {
     receive(testSnapshot(asking, 'asking'));
     const metadataOnly: Conversation = {
       ...asking,
-      questions: [
+      interactions: [
         {
           ...question,
           status: 'answered',
@@ -319,8 +329,8 @@ describe('authoritative turn presentation', () => {
       ],
     };
     update(metadataOnly);
-    expect(dockQuestions(metadataOnly.questions, metadataOnly.messages, 'group', 'thread')).toEqual(
-      metadataOnly.questions,
+    expect(dockQuestions(metadataOnly.interactions, metadataOnly.messages, 'group', 'thread')).toEqual(
+      metadataOnly.interactions,
     );
     const answer: Conversation['messages'][number] = {
       id: 'question-response:q',
@@ -339,15 +349,14 @@ describe('authoritative turn presentation', () => {
     });
     update(answered);
     const cardRows = chatTranscript.value.filter((row) => row.kind === 'question-answer');
-    const { timestamp: answerTimestamp, ...answerFields } = answer;
     expect(cardRows).toEqual([
       {
         kind: 'question-answer',
-        question: metadataOnly.questions[0],
-        answer: { ...answerFields, ts: answerTimestamp, files: null },
+        question: metadataOnly.interactions[0],
+        answer,
       },
     ]);
-    expect(dockQuestions(answered.questions, answered.messages, 'group', 'thread')).toEqual([]);
+    expect(dockQuestions(answered.interactions, answered.messages, 'group', 'thread')).toEqual([]);
     expect(conversationState.value?.conversation.timeline.slice(0, asking.timeline.length)).toEqual(asking.timeline);
     const originalTrace = chatTranscript.value.find((row) =>
       row.kind === 'turn' ? row.turn.id === testTurn.id : row.kind === 'message' && row.message.turnId === testTurn.id,
@@ -366,8 +375,9 @@ describe('authoritative turn presentation', () => {
   it.each([false, true])(
     'keeps the question in the dock without synthesizing question activity; recorded call = %s',
     (recorded) => {
-      const question: Conversation['questions'][number] = {
-        questionId: 'question',
+      const question: Conversation['interactions'][number] = {
+        kind: 'question',
+        id: 'question',
         messageId: 'question-output',
         turnId: testTurn.id,
         timelinePosition: 200,
@@ -399,7 +409,7 @@ describe('authoritative turn presentation', () => {
           ]
         : [];
       const view = testSnapshot({
-        questions: [question],
+        interactions: [question],
         turns: [
           { ...testTurn, phase: 'settled', outcome: 'replied', activity, outputIds: ['question-output', 'reply'] },
         ],
@@ -416,7 +426,7 @@ describe('authoritative turn presentation', () => {
         ],
       }).conversation;
       const projection = conversationPresentation(view);
-      expect(dockQuestions(view.questions, view.messages, 'group', 'thread')).toEqual([question]);
+      expect(dockQuestions(view.interactions, view.messages, 'group', 'thread')).toEqual([question]);
       const steps = projection.messages[0].activity!.map((line) => JSON.parse(line.text));
       expect(steps.map((step) => step.id)).toEqual(recorded ? ['ui:start:turn-1', 'question-call'] : []);
       expect(projection.messages[0].turnTraceOwner).toBe(true);

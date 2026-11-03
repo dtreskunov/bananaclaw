@@ -1215,8 +1215,9 @@ Skip failures retain the prompt and typed answer with a retryable error, includi
 a **Retry skip** control if the terminal outcome was saved before journaling failed.
 Answers and skips share one idempotent response ID and a first-response-wins update,
 so retries and competing tabs never produce both outcomes. Approvals cannot be skipped.
-Browser protocol version 4 includes skipped responses and title-free questions;
-older clients must reload.
+Browser protocol version 8 carries questions and consent requests as discriminated
+interactions. Choice, literal text, and skip responses are explicit; older
+clients must reload.
 
 The icon is disabled and grayed out while stopping, without adding transient
 status text or changing the bubble's layout. A **Stopping response** tooltip
@@ -1357,7 +1358,7 @@ once, offline, using saved output associations and ordinals. These assigned
 positions encode canonical presentation order, not recovered execution timing.
 There are no runtime missing-position or saved-association placement fallbacks.
 
-The browser protocol is version 5 and validates `protocolVersion`, `streamId`,
+The browser protocol is version 8 and validates `protocolVersion`, `streamId`,
 revisions, entity shapes, timeline references, and unique activity placement.
 Gaps or unknown streams show a synchronization error and reconnect for a fresh
 snapshot; incompatible protocols explicitly ask for a page reload. Progress is
@@ -1367,6 +1368,23 @@ Every projection rechecks access and scopes channel, platform and thread, includ
 shared sessions and synthetic DM IDs. Off-route sends cannot reveal their originating
 turn's trace; historical turns with an unknown origin expose only activity and
 usage anchored to already-visible outputs.
+
+Messages, interactions, and turns are separate normalized collections.
+Interactions share one `id` and have `question`, `confirmation`, `account_setup`,
+or `access_grant` kinds; timeline rows reference them by `interactionId`.
+Questions retain their input specification, including placeholder and multiline
+hints. Approvals use the same authorized projection in polling and transcripts,
+with one required status rather than optional status/stage fallbacks.
+The browser reuses these shared types and keeps rendering/submission metadata
+local. Account setup still grants no agent access.
+
+Account setup and access grants are structured-input variants, not approval
+objects with empty package/action fields. Their safe `requirements`, workflow
+revision and `completed` state are shared by native readers and browser views.
+The browser adds only viewer-specific origin and response context. Private
+previews bind `requestRevision`; they do not carry a second request DTO.
+The account editor receives the authoritative interaction as a prop and waits
+for its next revision after HTTP acceptance, rather than fetching shadow state.
 
 **Deployment:** this client and host have no legacy frame support. Build
 the checked-in bundle with `pnpm --dir src/ui/client/chat run build`, deploy host
@@ -1427,7 +1445,7 @@ conversion events are added to the drained journal. Repeat conversion is a no-op
 
 **Verify:** require zero pairs needing conversion, SQLite integrity/foreign-key
 checks, and matching activity positions on both sides before starting the matched
-host and runners. Verify session-link version 5, browser protocol version 4,
+host and runners. Verify session-link version 5, browser protocol version 8,
 served bundle hashes, reconnect snapshots, applied steering, mid-turn output and
 completion behavior. Reload open browser tabs. Runner source is bind-mounted, so
 source-only changes do not require an image rebuild.
@@ -1507,9 +1525,11 @@ captured callbacks refuse submission after navigating away.
 The host still delivers its normal outcome notification to the agent. When a
 retained approval bubble represents that outcome, the UI omits the duplicate
 host-only notification; model context and delivery are unchanged. Retained
-requests survive reload and session-inclusive archive/restore. Existing
-session-bound approvals are backfilled where records still exist; previously
-deleted requests are not reconstructed or guessed.
+requests survive reload and session-inclusive format-2 archive/restore as
+finalized audit records. Archiving cancels pending approvals and refuses
+applying effects. Restored account records cannot resume private recovery or
+retry. Old storage is reset only by the explicit
+[offline cutover](user-requests-refactor-plan.md#offline-cutover-detect--why--fix--verify--rollback).
 
 ### Messages with approval decisions
 
@@ -1530,7 +1550,7 @@ outcome notification, attributed to the authenticated responder. It uses the
 existing conversation routing and steering/queueing path; it does not produce a
 separate chat turn or alter the approved packages, command, credential or grant.
 It appears once even when the change also schedules post-restart verification.
-Legacy sessionless gateway approvals do not offer this field because they have
+Sessionless approvals do not offer this field because they have
 no originating conversation; the server rejects a non-empty message for them.
 
 ### Applying Agent Settings

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from '../../../channels/homeassistant-text.js';
 import { readThreadTitle } from '../../../modules/thread-titles/db.js';
-import type { LiveTaskDto } from './chat.js';
+import type { LiveTaskDto } from '../../shared/thread.js';
 
 export interface ThreadScanSpec {
   agentGroupId: string;

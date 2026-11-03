@@ -60,7 +60,8 @@ import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
 import { ConversationProtocolError, type ConversationSnapshot } from '../../../shared/conversation-protocol';
-import type { QuestionResponse } from '../../../shared/question-response';
+import type { QuestionResponse } from '../../../shared/question';
+import type { ChatStartResponse, ThreadSummary } from '../../../shared/thread';
 import { applyTurnState, resetTurnState } from './stop-turn';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { parentPath } from './utils';
@@ -179,10 +180,9 @@ export function warmChat(): Promise<void> {
     const result = await postJson<{ sessionId?: string; error?: string }>(
       `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/warmup`,
     );
-    if (typeof result.data.sessionId === 'string' && groupId.value === gid) {
-      threads.value = threads.value.map((entry) =>
-        entry.threadId === tid ? { ...entry, sessionId: result.data.sessionId } : entry,
-      );
+    const sessionId = result.data.sessionId;
+    if (typeof sessionId === 'string' && groupId.value === gid) {
+      threads.value = threads.value.map((entry) => (entry.threadId === tid ? { ...entry, sessionId } : entry));
     }
     if (!result.ok || !result.data.sessionId) throw new Error(result.data.error || `HTTP ${result.status}`);
   })().catch((err: unknown) => {
@@ -359,7 +359,7 @@ export async function editMessageInBranch(
   return true;
 }
 
-function threadCtxOf(t: Thread | null | undefined): ThreadCtx | null {
+export function threadCtxOf(t: Thread | null | undefined): ThreadCtx | null {
   if (!t || !t.channelType || t.channelType === 'web') return null;
   return { channelType: t.channelType, messagingGroupId: t.messagingGroupId ?? null, canSend: !!t.canSend };
 }
@@ -476,7 +476,7 @@ export function startSyncPoll(): void {
 
 interface SyncResponse {
   approvals: PendingApprovalDto[];
-  threads?: Thread[];
+  threads?: ThreadSummary[];
   conversation?: ConversationSnapshot;
   voiceInput?: VoiceInputCapability;
 }
@@ -588,12 +588,6 @@ export function taskUrl(gid: string, tid: string, suffix = ''): string {
 /** Open the scheduled-tasks management panel for a thread. */
 export function openTaskPanel(gid: string, tid: string, focusSeriesId?: string): void {
   taskPanelRequest.value = { gid, tid, ...(focusSeriesId ? { focusSeriesId } : {}) };
-}
-
-interface ChatStartResponse {
-  threadId: string;
-  messagingGroupId?: string | null;
-  sessionMode?: string;
 }
 
 export async function openChat(gid: string, resumeTid: string | null, opts: ThreadCtx | null): Promise<void> {
@@ -726,14 +720,15 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
     return;
   }
   threadId.value = started.threadId;
-  messagingGroupId.value = started.messagingGroupId || null;
+  messagingGroupId.value = started.messagingGroupId;
   threads.value = [
     {
       threadId: started.threadId,
       sessionId: null,
       channelType: 'web',
-      messagingGroupId: started.messagingGroupId || null,
-      sessionMode: started.sessionMode || 'per-thread',
+      messagingGroupId: started.messagingGroupId,
+      platformId: started.platformId,
+      sessionMode: 'per-thread',
       title: '(new thread)',
       lastActivityAt: new Date().toISOString(),
       messageCount: 0,
@@ -744,7 +739,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
   connectChatWs({
     gid,
     tid: started.threadId,
-    mg: started.messagingGroupId || null,
+    mg: started.messagingGroupId,
     generation,
   });
   void runSync();
@@ -1621,7 +1616,7 @@ export async function respondApproval(approvalId: string, value: string, message
   // seconds; keeping the row visible the whole time is misleading. If the
   // POST fails we re-fetch the canonical list.
   const before = pendingApprovals.value;
-  pendingApprovals.value = before.filter((a) => a.approvalId !== approvalId);
+  pendingApprovals.value = before.filter((a) => a.id !== approvalId);
   const verb = value === 'approve' ? 'Approving' : value === 'reject' ? 'Rejecting' : 'Submitting';
   chatStatus.value = verb + '\u2026';
   try {
@@ -1656,15 +1651,7 @@ export async function respondApproval(approvalId: string, value: string, message
   }
 }
 
-export async function respondQuestion(questionId: string, value: string): Promise<boolean> {
-  return submitQuestionResponse(questionId, { value });
-}
-
-export async function skipQuestion(questionId: string): Promise<boolean> {
-  return submitQuestionResponse(questionId, { responseType: 'skipped' });
-}
-
-async function submitQuestionResponse(questionId: string, response: QuestionResponse): Promise<boolean> {
+export async function respondQuestion(questionId: string, response: QuestionResponse): Promise<boolean> {
   if (respondingQuestionIds.value.has(questionId)) return false;
   const next = new Set(respondingQuestionIds.value);
   next.add(questionId);

@@ -15,18 +15,14 @@ import {
   searchThreads,
   clearSearch,
   openTaskPanel,
+  threadCtxOf,
 } from '../actions';
 import { requestChoice, requestConfirm } from './PromptModal';
 import { tsKey } from '../utils';
 import { Pane } from './Pane';
 import { TrashIcon } from './ActionIcons';
 import { RelativeTime } from './RelativeTime';
-import type { Thread, ThreadCtx, SearchResult } from '../types';
-
-function threadCtxOf(t: Thread | null | undefined): ThreadCtx | null {
-  if (!t || !t.channelType || t.channelType === 'web') return null;
-  return { channelType: t.channelType, messagingGroupId: t.messagingGroupId ?? null, canSend: !!t.canSend };
-}
+import type { Thread, SearchResult } from '../types';
 
 function ThreadRow({ t }: { t: Thread }) {
   const ct = t.channelType || 'web';

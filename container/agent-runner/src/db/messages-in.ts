@@ -247,28 +247,3 @@ export function getMessageIn(id: string): MessageInRow | undefined {
     inbound.close();
   }
 }
-
-/**
- * Find a pending response to a question (by questionId in content).
- * Reads from inbound.db, checks processing_ack to skip already-handled responses.
- */
-export function findQuestionResponse(questionId: string): MessageInRow | undefined {
-  const inbound = openInboundDb();
-  const outbound = getOutboundDb();
-
-  try {
-    const response = inbound
-      .prepare("SELECT * FROM messages_in WHERE status = 'pending' AND content LIKE ?")
-      .get(`%"questionId":"${questionId}"%`) as MessageInRow | undefined;
-
-    if (!response) return undefined;
-
-    // Check it hasn't been acked already
-    const acked = outbound.prepare('SELECT 1 FROM processing_ack WHERE message_id = ?').get(response.id);
-    if (acked) return undefined;
-
-    return response;
-  } finally {
-    inbound.close();
-  }
-}

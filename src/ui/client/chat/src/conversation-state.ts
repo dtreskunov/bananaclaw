@@ -1,5 +1,6 @@
 import { batch, signal } from '@preact/signals';
 import type { Conversation, ConversationTrace, ConversationTurn } from '../../../shared/conversation';
+import { isQuestionInteraction } from '../../../shared/conversation';
 import { conversationActivity, turnModelTime, withModelTime } from '../../../shared/conversation-activity';
 import {
   ConversationProtocolError,
@@ -56,7 +57,7 @@ export function resetConversation(): void {
 
 export function conversationPresentation(view: Conversation): { messages: ChatMessage[]; transcript: TranscriptRow[] } {
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
-  const questions = new Map(view.questions.map((question) => [question.questionId, question]));
+  const interactions = new Map(view.interactions.map((interaction) => [interaction.id, interaction]));
   const byId = new Map(
     view.messages
       .filter((message) => message.inputState?.status !== 'cancelled')
@@ -89,8 +90,7 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     const cached = presentedMessages.get(source);
     if (cached && cached.statsTurn === statsTurn && cached.traceTurn === traceTurn && cached.traceKey === traceKey)
       return cached.message;
-    const { timestamp, ...fields } = source;
-    const message: ChatMessage = { ...fields, files: fields.files ?? null, ts: timestamp };
+    const message: ChatMessage = row.statsTurnId || row.trace ? { ...source } : source;
     if (row.statsTurnId) message.statsTurn = statsTurn;
     if (row.trace) {
       message.turnId = row.trace.turnId;
@@ -108,14 +108,17 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
       if (!source) throw new ConversationProtocolError('invalid_frame');
       const message = presentMessage(source, row);
       if (message.questionId) {
-        const question = questions.get(message.questionId);
-        if (!question || message.direction !== 'in') throw new ConversationProtocolError('invalid_frame');
+        const question = interactions.get(message.questionId);
+        if (question?.kind !== 'question' || message.direction !== 'in')
+          throw new ConversationProtocolError('invalid_frame');
         return [{ kind: 'question-answer', question, answer: message }];
       }
       return [{ kind: 'message', message }];
     }
-    if (row.kind === 'question') {
-      return [];
+    if (row.kind === 'interaction') {
+      const interaction = interactions.get(row.interactionId);
+      if (!interaction) throw new ConversationProtocolError('invalid_frame');
+      return interaction.kind === 'question' ? [] : [{ kind: 'interaction', interaction }];
     }
     if (!turn || turn.id !== row.turnId) throw new ConversationProtocolError('invalid_frame');
     return [
@@ -161,7 +164,7 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
     }
-    pendingQuestions.value = view.questions;
+    pendingQuestions.value = view.interactions.filter(isQuestionInteraction);
     pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, view, groupId.value);
     refs.seenIds = new Set(view.messages.map((m) => `${m.direction}:${m.id}`));
     canSend.value = caps.canSend;

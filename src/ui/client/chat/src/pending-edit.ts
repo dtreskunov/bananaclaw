@@ -16,7 +16,11 @@ interface PendingEditorSession {
 export const pendingEditorSessions = signal(new Map<string, PendingEditorSession>());
 export const composerSendInFlight = signal(false);
 
-export function pendingEditorKey(gid: string | null, thread: Thread | null, messageId?: string): string {
+export function pendingEditorKey(
+  gid: string | null,
+  thread: Pick<Thread, 'threadId' | 'channelType' | 'messagingGroupId'> | null,
+  messageId?: string,
+): string {
   return JSON.stringify([
     gid,
     thread?.channelType || 'web',

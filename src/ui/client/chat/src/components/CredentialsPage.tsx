@@ -133,7 +133,7 @@ export function CredentialsContent({ agent }: {
 }
 
 export function AccessRequestRedirect({ id }: { id: string }) {
-  const request = useCredentialResource<{ origin?: ApprovalOrigin | null }>(credentialsPath(`/access-requests/${encodeURIComponent(id)}`));
+  const request = useCredentialResource<import('../../../../shared/approval').AccountInteraction>(credentialsPath(`/access-requests/${encodeURIComponent(id)}`));
   const origin = request.data?.origin;
   const href = origin ? approvalThreadHref(origin) : null;
   useEffect(() => {

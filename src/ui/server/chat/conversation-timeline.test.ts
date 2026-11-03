@@ -37,7 +37,7 @@ function present(messages: ConversationMessage[], current: ConversationTurn = tu
     threadId: 'thread',
     messages,
     turns: [current],
-    questions: [],
+    interactions: [],
     connection: { connected: true, activeTurnId: current.phase === 'settled' ? null : current.id },
     capabilities: { canSend: true, stop: true, steer: true, editInput: true, cancelInput: true },
   };
@@ -242,9 +242,10 @@ describe('explicit host trace placement', () => {
       outputIds: ['question-output'],
       activity: [activity(0, 150)],
     });
-    view.questions = [
+    view.interactions = [
       {
-        questionId: 'question',
+        kind: 'question',
+        id: 'question',
         messageId: 'question-output',
         timelinePosition: 200,
         turnId: turn.id,
@@ -262,8 +263,8 @@ describe('explicit host trace placement', () => {
     ];
     view.timeline = conversationTimeline(view);
     expect(view.timeline[1]).toEqual({
-      kind: 'question',
-      questionId: 'question',
+      kind: 'interaction',
+      interactionId: 'question',
     });
     expect(view.timeline[2]).toEqual({
       kind: 'turn',

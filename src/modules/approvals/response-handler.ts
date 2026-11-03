@@ -10,20 +10,15 @@
  * core iterates handlers and the first one to return `true` claims the response.
  */
 import { wakeContainer } from '../../container-runner.js';
-import {
-  beginApprovalExecution,
-  deletePendingApproval,
-  endApprovalExecution,
-  getPendingApproval,
-  getSession,
-} from '../../db/sessions.js';
+import { beginApprovalExecution, endApprovalExecution, getSession } from '../../db/sessions.js';
+import { getApproval, updateApprovalStatus } from '../../db/approvals.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
-import type { PendingApproval } from '../../types.js';
+import type { Approval } from '../../types.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/user-roles.js';
 import { getApprovalHandler, getInteractiveApprovalHandler } from './primitive.js';
 import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
-import { updateApprovalHistory } from '../../db/approval-history.js';
+
 import {
   ApprovalMessageError,
   parseApprovalMessage,
@@ -32,7 +27,7 @@ import {
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
   if (payload.responseType === 'skipped') return false;
-  const approval = getPendingApproval(payload.questionId);
+  const approval = getApproval(payload.questionId);
   if (!approval) return false;
 
   if (!isAuthorizedApprovalClick(approval, payload)) {
@@ -42,6 +37,10 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
       userId: payload.userId,
       channelType: payload.channelType,
     });
+    return true;
+  }
+  if (approval.status !== 'pending') {
+    log.info('Ignoring response to an approval that is no longer pending', { approvalId: approval.approval_id });
     return true;
   }
   const message = parseApprovalMessage(payload.message);
@@ -67,18 +66,16 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
 }
 
 async function handleRegisteredApproval(
-  approval: PendingApproval,
+  approval: Approval,
   selectedOption: string,
   userId: string,
   message?: string,
 ): Promise<void> {
-  if (!approval.session_id) {
-    deletePendingApproval(approval.approval_id);
-    return;
-  }
-  const session = getSession(approval.session_id);
+  const session = approval.session_id ? getSession(approval.session_id) : undefined;
   if (!session) {
-    deletePendingApproval(approval.approval_id);
+    const outcome = 'Approval cannot be applied because its originating conversation is unavailable.';
+    log.warn(outcome, { approvalId: approval.approval_id });
+    updateApprovalStatus(approval.approval_id, 'cancelled', { outcome });
     return;
   }
 
@@ -99,8 +96,7 @@ async function handleRegisteredApproval(
   if (selectedOption !== 'approve') {
     notify(`Your ${approval.action} request was rejected by admin.`);
     log.info('Approval rejected', { approvalId: approval.approval_id, action: approval.action, userId });
-    updateApprovalHistory(approval.approval_id, 'rejected', { ...response, outcome: outcomeMessage });
-    deletePendingApproval(approval.approval_id);
+    updateApprovalStatus(approval.approval_id, 'rejected', { ...response, outcome: outcomeMessage });
     await wakeContainer(session);
     return;
   }
@@ -108,19 +104,18 @@ async function handleRegisteredApproval(
   // Approved — dispatch to the module that registered for this action.
   const handler = getApprovalHandler(approval.action);
   if (!handler) {
-    log.warn('No approval handler registered — row dropped', {
+    log.warn('No approval handler registered', {
       approvalId: approval.approval_id,
       action: approval.action,
     });
     notify(`Your ${approval.action} was approved, but no handler is installed to apply it.`);
-    updateApprovalHistory(approval.approval_id, 'failed', { ...response, outcome: outcomeMessage });
-    deletePendingApproval(approval.approval_id);
+    updateApprovalStatus(approval.approval_id, 'failed', { ...response, outcome: outcomeMessage });
     await wakeContainer(session);
     return;
   }
 
   const payload = JSON.parse(approval.payload);
-  updateApprovalHistory(approval.approval_id, 'pending');
+  updateApprovalStatus(approval.approval_id, 'applying', response);
   let outcome: 'approved' | 'failed' = 'approved';
   try {
     await handler({ session, payload, userId, notify, originMessageId: approval.origin_message_id });
@@ -134,8 +129,7 @@ async function handleRegisteredApproval(
     );
   }
 
-  updateApprovalHistory(approval.approval_id, outcome, { ...response, outcome: outcomeMessage });
-  deletePendingApproval(approval.approval_id);
+  updateApprovalStatus(approval.approval_id, outcome, { ...response, outcome: outcomeMessage });
   await wakeContainer(session);
 }
 
@@ -149,7 +143,7 @@ function namespacedUserId(payload: ResponsePayload): string | null {
   return payload.userId.includes(':') ? payload.userId : `${payload.channelType}:${payload.userId}`;
 }
 
-function isAuthorizedApprovalClick(approval: PendingApproval, payload: ResponsePayload): boolean {
+function isAuthorizedApprovalClick(approval: Approval, payload: ResponsePayload): boolean {
   const userId = namespacedUserId(payload);
   if (!userId) return false;
 
