@@ -607,9 +607,7 @@ function SettingsTab({
       if (effectiveRestart) {
         showToast(
           `${effectiveRebuild ? 'Image rebuilt. ' : ''}Saved — ${
-            restarted === 0
-              ? 'changes apply when the agent next starts.'
-              : 'changes apply after current responses finish.'
+            restarted === 0 ? 'changes apply when the agent next starts.' : 'changes apply after current responses finish.'
           }`,
         );
       } else {
@@ -1053,8 +1051,8 @@ function SettingsTab({
             </p>
             {effectiveRestart ? (
               <p class="group-admin-help" role="status">
-                Changes apply automatically after active responses finish and are committed. Idle sessions restart
-                immediately. No agent reply is generated.
+                Changes apply automatically after active responses finish and are committed.
+                Idle sessions restart immediately. No agent reply is generated.
               </p>
             ) : null}
             <div class="ga-confirm-options">
