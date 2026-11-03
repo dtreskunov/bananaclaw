@@ -609,7 +609,9 @@ describe('GET /api/groups/:gid/admin/settings (extended fields)', () => {
     expect(
       getDb().prepare('SELECT economy_mode FROM container_configs WHERE agent_group_id=?').get('ag-economy'),
     ).toEqual({ economy_mode: 1 });
-    expect((await call('PATCH', url, { economy_mode: false })).status()).toBe(200);
+    expect((await call('PATCH', url, { provider: 'claude' })).status()).toBe(400);
+    expect((await call('GET', url)).body()).toMatchObject({ config: { provider: 'native', economy_mode: true } });
+    expect((await call('PATCH', url, { provider: 'claude', economy_mode: false })).status()).toBe(200);
     expect((await call('GET', url)).body()).toMatchObject({ config: { economy_mode: false } });
   });
 

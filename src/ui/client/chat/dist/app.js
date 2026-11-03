@@ -35325,6 +35325,7 @@ function SettingsTab({
     "image_tag",
     "assistant_name",
     "max_messages_per_prompt",
+    "economy_mode",
     "model_params",
     "mcp_servers",
     "skills",
@@ -35564,7 +35565,14 @@ function SettingsTab({
                 onChange: (v5) => {
                   if (v5 === draft.provider) return;
                   setDraft(
-                    (d5) => d5 ? { ...d5, provider: v5, model: null, small_model: null, upstream_provider: null } : d5
+                    (d5) => d5 ? {
+                      ...d5,
+                      provider: v5,
+                      model: null,
+                      small_model: null,
+                      upstream_provider: null,
+                      economy_mode: (v5 ?? data.defaults.provider) === "native" && d5.economy_mode
+                    } : d5
                   );
                 }
               }
@@ -35761,6 +35769,25 @@ function SettingsTab({
           )
         }
       ),
+      effectiveProvider === "native" ? /* @__PURE__ */ u4(
+        GroupAdminField,
+        {
+          label: "Economy mode",
+          info: "Limits tool text to 16 KiB, compacts at 100k context tokens, and pauses expensive runs at 20 model calls or 2M recorded/reserved tokens. Complete results are preserved privately. Restart required.",
+          children: /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
+            /* @__PURE__ */ u4(
+              "input",
+              {
+                type: "checkbox",
+                checked: draft.economy_mode,
+                disabled: busy,
+                onChange: (e4) => update("economy_mode", e4.currentTarget.checked)
+              }
+            ),
+            /* @__PURE__ */ u4("span", { children: "Bound expensive agent runs" })
+          ] })
+        }
+      ) : null,
       data.site.available ? /* @__PURE__ */ u4(
         GroupAdminField,
         {

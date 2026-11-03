@@ -62,6 +62,7 @@ interface SettingsResponse {
     image_tag: string | null;
     assistant_name: string | null;
     max_messages_per_prompt: number | null;
+    economy_mode: boolean;
     cli_scope: string | null;
     voice_input_backend: string | null;
     voice_input_enabled: boolean;
@@ -434,6 +435,7 @@ function SettingsTab({
     'image_tag',
     'assistant_name',
     'max_messages_per_prompt',
+    'economy_mode',
     'model_params',
     'mcp_servers',
     'skills',
@@ -607,7 +609,9 @@ function SettingsTab({
       if (effectiveRestart) {
         showToast(
           `${effectiveRebuild ? 'Image rebuilt. ' : ''}Saved — ${
-            restarted === 0 ? 'changes apply when the agent next starts.' : 'changes apply after current responses finish.'
+            restarted === 0
+              ? 'changes apply when the agent next starts.'
+              : 'changes apply after current responses finish.'
           }`,
         );
       } else {
@@ -698,7 +702,16 @@ function SettingsTab({
                 // Model ids are provider-specific, so carrying the old pick over
                 // would save an id the new provider can't resolve.
                 setDraft((d) =>
-                  d ? { ...d, provider: v, model: null, small_model: null, upstream_provider: null } : d,
+                  d
+                    ? {
+                        ...d,
+                        provider: v,
+                        model: null,
+                        small_model: null,
+                        upstream_provider: null,
+                        economy_mode: (v ?? data.defaults.provider) === 'native' && d.economy_mode,
+                      }
+                    : d,
                 );
               }}
             />
@@ -898,6 +911,23 @@ function SettingsTab({
             />
           </Field>
 
+          {effectiveProvider === 'native' ? (
+            <Field
+              label="Economy mode"
+              info="Limits tool text to 16 KiB, compacts at 100k context tokens, and pauses expensive runs at 20 model calls or 2M recorded/reserved tokens. Complete results are preserved privately. Restart required."
+            >
+              <label class="group-admin-check">
+                <input
+                  type="checkbox"
+                  checked={draft.economy_mode}
+                  disabled={busy}
+                  onChange={(e) => update('economy_mode', e.currentTarget.checked)}
+                />
+                <span>Bound expensive agent runs</span>
+              </label>
+            </Field>
+          ) : null}
+
           {data.site.available ? (
             <Field
               label="Website"
@@ -1051,8 +1081,8 @@ function SettingsTab({
             </p>
             {effectiveRestart ? (
               <p class="group-admin-help" role="status">
-                Changes apply automatically after active responses finish and are committed.
-                Idle sessions restart immediately. No agent reply is generated.
+                Changes apply automatically after active responses finish and are committed. Idle sessions restart
+                immediately. No agent reply is generated.
               </p>
             ) : null}
             <div class="ga-confirm-options">

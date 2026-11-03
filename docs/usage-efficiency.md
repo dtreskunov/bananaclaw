@@ -13,6 +13,9 @@ ncl groups restart --id <group-id>
 
 Disable with `--economy-mode false` and restart. The equivalent settings API
 field is the boolean `economy_mode`. These operations use existing permissions.
+The native group's Settings tab exposes the same switch and existing restart
+confirmation. Switching to another provider clears the switch; the server
+rejects an incompatible provider change unless economy mode is disabled.
 
 ## Large tool results
 
