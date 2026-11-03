@@ -34,6 +34,8 @@ import { createSession } from '../../db/sessions.js';
 import { dispatch } from '../dispatch.js';
 // Side-effect import: registers the `groups-*` commands (including delete).
 import './groups.js';
+import { getContainerConfig } from '../../db/container-configs.js';
+import { configFromDb } from '../../container-config.js';
 
 function now(): string {
   return new Date().toISOString();
@@ -59,6 +61,29 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
   afterEach(() => {
     closeDb();
     if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+  });
+
+  it('validates, persists and materializes opt-in economy mode through the CLI', async () => {
+    const group = { id: 'economy', name: 'economy', folder: 'economy', agent_provider: null, created_at: now() };
+    createAgentGroup(group);
+    getDb().prepare('INSERT INTO container_configs (agent_group_id,updated_at) VALUES (?,?)').run(group.id, now());
+    const update = (value: unknown) =>
+      dispatch(
+        {
+          id: 'economy-update',
+          command: 'groups-config-update',
+          args: { id: group.id, economy_mode: value },
+        },
+        { caller: 'host' },
+      );
+    expect(configFromDb(getContainerConfig(group.id)!, group).economyMode).toBe(false);
+    expect((await update('invalid')).ok).toBe(false);
+    expect((await update(true)).ok).toBe(false);
+    getDb().prepare("UPDATE container_configs SET provider='native' WHERE agent_group_id=?").run(group.id);
+    expect(await update('true')).toMatchObject({ ok: true, data: { economy_mode: true } });
+    expect(configFromDb(getContainerConfig(group.id)!, group).economyMode).toBe(true);
+    expect(await update(false)).toMatchObject({ ok: true, data: { economy_mode: false } });
+    expect(() => getDb().prepare('UPDATE container_configs SET economy_mode=2').run()).toThrow();
   });
 
   it('deletes a group with sessions, destinations, approvals, members, roles, and wirings', async () => {

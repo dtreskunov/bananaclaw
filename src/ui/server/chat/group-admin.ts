@@ -67,7 +67,7 @@ import {
 import type { Session } from '../../../types.js';
 import type { AgentGroup, ContainerConfigRow } from '../../../types.js';
 import { authenticate } from '../auth.js';
-import type { McpServerConfig } from '../../../container-config.js';
+import { configFromDb, type McpServerConfig } from '../../../container-config.js';
 import { providerProvidesAgentSurfaces } from '../../../providers/provider-container-registry.js';
 import { SELECTABLE_AGENT_PROVIDERS, VALID_AGENT_PROVIDERS } from './agent-providers.js';
 import { recordAdminAction } from './audit.js';
@@ -90,6 +90,7 @@ const SCALAR_FIELDS = [
   'image_tag',
   'assistant_name',
   'max_messages_per_prompt',
+  'economy_mode',
   'cli_scope',
   'voice_input_backend',
   'voice_input_enabled',
@@ -242,7 +243,7 @@ interface SettingsResponse {
     | 'max_messages_per_prompt'
     | 'cli_scope'
     | 'voice_input_backend'
-  > & { voice_input_enabled: boolean };
+  > & { voice_input_enabled: boolean; economy_mode: boolean };
   voiceInput: VoiceInputConfig;
   /** Freeform provider knobs (e.g. `{ max_tokens: 8192 }`). Edited via PATCH /model-params. */
   modelParams: Record<string, unknown>;
@@ -356,6 +357,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
       image_tag: cfg.image_tag,
       assistant_name: cfg.assistant_name,
       max_messages_per_prompt: cfg.max_messages_per_prompt,
+      economy_mode: cfg.economy_mode === 1,
       cli_scope: cfg.cli_scope,
       voice_input_backend: cfg.voice_input_backend ?? null,
       voice_input_enabled: cfg.voice_input_enabled !== 0,
@@ -427,6 +429,7 @@ async function handlePatchSettings(
       | 'image_tag'
       | 'assistant_name'
       | 'max_messages_per_prompt'
+      | 'economy_mode'
       | 'cli_scope'
       | 'voice_input_backend'
       | 'voice_input_enabled'
@@ -540,11 +543,11 @@ async function handlePatchSettings(
         throw new BadRequest('voice_input_backend must be null or a backend ID string');
       }
       updates.voice_input_backend = raw;
-    } else if (key === 'voice_input_enabled') {
+    } else if (key === 'voice_input_enabled' || key === 'economy_mode') {
       if (typeof raw !== 'boolean') {
-        throw new BadRequest('voice_input_enabled must be a boolean');
+        throw new BadRequest(`${key} must be a boolean`);
       }
-      updates.voice_input_enabled = raw ? 1 : 0;
+      updates[key] = raw ? 1 : 0;
     } else if (key === 'cli_scope') {
       if (isCleared) {
         // cli_scope is NOT NULL in container_configs (TEXT DEFAULT 'group')
@@ -633,6 +636,10 @@ async function handlePatchSettings(
   ) {
     throw new BadRequest('no editable fields supplied');
   }
+
+  const effective = configFromDb({ ...getContainerConfig(gid)!, ...updates }, getAgentGroup(gid)!);
+  if (effective.economyMode && effective.provider !== 'native')
+    throw new BadRequest('Economy mode requires the native provider');
 
   const agentGroupUpdates: Partial<
     Pick<AgentGroup, 'name' | 'site_slug' | 'site_enabled' | 'email_slug' | 'email_enabled'>

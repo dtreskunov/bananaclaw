@@ -138,6 +138,7 @@ export interface ProviderExchange {
  * providers; individual providers may ignore any they don't need.
  */
 export interface ProviderOptions {
+  economyMode?: boolean;
   assistantName?: string;
   mcpServers?: Record<string, McpServerConfig>;
   env?: Record<string, string | undefined>;

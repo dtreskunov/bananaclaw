@@ -45,6 +45,7 @@ import { moduleCredentialConnections } from './module-credential-connections.js'
 import { migration044 } from './044-agent-vault-default.js';
 import { migration048 } from './048-agent-vault-only.js';
 import { migration049 } from './049-approvals.js';
+import { migration050 } from './050-economy-mode.js';
 
 export interface Migration {
   version: number;
@@ -106,6 +107,7 @@ export const migrations: Migration[] = [
   migration044,
   migration048,
   migration049,
+  migration050,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a

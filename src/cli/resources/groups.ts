@@ -1,4 +1,5 @@
-import type { McpServerConfig } from '../../container-config.js';
+import { configFromDb, type McpServerConfig } from '../../container-config.js';
+import { getAgentGroup } from '../../db/agent-groups.js';
 import { buildAgentGroupImage, killContainer, wakeContainer } from '../../container-runner.js';
 import { restartAgentGroupContainers } from '../../container-restart.js';
 import { cascadeDeleteAgentGroup } from '../../db/cascade-delete-agent-group.js';
@@ -32,6 +33,7 @@ function presentConfig(row: ContainerConfigRow): Record<string, unknown> {
     image_tag: row.image_tag,
     assistant_name: row.assistant_name,
     max_messages_per_prompt: row.max_messages_per_prompt,
+    economy_mode: row.economy_mode === 1,
     skills: JSON.parse(row.skills),
     mcp_servers: JSON.parse(row.mcp_servers),
     packages_apt: JSON.parse(row.packages_apt),
@@ -223,7 +225,7 @@ registerResource({
       access: 'approval',
       description:
         'Update container config scalar fields. Changes are saved but do NOT take effect until you run `ncl groups restart`. ' +
-        'Use --id <group-id> and any of: --provider, --upstream-provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope.',
+        'Use --id <group-id> and any of: --provider, --upstream-provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --economy-mode true|false, --cli-scope.',
       handler: async (args) => {
         const id = args.id as string;
         if (!id) throw new Error('--id is required');
@@ -240,6 +242,7 @@ registerResource({
             | 'image_tag'
             | 'assistant_name'
             | 'max_messages_per_prompt'
+            | 'economy_mode'
             | 'cli_scope'
           >
         > = {};
@@ -270,6 +273,12 @@ registerResource({
         if (args.assistant_name !== undefined) updates.assistant_name = args.assistant_name as string;
         if (args.max_messages_per_prompt !== undefined)
           updates.max_messages_per_prompt = Number(args.max_messages_per_prompt);
+        const economy = args['economy-mode'] ?? args.economy_mode;
+        if (economy !== undefined) {
+          if (typeof economy !== 'boolean' && economy !== 'true' && economy !== 'false')
+            throw new Error('--economy-mode must be true or false');
+          updates.economy_mode = economy === true || economy === 'true' ? 1 : 0;
+        }
         if (args['cli-scope'] !== undefined || args.cli_scope !== undefined) {
           const scope = (args['cli-scope'] ?? args.cli_scope) as string;
           if (!['disabled', 'group', 'global'].includes(scope)) {
@@ -280,10 +289,13 @@ registerResource({
 
         if (Object.keys(updates).length === 0) {
           throw new Error(
-            'Nothing to update — provide at least one of: --provider, --upstream-provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope',
+            'Nothing to update — provide at least one of: --provider, --upstream-provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --economy-mode, --cli-scope',
           );
         }
 
+        const effective = configFromDb({ ...row, ...updates }, getAgentGroup(id)!);
+        if (effective.economyMode && effective.provider !== 'native')
+          throw new Error('Economy mode requires the native provider');
         updateContainerConfigScalars(id, updates);
 
         const updated = getContainerConfig(id)!;

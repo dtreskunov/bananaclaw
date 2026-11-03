@@ -598,6 +598,21 @@ describe('PATCH /api/groups/:gid/admin/skills', () => {
 });
 
 describe('GET /api/groups/:gid/admin/settings (extended fields)', () => {
+  it('keeps economy mode opt-in and materializes its persisted boolean', async () => {
+    seedOwnedGroup('ag-economy', 'economy-grp');
+    const url = '/ui/chat/api/groups/ag-economy/admin/settings';
+    expect((await call('GET', url)).body()).toMatchObject({ config: { economy_mode: false } });
+    expect((await call('PATCH', url, { economy_mode: 'true' })).status()).toBe(400);
+    expect((await call('PATCH', url, { economy_mode: true })).status()).toBe(400);
+    expect((await call('PATCH', url, { provider: 'native', economy_mode: true })).status()).toBe(200);
+    expect((await call('GET', url)).body()).toMatchObject({ config: { economy_mode: true } });
+    expect(
+      getDb().prepare('SELECT economy_mode FROM container_configs WHERE agent_group_id=?').get('ag-economy'),
+    ).toEqual({ economy_mode: 1 });
+    expect((await call('PATCH', url, { economy_mode: false })).status()).toBe(200);
+    expect((await call('GET', url)).body()).toMatchObject({ config: { economy_mode: false } });
+  });
+
   it('returns packages, mcpServers, and skills slices', async () => {
     seedOwnedGroup('ag-get', 'get-grp');
     await call('PATCH', '/ui/chat/api/groups/ag-get/admin/packages', { apt: ['jq'] });

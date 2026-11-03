@@ -17,6 +17,7 @@ export interface RunnerConfig {
   groupName: string;
   agentGroupId: string;
   maxMessagesPerPrompt: number;
+  economyMode?: boolean;
   mcpServers: Record<string, McpServerConfig>;
   mcpAccess?: Array<{ server: string; resource_url: string; account_alias: string; status: 'ready' | 'blocked'; reason?: string }>;
   /** Slugs the host switched off. Only the live-scanned local root needs it. */
@@ -50,12 +51,18 @@ export function loadConfig(): RunnerConfig {
     console.error(`[config] Failed to read ${CONFIG_PATH}, using defaults`);
   }
 
+  if (raw.economyMode !== undefined && typeof raw.economyMode !== 'boolean')
+    throw new Error('economyMode must be a boolean');
+  if (raw.economyMode && raw.provider !== 'native')
+    throw new Error('Economy mode requires the native provider');
+
   _config = {
     provider: (raw.provider as string) || 'claude',
     assistantName: (raw.assistantName as string) || '',
     groupName: (raw.groupName as string) || '',
     agentGroupId: (raw.agentGroupId as string) || '',
     maxMessagesPerPrompt: (raw.maxMessagesPerPrompt as number) || DEFAULT_MAX_MESSAGES,
+    economyMode: raw.economyMode === true,
     mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
     mcpAccess: raw.mcpAccess as RunnerConfig['mcpAccess'],
     disabledSkills: Array.isArray(raw.disabledSkills)
