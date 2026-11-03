@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ModelMessage } from 'ai';
-import type { CallUsage } from '../types.js';
 
 const DEFAULT_PATH = '/workspace/native-state/native-state.db';
 
@@ -23,10 +22,6 @@ interface CompactionRow {
   summary: string;
   retained_ids: string;
 }
-
-export class NativeBudgetExceeded extends Error {}
-export const ECONOMY_CALLS = 20;
-export const ECONOMY_TOKENS = 2_000_000;
 
 export class NativeStore {
   private readonly db: Database;
@@ -72,21 +67,6 @@ export class NativeStore {
         reason TEXT NOT NULL,
         PRIMARY KEY (conversation_id, provider_scope, media_key)
       );
-      CREATE TABLE IF NOT EXISTS model_calls (
-        id INTEGER PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        task_key TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        started_at TEXT NOT NULL,
-        reserved_tokens INTEGER NOT NULL,
-        input_tokens INTEGER,
-        cache_read_tokens INTEGER,
-        cache_write_tokens INTEGER,
-        output_tokens INTEGER,
-        context_tokens INTEGER,
-        duration_api_ms INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_native_calls_task ON model_calls(conversation_id, task_key);
       CREATE TABLE IF NOT EXISTS tool_results (
         id TEXT PRIMARY KEY,
         content_json TEXT NOT NULL
@@ -112,44 +92,6 @@ export class NativeStore {
     const filename = path.join(directory, `${id}.json`);
     fs.writeFileSync(filename, complete, { mode: 0o600 });
     return filename;
-  }
-
-  budget(conversation: string, task: string): { calls: number; tokens: number } {
-    return this.db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(
-      COALESCE(input_tokens + cache_read_tokens + cache_write_tokens + output_tokens, reserved_tokens)
-    ), 0) AS tokens FROM model_calls WHERE conversation_id=? AND task_key=?`).get(conversation, task) as {
-      calls: number; tokens: number;
-    };
-  }
-
-  reserveCall(conversation: string, task: string, kind: string, inputBytes: number, maxOutput: number) {
-    if (!Number.isSafeInteger(inputBytes) || inputBytes < 0 || !Number.isSafeInteger(maxOutput) || maxOutput < 1)
-      throw new Error('Invalid native request reservation');
-    const { calls, tokens } = this.budget(conversation, task);
-    const output = Math.min(maxOutput, ECONOMY_TOKENS - tokens - inputBytes);
-    if (calls >= ECONOMY_CALLS || output < 1)
-      throw new NativeBudgetExceeded(`Economy mode paused after ${calls} model requests and ${tokens} recorded/reserved tokens. ` +
-        'Completed work and tool results are saved. Ask to continue with a new allowance; do not repeat completed actions.');
-    const result = this.db.prepare(`INSERT INTO model_calls
-      (conversation_id, task_key, kind, started_at, reserved_tokens) VALUES (?, ?, ?, ?, ?)`)
-      .run(conversation, task, kind, new Date().toISOString(), inputBytes + output);
-    return { id: Number(result.lastInsertRowid), maxOutputTokens: output };
-  }
-
-  finishCall(id: number, usage: CallUsage): void {
-    this.db.prepare(`UPDATE model_calls SET input_tokens=?,cache_read_tokens=?,cache_write_tokens=?,
-      output_tokens=?,context_tokens=?,duration_api_ms=? WHERE id=?`).run(
-      usage.input_tokens, usage.cache_read_tokens, usage.cache_write_tokens, usage.output_tokens,
-      usage.context_tokens ?? null, usage.duration_api_ms ?? null, id,
-    );
-  }
-
-  lastContext(conversation: string): number | undefined {
-    const row = this.db.prepare(`SELECT context_tokens FROM model_calls
-      WHERE conversation_id=? AND context_tokens IS NOT NULL ORDER BY id DESC LIMIT 1`).get(conversation) as {
-        context_tokens: number;
-      } | null;
-    return row?.context_tokens;
   }
 
   hasConversation(id: string): boolean {

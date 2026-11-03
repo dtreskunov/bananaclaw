@@ -109,7 +109,6 @@ async function main(): Promise<void> {
     smallModel: config.smallModel,
     effort: config.effort,
     modelParams: config.modelParams,
-    economyMode: config.economyMode,
   });
 
   // Providers that lack native memory opt in via `usesMemoryScaffold`; for them

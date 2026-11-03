@@ -2,24 +2,6 @@ import { jsonSchema, tool, type ToolSet } from 'ai';
 
 export const NO_REPLY_TOOL = 'no_reply';
 
-/** Sent as a transient user message, with no tools offered, once a turn hits the step limit. */
-export const STEP_LIMIT_PROMPT =
-  '<system>You have reached the step limit for this turn, so no more tools can run. Write your final message now: what you found or finished, what is still undone, and how to continue.</system>';
-
-export function stepBudgetInstructions(maxSteps: number, stepsCompleted: number): string {
-  const remaining = maxSteps - stepsCompleted;
-  const reserve = Math.min(10, Math.ceil(maxSteps / 5));
-  const budget = `Step budget: ${stepsCompleted} of ${maxSteps} steps used; ${remaining} remain before tools are disabled.`;
-  return `## Turn budget
-
-${budget}
-${remaining <= 0 ? 'Tools are now disabled. Write your final message.' :
-  `You have at most ${maxSteps} model steps: a hard ceiling, not a target. A step may contain multiple tool calls. Reserve the last ${reserve} steps for saving results, verification and a handoff.`}
-Batch safe reads; avoid polling unchanged state. Change strategy when progress stalls.
-Report verified findings, completed actions, remaining work and a concrete next step. Never claim unverified completion.
-${remaining > 0 && remaining <= reserve ? 'Stop expanding scope; save and verify the current portion, then give a handoff.' : ''}`;
-}
-
 const POINTER_MAX_CHARS = 300;
 const POINTER_MIN_UNDELIVERED_CHARS = 400;
 const POINTER_PATTERN = /\b(?:above|earlier|previous (?:message|response|reply))\b/i;

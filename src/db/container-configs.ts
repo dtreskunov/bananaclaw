@@ -10,7 +10,6 @@ const SCALAR_COLUMNS = new Set([
   'image_tag',
   'assistant_name',
   'max_messages_per_prompt',
-  'economy_mode',
   'cli_scope',
   'voice_input_backend',
   'voice_input_enabled',
@@ -44,17 +43,16 @@ export function createContainerConfig(config: ContainerConfigRow): void {
     .prepare(
       `INSERT INTO container_configs (
         agent_group_id, provider, model, effort, image_tag, assistant_name,
-        max_messages_per_prompt, economy_mode, skills, mcp_servers, packages_apt, packages_npm,
+        max_messages_per_prompt, skills, mcp_servers, packages_apt, packages_npm,
         packages_pip, additional_mounts, model_params, voice_input_backend, voice_input_enabled, credential_backend, updated_at
       ) VALUES (
         @agent_group_id, @provider, @model, @effort, @image_tag, @assistant_name,
-        @max_messages_per_prompt, @economy_mode, @skills, @mcp_servers, @packages_apt, @packages_npm,
+        @max_messages_per_prompt, @skills, @mcp_servers, @packages_apt, @packages_npm,
         @packages_pip, @additional_mounts, @model_params, @voice_input_backend, @voice_input_enabled, @credential_backend, @updated_at
       )`,
     )
     .run({
       ...config,
-      economy_mode: config.economy_mode ?? 0,
       voice_input_backend: config.voice_input_backend ?? null,
       voice_input_enabled: config.voice_input_enabled ?? 1,
       credential_backend: config.credential_backend ?? 'agent-vault',
@@ -85,7 +83,6 @@ export function updateContainerConfigScalars(
       | 'image_tag'
       | 'assistant_name'
       | 'max_messages_per_prompt'
-      | 'economy_mode'
       | 'cli_scope'
       | 'voice_input_backend'
       | 'voice_input_enabled'

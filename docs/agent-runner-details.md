@@ -693,20 +693,12 @@ Recovery happens inside the provider's step loop:
   least 400 characters of undelivered text, is delivered as is; the runner
   only logs a warning (`final message may point at`) to measure how often
   it happens.
-- **Step limit.** A turn runs at most 100 model steps (`MAX_STEPS`). If the
-  model is still calling tools at the limit, one more step runs with no tools
-  and a transient instruction to report what was done and what remains.
-  Each normal step's system prompt includes budgeting guidance and a live
-  used/remaining counter derived from `MAX_STEPS` and `stepsCompleted`. Steps
-  count model rounds, not individual tool calls; a round can call multiple
-  tools. The guidance recommends batching safe repetitive work, changing
-  unproductive strategies, and reserving the last 10 steps for saving,
-  verification, and a clear handoff. At 10 or fewer remaining steps, it
-  explicitly tells the model to stop expanding scope; the final tools-disabled
-  step reports zero remaining and asks for verified progress and next steps.
-  The counter is not persisted in conversation history, survives compaction
-  and steering without resetting, and resets for the next turn. Turns whose
-  tools were disabled up front do not advertise this tool-use budget.
+- **Long tasks.** There is no total model-step ceiling or cumulative execution
+  token allowance. The loop completes when the model answers, ends silently,
+  encounters a genuine failure, or is cancelled. Steering continues across
+  arbitrarily many completed steps. System instructions contain no changing
+  step counter. Large tool results use a bounded, recoverable projection; see
+  [usage efficiency](usage-efficiency.md).
 
 There is no `reply` tool: MiniMax ignores `tool_choice` and prefers to end
 with plain text, so a tool-based reply was mostly bypassed anyway.

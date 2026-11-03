@@ -4,6 +4,12 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Native efficiency without execution caps.** Large tool results
+  are preserved privately with bounded model-visible text. Native tasks no
+  longer have a 100-step ceiling or changing step-budget prompts; confirmed
+  MiniMax plan exhaustion is terminal. No optional mode or new tuning settings.
+  See [detect / why / fix / verify / rollback](docs/usage-efficiency.md#detect--why--fix--verify--rollback).
+
 - **[BREAKING] Retained approval storage.** One approval record owns request
   metadata and lifecycle; private account progress no longer mirrors it.
   Archives cancel pending decisions, refuse applying effects, and restore
