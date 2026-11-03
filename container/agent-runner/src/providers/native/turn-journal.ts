@@ -41,6 +41,10 @@ export class NativeTurnJournal {
     return this.protectedInputs;
   }
 
+  hasToolExecutions(): boolean {
+    return this.calls.size > 0;
+  }
+
   stopTool(toolCallId: string): boolean {
     const controller = this.toolControllers.get(toolCallId);
     if (!controller) return false;

@@ -55,6 +55,14 @@ export class NativeStore {
         summary TEXT NOT NULL,
         retained_ids TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS media_quarantines (
+        conversation_id TEXT NOT NULL,
+        provider_scope TEXT NOT NULL,
+        media_key TEXT NOT NULL,
+        confirmed_ref INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        PRIMARY KEY (conversation_id, provider_scope, media_key)
+      );
     `);
   }
 
@@ -99,6 +107,24 @@ export class NativeStore {
 
   contextMessages(conversationId: string): ModelMessage[] {
     return this.contextEntries(conversationId).map((entry) => entry.message);
+  }
+
+  mediaQuarantines(conversationId: string, providerScope: string): Map<string, string> {
+    const rows = this.db.prepare(
+      'SELECT media_key, reason FROM media_quarantines WHERE conversation_id = ? AND provider_scope = ?',
+    ).all(conversationId, providerScope) as Array<{ media_key: string; reason: string }>;
+    return new Map(rows.map(row => [row.media_key, row.reason]));
+  }
+
+  quarantineMedia(conversationId: string, providerScope: string, mediaKey: string, confirmedRef: string, reason: string): void {
+    if (!providerScope || !mediaKey || !reason.trim() || !Number.isSafeInteger(Number(confirmedRef)) ||
+        !this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? AND id = ?')
+          .get(conversationId, Number(confirmedRef)))
+      throw new Error('Invalid media quarantine checkpoint or identity');
+    this.db.prepare(
+      `INSERT OR IGNORE INTO media_quarantines
+       (conversation_id, provider_scope, media_key, confirmed_ref, reason) VALUES (?, ?, ?, ?, ?)`,
+    ).run(conversationId, providerScope, mediaKey, Number(confirmedRef), reason);
   }
 
   saveCompaction(conversationId: string, throughRef: string, retainedRefs: string[], summary: string): void {
@@ -164,6 +190,11 @@ export class NativeStore {
            SELECT ?, steering_id, ? FROM applied_steering
            WHERE conversation_id = ? AND message_id = ?`,
         ).run(child, Number(copiedId), conversationId, row.id);
+        this.db.prepare(
+          `INSERT INTO media_quarantines (conversation_id, provider_scope, media_key, confirmed_ref, reason)
+           SELECT ?, provider_scope, media_key, ?, reason FROM media_quarantines
+           WHERE conversation_id = ? AND confirmed_ref = ?`,
+        ).run(child, Number(copiedId), conversationId, row.id);
       }
       return child;
     })();
@@ -194,6 +225,8 @@ export class NativeStore {
         AND (through_id > ? OR EXISTS (SELECT 1 FROM json_each(retained_ids) WHERE value > ?))
       `).run(conversationId, Number(anchorRef), Number(anchorRef));
       this.db.prepare('DELETE FROM applied_steering WHERE conversation_id = ? AND message_id > ?')
+        .run(conversationId, Number(anchorRef));
+      this.db.prepare('DELETE FROM media_quarantines WHERE conversation_id = ? AND confirmed_ref > ?')
         .run(conversationId, Number(anchorRef));
       this.db.prepare('DELETE FROM messages WHERE conversation_id = ? AND id > ?')
         .run(conversationId, Number(anchorRef));

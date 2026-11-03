@@ -3,7 +3,9 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { crc32 } from 'node:zlib';
-import { jsonSchema, tool } from 'ai';
+import { APICallError, jsonSchema, tool } from 'ai';
+import * as aiSdk from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -16,6 +18,8 @@ import * as nativeAudio from './native/audio.js';
 import * as nativeTools from './native/tools.js';
 import * as nativeAttachments from './native/attachments.js';
 import { NativeStore } from './native/store.js';
+import { mediaKeys } from './native/media-recovery.js';
+import { NativeTurnJournal } from './native/turn-journal.js';
 import { fingerprintToolInput, type ProviderEvent, type TurnUsage } from './types.js';
 import { COMPACTION_INSTRUCTIONS } from './native/compaction.js';
 import { accumulateCallUsage } from './usage.js';
@@ -57,6 +61,10 @@ type StubUsage = { prompt_tokens?: number; completion_tokens?: number };
 let scriptedUsage: StubUsage[];
 let compactionUsage: StubUsage;
 let reasoningOnlyCompactions: number;
+let rejectedMediaData: string[];
+let mediaRejectionStatus: number;
+let rejectMediaRetry: boolean;
+let mediaRetryFailureStatus: number;
 
 const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
   (executable) => spawnSync(executable, ['-version'], { stdio: 'ignore' }).status === 0,
@@ -115,6 +123,10 @@ beforeEach(() => {
   scriptedUsage = [];
   compactionUsage = { prompt_tokens: 4, completion_tokens: 3 };
   reasoningOnlyCompactions = 0;
+  rejectedMediaData = [];
+  mediaRejectionStatus = 400;
+  rejectMediaRetry = false;
+  mediaRetryFailureStatus = 400;
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -178,6 +190,13 @@ beforeEach(() => {
       if (!isCompaction && contextOverflows > 0 && (!overflowAfterTool || hasCompletedTool)) {
         contextOverflows--;
         return Response.json({ type: 'error', error: { message: 'invalid params, context window exceeds limit (2013)', type: 'invalid_request_error' } }, { status: 400 });
+      }
+      if (!isCompaction && rejectMediaRetry &&
+          JSON.stringify(modelMessages).includes('Media unavailable to this model')) {
+        return Response.json({ error: { message: 'Diagnostic retry failed', type: 'invalid_request_error' } }, { status: mediaRetryFailureStatus });
+      }
+      if (!isCompaction && rejectedMediaData.some(data => JSON.stringify(modelMessages).includes(data))) {
+        return Response.json({ error: { message: 'Original media rejection', type: 'invalid_request_error' } }, { status: mediaRejectionStatus });
       }
       if (holdModelResponse) {
         return new Response(new ReadableStream({
@@ -330,6 +349,284 @@ describe('NativeProvider', () => {
       ? { type: 'image_url', image_url: { url: `data:${mime};base64,${data}` } }
       : { type: 'image', source: { type: 'base64', media_type: mime, data } };
   }
+
+  const rejectedBytes = Buffer.from('opaque rejected attachment').toString('base64');
+  function rejectedHistory(mime = 'image/png', earlier = false): string {
+    rejectedMediaData = [rejectedBytes];
+    const store = new NativeStore();
+    const continuation = store.createConversation();
+    if (earlier) store.append(continuation, Array.from({ length: 5 }, () => [
+      { role: 'user' as const, content: 'Earlier requirements '.repeat(100) },
+      { role: 'assistant' as const, content: 'Earlier completed work '.repeat(100) },
+    ]).flat());
+    store.append(continuation, [{ role: 'user', content: [
+      { type: 'text', text: 'Inspect the attachment' },
+      { type: 'file', mediaType: mime, data: rejectedBytes },
+    ] }]);
+    store.close();
+    return continuation;
+  }
+
+  it.each([
+    ['openai-chat', 'image/png'], ['openai-chat', 'image/jpeg'], ['openai-chat', 'application/pdf'],
+    ['openai-chat', 'audio/wav'], ['openai-chat', 'video/mp4'],
+    ['anthropic-messages', 'image/png'], ['anthropic-messages', 'application/pdf'],
+  ] as const)(
+    'recovers %s/%s rejection once, preserving history and provider-scoped quarantines across resume',
+    async (protocol, mime) => {
+      const provider = vision(protocol);
+      const continuation = rejectedHistory(mime);
+      const events = await collect(provider, continuation);
+      expect(events.some(event => event.type === 'error')).toBe(false);
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[0].messages)).toContain(rejectedBytes);
+      expect(JSON.stringify(requests[1].messages)).not.toContain(rejectedBytes);
+      expect(JSON.stringify(requests[1].messages)).toContain('Media unavailable to this model');
+      expect(events.some(event => event.type === 'progress' && event.step.kind === 'notification' &&
+        event.step.text.includes('retry succeeded'))).toBe(true);
+      const resumed = await collect(new NativeProvider({ model: 'local/vision-model' }), continuation);
+      expect(resumed.some(event => event.type === 'error')).toBe(false);
+      expect(requests).toHaveLength(3);
+      expect(JSON.stringify(requests[2].messages)).not.toContain(rejectedBytes);
+      const switched = await collect(new NativeProvider({ model: 'local/other-model' }), continuation);
+      expect(switched.some(event => event.type === 'error')).toBe(false);
+      expect(requests).toHaveLength(5);
+      expect(JSON.stringify(requests[3].messages)).toContain(rejectedBytes);
+      const store = new NativeStore();
+      expect(JSON.stringify(store.messages(continuation)[0])).toContain(rejectedBytes);
+      store.close();
+    },
+  );
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'does not replay completed tools or discard other content during %s media recovery',
+    async (protocol) => {
+      const provider = vision(protocol);
+      let executions = 0;
+      const tools = spyOn(nativeTools, 'createNativeTools').mockImplementation(() => ({
+        produce_media: tool({
+          inputSchema: jsonSchema({ type: 'object', properties: {} }),
+          execute: async () => { executions++; return 'completed action'; },
+          toModelOutput: () => ({ type: 'content', value: [
+            { type: 'text', text: 'Other completed work' },
+            { type: 'file', mediaType: 'image/png', data: { type: 'data', data: png } },
+            { type: 'file', mediaType: 'image/png', data: { type: 'data', data: rejectedBytes } },
+          ] }),
+        }),
+      }));
+      rejectedMediaData = [rejectedBytes];
+      scriptedToolCalls = [['produce_media', '{}']];
+      try {
+        const events = await collect(provider);
+        expect(events.some(event => event.type === 'error')).toBe(false);
+        expect(executions).toBe(1);
+        expect(requests).toHaveLength(3);
+        expect(JSON.stringify(requests[2].messages)).toContain('Other completed work');
+        expect(JSON.stringify(requests[2].messages)).toContain(png);
+        expect(JSON.stringify(requests[2].messages)).not.toContain(rejectedBytes);
+      } finally { tools.mockRestore(); }
+    },
+  );
+
+  it.each([400, 429, 503])('surfaces the original rejection after retry status %i without SDK retries or a quarantine', async status => {
+    const provider = vision('openai-chat');
+    const continuation = rejectedHistory();
+    rejectMediaRetry = true;
+    mediaRetryFailureStatus = status;
+    const quarantine = spyOn(NativeStore.prototype, 'quarantineMedia');
+    try {
+      const events = await collect(provider, continuation);
+      expect(requests).toHaveLength(2);
+      expect(events.some(event => event.type === 'error' && event.message === 'Original media rejection')).toBe(true);
+      expect(events.some(event => event.type === 'progress' && event.step.kind === 'notification' &&
+        event.step.detail === 'Diagnostic retry failed')).toBe(true);
+      expect(quarantine).not.toHaveBeenCalled();
+    } finally { quarantine.mockRestore(); }
+  });
+
+  it('does not attempt media recovery for a parameter rejection without media', async () => {
+    const provider = vision('openai-chat');
+    const store = new NativeStore();
+    const continuation = store.createConversation();
+    store.append(continuation, [{ role: 'user', content: rejectedBytes }]);
+    store.close();
+    rejectedMediaData = [rejectedBytes];
+    const events = await collect(provider, continuation);
+    expect(requests).toHaveLength(1);
+    expect(events.some(event => event.type === 'error' && event.message === 'Original media rejection')).toBe(true);
+  });
+
+  it('does not discard media already accepted in an earlier successful model step', async () => {
+    const provider = vision('openai-chat');
+    const continuation = rejectedHistory();
+    rejectedMediaData = [];
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    const query = provider.query({ prompt: 'follow up', continuation, cwd: root });
+    query.end();
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'progress' && event.step.tool === 'bash' && event.step.status === 'completed')
+        rejectedMediaData = [rejectedBytes];
+    }
+    expect(requests).toHaveLength(2);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(events.some(event => event.type === 'error')).toBe(true);
+    expect(events.some(event => event.type === 'progress' && event.step.kind === 'notification' &&
+      event.step.text.includes('retrying once'))).toBe(false);
+  });
+
+  it('caps media rejection recovery at one diagnostic attempt for the entire turn', async () => {
+    const provider = vision('openai-chat');
+    const secondBytes = Buffer.from('different rejected attachment').toString('base64');
+    let executions = 0;
+    const tools = spyOn(nativeTools, 'createNativeTools').mockImplementation(() => ({
+      produce_media: tool({
+        inputSchema: jsonSchema({ type: 'object', properties: {} }),
+        execute: async () => ++executions,
+        toModelOutput: ({ output }) => ({ type: 'content', value: [
+          { type: 'file', mediaType: 'image/png', data: {
+            type: 'data', data: output === 1 ? rejectedBytes : secondBytes,
+          } },
+        ] }),
+      }),
+    }));
+    rejectedMediaData = [rejectedBytes, secondBytes];
+    scriptedToolCalls = [['produce_media', '{}'], ['produce_media', '{}']];
+    try {
+      const events = await collect(provider);
+      expect(executions).toBe(2);
+      expect(requests).toHaveLength(4);
+      expect(events.some(event => event.type === 'error')).toBe(true);
+      expect(events.filter(event => event.type === 'progress' && event.step.kind === 'notification' &&
+        event.step.text.includes('retrying once'))).toHaveLength(1);
+    } finally { tools.mockRestore(); }
+  });
+
+  it('excludes quarantined bytes from the exact inline-media budget before preparing new attachments', async () => {
+    const provider = vision('openai-chat');
+    const model = await nativeCatalog.resolveNativeModel('local/vision-model');
+    const scope = JSON.stringify([model.providerId, model.modelId, model.baseURL, model.protocol]);
+    const store = new NativeStore();
+    const continuation = store.createConversation();
+    const huge: ModelMessage = { role: 'user', content: [
+      { type: 'file', mediaType: 'image/png', data: 'A'.repeat(nativeAttachments.MAX_INLINE_BYTES) },
+    ] };
+    store.append(continuation, [huge]);
+    const confirmed = store.append(continuation, [{ role: 'assistant', content: 'Previous diagnostic succeeded' }]);
+    store.quarantineMedia(continuation, scope, mediaKeys([huge])[0], confirmed, 'Previous rejection');
+    store.close();
+    fs.writeFileSync(path.join(root, 'new.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const events = await collect(provider, continuation, [
+      { path: path.join(root, 'new.png'), mime: 'image/png', filename: 'new.png' },
+    ]);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(requests[0].messages)).toContain('data:image/png;base64,iVBORw==');
+    expect(events.some(event => event.type === 'progress' && event.step.kind === 'compaction')).toBe(false);
+  });
+
+  it('does not recover authentication failures even when unconfirmed media exists', async () => {
+    const provider = vision('openai-chat');
+    const continuation = rejectedHistory();
+    mediaRejectionStatus = 401;
+    const events = await collect(provider, continuation);
+    expect(requests).toHaveLength(1);
+    expect(events.some(event => event.type === 'error')).toBe(true);
+  });
+
+  it.each(['text', 'reasoning', 'tool-input'])('does not recover after partial %s output', async kind => {
+    const provider = vision('openai-chat');
+    const continuation = rejectedHistory();
+    const error = new APICallError({ message: 'Original media rejection', url: 'http://stub',
+      requestBodyValues: {}, statusCode: 400, isRetryable: false,
+      responseBody: '{"error":{"type":"invalid_request_error"}}' });
+    const mock = new MockLanguageModelV4({ doStream: async () => ({
+      warnings: [], stream: new ReadableStream({ start(controller) {
+        if (kind === 'tool-input') {
+          controller.enqueue({ type: 'tool-input-start', id: 'partial', toolName: 'bash' });
+          controller.enqueue({ type: 'tool-input-delta', id: 'partial', delta: '{"command":' });
+        } else {
+          controller.enqueue({ type: `${kind}-start`, id: 'partial' });
+          controller.enqueue({ type: `${kind}-delta`, id: 'partial', delta: 'Already emitted' });
+        }
+        controller.enqueue({ type: 'error', error });
+        controller.close();
+      } }),
+    }) });
+    const streamText = aiSdk.streamText;
+    const stream = spyOn(aiSdk, 'streamText').mockImplementation(options => streamText({ ...options, model: mock }));
+    try {
+      const events = await collect(provider, continuation);
+      expect(events.some(event => event.type === 'error' && event.message === error.message)).toBe(true);
+      expect(mock.doStreamCalls).toHaveLength(1);
+    } finally { stream.mockRestore(); }
+  });
+
+  it('does not retry when a tool execution was journaled before the failed call emitted stream output', async () => {
+    const provider = vision('openai-chat');
+    const continuation = rejectedHistory();
+    let executions = 0;
+    let wrapped: ReturnType<NativeTurnJournal['wrap']> | undefined;
+    const tools = spyOn(nativeTools, 'createNativeTools').mockImplementation(() => ({
+      side_effect: tool({ inputSchema: jsonSchema({ type: 'object', properties: {} }),
+        execute: async () => { executions++; return 'completed'; } }),
+    }));
+    const wrap = NativeTurnJournal.prototype.wrap;
+    const capture = spyOn(NativeTurnJournal.prototype, 'wrap').mockImplementation(function (this: NativeTurnJournal, ...args) {
+      return (wrapped = wrap.apply(this, args));
+    });
+    const error = new APICallError({ message: 'Original media rejection', url: 'http://stub',
+      requestBodyValues: {}, statusCode: 400, isRetryable: false,
+      responseBody: '{"error":{"type":"invalid_request_error"}}' });
+    const mock = new MockLanguageModelV4({ doStream: async () => {
+      if (!wrapped?.side_effect.execute) throw new Error('Missing journaled tool');
+      await wrapped.side_effect.execute({}, { toolCallId: 'started', messages: [] });
+      throw error;
+    } });
+    const streamText = aiSdk.streamText;
+    const stream = spyOn(aiSdk, 'streamText').mockImplementation(options => streamText({ ...options, model: mock }));
+    try {
+      const events = await collect(provider, continuation);
+      expect(events.some(event => event.type === 'error' && event.message === error.message)).toBe(true);
+      expect(executions).toBe(1);
+      expect(mock.doStreamCalls).toHaveLength(1);
+    } finally { stream.mockRestore(); capture.mockRestore(); tools.mockRestore(); }
+  });
+
+  it('honors Stop before a media-free retry without confirming a quarantine', async () => {
+    const provider = vision('openai-chat');
+    const query = provider.query({ prompt: 'follow up', continuation: rejectedHistory(), cwd: root });
+    query.end();
+    const quarantine = spyOn(NativeStore.prototype, 'quarantineMedia');
+    try {
+      for await (const event of query.events) {
+        if (event.type === 'progress' && event.step.kind === 'notification' &&
+            event.step.text.includes('retrying once')) query.abort('user');
+      }
+      expect(requests).toHaveLength(1);
+      expect(quarantine).not.toHaveBeenCalled();
+    } finally { quarantine.mockRestore(); }
+  });
+
+  it('reapplies media quarantines after proactive compaction reloads original retained media', async () => {
+    const provider = vision('anthropic-messages');
+    catalogModels = { local: { models: { 'vision-model': {
+      modalities: { input: ['text', 'image'], output: ['text'] }, limit: { context: 1_000_000 },
+    } } } };
+    const continuation = rejectedHistory('image/png', true);
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
+    const events = await collect(provider, continuation);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(events.some(event => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'completed')).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain(rejectedBytes);
+    const store = new NativeStore();
+    expect(JSON.stringify(store.contextMessages(continuation))).toContain(rejectedBytes);
+    store.close();
+  });
 
   it.each([
     ['openai-chat', 'pdf', 'view_pdf', 'application/pdf', Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n')],
@@ -2353,7 +2650,7 @@ describe('NativeProvider', () => {
     });
   });
 
-  it('surfaces an audio rejection without retrying the turn as a file reference', async () => {
+  it('recovers an audio rejection with an explicit media-unavailable note, not a file-reference fallback', async () => {
     rejectAudio = true;
     const catalog = spyOn(nativeCatalog, 'resolveNativeModel').mockResolvedValue({
       wireId: 'local/audio-model', providerId: 'local', modelId: 'audio-model',
@@ -2366,8 +2663,11 @@ describe('NativeProvider', () => {
       const events = await collect(new NativeProvider({ model: 'local/audio-model' }), undefined, [{
         path: '/voice.mp3', filename: 'voice.mp3', mime: 'audio/mpeg',
       }]);
-      expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringContaining('Unsupported audio format') }));
-      expect(requests).toHaveLength(1);
+      expect(events.some(event => event.type === 'error')).toBe(false);
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[1]?.messages)).toContain('Media unavailable to this model: Unsupported audio format');
+      expect(JSON.stringify(requests[1]?.messages)).not.toContain('input_audio');
+      expect(JSON.stringify(requests[1]?.messages)).not.toContain('file-reference');
     } finally {
       audio.mockRestore();
       catalog.mockRestore();

@@ -31,6 +31,7 @@ import {
 } from './native/compaction.js';
 import { createNativeTools } from './native/tools.js';
 import { openAiToolMedia } from './native/tool-media.js';
+import { applyMediaQuarantines, isMediaParameterError, mediaKeys } from './native/media-recovery.js';
 import { NATIVE_TODO_INSTRUCTIONS, NativeTodoState, shouldRequireTodos } from './native/todos.js';
 import {
   isPointerReply,
@@ -346,13 +347,20 @@ export class NativeProvider implements AgentProvider {
               const conversation = continuation;
               abortController.signal.throwIfAborted();
               const messages: ModelMessage[] = [...prior, { role: 'user', content: turn.text }];
+              const mediaScope = JSON.stringify([resolved.providerId, resolved.modelId, resolved.baseURL, resolved.protocol]);
+              const quarantines = store.mediaQuarantines(conversation, mediaScope);
+              const projectedContext = () => applyMediaQuarantines(messages, quarantines);
+              const confirmedMedia = new Set<string>();
+              let mediaRecoveryAttempted = false;
+              let mediaRetry: { key: string; reason: string; error: unknown } | undefined;
+              let quarantineNoticeSent = false;
               let toolMediaPressure = false;
               const nativeTools = (): ToolSet => turn.toolsDisabled
                 ? {}
                 : {
                     ...createNativeTools(input.cwd, skills, todoState, {
                       model: resolved,
-                      maxInlineBytes: Math.max(0, MAX_INLINE_BYTES - inlineHistoryBytes(messages)),
+                      maxInlineBytes: Math.max(0, MAX_INLINE_BYTES - inlineHistoryBytes(projectedContext())),
                       onMediaPressure: () => { toolMediaPressure = true; },
                     }),
                     ...NO_REPLY_TOOLS,
@@ -468,7 +476,7 @@ export class NativeProvider implements AgentProvider {
               ): AsyncGenerator<ProviderEvent, ModelMessage> {
                 while (true) {
                   let pressure = false;
-                  const historyBytes = inlineHistoryBytes(messages);
+                  const historyBytes = inlineHistoryBytes(projectedContext());
                   const message = await prepareNativeUserMessage(text, files, resolved, {
                     signal: abortController.signal,
                     maxInlineBytes: MAX_INLINE_BYTES - historyBytes - extraBytes,
@@ -511,9 +519,21 @@ export class NativeProvider implements AgentProvider {
               })}`);
               while (true) {
                 abortController.signal.throwIfAborted();
-                while (inlineHistoryBytes(messages) > MAX_INLINE_BYTES)
-                  yield* compactContext(compactionPolicy.recover('media'));
-                yield* maybeCompactContext();
+                if (!mediaRetry) {
+                  while (inlineHistoryBytes(projectedContext()) > MAX_INLINE_BYTES)
+                    yield* compactContext(compactionPolicy.recover('media'));
+                  yield* maybeCompactContext();
+                }
+                const requestContext = projectedContext();
+                if (!mediaRetry && !quarantineNoticeSent && quarantines.size &&
+                    mediaKeys(messages).some(key => quarantines.has(key))) {
+                  quarantineNoticeSent = true;
+                  yield { type: 'progress', step: {
+                    kind: 'notification', id: `native-media-quarantine-${continuation}-${startedAt}`,
+                    text: 'Previously quarantined media omitted for this model',
+                    detail: 'Original attachments remain preserved; unavailable media is explicitly marked in model context.',
+                  } };
+                }
                 toolMediaPressure = false;
                 const stepNudge: string | null = [nudge, ...pendingBrokerGuidance].filter(Boolean).join('\n\n') || null;
                 nudge = null;
@@ -531,7 +551,7 @@ export class NativeProvider implements AgentProvider {
                     ),
                     turn.toolsDisabled ? null : stepBudgetInstructions(MAX_STEPS, stepsCompleted),
                   ].filter(Boolean).join('\n\n'),
-                  messages: stepNudge ? [...messages, { role: 'user', content: stepNudge }] : messages,
+                  messages: stepNudge ? [...requestContext, { role: 'user', content: stepNudge }] : requestContext,
                   tools: journal.wrap(tools, abortController.signal),
                   ...(deferredMcp ? { repairToolCall: deferredMcp.repairToolCall } : {}),
                   // Own the boundary: SDK prepareStep cannot resume a text-only
@@ -551,7 +571,7 @@ export class NativeProvider implements AgentProvider {
                             : undefined,
                       }
                     : {}),
-                  maxRetries: 2,
+                  maxRetries: mediaRetry ? 0 : 2,
                   abortSignal: abortController.signal,
                   // A model call can finish before its tool does. Retain its
                   // usage even if cancellation prevents finish-step.
@@ -572,7 +592,8 @@ export class NativeProvider implements AgentProvider {
                     yield* flushCallUsage();
                     yield { type: 'activity' };
                     const part = rawPart as unknown as Record<string, unknown>;
-                    if (['tool-call', 'tool-result', 'tool-error', 'text-delta'].includes(String(part.type)))
+                    if (['tool-input-start', 'tool-input-delta', 'tool-call', 'tool-result', 'tool-error',
+                      'tool-approval-request', 'text-delta', 'reasoning-delta', 'file', 'source'].includes(String(part.type)))
                       stepProducedOutput = true;
                     // The silence reason is reported with the result, not as activity.
                     if (part.toolName === NO_REPLY_TOOL) continue;
@@ -599,8 +620,32 @@ export class NativeProvider implements AgentProvider {
                     }
                   }
                 } catch (error) {
-                  if (!isContextOverflow(error) || stepProducedOutput || !compactionPolicy.canRecover()) throw error;
-                  yield* compactContext(compactionPolicy.recover('context'));
+                  abortController.signal.throwIfAborted();
+                  if (mediaRetry) {
+                    log(`Media-free retry failed: ${errorMessage(error)}; surfacing original rejection`);
+                    yield { type: 'progress', step: {
+                      kind: 'notification', id: `native-media-retry-${continuation}-${startedAt}-failed`,
+                      text: 'Media-free retry failed; no attachment was quarantined', detail: errorMessage(error),
+                    } };
+                    throw mediaRetry.error;
+                  }
+                  if (isContextOverflow(error)) {
+                    if (stepProducedOutput || !compactionPolicy.canRecover()) throw error;
+                    yield* compactContext(compactionPolicy.recover('context'));
+                  } else {
+                    const key = !mediaRecoveryAttempted && !stepProducedOutput && !turnJournal.hasToolExecutions() &&
+                      isMediaParameterError(error) ? mediaKeys(requestContext).reverse().find(key => !confirmedMedia.has(key)) : undefined;
+                    if (!key) throw error;
+                    mediaRecoveryAttempted = true;
+                    mediaRetry = { key, reason: errorMessage(error), error };
+                    quarantines.set(key, mediaRetry.reason);
+                    log(`Provider rejected media-bearing request; retrying once without newest unconfirmed attachment`);
+                    yield { type: 'progress', step: {
+                      kind: 'notification', id: `native-media-retry-${continuation}-${startedAt}`,
+                      text: 'Provider rejected this request; retrying once without the newest unconfirmed media',
+                      detail: `${mediaRetry.reason}. Original attachments and completed tool actions remain preserved.`,
+                    } };
+                  }
                   nudge = stepNudge;
                   continue;
                 }
@@ -610,6 +655,17 @@ export class NativeProvider implements AgentProvider {
                 yield* flushCallUsage();
                 if (abortController.signal.aborted) throw new Error('Turn stopped');
                 checkpoint = journal.finishSegment(portableHistory(responseMessages));
+                for (const key of mediaKeys(requestContext)) confirmedMedia.add(key);
+                if (mediaRetry) {
+                  store.quarantineMedia(conversation, mediaScope, mediaRetry.key, checkpoint, mediaRetry.reason);
+                  mediaRetry = undefined;
+                  quarantineNoticeSent = true;
+                  yield { type: 'progress', step: {
+                    kind: 'notification', id: `native-media-quarantine-${continuation}-${startedAt}-confirmed`,
+                    text: 'Media-free retry succeeded; attachment quarantined for this model',
+                    detail: 'The original media is preserved. Repair or regenerate it before loading it again.',
+                  } };
+                }
                 messages.push(...responseMessages);
                 const steps = await result.steps;
                 stepsCompleted += steps.length;

@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { ModelMessage } from 'ai';
 
 import { NativeStore } from './store.js';
+import { applyMediaQuarantines, mediaKeys } from './media-recovery.js';
 
 let root: string;
 let store: NativeStore;
@@ -19,6 +20,42 @@ afterEach(() => {
 });
 
 describe('NativeStore', () => {
+  it('persists model-scoped media quarantines without changing transcripts or leaking future confirmations into forks', () => {
+    const conversation = store.createConversation();
+    const media: ModelMessage = { role: 'user', content: [
+      { type: 'file', mediaType: 'application/pdf', data: 'opaque original media' },
+    ] };
+    const source = store.append(conversation, [media]);
+    const confirmed = store.append(conversation, [{ role: 'assistant', content: 'Accepted retry' }]);
+    const key = mediaKeys([media])[0];
+    const original = store.messages(conversation);
+    store.quarantineMedia(conversation, 'model-A', key, confirmed, 'Original parameter rejection');
+    store.close();
+    store = new NativeStore(path.join(root, 'state.db'));
+    expect(store.messages(conversation)).toEqual(original);
+    expect(store.mediaQuarantines(conversation, 'model-A').get(key)).toBe('Original parameter rejection');
+    expect(store.mediaQuarantines(conversation, 'model-B').size).toBe(0);
+    const early = store.fork(conversation, source)!;
+    const late = store.fork(conversation, confirmed)!;
+    expect(store.mediaQuarantines(early, 'model-A').size).toBe(0);
+    expect(store.mediaQuarantines(late, 'model-A').get(key)).toBe('Original parameter rejection');
+    store.saveCompaction(conversation, source, [source], 'Compacted earlier history');
+    expect(mediaKeys(applyMediaQuarantines(
+      store.contextMessages(conversation), store.mediaQuarantines(conversation, 'model-A'),
+    ))).toEqual([]);
+    store.replaceAfter(conversation, source, [{ role: 'assistant', content: 'Rolled back confirmation' }]);
+    expect(store.mediaQuarantines(conversation, 'model-A').size).toBe(0);
+  });
+
+  it('rejects media quarantine confirmations outside the conversation', () => {
+    const conversation = store.createConversation();
+    const foreign = store.append(store.createConversation(), [{ role: 'user', content: 'foreign' }]);
+    expect(() => store.quarantineMedia(conversation, 'model-A', 'key', foreign, 'Rejected')).toThrow(
+      'Invalid media quarantine checkpoint',
+    );
+    expect(store.mediaQuarantines(conversation, 'model-A').size).toBe(0);
+  });
+
   it('atomically persists steering and recovers deduplication after reopening, including forks', () => {
     const conversation = store.createConversation();
     const before = store.append(conversation, [{ role: 'user', content: 'original' }]);

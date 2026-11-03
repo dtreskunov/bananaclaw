@@ -412,6 +412,32 @@ Reopening then requires the source path to still exist; files needed later shoul
 be saved in the workspace because temporary container files disappear on exit.
 No media is automatically reread or attached.
 
+### Native Provider: Media rejection recovery
+
+For a non-retryable HTTP 400 `invalid_request_error`, the native provider may
+retry the model request **once per turn**, replacing only the newest media
+descriptor not yet accepted in a successful model step in that turn. Resumed
+history starts unconfirmed. Explicit context-overflow errors use compaction
+instead; authentication, permission, rate-limit, and server errors do not enter
+this diagnostic recovery. It is forbidden after partial model output or any
+tool execution from the failed request. Completed tools are never replayed.
+
+The retry contains an explicit media-unavailable note preserving available
+filename and media-type metadata, directing the agent to repair or regenerate
+the attachment and preserve completed actions. Notifications
+report the diagnostic retry, failure, and confirmed quarantine. If the retry
+fails, its error is reported in the notification and the original rejection is
+surfaced; no quarantine is saved and no additional SDK retries are attempted.
+
+An accepted retry persists a descriptor-hash quarantine in native state, scoped
+to the conversation, provider, model, endpoint, and protocol. Raw transcript
+bytes are never rewritten. Quarantines are projected immediately before model
+requests, including after compaction, and excluded from inline-media accounting.
+Forks copy only quarantines confirmed by the selected checkpoint; rollback
+removes confirmations past its anchor. Changed media descriptors can be tried
+again, and switching models does not inherit another model's quarantines.
+There is no format-specific decoder, automatic conversion, or silent discard.
+
 ### Native Provider: Automatic and context-overflow compaction
 
 The native provider automatically compacts at **75% context utilization**,
