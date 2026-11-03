@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { crc32 } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { APICallError, jsonSchema, tool } from 'ai';
 import * as aiSdk from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -335,6 +336,49 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it('includes the final handoff in its durable 20-call ceiling and grants only a new input a fresh allowance', async () => {
+    scriptedToolCalls = Array.from({ length: 19 }, () => ['bash', '{"command":"echo once >> budget-actions.txt"}']);
+    const first = await collect(new NativeProvider({ model: 'local/stub', economyMode: true }));
+    const init = first.find(event => event.type === 'init');
+    if (init?.type !== 'init') throw new Error('Missing continuation');
+    expect(requests).toHaveLength(20);
+    expect(requests.at(-1)?.tools).toBeUndefined();
+    expect(fs.readFileSync(path.join(root, 'budget-actions.txt'), 'utf8').trim().split('\n')).toHaveLength(19);
+    const resumed = new NativeProvider({ model: 'local/stub', economyMode: true }).query({
+      prompt: 'hello', continuation: init.continuation, cwd: root,
+    });
+    resumed.end();
+    const events: ProviderEvent[] = [];
+    for await (const event of resumed.events) events.push(event);
+    expect(requests).toHaveLength(20);
+    expect(replyTexts(events).flat().join('')).toContain('Economy mode paused');
+    const continued = await collect(new NativeProvider({ model: 'local/stub', economyMode: true }), init.continuation);
+    expect(requests).toHaveLength(21);
+    expect(continued.some(event => event.type === 'error')).toBe(false);
+  });
+
+  it('does not make another request after reported usage reaches two million tokens', async () => {
+    scriptedToolCalls = [['bash', '{"command":"echo once >> token-actions.txt"}']];
+    scriptedUsage = [{ prompt_tokens: 2_000_000, completion_tokens: 3 }];
+    const events = await collect(new NativeProvider({ model: 'local/stub', economyMode: true }));
+    expect(requests).toHaveLength(1);
+    expect(replyTexts(events).flat().join('')).toContain('Economy mode paused');
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(fs.readFileSync(path.join(root, 'token-actions.txt'), 'utf8')).toBe('once\n');
+  });
+
+  it('restores unfinished request reservations before starting a resumed input', async () => {
+    const store = new NativeStore();
+    const continuation = store.createConversation();
+    const task = createHash('sha256').update('follow up').digest('hex');
+    for (let i = 0; i < 19; i++) store.reserveCall(continuation, task, 'work', 1, 1);
+    store.close();
+    const events = await collect(new NativeProvider({ model: 'local/stub', economyMode: true }), continuation);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].tools).toBeUndefined();
+    expect(events.some(event => event.type === 'error')).toBe(false);
+  });
+
   it.each([false, true])('projects large results consistently on the wire and in history with economy=%s', async (economyMode) => {
     const complete = `start\n${'detail '.repeat(8000)}\nUNIQUE_END_OF_LARGE_RESULT`;
     fs.writeFileSync(path.join(root, 'large-result.txt'), complete);
@@ -1077,20 +1121,23 @@ describe('NativeProvider', () => {
       event.step.status === status);
   }
 
-  function miniMaxFlash(maxOutputTokens = 512_000) {
-    catalogModels = { local: { models: { 'MiniMax-M3.1-Flash-Preview': {
+  function miniMaxFlash(maxOutputTokens = 512_000, modelId = 'MiniMax-M3.1-Flash-Preview') {
+    catalogModels = { local: { models: { [modelId]: {
       modalities: { input: ['text'], output: ['text'] },
       limit: { context: 1_000_000, output: maxOutputTokens },
     } } } };
-    return new NativeProvider({ model: 'local/MiniMax-M3.1-Flash-Preview' });
+    return new NativeProvider({ model: `local/${modelId}` });
   }
 
-  it.each(['openai-chat', 'anthropic-messages'] as const)(
-    'recovers a reasoning-only MiniMax compaction through %s without duplicate billing', async (protocol) => {
+  it.each([
+    ['openai-chat', 'MiniMax-M3.1-Flash-Preview'], ['anthropic-messages', 'MiniMax-M3.1-Flash-Preview'],
+    ['openai-chat', 'MiniMax-M3.1-Flash'], ['anthropic-messages', 'MiniMax-M3.1-Flash'],
+  ] as const)(
+    'recovers a reasoning-only MiniMax compaction through %s/%s without duplicate billing', async (protocol, modelId) => {
       process.env.NATIVE_PROTOCOL = protocol;
       contextOverflows = 1;
       reasoningOnlyCompactions = 1;
-      const events = await collect(miniMaxFlash(), history());
+      const events = await collect(miniMaxFlash(512_000, modelId), history());
       expect(events.some((event) => event.type === 'error')).toBe(false);
       expect(compactions(events, 'completed')).toHaveLength(1);
       const summaries = requests.filter((request) => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
@@ -1172,8 +1219,9 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain('Earlier requirements '.repeat(250));
   });
 
-  it('turns off tools for a handoff when economical compaction fails', async () => {
+  it.each([false, true])('turns off tools for one handoff when economical compaction fails (invalid tool=%s)', async (invalidTool) => {
     scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    if (invalidTool) scriptedToolCalls.push(['bash', '{"command":"echo twice >> once.txt"}']);
     scriptedUsage = [{ prompt_tokens: 99_998, completion_tokens: 2 }];
     rejectCompaction = true;
     const events = await collect(knownContext(true), history());
@@ -1182,6 +1230,7 @@ describe('NativeProvider', () => {
     expect(events.some(event => event.type === 'result' && event.replies?.length)).toBe(true);
     expect(JSON.stringify(requests.at(-1))).toContain('Write your final message now');
     expect(requests.at(-1)?.tools).toBeUndefined();
+    expect(requests).toHaveLength(3);
     expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
   });
 

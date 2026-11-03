@@ -36,6 +36,40 @@ remain in place. If compaction fails or reaches that limit, tools are disabled
 and the runner asks for a progress handoff instead of continuing an expensive
 tool loop. Other groups keep the existing policy.
 
+## Durable request budget
+
+Each formatted input in a native conversation has an allowance of 20 model
+requests (including summaries and the final handoff) and two million cumulative
+input/cache/output tokens. At 19 requests or 1.75 million tokens, the runner
+stops tools and requests a handoff. A new input grants another allowance;
+steering and replaying the same input after a restart do not reset it.
+
+Before each request, `native-state.db` reserves serialized UTF-8 request bytes
+plus the allowed output, with 1 KiB framing headroom. Actual reported usage
+replaces that estimate; missing usage or interrupted requests retain their
+reservation. Estimates are conservative safeguards, not billable token counts.
+Large media may require disabling economy mode for that task. If the remaining
+allowance cannot fit a request, a deterministic pause notice is delivered
+without another model call. Output is capped to the remaining allowance.
+
+The private `model_calls` table records request kind, time, actual input,
+cache reads/writes, output, context and API duration without storing prompts.
+It is the budget ledger as well as request-level diagnostic data; no second
+accounting pipeline is introduced. Existing turn usage/UI accounting remains
+the source for actual reported consumption. To inspect without model calls:
+
+```sh
+pnpm exec tsx scripts/q.ts <session>/native-state/native-state.db \
+  "SELECT kind,COUNT(*),SUM(input_tokens),SUM(cache_read_tokens),SUM(output_tokens) FROM model_calls WHERE conversation_id='<continuation>' GROUP BY kind"
+```
+
+Filter by the active continuation: a native fork snapshot can contain its
+parent's historical rows, which must not be billed again in cross-session audits.
+
+Budget estimates cannot guarantee MiniMax quota availability: other clients
+share the account, quota units are weighted, and an in-flight call's actual
+usage can differ from its estimate. An overrun prevents subsequent calls.
+
 ## Private memory migration
 
 Do this offline first, inside a private copy of the group's workspace:

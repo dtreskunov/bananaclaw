@@ -24,7 +24,7 @@ import { inlineHistoryBytes, MAX_INLINE_BYTES, prepareNativeUserMessage } from '
 export { prepareNativeUserMessage as userMessage } from './native/attachments.js';
 import { loadNativeInstructions, nativeMediaInstructions } from './native/instructions.js';
 import { NativeSkillRegistry } from './native/skills.js';
-import { NativeStore } from './native/store.js';
+import { ECONOMY_CALLS, ECONOMY_TOKENS, NativeBudgetExceeded, NativeStore } from './native/store.js';
 import { INTERRUPTED_TOOL, NativeTurnJournal } from './native/turn-journal.js';
 import {
   compactNativeContext, COMPACTION_INSTRUCTIONS, CompactionSummaryError, createCompactionPolicy, isContextOverflow, type NativeCompactionPlan,
@@ -44,6 +44,7 @@ import {
 import { DeferredMcpTools, mcpToolSearchMode } from './native/tool-search.js';
 import { boundToolResults } from './native/tool-results.js';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 export const MAX_STEPS = 100;
 
@@ -335,6 +336,8 @@ export class NativeProvider implements AgentProvider {
             seenBrokerGuidance.clear();
             pendingBrokerGuidance.clear();
             const startedAt = Date.now();
+            const taskKey = createHash('sha256').update(turn.text).digest('hex');
+            const maxSteps = options.economyMode ? ECONOMY_CALLS : MAX_STEPS;
             const callUsages: CallUsage[] = [];
             function* flushCallUsage(): Generator<ProviderEvent> {
               for (const data of callUsages.splice(0)) yield { type: 'usage_call', data };
@@ -348,7 +351,7 @@ export class NativeProvider implements AgentProvider {
               journal = turnJournal;
               abortController.signal.throwIfAborted();
               const resolved = await resolveNativeModel(configuredModel);
-              const miniMaxFlash = /^MiniMax-M3\.1-Flash-Preview$/i.test(resolved.modelId);
+              const miniMaxFlash = /^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(resolved.modelId);
               const conversation = continuation;
               abortController.signal.throwIfAborted();
               const messages: ModelMessage[] = [...prior, { role: 'user', content: turn.text }];
@@ -385,14 +388,21 @@ export class NativeProvider implements AgentProvider {
               let silence: string | null = null;
               let checkpoint = journal.checkpoint;
               const appliedSteeringIds: string[] = [];
-              function recordCall({ usage, performance }: LanguageModelCallEndEvent, summary = false): void {
+              function recordCall({ usage, performance }: LanguageModelCallEndEvent, id?: number, summary = false): void {
                 // Stopping can make the SDK close a waiting stream with a synthetic, usage-less
                 // finish; that is not a report of the call.
                 if (abortController.signal.aborted && usage.inputTokens === undefined && usage.outputTokens === undefined) return;
                 const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
                 // A summary call's prompt is the old history, not the conversation's context.
                 if (summary) data.context_tokens = undefined;
+                if (id !== undefined && typeof usage.inputTokens === 'number' && typeof usage.outputTokens === 'number')
+                  store.finishCall(id, data);
                 callUsages.push(data);
+              }
+              function reserveCall(kind: string, request: unknown, maxOutput: number) {
+                return options.economyMode
+                  ? store.reserveCall(conversation, taskKey, kind, Buffer.byteLength(JSON.stringify(request)) + 1024, maxOutput)
+                  : { id: undefined, maxOutputTokens: maxOutput };
               }
               // One-off instruction for the next step; never persisted.
               let nudge: string | null = null;
@@ -401,6 +411,7 @@ export class NativeProvider implements AgentProvider {
               // Text written alongside tool calls, which is never delivered.
               let undeliveredChars = 0;
               const compactionPolicy = createCompactionPolicy(resolved.contextWindow, options.economyMode ? 100_000 : Infinity);
+              if (options.economyMode) compactionPolicy.observe(store.lastContext(conversation));
               async function* compactContext(plan: NativeCompactionPlan): AsyncGenerator<ProviderEvent> {
                 abortController.signal.throwIfAborted();
                 const compactStartedAt = Date.now();
@@ -418,14 +429,15 @@ export class NativeProvider implements AgentProvider {
                     maxRequests: options.economyMode ? 4 : undefined,
                     signal: abortController.signal,
                     summarize: async (prompt, request) => {
+                      const reservation = reserveCall('summary', prompt, request.maxOutputTokens);
                       const compacted = streamText({
                         model, system: COMPACTION_INSTRUCTIONS, messages: [{ role: 'user', content: prompt }],
-                        maxOutputTokens: request.maxOutputTokens,
+                        maxOutputTokens: reservation.maxOutputTokens,
                         ...(miniMaxFlash ? { providerOptions: resolved.protocol === 'anthropic-messages'
                           ? { anthropic: { effort: 'low' } }
                           : { [resolved.providerId]: { reasoningEffort: 'low' } } } : {}),
                         maxRetries: 0, abortSignal: request.signal,
-                        onLanguageModelCallEnd: (event) => recordCall(event, true),
+                        onLanguageModelCallEnd: (event) => recordCall(event, reservation.id, true),
                       });
                       for await (const part of compacted.stream) if (part.type === 'error') throw part.error;
                       const [text, finishReason, usage] = await Promise.all([
@@ -529,7 +541,17 @@ export class NativeProvider implements AgentProvider {
               })}`);
               while (true) {
                 abortController.signal.throwIfAborted();
-                if (!mediaRetry) {
+                const budget = options.economyMode ? store.budget(conversation, taskKey) : undefined;
+                if (!wrappingUp && budget && (budget.calls >= maxSteps - 1 || budget.tokens >= ECONOMY_TOKENS - 250_000)) {
+                  wrappingUp = true;
+                  nudge = STEP_LIMIT_PROMPT;
+                  yield { type: 'progress', step: {
+                    kind: 'notification', id: `native-budget-${conversation}-${startedAt}`,
+                    text: 'Economy budget nearly exhausted; preparing a handoff',
+                    detail: `${budget.calls} model requests; ${budget.tokens} recorded/reserved tokens. Continue explicitly for another allowance.`,
+                  } };
+                }
+                if (!mediaRetry && !wrappingUp) {
                   while (inlineHistoryBytes(projectedContext()) > MAX_INLINE_BYTES)
                     yield* compactContext(compactionPolicy.recover('media'));
                   yield* maybeCompactContext();
@@ -549,19 +571,23 @@ export class NativeProvider implements AgentProvider {
                 nudge = null;
                 pendingBrokerGuidance.clear();
                 const tools = wrappingUp ? {} : stepTools();
-                yield { type: 'model_request' };
-                const result = streamText({
-                  model,
-                  system: [
+                const system = [
                     loadNativeInstructions(
                       input.systemContext?.instructions,
                       [skills.instructions(), mcpCatalog].filter(Boolean).join('\n\n') || null,
                       turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
                       nativeMediaInstructions(tools),
                     ),
-                    turn.toolsDisabled ? null : stepBudgetInstructions(MAX_STEPS, stepsCompleted),
-                  ].filter(Boolean).join('\n\n'),
-                  messages: stepNudge ? [...requestContext, { role: 'user', content: stepNudge }] : requestContext,
+                    turn.toolsDisabled ? null : stepBudgetInstructions(maxSteps, budget?.calls ?? stepsCompleted),
+                  ].filter(Boolean).join('\n\n');
+                const requestMessages: ModelMessage[] = stepNudge
+                  ? [...requestContext, { role: 'user', content: stepNudge }] : requestContext;
+                const reservation = reserveCall(wrappingUp ? 'handoff' : 'work', { system, messages: requestMessages, tools },
+                  options.economyMode && wrappingUp ? Math.min(configuredMaxOutput ?? 8192, 8192) : configuredMaxOutput ?? 8192);
+                yield { type: 'model_request' };
+                const result = streamText({
+                  model, system,
+                  messages: requestMessages,
                   tools: journal.wrap(tools, abortController.signal),
                   ...(deferredMcp ? { repairToolCall: deferredMcp.repairToolCall } : {}),
                   // Own the boundary: SDK prepareStep cannot resume a text-only
@@ -585,8 +611,8 @@ export class NativeProvider implements AgentProvider {
                   abortSignal: abortController.signal,
                   // A model call can finish before its tool does. Retain its
                   // usage even if cancellation prevents finish-step.
-                  onLanguageModelCallEnd: recordCall,
-                  ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
+                  onLanguageModelCallEnd: (event) => recordCall(event, reservation.id),
+                  ...(options.economyMode || configuredMaxOutput ? { maxOutputTokens: reservation.maxOutputTokens } : {}),
                   ...(typeof options.modelParams?.temperature === 'number'
                     ? { temperature: options.modelParams.temperature }
                     : {}),
@@ -696,7 +722,7 @@ export class NativeProvider implements AgentProvider {
                 // must not consume input for a generation that never starts.
                 const prepared: Array<{ input: SteeringInput; message: ModelMessage }> = [];
                 let preparedBytes = 0;
-                while (!ended && stepsCompleted < MAX_STEPS && prepared.length < steering.length) {
+                while (!ended && !wrappingUp && stepsCompleted < maxSteps && prepared.length < steering.length) {
                   const guidance = steering[prepared.length];
                   // Lock before preparation can yield: an edit must never change
                   // the buffer while an attachment is being prepared for ingestion.
@@ -741,15 +767,17 @@ export class NativeProvider implements AgentProvider {
                   log(`Warning: final message may point at ${undeliveredChars} chars of undelivered text: ${JSON.stringify(reply.slice(0, 120))}`);
                 }
                 if (reply || silenceCall || !continueTools) break;
-                if (stepsCompleted < MAX_STEPS) continue;
                 if (wrappingUp) break;
+                if (stepsCompleted < maxSteps) continue;
                 wrappingUp = true;
                 nudge = STEP_LIMIT_PROMPT;
-                log(`Reached the ${MAX_STEPS}-step limit; asking for a progress report`);
+                log(`Reached the ${maxSteps}-step limit; asking for a progress report`);
               }
               // No await or yield between closing acceptance and deciding the
               // final result; guidance arriving after this belongs to a later turn.
               active = false;
+              if (!reply && wrappingUp && options.economyMode)
+                reply = 'Economy mode paused. Completed work and tool results are saved, but the model did not produce a final handoff. Ask to continue; do not repeat completed actions.';
               yield { type: 'checkpoint', ref: checkpoint };
               yield {
                 type: 'result',
@@ -761,6 +789,18 @@ export class NativeProvider implements AgentProvider {
             } catch (error) {
               active = false;
               yield* flushCallUsage();
+              if (error instanceof NativeBudgetExceeded && !abortController.signal.aborted) {
+                if (journal) {
+                  await journal.settle();
+                  yield { type: 'checkpoint', ref: journal.save() };
+                }
+                yield { type: 'progress', step: {
+                  kind: 'notification', id: `native-budget-paused-${continuation}-${startedAt}`,
+                  text: 'Economy budget reached', detail: error.message,
+                } };
+                yield { type: 'result', text: null, finishReason: 'stop', replies: [{ text: error.message }] };
+                continue;
+              }
               if (abortController.signal.aborted) {
                 if (journal) {
                   await journal.settle();
