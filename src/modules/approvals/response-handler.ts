@@ -21,7 +21,7 @@ import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import type { PendingApproval } from '../../types.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/user-roles.js';
-import { getApprovalHandler, getInteractiveApprovalHandler, notifyApprovalResolved } from './primitive.js';
+import { getApprovalHandler, getInteractiveApprovalHandler } from './primitive.js';
 import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
 import { updateApprovalHistory } from '../../db/approval-history.js';
 import {
@@ -101,7 +101,6 @@ async function handleRegisteredApproval(
     log.info('Approval rejected', { approvalId: approval.approval_id, action: approval.action, userId });
     updateApprovalHistory(approval.approval_id, 'rejected', { ...response, outcome: outcomeMessage });
     deletePendingApproval(approval.approval_id);
-    await notifyApprovalResolved({ approval, session, outcome: 'reject', userId });
     await wakeContainer(session);
     return;
   }
@@ -116,7 +115,6 @@ async function handleRegisteredApproval(
     notify(`Your ${approval.action} was approved, but no handler is installed to apply it.`);
     updateApprovalHistory(approval.approval_id, 'failed', { ...response, outcome: outcomeMessage });
     deletePendingApproval(approval.approval_id);
-    await notifyApprovalResolved({ approval, session, outcome: 'approve', userId });
     await wakeContainer(session);
     return;
   }
@@ -138,7 +136,6 @@ async function handleRegisteredApproval(
 
   updateApprovalHistory(approval.approval_id, outcome, { ...response, outcome: outcomeMessage });
   deletePendingApproval(approval.approval_id);
-  await notifyApprovalResolved({ approval, session, outcome: 'approve', userId });
   await wakeContainer(session);
 }
 
