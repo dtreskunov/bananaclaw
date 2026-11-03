@@ -103,7 +103,13 @@ describe('web thread warmup', () => {
       groupId: GROUP,
       threadId: 'draft thread',
     });
-    expect((await call('start')).status).toBe(200);
+    const started = await call('start');
+    expect(started.status).toBe(200);
+    expect(started.body).toEqual({
+      threadId: expect.any(String),
+      messagingGroupId: expect.any(String),
+      platformId: `group:${GROUP}`,
+    });
     expect(getSessionsByAgentGroup(GROUP)).toEqual([]);
     expect(wakeContainer).not.toHaveBeenCalled();
   });

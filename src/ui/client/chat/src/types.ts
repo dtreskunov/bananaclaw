@@ -1,6 +1,7 @@
 // Shared types used across the chat UI client.
 import type { InputHandling } from '../../../shared/input-state';
 import type { ModelTime } from '../../../shared/activity-presentation';
+import type { ThreadSummary } from '../../../shared/thread';
 import type {
   ConversationMessage,
   ConversationQuestion,
@@ -9,19 +10,7 @@ import type {
 } from '../../../shared/conversation';
 export type { InputHandling, InputState } from '../../../shared/input-state';
 
-export type ChannelType =
-  | 'web'
-  | 'resend'
-  | 'discord'
-  | 'telegram'
-  | 'whatsapp'
-  | 'imessage'
-  | 'signal'
-  | 'slack'
-  | 'matrix'
-  | 'gchat'
-  | 'cli'
-  | string;
+export type ChannelType = ThreadSummary['channelType'];
 
 export interface ChannelMetaEntry {
   label: string;
@@ -43,83 +32,13 @@ export interface Group {
   lastActivityAt?: string;
 }
 
-export interface Thread {
-  threadId: string;
-  sessionId?: string | null;
-  channelType?: ChannelType;
-  messagingGroupId?: string | null;
-  sessionMode?: string;
-  title: string;
-  lastActivityAt: string;
-  messageCount?: number;
-  kind?: 'dm' | 'thread';
-  counterparty?: string;
-  canSend?: boolean;
-  totalCost?: number;
-  totalTokens?: number;
-  turnCount?: number;
-  liveTasks?: LiveTaskDto[];
-  /** Set when this thread was branched off another one. */
-  forkedFrom?: ForkOrigin;
-  /** Branches taken out of this thread, oldest first. */
-  forkChildren?: ForkChild[];
-}
-
-export interface ForkChild {
-  threadId: string;
-  /** The message in *this* thread the branch was cut at. */
-  messageId: string;
-  title: string;
-}
-
-export interface ForkOrigin {
-  threadId: string;
-  /** The message the branch was cut at; everything up to it was inherited. */
-  messageId: string;
-  title: string | null;
-  /** 'native' kept the agent's real context; 'transcript' replayed a digest. */
-  fidelity: 'native' | 'transcript';
-  /** The parent is gone, so the origin is a label rather than a link. */
-  deleted: boolean;
-}
-
-/** One live (pending/paused) scheduled task keeping a thread active. */
-export interface LiveTaskDto {
-  seriesId: string;
-  nextRunAt: string | null;
-  recurrence: string | null;
-  summary: string;
-  paused: boolean;
-}
-
-/** Full per-series detail for the scheduled-tasks management panel. */
-export interface TaskDetailDto {
-  seriesId: string;
-  status: 'pending' | 'paused';
-  nextRunAt: string | null;
-  recurrence: string | null;
-  summary: string;
-  prompt: string;
-  hasScript: boolean;
-  script: string;
-  scriptTimeoutMs: number;
-  consecutiveFailures: number;
-  attempts: TaskAttemptDto[];
-}
-
-export interface TaskAttemptDto {
-  taskMessageId: string;
-  triggerSource: 'scheduled' | 'manual';
-  status: 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed';
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  exitCode: number | null;
-  signal: string | null;
-  error: string | null;
-  wakeAgent: boolean | null;
-  providerInvoked: boolean;
-}
+/** Local presentation may precede a session or use an implicit messaging-group context. */
+export type Thread = Omit<ThreadSummary, 'sessionId' | 'messagingGroupId'> & {
+  sessionId: string | null;
+  messagingGroupId: string | null;
+};
+export type ForkOrigin = NonNullable<ThreadSummary['forkedFrom']>;
+export type ForkChild = NonNullable<ThreadSummary['forkChildren']>[number];
 
 /** Open-request for the task panel: which thread's tasks to manage. */
 export interface TaskPanelRequest {

@@ -21,16 +21,17 @@ import {
 import { currentPendingEditor, openPendingEditor, pendingEditorKey, pendingEditorSessions } from './pending-edit';
 import { PendingMessageActions } from './components/PendingMessageActions';
 import { EditIcon, TrashIcon } from './components/ActionIcons';
-import type { ChatMessage, Thread } from './types';
+import type { ChatMessage } from './types';
+import { testThread } from './conversation-test-fixtures';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
-const thread: Thread = {
+const thread = testThread({
   threadId: 'thread/id',
   channelType: 'web',
   messagingGroupId: 'web/group',
   title: '',
   lastActivityAt: '',
-};
+});
 const message: ChatMessage = {
   id: 'message/id',
   text: 'Original',

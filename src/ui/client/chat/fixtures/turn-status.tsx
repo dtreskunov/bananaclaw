@@ -730,7 +730,11 @@ window.addEventListener('pagehide', disposeAppearance, { once: true });
 groupId.value = fixtureGroupId;
 threadId.value = fixtureThreadId;
 channelType.value = 'web';
-threads.value = [{ threadId: fixtureThreadId, title: 'Status fixture', lastActivityAt: '', channelType: 'web' }];
+threads.value = [{
+  threadId: fixtureThreadId, sessionId: 'fixture-session', title: 'Status fixture', lastActivityAt: '',
+  channelType: 'web', messagingGroupId: null, platformId: 'group:' + fixtureGroupId,
+  sessionMode: 'per-thread', messageCount: 1,
+}];
 completionSoundMutedSig.value = true;
 progressSoundMutedSig.value = true;
 const mobile = window.matchMedia('(max-width: 720px)');

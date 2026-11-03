@@ -52,7 +52,7 @@ import {
   resolveTurnContext,
   viewerHasContent,
 } from './chat.js';
-import type { ThreadSummary } from './chat.js';
+import type { ThreadSummary } from '../../shared/thread.js';
 import { handleGroupAdminRequest } from './group-admin.js';
 import { handleCredentialsRequest } from './credentials-admin.js';
 import { usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';

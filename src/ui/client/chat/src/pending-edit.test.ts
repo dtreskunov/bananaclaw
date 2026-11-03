@@ -12,18 +12,19 @@ import {
   threadId,
   turnConnected,
 } from './state';
-import type { ChatMessage, Thread } from './types';
+import type { ChatMessage } from './types';
+import { testThread } from './conversation-test-fixtures';
 import type { PendingEditBody, PendingEditResult } from './pending-edit';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 
-const thread: Thread = {
+const thread = testThread({
   threadId: 'thread/id',
   channelType: 'web',
   messagingGroupId: 'web/group',
   title: 'Chat',
   lastActivityAt: '',
-};
+});
 const message: ChatMessage = {
   id: 'web-message/id',
   direction: 'in',

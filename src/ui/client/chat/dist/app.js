@@ -19528,9 +19528,7 @@ function currentInputKey(id2) {
     {
       threadId: threadId.value,
       channelType: channelType.value,
-      messagingGroupId: messagingGroupId.value ?? void 0,
-      title: "",
-      lastActivityAt: ""
+      messagingGroupId: messagingGroupId.value
     },
     id2
   );
@@ -20600,10 +20598,9 @@ function warmChat() {
     const result = await postJson(
       `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/warmup`
     );
-    if (typeof result.data.sessionId === "string" && groupId.value === gid) {
-      threads.value = threads.value.map(
-        (entry) => entry.threadId === tid ? { ...entry, sessionId: result.data.sessionId } : entry
-      );
+    const sessionId = result.data.sessionId;
+    if (typeof sessionId === "string" && groupId.value === gid) {
+      threads.value = threads.value.map((entry) => entry.threadId === tid ? { ...entry, sessionId } : entry);
     }
     if (!result.ok || !result.data.sessionId) throw new Error(result.data.error || `HTTP ${result.status}`);
   })().catch((err) => {
@@ -21036,14 +21033,15 @@ async function openChat(gid, resumeTid, opts) {
     return;
   }
   threadId.value = started.threadId;
-  messagingGroupId.value = started.messagingGroupId || null;
+  messagingGroupId.value = started.messagingGroupId;
   threads.value = [
     {
       threadId: started.threadId,
       sessionId: null,
       channelType: "web",
-      messagingGroupId: started.messagingGroupId || null,
-      sessionMode: started.sessionMode || "per-thread",
+      messagingGroupId: started.messagingGroupId,
+      platformId: started.platformId,
+      sessionMode: "per-thread",
       title: "(new thread)",
       lastActivityAt: (/* @__PURE__ */ new Date()).toISOString(),
       messageCount: 0
@@ -21054,7 +21052,7 @@ async function openChat(gid, resumeTid, opts) {
   connectChatWs({
     gid,
     tid: started.threadId,
-    mg: started.messagingGroupId || null,
+    mg: started.messagingGroupId,
     generation: generation2
   });
   void runSync();
@@ -22476,10 +22474,6 @@ function RelativeTime({ ts, className }) {
 }
 
 // src/components/ThreadsRail.tsx
-function threadCtxOf2(t4) {
-  if (!t4 || !t4.channelType || t4.channelType === "web") return null;
-  return { channelType: t4.channelType, messagingGroupId: t4.messagingGroupId ?? null, canSend: !!t4.canSend };
-}
 function ThreadRow({ t: t4 }) {
   const ct = t4.channelType || "web";
   const meta = channelMeta(ct);
@@ -22497,7 +22491,7 @@ function ThreadRow({ t: t4 }) {
   ].filter(Boolean).join(" \xB7 ") : void 0;
   const onOpen = (ev) => {
     if (ev.target.classList.contains("del")) return;
-    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
+    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
   const onDel = async (ev) => {
@@ -22598,7 +22592,7 @@ function DmRow({ t: t4 }) {
   const meta = channelMeta(ct);
   const active = t4.threadId === threadId.value;
   const onOpen = () => {
-    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf2(t4)).catch(console.error);
+    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
   return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
@@ -22668,7 +22662,7 @@ function SearchResultRow({ r: r4 }) {
     const tid = r4.threadId || (r4.messagingGroupId ? `__dm:${r4.messagingGroupId}` : null);
     if (!tid) return;
     drawerOpen.threads.value = false;
-    const opts = threadCtxOf2(threads.value.find((t4) => t4.threadId === tid)) ?? {
+    const opts = threadCtxOf(threads.value.find((t4) => t4.threadId === tid)) ?? {
       channelType: r4.channelType || "web",
       messagingGroupId: r4.messagingGroupId,
       canSend: false

@@ -66,7 +66,10 @@ objects or introduce a custom schema DSL.
 4. Consider one current-state interaction record only if replacing existing
    duplicated storage and coordination is independently net-reducing.
 5. Finish integration by reusing shared message types in host read models and
-   removing obsolete response polling and redundant presentation copies.
+   shared thread/task resource views in the browser, removing obsolete response
+   polling and redundant presentation copies. Local thread presentation permits
+   an uncreated session or implicit messaging-group context; authoritative
+   thread-list fields stay required.
 
 Measure each completed change and the cumulative delta against the baseline.
 Report production, tests, documentation, generated assets, and disposable

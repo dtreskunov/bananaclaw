@@ -35,7 +35,8 @@ import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, open
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
 import { clearPinnedContext, removePending, respondQuestion, retryChatSend, sendChat, warmChat } from '../actions';
-import type { ActivityLine, ChatMessage, PendingQuestionDto, Thread } from '../types';
+import type { ActivityLine, ChatMessage, PendingQuestionDto } from '../types';
+import { testThread } from '../conversation-test-fixtures';
 import type { ConversationMessage, ConversationTurn } from '../../../../shared/conversation';
 import { applyConversationFrame, completedResponse, conversationState, resetConversation } from '../conversation-state';
 import { testSnapshot, testTurn, testWebSubmission } from '../conversation-test-fixtures';
@@ -127,7 +128,7 @@ vi.mock('../actions', () => ({
   respondQuestion: vi.fn(),
 }));
 
-const thread: Thread = { threadId: 'thread', title: 'Chat', lastActivityAt: '', channelType: 'web' };
+const thread = testThread({ messagingGroupId: null });
 let message: ChatMessage;
 let input: any;
 let tree: any;

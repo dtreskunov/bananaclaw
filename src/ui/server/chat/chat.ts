@@ -13,6 +13,7 @@ import type internal from 'stream';
 import path from 'path';
 import { isQuestionResponse } from '../../shared/conversation-protocol.js';
 import type { ConversationMessage } from '../../shared/conversation.js';
+import type { ChatStartResponse, TaskAttemptDto, TaskDetailDto, ThreadSummary } from '../../shared/thread.js';
 
 import Busboy from 'busboy';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -407,7 +408,11 @@ export async function handleChatRequest(
     }
     const messagingGroupId = ensureWebMessagingGroup(m.groupId);
     const threadId = crypto.randomUUID();
-    writeJson(res, 200, { threadId, messagingGroupId, platformId: platformIdFor(m.groupId) });
+    writeJson(res, 200, {
+      threadId,
+      messagingGroupId,
+      platformId: platformIdFor(m.groupId),
+    } satisfies ChatStartResponse);
     return true;
   }
 
@@ -2029,53 +2034,6 @@ export function parseOutboundContent(
   };
 }
 
-export interface ThreadSummary {
-  threadId: string;
-  sessionId: string;
-  channelType: string;
-  messagingGroupId: string;
-  platformId: string;
-  sessionMode: 'per-thread' | 'shared' | 'agent-shared';
-  title: string;
-  lastActivityAt: string;
-  messageCount: number;
-  counterparty?: string;
-  /** True when the web UI can dispatch a send through this channel's adapter. */
-  canSend?: boolean;
-  /**
-   * 'dm' marks a threadless room — one chat per (channel, mg) with
-   * thread_id IS NULL. Rendered in its own section in the rail; not
-   * sendable from web (yet).
-   */
-  kind?: 'thread' | 'dm';
-  /** Aggregate cost in USD across all turns in this thread. */
-  totalCost?: number;
-  /** Aggregate input + output tokens across all turns. */
-  totalTokens?: number;
-  /** Number of provider turns that have usage data. */
-  turnCount?: number;
-  /**
-   * The live (pending/paused) scheduled tasks keeping this thread alive,
-   * soonest next-run first. Drives the ⏰ badge in the rail so an
-   * auto-active thread reads differently from a conversational one.
-   */
-  liveTasks?: LiveTaskDto[];
-  /** Set when this thread was forked out of another one. */
-  forkedFrom?: {
-    threadId: string;
-    messageId: string;
-    title: string | null;
-    fidelity: 'native' | 'transcript';
-    /** Parent no longer exists — the chip must not offer navigation. */
-    deleted: boolean;
-  };
-  /**
-   * Branches taken out of this thread, oldest first. Only branches the viewer
-   * can actually open are listed — the log renders each one as a link.
-   */
-  forkChildren?: { threadId: string; messageId: string; title: string }[];
-}
-
 export function buildViewerSearchConversations(threads: ThreadSummary[]): SearchConversationScope[] {
   const seen = new Set<string>();
   const scopes: SearchConversationScope[] = [];
@@ -2093,59 +2051,6 @@ export function buildViewerSearchConversations(threads: ThreadSummary[]): Search
     });
   }
   return scopes;
-}
-
-/** One live (pending/paused) scheduled task in a thread. */
-export interface LiveTaskDto {
-  /** series_id — stable across recurrences; focuses the task panel. */
-  seriesId: string;
-  /** ISO timestamp of the next run, or null for a one-off with no wait. */
-  nextRunAt: string | null;
-  /** Cron expression when recurring, else null (one-off). */
-  recurrence: string | null;
-  /** One-line summary of the task's prompt. */
-  summary: string;
-  /** True when the task is paused rather than pending. */
-  paused: boolean;
-}
-
-/** Full per-series detail for the task-management panel. */
-export interface TaskDetailDto {
-  /** series_id — stable across recurrences; the mutation handle. */
-  seriesId: string;
-  status: 'pending' | 'paused';
-  /** ISO timestamp of the next run, or null for a one-off with no wait. */
-  nextRunAt: string | null;
-  /** Cron expression when recurring, else null (one-off). */
-  recurrence: string | null;
-  /** One-line summary of the prompt (for the collapsed row). */
-  summary: string;
-  /** Full prompt text (for the edit form). */
-  prompt: string;
-  /** True when the task also carries a pre-check/exec script. */
-  hasScript: boolean;
-  /** Full script text (empty string when the task has no script). */
-  script: string;
-  /** Bounded wall-clock timeout for the pre-task script. */
-  scriptTimeoutMs: number;
-  /** Consecutive scheduled failures carried into the live occurrence. */
-  consecutiveFailures: number;
-  /** Recent execution attempts, newest first. */
-  attempts: TaskAttemptDto[];
-}
-
-export interface TaskAttemptDto {
-  taskMessageId: string;
-  triggerSource: 'scheduled' | 'manual';
-  status: 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed';
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  exitCode: number | null;
-  signal: string | null;
-  error: string | null;
-  wakeAgent: boolean | null;
-  providerInvoked: boolean;
 }
 
 /** Parse a task row's content JSON into its prompt + script text. */

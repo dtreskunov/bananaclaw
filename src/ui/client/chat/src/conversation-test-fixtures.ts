@@ -1,8 +1,23 @@
 import type { Conversation, ConversationTurn } from '../../../shared/conversation';
 import { CONVERSATION_PROTOCOL_VERSION, type ConversationSnapshot } from '../../../shared/conversation-protocol';
 import { conversationTimeline } from '../../../server/chat/conversation-timeline';
-import type { PendingWebSend } from './types';
+import type { PendingWebSend, Thread } from './types';
 import type { AccountInteraction, AccountRequirements } from '../../../shared/approval';
+
+export function testThread(overrides: Partial<Thread> = {}): Thread {
+  return {
+    threadId: 'thread',
+    sessionId: 'session',
+    channelType: 'web',
+    messagingGroupId: 'web-group',
+    platformId: 'group:group',
+    sessionMode: 'per-thread',
+    title: 'Chat',
+    lastActivityAt: '',
+    messageCount: 1,
+    ...overrides,
+  };
+}
 
 export function testAccountInteraction(
   overrides: Omit<Partial<AccountInteraction>, 'requirements'> & { requirements?: Partial<AccountRequirements> } = {},
