@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  chatSdkHistoryContent,
-  inboundAttachmentSecurityHeaders,
-  matchChatPath,
-  parseOutboundContent,
-  publicInboundMessageId,
-} from './chat.js';
+import { inboundAttachmentSecurityHeaders, matchChatPath } from './chat.js';
+import { chatSdkHistoryContent, parseOutboundContent, publicInboundMessageId } from './history.js';
 
 describe('chat socket bootstrap', () => {
   it('does not expose a REST history route', () => {

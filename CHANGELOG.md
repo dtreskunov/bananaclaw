@@ -4,6 +4,11 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **Acyclic conversation reads and UI configuration.** Authorized context,
+  history and public projections no longer depend on HTTP controllers. Host
+  commands and credential operations read UI configuration without starting
+  the UI. HTTP contracts, conversation protocol and storage are unchanged.
+
 - **[BREAKING] Unified current-state interaction storage.** Questions,
   confirmations, account setup and access grants now share `interactions`;
   private execution progress remains separate. Existing records require the

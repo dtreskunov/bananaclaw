@@ -271,3 +271,32 @@ Host/browser builds and typechecks, runner typecheck and standalone converter
 typecheck passed. Deployment evidence is retained with the installation's
 protected upgrade backups rather than treating this document as a live status
 or adding a permanent migration/recovery framework.
+
+## Conversation dependency-boundary phase
+
+The next step separates authorized context and history projection from the HTTP
+controller, with no new lifecycle, protocol, schema or request engine. Context,
+history and public conversation/approval readers have one-way dependencies.
+History reuses the already-authorized session instead of repeating target and
+session resolution. Input handling, DM/identity scope, pending edits, attachments,
+attribution and task events keep their existing behavior.
+
+UI flags, mount prefix and external URL calculation now have a small
+configuration owner below HTTP startup. Commands, credential operations and
+link helpers import that owner rather than the server. No compatibility
+re-exports preserve the former cycles.
+
+Against `61a2035f8` (converter cleanup), this adds 36 production physical LOC,
+removes two cyclomatic/branch increments and adds no production functions.
+The full resolved static runtime import/re-export graph changes from one
+seven-module cycle to no cycles (517 to 520 modules); type-only and dynamic
+imports, tests and generated files are excluded from that measurement.
+The largest function remains complexity 217; reducing that HTTP dispatcher
+is a separate step, not hidden by this extraction.
+
+The full host/browser suite passes 3,247 tests with ten unrelated existing
+failures (five CSS assertions, four approval-card attribution expectations and
+one builtin-count fixture). The eleven host-routing tests formerly blocked by
+eager UI initialization now pass without changing their tests. New import
+guards prove authorized readers and configuration load without HTTP startup;
+configuration precedence and URL fallback behavior are covered explicitly.

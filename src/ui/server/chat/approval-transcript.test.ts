@@ -18,7 +18,7 @@ import { inboundDbPath, initSessionFolder, openInboundDb, writeSessionMessage } 
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
 import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
 import { readConversation } from './conversation.js';
-import { readChatHistory } from './chat.js';
+import { readChatHistory } from './history.js';
 import { approvalOrigin } from './approval-transcript.js';
 import { createApprovalWorkflow, finishApprovalWorkflow } from '../../../modules/approvals/workflows.js';
 import {

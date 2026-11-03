@@ -13,7 +13,7 @@ import type { AccountInteraction, AccountRequestData } from '../../shared/approv
 import { inboundDbPath, openInboundDb } from '../../../session-manager.js';
 import type { ApprovalOrigin, ConversationApproval } from '../../shared/approval.js';
 import { presentApproval } from './approval-presentation.js';
-import { resolveTurnContext, type TurnContext } from './chat.js';
+import { resolveTurnContext, type TurnContext } from './conversation-context.js';
 
 export function approvalOrigin(
   userId: string,

@@ -41,18 +41,13 @@ import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js'
 import { siteFqdn, siteUrl } from '../pages/site.js';
 import { createPrivateWebSession } from '../private-web-db.js';
 import { resolvePrivateWebEntry } from '../private-web-path.js';
-import { uiBaseUrl } from '../server.js';
+import { uiBaseUrl } from '../config.js';
 import { classify, resolveSafe } from './classify.js';
 import { fileEtag } from './etag.js';
 import { compareEntriesByDate, searchFilesByName } from './file-search.js';
-import {
-  handleChatRequest,
-  handleChatUpgrade,
-  listThreadsForViewer,
-  readChatHistory,
-  resolveTurnContext,
-  viewerHasContent,
-} from './chat.js';
+import { handleChatRequest, handleChatUpgrade, listThreadsForViewer, viewerHasContent } from './chat.js';
+import { readChatHistory } from './history.js';
+import { resolveTurnContext } from './conversation-context.js';
 import type { ThreadSummary } from '../../shared/thread.js';
 import { handleGroupAdminRequest } from './group-admin.js';
 import { handleCredentialsRequest } from './credentials-admin.js';

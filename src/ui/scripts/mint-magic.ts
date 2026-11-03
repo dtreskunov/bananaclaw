@@ -15,7 +15,7 @@ import path from 'path';
 import { initDb } from '../../db/connection.js';
 import { getAllUsers } from '../../modules/permissions/db/users.js';
 import { issueMagicLink } from '../server/auth.js';
-import { uiBaseUrl } from '../server/server.js';
+import { uiBaseUrl } from '../server/config.js';
 
 const HELP = `mint-magic — issue a UI magic-link login URL.
 

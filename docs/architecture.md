@@ -7,6 +7,12 @@ runner-owned `runner-state.db`. Both sides exchange journaled durable events and
 live status over a private per-session Unix socket. Host databases are not
 mounted into the container. There is no stdin or signal-file protocol.
 
+The UI follows the same dependency direction: HTTP/socket controllers consume
+authorized conversation context and history readers, never the reverse.
+Environment flags and public URLs live below HTTP startup so host commands and
+credential operations do not initialize the UI merely to read configuration.
+See [server code ownership](ui.md#server-code-ownership).
+
 ## Two-Level DB
 
 **Central DB (host process):**

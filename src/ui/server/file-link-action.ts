@@ -21,7 +21,7 @@ import { ensureUserDm } from '../../modules/permissions/user-dm.js';
 import { getIdentitiesForUser } from '../../modules/permissions/db/identities.js';
 import { createDownloadToken } from './download-tokens.js';
 import { classify, resolveSafe } from './chat/classify.js';
-import { isUiEnabled, uiBaseUrl } from './server.js';
+import { isUiEnabled, uiBaseUrl } from './config.js';
 
 const DEFAULT_TTL_MS = 15 * 60 * 1000; // 15 min
 const MAX_TTL_MS = 24 * 60 * 60 * 1000; // 24h

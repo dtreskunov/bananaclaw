@@ -17,7 +17,8 @@ import type {
   ConversationTurn,
   ConversationUsage,
 } from '../../shared/conversation.js';
-import { publicInboundMessageId, readChatHistory, resolveTurnContext, type TurnContext } from './chat.js';
+import { publicInboundMessageId, readChatHistory } from './history.js';
+import { resolveTurnContext, type TurnContext } from './conversation-context.js';
 
 export function routeMatches(
   context: TurnContext,

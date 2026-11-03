@@ -15,7 +15,6 @@ import http from 'http';
 import path from 'path';
 
 import { getAgentGroup } from '../../db/agent-groups.js';
-import { readEnvFile } from '../../env.js';
 import { log } from '../../log.js';
 import { canAccessAgentGroup } from '../../modules/permissions/access.js';
 import { ensureSharedHttpServer, mountHandler, mountUpgradeHandler } from '../../webhook-server.js';
@@ -36,9 +35,8 @@ import { CLIENT_METADATA_PATH, handleClientMetadata, handleOAuthCallback } from 
 import { handleOnboarding } from './onboarding.js';
 import { handleSettings } from './settings.js';
 import { handle as chatHandle, CHAT_MOUNT_PREFIX, handleChatUpgrade } from './chat/routes.js';
+import { readUiConfig, UI_MOUNT_PREFIX } from './config.js';
 
-/** Path prefix every UI app lives under. Shared cookie path. */
-export const UI_MOUNT_PREFIX = '/ui';
 /** Where a successful magic-link redeem redirects when no `next` is given. */
 const DEFAULT_LANDING = `${UI_MOUNT_PREFIX}/chat/`;
 
@@ -47,20 +45,8 @@ const PURGE_INTERVAL_MS = 60 * 60 * 1000;
 let purgeTimer: NodeJS.Timeout | null = null;
 let mounted = false;
 
-function readConfig(): { enabled: boolean; secure: boolean } {
-  const env = readEnvFile(['UI_ENABLED', 'UI_SECURE']);
-  const enabled = (process.env.UI_ENABLED || env.UI_ENABLED) === 'true';
-  const secure = (process.env.UI_SECURE || env.UI_SECURE) === 'true';
-  return { enabled, secure };
-}
-
-/** Whether the UI shell is enabled and mounted (set via UI_ENABLED). */
-export function isUiEnabled(): boolean {
-  return readConfig().enabled;
-}
-
 export function startUi(): void {
-  const cfg = readConfig();
+  const cfg = readUiConfig();
   if (!cfg.enabled) {
     log.info('UI disabled (set UI_ENABLED=true to mount)');
     return;
@@ -229,15 +215,6 @@ export async function stopUi(): Promise<void> {
     purgeTimer = null;
   }
   // Shared server lifecycle is owned by stopWebhookServer; nothing to do here.
-}
-
-/** Compute the external base URL used for magic-link URLs (ends in /ui, no trailing slash). */
-export function uiBaseUrl(): string {
-  const env = readEnvFile(['UI_BASE_URL', 'WEBHOOK_PORT']);
-  const explicit = process.env.UI_BASE_URL || env.UI_BASE_URL;
-  if (explicit) return explicit.replace(/\/$/, '');
-  const port = process.env.WEBHOOK_PORT || env.WEBHOOK_PORT || '3000';
-  return `http://localhost:${port}${UI_MOUNT_PREFIX}`;
 }
 
 // ── auth dispatcher ───────────────────────────────────────────────────────

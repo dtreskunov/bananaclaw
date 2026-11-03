@@ -2,6 +2,20 @@
 
 Optional read-only web UI mounted on the existing webhook HTTP server under `/ui`. A shared auth shell (`/ui/auth/*`) hands out a single bearer-cookie that's reused by every UI app. Today the only app is the **chat** app at `/ui/chat`; more apps will live alongside it.
 
+### Server code ownership
+
+- [UI configuration](../src/ui/server/config.ts) owns environment flags, the mount
+  prefix and external base URL without importing HTTP startup.
+- [Conversation context](../src/ui/server/chat/conversation-context.ts) owns
+  viewer authorization, messaging-group/session resolution and DM recipient scope.
+- [History](../src/ui/server/chat/history.ts) reads authorized messages and input
+  dispositions; [conversation](../src/ui/server/chat/conversation.ts) and
+  [approval](../src/ui/server/chat/approval-transcript.ts) readers project their
+  public views.
+- The [server](../src/ui/server/server.ts), [router](../src/ui/server/chat/routes.ts)
+  and [chat controller](../src/ui/server/chat/chat.ts) own HTTP/socket orchestration.
+  Shared readers never import these transport modules or compatibility re-exports.
+
 ### Conversation protocol
 
 The chat client uses versioned atomic conversation snapshots/updates, with

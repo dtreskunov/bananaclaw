@@ -8,7 +8,7 @@ import type { McpServerConfig } from '../../container-config.js';
 import { registerDeliveryAction, onDeliveryAdapterReady } from '../../delivery.js';
 import { onShutdown } from '../../response-registry.js';
 import { log } from '../../log.js';
-import { uiBaseUrl } from '../../ui/server/server.js';
+import { uiBaseUrl } from '../../ui/server/config.js';
 import { openInboundDb } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import {

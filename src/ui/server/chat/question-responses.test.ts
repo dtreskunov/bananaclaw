@@ -35,7 +35,7 @@ import { handleApprovalsResponse } from '../../../modules/approvals/response-han
 import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
 import { registerResponseHandler } from '../../../response-registry.js';
 import { handle } from './routes.js';
-import { readChatHistory } from './chat.js';
+import { readChatHistory } from './history.js';
 
 const NOW = '2026-10-05T18:00:00Z';
 registerResponseHandler(handleApprovalsResponse);

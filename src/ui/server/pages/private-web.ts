@@ -11,7 +11,7 @@ import { registerHostHandler } from '../../../webhook-server.js';
 import { readCookie, recordAccess } from '../auth.js';
 import { inspectPrivateWebHandoff, lookupPrivateWebSession, redeemPrivateWebHandoff } from '../private-web-db.js';
 import { resolvePrivateWebEntry } from '../private-web-path.js';
-import { isUiEnabled, uiBaseUrl } from '../server.js';
+import { isUiEnabled, uiBaseUrl } from '../config.js';
 import { classify } from '../chat/classify.js';
 import { pagesEnabled } from './site.js';
 import { serveWebRoot } from './web-root.js';

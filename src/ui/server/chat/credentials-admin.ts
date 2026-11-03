@@ -21,7 +21,7 @@ import {
   updateConnection,
 } from '../../../modules/credentials/shared-connections.js';
 import { getSignIn } from '../../../modules/credentials/sign-ins.js';
-import { uiBaseUrl } from '../server.js';
+import { uiBaseUrl } from '../config.js';
 import { recordAdminAction } from './audit.js';
 import { projectAccountInteraction } from './approval-transcript.js';
 import {

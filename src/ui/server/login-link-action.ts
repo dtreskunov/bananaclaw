@@ -11,7 +11,7 @@ import { registerDeliveryAction, getDeliveryAdapter } from '../../delivery.js';
 import { log } from '../../log.js';
 import { ensureUserDm, resolveUserId } from '../../modules/permissions/user-dm.js';
 import { issueMagicLink } from './auth.js';
-import { isUiEnabled, uiBaseUrl } from './server.js';
+import { isUiEnabled, uiBaseUrl } from './config.js';
 
 registerDeliveryAction('mint_login_link', async (content, session) => {
   const rawUserId = content.userId as string | undefined;

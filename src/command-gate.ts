@@ -11,7 +11,7 @@
  */
 import { getDb, hasTable } from './db/connection.js';
 import { issueMagicLink } from './ui/server/auth.js';
-import { isUiEnabled, uiBaseUrl } from './ui/server/server.js';
+import { isUiEnabled, uiBaseUrl } from './ui/server/config.js';
 
 export type GateResult =
   | { action: 'pass' }
