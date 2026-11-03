@@ -22,6 +22,7 @@ import { createMessagingGroup, getMessagingGroupByPlatform } from '../../db/mess
 import { seedUserWithIdentity } from '../../test-utils/seed-identity.js';
 import { getIdentity } from './db/identities.js';
 import { grantRole } from './db/user-roles.js';
+import { dispatchResponse } from '../../response-registry.js';
 
 let ownerId: string;
 let scopedAdminId: string;
@@ -37,6 +38,8 @@ vi.mock('../../container-runner.js', () => ({
 // Mock delivery adapter.
 const deliverMock = vi.fn().mockResolvedValue('plat-msg-id');
 vi.mock('../../delivery.js', () => ({
+  registerDeliveryAction: vi.fn(),
+  onDeliveryAdapterReady: vi.fn(),
   getDeliveryAdapter: () => ({ deliver: deliverMock }),
 }));
 
@@ -195,7 +198,6 @@ describe('unknown-channel registration flow', () => {
 
   it('approve → creates wiring, admits triggering sender, replays', async () => {
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
     const { wakeContainer } = await import('../../container-runner.js');
     (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
 
@@ -209,17 +211,14 @@ describe('unknown-channel registration flow', () => {
     expect(pending).toBeDefined();
 
     // Owner clicks "Connect to Andy" (single-agent card).
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.messaging_group_id,
-        value: 'connect:ag-1',
-        userId: 'owner', // raw platform id — handler namespaces it
-        channelType: 'telegram',
-        platformId: 'dm-owner',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.messaging_group_id,
+      value: 'connect:ag-1',
+      userId: 'owner', // raw platform id — handler namespaces it
+      channelType: 'telegram',
+      platformId: 'dm-owner',
+      threadId: null,
+    });
 
     // Wiring created with defaults.
     const mga = getDb()
@@ -255,7 +254,6 @@ describe('unknown-channel registration flow', () => {
 
   it('approve on a DM wires with pattern="." defaults', async () => {
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
 
     await routeInbound(dmEvent('dm-approve-user'));
     await new Promise((r) => setTimeout(r, 10));
@@ -265,17 +263,14 @@ describe('unknown-channel registration flow', () => {
       messaging_group_id: string;
     };
 
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.messaging_group_id,
-        value: 'connect:ag-1',
-        userId: 'owner',
-        channelType: 'telegram',
-        platformId: 'dm-owner',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.messaging_group_id,
+      value: 'connect:ag-1',
+      userId: 'owner',
+      channelType: 'telegram',
+      platformId: 'dm-owner',
+      threadId: null,
+    });
 
     const mga = getDb()
       .prepare('SELECT engage_mode, engage_pattern FROM messaging_group_agents WHERE messaging_group_id = ?')
@@ -286,7 +281,6 @@ describe('unknown-channel registration flow', () => {
 
   it('deny → sets denied_at; future mentions drop silently without a second card', async () => {
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
 
     await routeInbound(groupMention('chat-deny'));
     await new Promise((r) => setTimeout(r, 10));
@@ -295,17 +289,14 @@ describe('unknown-channel registration flow', () => {
       messaging_group_id: string;
     };
 
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.messaging_group_id,
-        value: 'reject',
-        userId: 'owner',
-        channelType: 'telegram',
-        platformId: 'dm-owner',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.messaging_group_id,
+      value: 'reject',
+      userId: 'owner',
+      channelType: 'telegram',
+      platformId: 'dm-owner',
+      threadId: null,
+    });
 
     // denied_at set, pending row cleared, no wiring.
     const mg = getMessagingGroupByPlatform('telegram', 'chat-deny');
@@ -330,7 +321,6 @@ describe('unknown-channel registration flow', () => {
 
   it('rejects clicks from an unauthorized user (prevents self-admit via forwarded card)', async () => {
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
 
     await routeInbound(groupMention('chat-unauth'));
     await new Promise((r) => setTimeout(r, 10));
@@ -339,17 +329,14 @@ describe('unknown-channel registration flow', () => {
       messaging_group_id: string;
     };
 
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.messaging_group_id,
-        value: 'approve',
-        userId: 'random-bystander',
-        channelType: 'telegram',
-        platformId: 'dm-random',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.messaging_group_id,
+      value: 'approve',
+      userId: 'random-bystander',
+      channelType: 'telegram',
+      platformId: 'dm-random',
+      threadId: null,
+    });
 
     // No wiring created, pending row preserved so a real approver can act on it.
     const mgaCount = (
@@ -365,7 +352,6 @@ describe('unknown-channel registration flow', () => {
 
   it('does not let a scoped admin connect an unknown channel to another agent group', async () => {
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
     const { getDb } = await import('../../db/connection.js');
 
     createAgentGroup({ id: 'ag-2', name: 'Betty', folder: 'betty', agent_provider: null, created_at: now() });
@@ -403,17 +389,14 @@ describe('unknown-channel registration flow', () => {
     expect(deliverMock).toHaveBeenCalledTimes(1);
     expect(deliverMock.mock.calls[0][1]).toBe('dm-scoped-admin');
 
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.messaging_group_id,
-        value: 'choose_existing',
-        userId: 'scoped-admin',
-        channelType: 'telegram',
-        platformId: 'dm-scoped-admin',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.messaging_group_id,
+      value: 'choose_existing',
+      userId: 'scoped-admin',
+      channelType: 'telegram',
+      platformId: 'dm-scoped-admin',
+      threadId: null,
+    });
 
     const followupPayload = JSON.parse(deliverMock.mock.calls[1][4] as string) as {
       options: Array<{ label: string; value: string }>;
@@ -421,17 +404,14 @@ describe('unknown-channel registration flow', () => {
     expect(followupPayload.options.map((option) => option.value)).toContain('connect:ag-1');
     expect(followupPayload.options.map((option) => option.value)).not.toContain('connect:ag-2');
 
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.messaging_group_id,
-        value: 'connect:ag-2',
-        userId: 'scoped-admin',
-        channelType: 'telegram',
-        platformId: 'dm-scoped-admin',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.messaging_group_id,
+      value: 'connect:ag-2',
+      userId: 'scoped-admin',
+      channelType: 'telegram',
+      platformId: 'dm-scoped-admin',
+      threadId: null,
+    });
 
     const mgaCount = (
       getDb()

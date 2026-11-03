@@ -20,6 +20,7 @@ import { createMessagingGroup, createMessagingGroupAgent } from '../../db/messag
 import { seedUserWithIdentity } from '../../test-utils/seed-identity.js';
 import { getIdentity } from './db/identities.js';
 import { grantRole } from './db/user-roles.js';
+import { dispatchResponse } from '../../response-registry.js';
 
 let ownerId: string;
 let adminBobId: string;
@@ -35,6 +36,8 @@ vi.mock('../../container-runner.js', () => ({
 // Mock delivery adapter — record card deliveries for assertions.
 const deliverMock = vi.fn().mockResolvedValue('plat-msg-id');
 vi.mock('../../delivery.js', () => ({
+  registerDeliveryAction: vi.fn(),
+  onDeliveryAdapterReady: vi.fn(),
   getDeliveryAdapter: () => ({
     deliver: deliverMock,
   }),
@@ -194,7 +197,6 @@ describe('unknown-sender request_approval flow', () => {
 
   it('approve → adds member and replays the original message', async () => {
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
     const { wakeContainer } = await import('../../container-runner.js');
     (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
 
@@ -206,20 +208,17 @@ describe('unknown-sender request_approval flow', () => {
     expect(pending).toBeDefined();
 
     // Fire the approve click through the response-handler chain.
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.id,
-        value: 'approve',
-        // Chat SDK's onAction surfaces the raw platform userId (e.g. Telegram
-        // chat id). The permissions handler namespaces it with channelType to
-        // match users(id).
-        userId: 'owner',
-        channelType: 'telegram',
-        platformId: 'dm-owner',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.id,
+      value: 'approve',
+      // Chat SDK's onAction surfaces the raw platform userId (e.g. Telegram
+      // chat id). The permissions handler namespaces it with channelType to
+      // match users(id).
+      userId: 'owner',
+      channelType: 'telegram',
+      platformId: 'dm-owner',
+      threadId: null,
+    });
 
     // Member row added for the stranger against the wired agent group.
     const strangerId = getIdentity('telegram', 'stranger')!.user_id;
@@ -238,7 +237,6 @@ describe('unknown-sender request_approval flow', () => {
 
   it('deny → deletes the pending row without adding a member', async () => {
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
 
     await routeInbound(stranger('hello'));
     await new Promise((r) => setTimeout(r, 10));
@@ -247,17 +245,14 @@ describe('unknown-sender request_approval flow', () => {
     const pending = getDb().prepare('SELECT id FROM pending_sender_approvals').get() as { id: string };
     expect(pending).toBeDefined();
 
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.id,
-        value: 'reject',
-        userId: 'owner', // raw platform id — handler namespaces with channelType
-        channelType: 'telegram',
-        platformId: 'dm-owner',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.id,
+      value: 'reject',
+      userId: 'owner', // raw platform id — handler namespaces with channelType
+      channelType: 'telegram',
+      platformId: 'dm-owner',
+      threadId: null,
+    });
 
     const count = (getDb().prepare('SELECT COUNT(*) AS c FROM pending_sender_approvals').get() as { c: number }).c;
     expect(count).toBe(0);
@@ -271,7 +266,6 @@ describe('unknown-sender request_approval flow', () => {
   it('rejects clicks from an unauthorized user (prevents self-admit via forwarded card)', async () => {
     // Stranger triggers the approval flow; card goes to the owner.
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
 
     await routeInbound(stranger('can I play'));
     await new Promise((r) => setTimeout(r, 10));
@@ -283,17 +277,14 @@ describe('unknown-sender request_approval flow', () => {
     // A random user (not the stranger, not the owner, not an admin) tries to
     // click the approval — e.g. they got the card forwarded. Should be
     // rejected without admitting them.
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.id,
-        value: 'approve',
-        userId: 'random-bystander', // not owner, not admin
-        channelType: 'telegram',
-        platformId: 'dm-random',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.id,
+      value: 'approve',
+      userId: 'random-bystander', // not owner, not admin
+      channelType: 'telegram',
+      platformId: 'dm-random',
+      threadId: null,
+    });
 
     // No member added for the stranger.
     const strangerId = getIdentity('telegram', 'stranger')!.user_id;
@@ -320,7 +311,6 @@ describe('unknown-sender request_approval flow', () => {
     });
 
     const { routeInbound } = await import('../../router.js');
-    const { getResponseHandlers } = await import('../../response-registry.js');
 
     await routeInbound(stranger('knock knock'));
     await new Promise((r) => setTimeout(r, 10));
@@ -330,17 +320,14 @@ describe('unknown-sender request_approval flow', () => {
     expect(pending).toBeDefined();
 
     // Admin clicks approve (not the designated approver, which was owner).
-    for (const handler of getResponseHandlers()) {
-      const claimed = await handler({
-        questionId: pending.id,
-        value: 'approve',
-        userId: 'admin-bob',
-        channelType: 'telegram',
-        platformId: 'dm-bob',
-        threadId: null,
-      });
-      if (claimed) break;
-    }
+    await dispatchResponse({
+      questionId: pending.id,
+      value: 'approve',
+      userId: 'admin-bob',
+      channelType: 'telegram',
+      platformId: 'dm-bob',
+      threadId: null,
+    });
 
     // Stranger admitted thanks to the admin's authority.
     const strangerId = getIdentity('telegram', 'stranger')!.user_id;

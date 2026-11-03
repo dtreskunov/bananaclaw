@@ -32,10 +32,6 @@ export function registerResponseHandler(handler: ResponseHandler): void {
   responseHandlers.push(handler);
 }
 
-export function getResponseHandlers(): readonly ResponseHandler[] {
-  return responseHandlers;
-}
-
 type ShutdownCallback = () => void | Promise<void>;
 const shutdownCallbacks: ShutdownCallback[] = [];
 
