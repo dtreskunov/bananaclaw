@@ -4204,6 +4204,7 @@ nav.tab-bar-strip.group-strip {
 /* src/components/ComposerInput.css */
 .composer-input-wrap {
   --composer-control-inset: 3px;
+  --composer-min-padding-block: 5px;
   flex: 1;
   min-width: 0;
   position: relative;
@@ -4258,6 +4259,7 @@ nav.tab-bar-strip.group-strip {
 @media (max-width: 720px) {
   .composer-input-wrap {
     --composer-control-inset: 2px;
+    --composer-min-padding-block: 10px;
   }
   .composer-input-wrap textarea {
     padding: 10px calc(92px + var(--composer-control-inset)) 10px calc(44px + var(--composer-control-inset));
@@ -4268,6 +4270,9 @@ nav.tab-bar-strip.group-strip {
   .composer-input-wrap.composer-passive textarea {
     padding: 10px;
   }
+}
+.composer-input-wrap:not(.multi-line) textarea {
+  padding-block: max(var(--composer-min-padding-block), calc((var(--control-action-size, 28px) + 2 * var(--composer-control-inset) - 1lh) / 2));
 }
 
 /* src/components/ApprovalMessageInput.css */

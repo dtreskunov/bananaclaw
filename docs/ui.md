@@ -166,7 +166,9 @@ retain their individual focus indicators, and reduced-motion preferences disable
 the outline transition.
 Composer controls use matching side and bottom insets (3 px on desktop, 2 px on
 mobile); single-line inputs keep the same clearance above the buttons in both
-text densities.
+text densities. Single-line text and placeholders are vertically centered using
+the current line height and control size; multiline drafts retain their separate
+bottom control row.
 
 **Text density**, below Mode, offers **Comfortable** (larger text and more
 breathing room) and **Compact** (smaller text and tighter spacing). Both use

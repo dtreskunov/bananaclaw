@@ -73,6 +73,18 @@ function mix(fg: string, bg: string, fraction: number): string {
 }
 
 describe('theme CSS contract', () => {
+  it('centers single-line text within the control height without changing multiline padding', () => {
+    const css = read('./components/ComposerInput.css');
+    const singleLine = css.match(/\.composer-input-wrap:not\(\.multi-line\) textarea \{([^}]+)\}/)?.[1];
+    expect(singleLine).toContain(
+      'padding-block: max(var(--composer-min-padding-block), calc((var(--control-action-size, 28px) + 2 * var(--composer-control-inset) - 1lh) / 2))',
+    );
+    expect(css).toContain('--composer-min-padding-block: 5px');
+    expect(css.slice(css.indexOf('@media (max-width: 720px)'))).toContain('--composer-min-padding-block: 10px');
+    expect(css).toContain('.composer-input-wrap.multi-line textarea { padding: 5px 8px 36px; }');
+    expect(css).toContain('.composer-input-wrap.multi-line textarea { padding: 10px 10px 48px; }');
+  });
+
   it('uses the same side and bottom inset for composer controls at both viewport sizes', () => {
     const css = read('./components/ChatMain.css');
     const wrapper = css.match(/\.chat-main \.composer-input-wrap \{([^}]+)\}/)?.[1];
