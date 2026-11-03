@@ -449,23 +449,20 @@ without trailing compaction. Missing usage or an unknown model window disables
 this proactive trigger, not emergency recovery. Utilization is not persisted:
 the first successful step after a resume establishes a new measurement.
 
-Each turn permits two proactive attempts, retaining the latest three exchange
-groups. Successful compaction invalidates the triggering measurement; summary
-calls cannot retrigger it. A failed proactive attempt emits an error activity
-and notification, preserves the active context, and disables further proactive
-attempts for that turn while normal generation continues. Reaching the
-proactive limit emits a notification and does not itself fail the turn.
-Per-turn policy owns eligibility, suppression, and the two attempt budgets;
-the shared executor only runs the selected plan and reports its lifecycle.
-Activity ordinals derive from the sum of proactive and emergency attempts,
-without a separate sequence counter.
+Successful compactions can repeat throughout a task, retaining the latest three
+exchange groups. Compaction invalidates its triggering measurement; summary
+usage cannot retrigger it. Failures are surfaced as specific blockers, preserving
+the active context instead of continuing expensive requests or dropping data.
+The summary must be smaller than its source; bounded chunking, request counts,
+timeouts and recovery attempts prevent a failing summarizer from looping.
 
 Recognized context rejections, including MiniMax's
 `context window exceeds limit (2013)`, trigger automatic compaction inside the
 native provider. Unrelated authentication, validation, and rate-limit errors
 do not. Recovery retries only the rejected model step, keeps the same turn and
-continuation, and shares a separate two-attempt emergency budget with inline
-media recovery. Proactive attempts do not consume this budget. A rejected step
+continuation, and shares a two-attempt recovery episode with inline media
+recovery. Only a successful normal model step resets that episode; a successful
+summary alone does not. Proactive compactions do not consume it. A rejected step
 that already streamed text or tool execution is not automatically retried.
 
 The full native transcript and checkpoint IDs remain unchanged. A persistent
@@ -693,20 +690,12 @@ Recovery happens inside the provider's step loop:
   least 400 characters of undelivered text, is delivered as is; the runner
   only logs a warning (`final message may point at`) to measure how often
   it happens.
-- **Step limit.** A turn runs at most 100 model steps (`MAX_STEPS`). If the
-  model is still calling tools at the limit, one more step runs with no tools
-  and a transient instruction to report what was done and what remains.
-  Each normal step's system prompt includes budgeting guidance and a live
-  used/remaining counter derived from `MAX_STEPS` and `stepsCompleted`. Steps
-  count model rounds, not individual tool calls; a round can call multiple
-  tools. The guidance recommends batching safe repetitive work, changing
-  unproductive strategies, and reserving the last 10 steps for saving,
-  verification, and a clear handoff. At 10 or fewer remaining steps, it
-  explicitly tells the model to stop expanding scope; the final tools-disabled
-  step reports zero remaining and asks for verified progress and next steps.
-  The counter is not persisted in conversation history, survives compaction
-  and steering without resetting, and resets for the next turn. Turns whose
-  tools were disabled up front do not advertise this tool-use budget.
+- **Long tasks.** There is no total model-step ceiling or cumulative execution
+  token allowance. The loop completes when the model answers, ends silently,
+  encounters a genuine failure, or is cancelled. Steering continues across
+  arbitrarily many completed steps. System instructions contain no changing
+  step counter. Large tool results use a bounded, recoverable projection; see
+  [usage efficiency](usage-efficiency.md).
 
 There is no `reply` tool: MiniMax ignores `tool_choice` and prefers to end
 with plain text, so a tool-based reply was mostly bypassed anyway.

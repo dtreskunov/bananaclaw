@@ -1,4 +1,4 @@
-import { isStepCount, streamText, wrapLanguageModel, type LanguageModelCallEndEvent, type ModelMessage, type ToolSet } from 'ai';
+import { APICallError, isStepCount, streamText, wrapLanguageModel, type LanguageModelCallEndEvent, type LanguageModelMiddleware, type ModelMessage, type ToolSet } from 'ai';
 
 import { registerProvider } from './provider-registry.js';
 import { loadConfig } from '../config.js';
@@ -38,12 +38,9 @@ import {
   NO_REPLY_TOOL,
   NO_REPLY_TOOLS,
   noReplyReason,
-  STEP_LIMIT_PROMPT,
-  stepBudgetInstructions,
 } from './native/reply.js';
 import { DeferredMcpTools, mcpToolSearchMode } from './native/tool-search.js';
-
-export const MAX_STEPS = 100;
+import { boundToolResults } from './native/tool-results.js';
 
 function log(message: string): void {
   console.error(`[native-provider] ${message}`);
@@ -52,6 +49,21 @@ function log(message: string): void {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+function quotaExhausted(error: unknown): boolean {
+  return /\b(?:Token|M) Plan\b.*\busage limit\b/i.test(errorMessage(error));
+}
+
+const stopExhaustedQuota: LanguageModelMiddleware = {
+  wrapStream: async ({ doStream }) => {
+    try { return await doStream(); }
+    catch (error) {
+      if (APICallError.isInstance(error) && quotaExhausted(error))
+        throw new APICallError({ ...error, message: error.message, cause: error, isRetryable: false });
+      throw error;
+    }
+  },
+};
 
 /**
  * Maps AI SDK usage onto the provider-wide convention shared with the Claude
@@ -291,6 +303,9 @@ export class NativeProvider implements AgentProvider {
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
+    const project = (messages: ModelMessage[]) =>
+      boundToolResults(messages, (complete) => store.archiveResult(complete));
+    const history = (messages: ModelMessage[]) => project(portableHistory(messages));
     const seenBrokerGuidance = new Set<string>();
     const pendingBrokerGuidance = new Set<string>();
     const mcpManager = lazyMcpManager(options.mcpServers, input.cwd, (guidance) => {
@@ -338,12 +353,12 @@ export class NativeProvider implements AgentProvider {
               const todoState = new NativeTodoState();
               const configuredModel = options.model ?? process.env.NATIVE_MODEL;
               if (!configuredModel) throw new Error('native requires a canonical model setting');
-              const prior = portableHistory(store.contextMessages(continuation));
+              const prior = history(store.contextMessages(continuation));
               const turnJournal = new NativeTurnJournal(store, continuation, { role: 'user', content: turn.text });
               journal = turnJournal;
               abortController.signal.throwIfAborted();
               const resolved = await resolveNativeModel(configuredModel);
-              const miniMaxFlash = /^MiniMax-M3\.1-Flash-Preview$/i.test(resolved.modelId);
+              const miniMaxFlash = /^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(resolved.modelId);
               const conversation = continuation;
               abortController.signal.throwIfAborted();
               const messages: ModelMessage[] = [...prior, { role: 'user', content: turn.text }];
@@ -371,10 +386,11 @@ export class NativeProvider implements AgentProvider {
                   : resolved.maxOutputTokens;
               const adapter = await languageModel(resolved);
               const modelSetupMs = Date.now() - startedAt;
-              const model = resolved.protocol === 'openai-chat'
-                ? wrapLanguageModel({ model: adapter, middleware: openAiToolMedia })
-                : adapter;
-              let stepsCompleted = 0;
+              const model = wrapLanguageModel({ model: adapter, middleware: [
+                    ...(resolved.protocol === 'openai-chat' ? [openAiToolMedia] : []),
+                    stopExhaustedQuota,
+                  ] });
+              let firstStep = true;
               let finishReason = '';
               let reply: string | null = null;
               let silence: string | null = null;
@@ -391,8 +407,6 @@ export class NativeProvider implements AgentProvider {
               }
               // One-off instruction for the next step; never persisted.
               let nudge: string | null = null;
-              // Past the step limit: one more step, without tools, to report progress.
-              let wrappingUp = false;
               // Text written alongside tool calls, which is never delivered.
               let undeliveredChars = 0;
               const compactionPolicy = createCompactionPolicy(resolved.contextWindow);
@@ -429,8 +443,8 @@ export class NativeProvider implements AgentProvider {
                         reasoningTokens: usage.outputTokenDetails?.reasoningTokens };
                     },
                   });
-                  messages.splice(0, messages.length, ...portableHistory(store.contextMessages(conversation)));
-                  compactionPolicy.observe(undefined);
+                  messages.splice(0, messages.length, ...history(store.contextMessages(conversation)));
+                  compactionPolicy.compacted();
                   yield* flushCallUsage();
                   yield { type: 'progress', step: {
                     kind: 'compaction', id: compactId, auto: true, status: 'completed',
@@ -445,30 +459,6 @@ export class NativeProvider implements AgentProvider {
                     error: errorMessage(error), durationMs: Date.now() - compactStartedAt,
                   } };
                   throw error;
-                }
-              }
-              async function* maybeCompactContext(): AsyncGenerator<ProviderEvent> {
-                const plan = compactionPolicy.proactive();
-                if (!plan) return;
-                if (plan === 'limit') {
-                  yield { type: 'progress', step: {
-                    kind: 'notification', id: `native-compaction-limit-${continuation}-${startedAt}`,
-                    text: 'Automatic compaction limit reached for this turn',
-                    detail: 'Continuing normally; context-overflow and media recovery remain available.',
-                  } };
-                  return;
-                }
-                try {
-                  yield* compactContext(plan);
-                } catch (error) {
-                  abortController.signal.throwIfAborted();
-                  compactionPolicy.disableProactive();
-                  log(`Proactive compaction failed; retaining context: ${errorMessage(error)}`);
-                  yield { type: 'progress', step: {
-                    kind: 'notification', id: `native-compaction-${continuation}-${plan.ordinal}-${startedAt}-fallback`,
-                    text: 'Automatic compaction failed; continuing with existing context',
-                    detail: errorMessage(error),
-                  } };
                 }
               }
               async function* prepareInput(
@@ -489,7 +479,7 @@ export class NativeProvider implements AgentProvider {
               const inputStarted = Date.now();
               const incoming = yield* prepareInput(turn.text, turn.files);
               journal.updateInput(incoming);
-              messages.splice(0, messages.length, ...portableHistory(store.contextMessages(continuation)));
+              messages.splice(0, messages.length, ...history(store.contextMessages(continuation)));
               const inputPreparationMs = Date.now() - inputStarted;
               const discoveryStarted = Date.now();
               const lazyServers = !turn.toolsDisabled && toolSearchMode === 'always'
@@ -522,7 +512,8 @@ export class NativeProvider implements AgentProvider {
                 if (!mediaRetry) {
                   while (inlineHistoryBytes(projectedContext()) > MAX_INLINE_BYTES)
                     yield* compactContext(compactionPolicy.recover('media'));
-                  yield* maybeCompactContext();
+                  const plan = compactionPolicy.proactive();
+                  if (plan) yield* compactContext(plan);
                 }
                 const requestContext = projectedContext();
                 if (!mediaRetry && !quarantineNoticeSent && quarantines.size &&
@@ -538,20 +529,19 @@ export class NativeProvider implements AgentProvider {
                 const stepNudge: string | null = [nudge, ...pendingBrokerGuidance].filter(Boolean).join('\n\n') || null;
                 nudge = null;
                 pendingBrokerGuidance.clear();
-                const tools = wrappingUp ? {} : stepTools();
-                yield { type: 'model_request' };
-                const result = streamText({
-                  model,
-                  system: [
-                    loadNativeInstructions(
+                const tools = stepTools();
+                const system = loadNativeInstructions(
                       input.systemContext?.instructions,
                       [skills.instructions(), mcpCatalog].filter(Boolean).join('\n\n') || null,
                       turn.toolsDisabled ? null : NATIVE_TODO_INSTRUCTIONS,
                       nativeMediaInstructions(tools),
-                    ),
-                    turn.toolsDisabled ? null : stepBudgetInstructions(MAX_STEPS, stepsCompleted),
-                  ].filter(Boolean).join('\n\n'),
-                  messages: stepNudge ? [...requestContext, { role: 'user', content: stepNudge }] : requestContext,
+                    );
+                const requestMessages: ModelMessage[] = stepNudge
+                  ? [...requestContext, { role: 'user', content: stepNudge }] : requestContext;
+                yield { type: 'model_request' };
+                const result = streamText({
+                  model, system,
+                  messages: requestMessages,
                   tools: journal.wrap(tools, abortController.signal),
                   ...(deferredMcp ? { repairToolCall: deferredMcp.repairToolCall } : {}),
                   // Own the boundary: SDK prepareStep cannot resume a text-only
@@ -560,7 +550,7 @@ export class NativeProvider implements AgentProvider {
                   ...(!turn.toolsDisabled && shouldRequireTodos(turn.text)
                     ? {
                         prepareStep: ({ instructions }) =>
-                          stepsCompleted === 0
+                          firstStep
                             ? {
                                 activeTools: ['todowrite'] as const,
                                 toolChoice: { type: 'tool' as const, toolName: 'todowrite' as const },
@@ -575,7 +565,7 @@ export class NativeProvider implements AgentProvider {
                   abortSignal: abortController.signal,
                   // A model call can finish before its tool does. Retain its
                   // usage even if cancellation prevents finish-step.
-                  onLanguageModelCallEnd: recordCall,
+                  onLanguageModelCallEnd: (event) => recordCall(event),
                   ...(configuredMaxOutput ? { maxOutputTokens: configuredMaxOutput } : {}),
                   ...(typeof options.modelParams?.temperature === 'number'
                     ? { temperature: options.modelParams.temperature }
@@ -650,7 +640,7 @@ export class NativeProvider implements AgentProvider {
                   continue;
                 }
 
-                const responseMessages = (await result.responseMessages) as ModelMessage[];
+                const responseMessages = project((await result.responseMessages) as ModelMessage[]);
                 await journal.settle();
                 yield* flushCallUsage();
                 if (abortController.signal.aborted) throw new Error('Turn stopped');
@@ -668,8 +658,9 @@ export class NativeProvider implements AgentProvider {
                 }
                 messages.push(...responseMessages);
                 const steps = await result.steps;
-                stepsCompleted += steps.length;
-                compactionPolicy.observe(callUsageFor(resolved, steps.at(-1)?.usage).context_tokens);
+                firstStep = false;
+                if (!toolMediaPressure)
+                  compactionPolicy.observe(callUsageFor(resolved, steps.at(-1)?.usage).context_tokens);
                 const stepText = (await result.text).trim() || null;
                 finishReason = String(await result.finishReason);
                 const step = steps.at(-1);
@@ -686,7 +677,7 @@ export class NativeProvider implements AgentProvider {
                 // must not consume input for a generation that never starts.
                 const prepared: Array<{ input: SteeringInput; message: ModelMessage }> = [];
                 let preparedBytes = 0;
-                while (!ended && stepsCompleted < MAX_STEPS && prepared.length < steering.length) {
+                while (!ended && prepared.length < steering.length) {
                   const guidance = steering[prepared.length];
                   // Lock before preparation can yield: an edit must never change
                   // the buffer while an attachment is being prepared for ingestion.
@@ -731,11 +722,6 @@ export class NativeProvider implements AgentProvider {
                   log(`Warning: final message may point at ${undeliveredChars} chars of undelivered text: ${JSON.stringify(reply.slice(0, 120))}`);
                 }
                 if (reply || silenceCall || !continueTools) break;
-                if (stepsCompleted < MAX_STEPS) continue;
-                if (wrappingUp) break;
-                wrappingUp = true;
-                nudge = STEP_LIMIT_PROMPT;
-                log(`Reached the ${MAX_STEPS}-step limit; asking for a progress report`);
               }
               // No await or yield between closing acceptance and deciding the
               // final result; guidance arriving after this belongs to a later turn.
@@ -765,7 +751,8 @@ export class NativeProvider implements AgentProvider {
               yield {
                 type: 'error',
                 message: errorMessage(error),
-                retryable: !(error instanceof CompactionSummaryError) && /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
+                retryable: !(error instanceof CompactionSummaryError) && !quotaExhausted(error) &&
+                  /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
               };
             } finally {
               active = false;

@@ -17,6 +17,14 @@ All notable changes to NanoClaw will be documented in this file.
   conversation protocol 10. New group archives use format 3; old archive shapes
   require their original host and the documented offline cutover.
 
+- **[BREAKING] Native efficiency without execution caps.** Large tool results
+  are preserved privately with bounded model-visible text. Native tasks no
+  longer have a 100-step ceiling or changing step-budget prompts; confirmed
+  MiniMax plan exhaustion is terminal. No optional mode or new tuning settings.
+  Healthy tasks survive beyond 30 minutes; the watchdog uses session-link
+  inactivity, not input age, while retaining stuck/dead-process recovery.
+  See [detect / why / fix / verify / rollback](docs/usage-efficiency.md#detect--why--fix--verify--rollback).
+
 - **[BREAKING] Retained approval storage.** One approval record owns request
   metadata and lifecycle; private account progress no longer mirrors it.
   Archives cancel pending decisions, refuse applying effects, and restore

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { jsonSchema, tool, type JSONSchema7, type ToolSet } from 'ai';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../../db/connection.js';
@@ -127,10 +128,38 @@ export function createNativeTools(
   }
 
   tools.read = tool({
-    description: 'Read a UTF-8 text file inside the agent container. Paths may be absolute or relative to the workspace.',
-    inputSchema: jsonSchema({ type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }),
+    description: 'Read UTF-8 text. Use startLine (1-based) and lineCount (at most 200) for bounded ranges of large files. Paths may be absolute or workspace-relative.',
+    inputSchema: jsonSchema({ type: 'object', properties: {
+      path: { type: 'string' },
+      startLine: { type: 'integer', minimum: 1 },
+      lineCount: { type: 'integer', minimum: 1, maximum: 200 },
+    }, required: ['path'] }),
     execute: async (input) => {
-      const filename = path.resolve(cwd, String((input as { path: string }).path));
+      const { path: file, startLine, lineCount } = input as { path: string; startLine?: number; lineCount?: number };
+      const filename = path.resolve(cwd, file);
+      if (startLine !== undefined || lineCount !== undefined) {
+        if (fs.statSync(filename).size > 16 * 1024 * 1024)
+          throw new Error('Ranged reads support files up to 16 MiB; query larger files with bash');
+        const start = startLine ?? 1, count = lineCount ?? 200;
+        if (!Number.isSafeInteger(start) || start < 1 || !Number.isSafeInteger(count) || count < 1 || count > 200)
+          throw new Error('startLine must be a positive integer; lineCount must be between 1 and 200');
+        const stream = fs.createReadStream(filename, { encoding: 'utf8' });
+        const reader = createInterface({ input: stream, crlfDelay: Infinity });
+        const selected: string[] = [];
+        let line = 0, bytes = 0;
+        try {
+          for await (const text of reader) {
+            if (++line < start) continue;
+            bytes += Buffer.byteLength(text) + 1;
+            if (bytes > MAX_FILE_BYTES)
+              throw new Error('Selected range exceeds the read limit; use fewer lines or query the file with bash');
+            selected.push(text);
+            if (selected.length === count) break;
+          }
+        } finally { reader.close(); stream.destroy(); }
+        if (!selected.length) throw new Error('startLine is beyond the end of the file');
+        return selected.join('\n');
+      }
       const stat = fs.statSync(filename);
       if (stat.size > MAX_FILE_BYTES) throw new Error(`File exceeds ${MAX_FILE_BYTES} byte read limit`);
       return fs.readFileSync(filename, 'utf8');

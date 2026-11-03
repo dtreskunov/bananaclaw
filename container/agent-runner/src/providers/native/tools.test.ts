@@ -73,6 +73,21 @@ describe('native coding tools', () => {
     expect(fs.readFileSync(path.join(root, 'nested/note.txt'), 'utf8')).toBe('alpha gamma');
   });
 
+  it('reads bounded ranges of files larger than the whole-file limit', async () => {
+    fs.writeFileSync(path.join(root, 'large.txt'), Array.from({ length: 10_000 }, (_, i) =>
+      `${i + 1}: ${'x'.repeat(50)}`).join('\n'));
+    await expect(execute('read', { path: 'large.txt' })).rejects.toThrow('read limit');
+    expect(await execute('read', { path: 'large.txt', startLine: 300, lineCount: 2 }))
+      .toBe(`300: ${'x'.repeat(50)}\n301: ${'x'.repeat(50)}`);
+    for (const range of [{ startLine: 0 }, { lineCount: 201 }, { lineCount: 1.5 }, { startLine: 20_000 }])
+      await expect(execute('read', { path: 'large.txt', ...range })).rejects.toThrow();
+    fs.writeFileSync(path.join(root, 'one-line.txt'), 'x'.repeat(300_000));
+    await expect(execute('read', { path: 'one-line.txt', lineCount: 1 })).rejects.toThrow('Selected range');
+    fs.truncateSync(path.join(root, 'one-line.txt'), 16 * 1024 * 1024 + 1);
+    await expect(execute('read', { path: 'one-line.txt', lineCount: 1 })).rejects.toThrow('16 MiB');
+    await expect(execute('read', { path: 'missing', lineCount: 1 })).rejects.toThrow();
+  });
+
   it.each(['absolute', 'relative'])('reads, writes, and edits outside the workspace using %s paths', async (kind) => {
     const filename = path.join(outside, 'nested', 'note.txt');
     const inputPath = kind === 'absolute' ? filename : path.relative(root, filename);

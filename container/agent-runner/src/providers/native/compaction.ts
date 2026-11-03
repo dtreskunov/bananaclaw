@@ -2,7 +2,6 @@ import type { ModelMessage } from 'ai';
 import { NativeStore, type NativeContextEntry } from './store.js';
 
 export const MAX_COMPACTION_ATTEMPTS = 2;
-export const MAX_PROACTIVE_COMPACTIONS = 2;
 export const COMPACTION_THRESHOLD = 0.75;
 export const COMPACTION_TIMEOUT_MS = 300_000;
 export const MAX_COMPACTION_LEAVES = 32;
@@ -20,7 +19,7 @@ export const COMPACTION_INSTRUCTIONS =
 export function shouldCompactContext(tokens: number | undefined, window: number | undefined): boolean {
   return tokens !== undefined && Number.isFinite(tokens) && tokens >= 0 &&
     window !== undefined && Number.isFinite(window) && window > 0 &&
-    tokens / window >= COMPACTION_THRESHOLD;
+    tokens >= window * COMPACTION_THRESHOLD;
 }
 
 export interface NativeCompactionPlan {
@@ -31,23 +30,17 @@ export interface NativeCompactionPlan {
 
 export function createCompactionPolicy(window: number | undefined) {
   let emergencyAttempts = 0;
-  let proactiveAttempts = 0;
-  let proactiveDisabled = false;
+  let ordinal = 0;
   let tokens: number | undefined;
   const plan = (attempt: number, detail: string): NativeCompactionPlan =>
-    ({ attempt, ordinal: emergencyAttempts + proactiveAttempts, detail });
+    ({ attempt, ordinal: ++ordinal, detail });
   return {
-    observe(value: number | undefined) { tokens = value; },
-    disableProactive() { proactiveDisabled = true; },
+    observe(value: number | undefined) { tokens = value; emergencyAttempts = 0; },
+    compacted() { tokens = undefined; },
     canRecover() { return emergencyAttempts < MAX_COMPACTION_ATTEMPTS; },
-    proactive(): NativeCompactionPlan | 'limit' | undefined {
-      if (proactiveDisabled || tokens === undefined || window === undefined || !shouldCompactContext(tokens, window))
+    proactive(): NativeCompactionPlan | undefined {
+      if (tokens === undefined || window === undefined || !shouldCompactContext(tokens, window))
         return undefined;
-      if (proactiveAttempts >= MAX_PROACTIVE_COMPACTIONS) {
-        proactiveDisabled = true;
-        return 'limit';
-      }
-      proactiveAttempts++;
       return plan(1, `Context utilization reached ${Math.round(tokens / window * 100)}% ` +
         `(${tokens} / ${window} tokens); summarizing older context`);
     },

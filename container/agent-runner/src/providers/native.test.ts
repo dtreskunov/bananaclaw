@@ -12,7 +12,7 @@ import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
 import { resetTurnSendTracking } from '../current-batch.js';
-import { formatNativeToolStep, MAX_STEPS, NativeProvider, portableHistory, userMessage } from './native.js';
+import { formatNativeToolStep, NativeProvider, portableHistory, userMessage } from './native.js';
 import * as nativeCatalog from './native/catalog.js';
 import * as nativeAudio from './native/audio.js';
 import * as nativeTools from './native/tools.js';
@@ -65,6 +65,7 @@ let rejectedMediaData: string[];
 let mediaRejectionStatus: number;
 let rejectMediaRetry: boolean;
 let mediaRetryFailureStatus: number;
+let apiFailures: Array<{ status: number; message: string }>;
 
 const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
   (executable) => spawnSync(executable, ['-version'], { stdio: 'ignore' }).status === 0,
@@ -127,6 +128,7 @@ beforeEach(() => {
   mediaRejectionStatus = 400;
   rejectMediaRetry = false;
   mediaRetryFailureStatus = 400;
+  apiFailures = [];
   const { inbound } = initTestSessionDb();
   inbound
     .prepare(
@@ -140,6 +142,10 @@ beforeEach(() => {
       requestUrls.push(request.url);
       requestHeaders.push(request.headers);
       requests.push((await request.json()) as Record<string, unknown>);
+      const failure = apiFailures.shift();
+      if (failure) return Response.json({
+        type: 'error', error: { type: 'rate_limit_error', message: failure.message },
+      }, { status: failure.status });
       const isCompaction = JSON.stringify(requests.at(-1)).includes(COMPACTION_INSTRUCTIONS);
       const modelMessages = requests.at(-1)?.messages;
       const hasCompletedTool = Array.isArray(modelMessages) && modelMessages.some(
@@ -335,6 +341,49 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'does not retry confirmed plan exhaustion through %s', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      apiFailures = Array.from({ length: 3 }, () => ({
+        status: 429, message: 'The Token Plan usage limit has been reached. (2067)',
+      }));
+      const events = await collect(new NativeProvider({ model: 'local/stub' }));
+      expect(requests).toHaveLength(1);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'error', retryable: false, message: expect.stringContaining('Token Plan usage limit'),
+      }));
+    },
+  );
+
+  it('retains the SDK retry for an ordinary transient 429', async () => {
+    apiFailures = [{ status: 429, message: 'Too many requests; retry shortly' }];
+    const events = await collect(new NativeProvider({ model: 'local/stub' }));
+    expect(requests).toHaveLength(2);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(replyTexts(events).flat()).toContain('hello from stub');
+  }, 15_000);
+
+  it('projects large results consistently on the wire and in history', async () => {
+    const complete = `start\n${'detail '.repeat(8000)}\nUNIQUE_END_OF_LARGE_RESULT`;
+    fs.writeFileSync(path.join(root, 'large-result.txt'), complete);
+    scriptedToolCalls = [['read', '{"path":"large-result.txt"}']];
+    const events = await collect(new NativeProvider({ model: 'local/stub' }));
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests.at(-1))).toContain('Abbreviated');
+    expect(JSON.stringify(requests.at(-1))).not.toContain('UNIQUE_END_OF_LARGE_RESULT');
+    const results = path.join(root, 'tool-results');
+    const files = fs.readdirSync(results);
+    expect(files).toHaveLength(1);
+    expect(JSON.parse(fs.readFileSync(path.join(results, files[0]), 'utf8'))).toEqual({ type: 'text', value: complete });
+    const init = events.find(event => event.type === 'init');
+    if (init?.type !== 'init') throw new Error('Missing continuation');
+    const store = new NativeStore();
+    try {
+      expect(JSON.stringify(store.messages(init.continuation))).not.toContain('UNIQUE_END_OF_LARGE_RESULT');
+    } finally { store.close(); }
+  });
+
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jv1sAAAAASUVORK5CYII=';
   const gif = 'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
   function vision(protocol: nativeCatalog.NativeProtocol) {
@@ -1054,20 +1103,23 @@ describe('NativeProvider', () => {
       event.step.status === status);
   }
 
-  function miniMaxFlash(maxOutputTokens = 512_000) {
-    catalogModels = { local: { models: { 'MiniMax-M3.1-Flash-Preview': {
+  function miniMaxFlash(maxOutputTokens = 512_000, modelId = 'MiniMax-M3.1-Flash-Preview') {
+    catalogModels = { local: { models: { [modelId]: {
       modalities: { input: ['text'], output: ['text'] },
       limit: { context: 1_000_000, output: maxOutputTokens },
     } } } };
-    return new NativeProvider({ model: 'local/MiniMax-M3.1-Flash-Preview' });
+    return new NativeProvider({ model: `local/${modelId}` });
   }
 
-  it.each(['openai-chat', 'anthropic-messages'] as const)(
-    'recovers a reasoning-only MiniMax compaction through %s without duplicate billing', async (protocol) => {
+  it.each([
+    ['openai-chat', 'MiniMax-M3.1-Flash-Preview'], ['anthropic-messages', 'MiniMax-M3.1-Flash-Preview'],
+    ['openai-chat', 'MiniMax-M3.1-Flash'], ['anthropic-messages', 'MiniMax-M3.1-Flash'],
+  ] as const)(
+    'recovers a reasoning-only MiniMax compaction through %s/%s without duplicate billing', async (protocol, modelId) => {
       process.env.NATIVE_PROTOCOL = protocol;
       contextOverflows = 1;
       reasoningOnlyCompactions = 1;
-      const events = await collect(miniMaxFlash(), history());
+      const events = await collect(miniMaxFlash(512_000, modelId), history());
       expect(events.some((event) => event.type === 'error')).toBe(false);
       expect(compactions(events, 'completed')).toHaveLength(1);
       const summaries = requests.filter((request) => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
@@ -1139,6 +1191,16 @@ describe('NativeProvider', () => {
     },
   );
 
+  it.each([100_000, 749_999])('does not compact a 1M-token window at %s context tokens', async (contextTokens) => {
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    scriptedUsage = [{ prompt_tokens: contextTokens - 2, completion_tokens: 2 }];
+    const events = await collect(knownContext(), history());
+    expect(compactions(events, 'running')).toHaveLength(0);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain('Earlier requirements '.repeat(250));
+  });
+
   it.each([
     { name: 'below threshold', usage: { prompt_tokens: 749_997, completion_tokens: 2 }, known: true },
     { name: 'missing usage', usage: {}, known: true },
@@ -1186,7 +1248,7 @@ describe('NativeProvider', () => {
     },
   );
 
-  it('reports proactive failure once, continues unchanged, and keeps emergency recovery available', async () => {
+  it('surfaces a proactive failure without continuing costly calls or repeating completed actions', async () => {
     const provider = knownContext();
     const continuation = history();
     scriptedToolCalls = [
@@ -1197,25 +1259,23 @@ describe('NativeProvider', () => {
     rejectCompaction = true;
     const events = await collect(provider, continuation);
     expect(compactions(events, 'error')).toHaveLength(1);
-    expect(events.some((event) => event.type === 'error')).toBe(false);
-    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'notification' &&
-      event.step.text.includes('Automatic compaction failed'))).toBe(true);
-    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\ntwice\n');
+    expect(events.some((event) => event.type === 'error' && event.message.includes('Summary service rejected'))).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(requests).toHaveLength(2);
     rejectCompaction = false;
+    scriptedToolCalls = [];
     contextOverflows = 1;
     const recovered = await collect(provider, continuation);
     expect(compactions(recovered, 'completed')).toHaveLength(1);
     expect(recovered.some((event) => event.type === 'error')).toBe(false);
   });
 
-  it('caps proactive compactions without spending the emergency recovery budget', async () => {
+  it('allows more than two proactive compactions in one task', async () => {
     const provider = knownContext();
     scriptedToolCalls = Array.from({ length: 4 }, () => ['bash', '{"command":"echo once >> once.txt"}']);
     scriptedUsage = Array.from({ length: 4 }, () => ({ prompt_tokens: 800_000, completion_tokens: 2 }));
     const events = await collect(provider, history());
-    expect(compactions(events, 'completed')).toHaveLength(2);
-    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'notification' &&
-      event.step.text.includes('compaction limit'))).toBe(true);
+    expect(compactions(events, 'completed')).toHaveLength(4);
     expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\nonce\nonce\nonce\n');
     expect(events.some((event) => event.type === 'error')).toBe(false);
   });
@@ -1287,14 +1347,14 @@ describe('NativeProvider', () => {
     } finally { store.close(); }
   });
 
-  it('continues after proactive compaction cannot remove protected or recent history', async () => {
+  it('reports the specific blocker when protected or recent history cannot be compacted', async () => {
     const provider = knownContext();
     scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
     scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
     const events = await collect(provider);
     expect(compactions(events, 'error')).toHaveLength(1);
-    expect(events.some((event) => event.type === 'error')).toBe(false);
-    expect(replyTexts(events)).toEqual([['hello from stub']]);
+    expect(events.some((event) => event.type === 'error' && event.message.includes('cannot be compacted'))).toBe(true);
+    expect(replyTexts(events)).toEqual([]);
     expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
   });
 
@@ -1583,11 +1643,6 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests[1].messages)).not.toContain('queued normal message');
     expect(JSON.stringify(requests[2].messages)).toContain('third guidance');
     expect(JSON.stringify(requests[3].messages)).toContain('queued normal message');
-    for (const [index, completed] of [0, 1, 2, 0].entries()) {
-      expect(JSON.stringify(requests[index].messages)).toContain(
-        `Step budget: ${completed} of ${MAX_STEPS} steps used; ${MAX_STEPS - completed} remain`,
-      );
-    }
     expect(events.filter((event) => event.type === 'steering_applied').map((event) => event.id)).toEqual(['one', 'two', 'three']);
     expect(events.filter((event) => event.type === 'result')).toHaveLength(2);
     expect(turnTotal(events.slice(0, events.findIndex((event) => event.type === 'result')))).toMatchObject({
@@ -1621,7 +1676,7 @@ describe('NativeProvider', () => {
     expect(getOutboundDb().prepare('SELECT COUNT(*) AS count FROM messages_out').get()).toMatchObject({ count: 1 });
   });
 
-  it('leaves guidance at the total step limit unapplied instead of running another turn', async () => {
+  it('accepts steering past 100 model steps and stops only when the caller ends the query', async () => {
     const provider = new NativeProvider({ model: 'local/test-model' });
     const query = provider.query({ prompt: 'original', cwd: root });
     const events: ProviderEvent[] = [];
@@ -1629,17 +1684,18 @@ describe('NativeProvider', () => {
     for await (const event of query.events) {
       events.push(event);
       if (event.type === 'assistant_message') {
-        query.steer!({ id: `s${++boundary}`, prompt: `guidance ${boundary}` });
+        if (++boundary <= 105) query.steer!({ id: `s${boundary}`, prompt: `guidance ${boundary}` });
+        else query.end();
       }
       if (event.type === 'result') query.end();
     }
-    expect(requests).toHaveLength(MAX_STEPS);
-    expect(events.filter((event) => event.type === 'steering_applied')).toHaveLength(MAX_STEPS - 1);
+    expect(requests).toHaveLength(106);
+    expect(events.filter((event) => event.type === 'steering_applied')).toHaveLength(105);
     expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
-    expect(turnTotal(events)).toMatchObject({ num_turns: MAX_STEPS, input_tokens: 4 * MAX_STEPS });
+    expect(turnTotal(events)).toMatchObject({ num_turns: 106, input_tokens: 4 * 106 });
     const continuation = events.find((event) => event.type === 'init')!.continuation;
-    expect(provider.appliedSteering(continuation, [`s${MAX_STEPS - 1}`, `s${MAX_STEPS}`])).toEqual([`s${MAX_STEPS - 1}`]);
-  }, 10_000);
+    expect(provider.appliedSteering(continuation, ['s100', 's105', 's106'])).toEqual(['s100', 's105']);
+  }, 30_000);
 
   it.each(['end', 'abort'] as const)('does not consume queued guidance after %s at a boundary', async (action) => {
     const provider = new NativeProvider({ model: 'local/test-model' });
@@ -2513,8 +2569,6 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests[0]?.messages)).toContain('## In-turn todos');
     expect(requests[1]?.tools).toBeUndefined();
     expect(JSON.stringify(requests[1]?.messages)).not.toContain('## In-turn todos');
-    expect(JSON.stringify(requests[0]?.messages)).toContain('## Turn budget');
-    expect(JSON.stringify(requests[1]?.messages)).not.toContain('## Turn budget');
   });
 
   it('requires todo initialization for explicitly multi-step work', async () => {
@@ -2769,12 +2823,10 @@ describe('NativeProvider', () => {
 
 describe('final message', () => {
   const sendCall = (text: string): [string, string] => ['mcp__nanoclaw__send_message', JSON.stringify({ text })];
-  const lastUserText = (request: Record<string, unknown>) =>
-    JSON.stringify((request.messages as Array<{ role: string }>).filter((message) => message.role === 'user').at(-1));
   const systemText = (request: Record<string, unknown>) =>
     JSON.stringify(request.system ?? (request.messages as Array<{ role: string }>).filter((message) => message.role === 'system'));
 
-  it.each(['openai-chat', 'anthropic-messages'])('reports the live step budget without persisting it (%s)', async (protocol) => {
+  it.each(['openai-chat', 'anthropic-messages'])('keeps system instructions stable across model steps and resume (%s)', async (protocol) => {
     process.env.NATIVE_PROTOCOL = protocol;
     scriptedToolCalls = [sendCall('first update'), sendCall('second update')];
     const first = await collect(new NativeProvider({ model: 'local/test-model' }));
@@ -2784,15 +2836,11 @@ describe('final message', () => {
     expect(requests).toHaveLength(3);
     for (let completed = 0; completed < requests.length; completed++) {
       const system = systemText(requests[completed]);
-      expect(system).toContain(`at most ${MAX_STEPS} model steps`);
-      expect(system).toContain('A step may contain multiple tool calls');
-      expect(system).toContain('Reserve the last 10 steps');
-      expect(system).toContain(
-        `Step budget: ${completed} of ${MAX_STEPS} steps used; ${MAX_STEPS - completed} remain`,
-      );
+      expect(system).toBe(systemText(requests[0]));
+      expect(system).not.toContain('Step budget');
     }
     await collect(new NativeProvider({ model: 'local/test-model' }), init.continuation);
-    expect(systemText(requests[3])).toContain(`Step budget: 0 of ${MAX_STEPS} steps used; ${MAX_STEPS} remain`);
+    expect(systemText(requests[3])).toBe(systemText(requests[0]));
     const store = new NativeStore();
     try {
       expect(JSON.stringify(store.contextMessages(init.continuation))).not.toContain('Step budget:');
@@ -2831,24 +2879,27 @@ describe('final message', () => {
     expect(replyTexts(events)).toEqual([['See my summary above.']]);
   });
 
-  it('asks for a final message without tools once the step limit is reached', async () => {
-    scriptedToolCalls = Array.from({ length: MAX_STEPS }, (_, index) => sendCall(`update ${index}`));
-    scriptedTexts = ['Progress so far.'];
+  it('completes 120 model tool steps and four compactions without forcing a handoff', async () => {
+    catalogModels = { local: { models: { 'test-model': {
+      modalities: { input: ['text'], output: ['text'] },
+      limit: { context: 1_000_000, output: 8192 },
+    } } } };
+    scriptedToolCalls = Array.from({ length: 120 }, (_, index) => sendCall(`update ${index}`));
+    scriptedUsage = Array.from({ length: 120 }, (_, index) => ({
+      prompt_tokens: (index + 1) % 30 === 0 ? 749_998 : 4, completion_tokens: 2,
+    }));
+    scriptedTexts = ['All 120 steps completed.'];
     const events = await collect(new NativeProvider({ model: 'local/test-model' }));
 
-    expect(requests).toHaveLength(MAX_STEPS + 1);
-    expect(requests[MAX_STEPS - 1]?.tools).toBeDefined();
-    expect(requests[MAX_STEPS]?.tools).toBeUndefined();
-    expect(lastUserText(requests[MAX_STEPS]!)).toContain('step limit');
-    for (let completed = 0; completed <= MAX_STEPS; completed++) {
-      const system = systemText(requests[completed]);
-      expect(system).toContain(
-        `Step budget: ${completed} of ${MAX_STEPS} steps used; ${MAX_STEPS - completed} remain`,
-      );
-      expect(system.includes('Stop expanding scope')).toBe(completed >= MAX_STEPS - 10 && completed < MAX_STEPS);
-    }
-    expect(systemText(requests[MAX_STEPS])).toContain('Tools are now disabled');
-    expect(replyTexts(events)).toEqual([['Progress so far.']]);
+    expect(requests).toHaveLength(125);
+    const normal = requests.filter(request => !JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+    expect(normal).toHaveLength(121);
+    expect(normal.every(request => request.tools !== undefined)).toBe(true);
+    expect(events.filter(event => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'completed')).toHaveLength(4);
+    expect(getOutboundDb().prepare("SELECT COUNT(*) AS count FROM messages_out WHERE kind='chat'").get())
+      .toMatchObject({ count: 120 });
+    expect(replyTexts(events)).toEqual([['All 120 steps completed.']]);
   }, 30_000);
 
   it('replaces a drafted final message when guidance arrives', async () => {
