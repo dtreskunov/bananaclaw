@@ -23,8 +23,8 @@ oversized individual lines; query larger files instead of loading them whole.
 
 ## Context and quota
 
-Compaction starts at the smaller of 100,000 context tokens and 75% of the
-model's context window. Summaries preserve pending inputs, recent exchanges,
+Compaction starts at 75% of the model's context window, without an absolute
+token trigger. Summaries preserve pending inputs, recent exchanges,
 completed actions and uncertain side effects. Full transcripts remain stored.
 Successful compactions can repeat throughout a task. Summaries must measurably
 shrink their source; a failure is reported as a blocker with the full context

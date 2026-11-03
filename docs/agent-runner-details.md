@@ -440,8 +440,7 @@ There is no format-specific decoder, automatic conversion, or silent discard.
 
 ### Native Provider: Automatic and context-overflow compaction
 
-The native provider automatically compacts at **100,000 context tokens or
-75% context utilization, whichever is smaller**,
+The native provider automatically compacts at **75% context utilization**,
 using the latest successful normal model step's prompt (including cached
 input) plus output, not cumulative billing tokens or the rounded UI percentage.
 The check runs between completed model/tool steps, after journaling their

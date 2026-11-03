@@ -1191,18 +1191,18 @@ describe('NativeProvider', () => {
     },
   );
 
-  it('compacts at 100k context tokens without replaying completed actions', async () => {
+  it.each([100_000, 749_999])('does not compact a 1M-token window at %s context tokens', async (contextTokens) => {
     scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
-    scriptedUsage = [{ prompt_tokens: 99_998, completion_tokens: 2 }];
+    scriptedUsage = [{ prompt_tokens: contextTokens - 2, completion_tokens: 2 }];
     const events = await collect(knownContext(), history());
-    expect(compactions(events, 'completed')).toHaveLength(1);
+    expect(compactions(events, 'running')).toHaveLength(0);
     expect(events.some(event => event.type === 'error')).toBe(false);
     expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
-    expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain('Earlier requirements '.repeat(250));
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain('Earlier requirements '.repeat(250));
   });
 
   it.each([
-    { name: 'below threshold', usage: { prompt_tokens: 99_997, completion_tokens: 2 }, known: true },
+    { name: 'below threshold', usage: { prompt_tokens: 749_997, completion_tokens: 2 }, known: true },
     { name: 'missing usage', usage: {}, known: true },
     { name: 'unknown window', usage: { prompt_tokens: 900_000, completion_tokens: 2 }, known: false },
   ])('does not proactively compact with $name', async ({ usage, known }) => {
@@ -2886,7 +2886,7 @@ describe('final message', () => {
     } } } };
     scriptedToolCalls = Array.from({ length: 120 }, (_, index) => sendCall(`update ${index}`));
     scriptedUsage = Array.from({ length: 120 }, (_, index) => ({
-      prompt_tokens: (index + 1) % 30 === 0 ? 99_998 : 4, completion_tokens: 2,
+      prompt_tokens: (index + 1) % 30 === 0 ? 749_998 : 4, completion_tokens: 2,
     }));
     scriptedTexts = ['All 120 steps completed.'];
     const events = await collect(new NativeProvider({ model: 'local/test-model' }));

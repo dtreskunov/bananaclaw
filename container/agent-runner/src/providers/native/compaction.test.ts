@@ -20,13 +20,14 @@ afterEach(() => {
 });
 
 describe('context overflow detection', () => {
-  it('uses the economy target or model safety threshold, whichever is smaller', () => {
-    expect(shouldCompactContext(99_999, 1_000_000)).toBe(false);
-    expect(shouldCompactContext(100_000, 1_000_000)).toBe(true);
+  it('uses 75 percent of the model window without an absolute token trigger', () => {
+    expect(shouldCompactContext(100_000, 1_000_000)).toBe(false);
+    expect(shouldCompactContext(749_999, 1_000_000)).toBe(false);
+    expect(shouldCompactContext(750_000, 1_000_000)).toBe(true);
     expect(shouldCompactContext(95_999, 128_000)).toBe(false);
     expect(shouldCompactContext(96_000, 128_000)).toBe(true);
     const policy = createCompactionPolicy(1_000_000);
-    policy.observe(100_000);
+    policy.observe(750_000);
     expect(policy.proactive()).toMatchObject({ attempt: 1 });
   });
   it.each([
@@ -243,8 +244,9 @@ it('invalidates a summary when history is rolled back before its boundary', asyn
 });
 
 it.each([
-  [99_999, 1_000_000, false],
-  [100_000, 1_000_000, true],
+  [100_000, 1_000_000, false],
+  [749_999, 1_000_000, false],
+  [750_000, 1_000_000, true],
   [800_000, 1_000_000, true],
   [undefined, 1_000_000, false],
   [750_000, undefined, false],
@@ -262,7 +264,7 @@ describe('compaction recovery episodes', () => {
     expect(policy.proactive()).toBeUndefined();
     expect(policy.recover('media')).toMatchObject({ ordinal: 1, attempt: 1 });
     for (let i = 0; i < 10; i++) {
-      policy.observe(100_000);
+      policy.observe(750_000);
       expect(policy.proactive()).toMatchObject({ ordinal: i + 2, attempt: 1 });
       policy.compacted();
       expect(policy.proactive()).toBeUndefined();
@@ -287,11 +289,11 @@ describe('compaction recovery episodes', () => {
     expect(unknown.proactive()).toBeUndefined();
     expect(unknown.recover('context')).toMatchObject({ ordinal: 1, attempt: 1 });
     const policy = createCompactionPolicy(1_000_000);
-    for (const tokens of [99_999, undefined, Number.NaN]) {
+    for (const tokens of [100_000, 749_999, undefined, Number.NaN]) {
       policy.observe(tokens);
       expect(policy.proactive()).toBeUndefined();
     }
-    policy.observe(100_000);
+    policy.observe(750_000);
     expect(policy.proactive()).toMatchObject({ ordinal: 1, attempt: 1 });
   });
 });

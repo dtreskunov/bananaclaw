@@ -19,7 +19,7 @@ export const COMPACTION_INSTRUCTIONS =
 export function shouldCompactContext(tokens: number | undefined, window: number | undefined): boolean {
   return tokens !== undefined && Number.isFinite(tokens) && tokens >= 0 &&
     window !== undefined && Number.isFinite(window) && window > 0 &&
-    tokens >= Math.min(window * COMPACTION_THRESHOLD, 100_000);
+    tokens >= window * COMPACTION_THRESHOLD;
 }
 
 export interface NativeCompactionPlan {
