@@ -440,7 +440,8 @@ There is no format-specific decoder, automatic conversion, or silent discard.
 
 ### Native Provider: Automatic and context-overflow compaction
 
-The native provider automatically compacts at **75% context utilization**,
+The native provider automatically compacts at **100,000 context tokens or
+75% context utilization, whichever is smaller**,
 using the latest successful normal model step's prompt (including cached
 input) plus output, not cumulative billing tokens or the rounded UI percentage.
 The check runs between completed model/tool steps, after journaling their
@@ -449,23 +450,20 @@ without trailing compaction. Missing usage or an unknown model window disables
 this proactive trigger, not emergency recovery. Utilization is not persisted:
 the first successful step after a resume establishes a new measurement.
 
-Each turn permits two proactive attempts, retaining the latest three exchange
-groups. Successful compaction invalidates the triggering measurement; summary
-calls cannot retrigger it. A failed proactive attempt emits an error activity
-and notification, preserves the active context, and disables further proactive
-attempts for that turn while normal generation continues. Reaching the
-proactive limit emits a notification and does not itself fail the turn.
-Per-turn policy owns eligibility, suppression, and the two attempt budgets;
-the shared executor only runs the selected plan and reports its lifecycle.
-Activity ordinals derive from the sum of proactive and emergency attempts,
-without a separate sequence counter.
+Successful compactions can repeat throughout a task, retaining the latest three
+exchange groups. Compaction invalidates its triggering measurement; summary
+usage cannot retrigger it. Failures are surfaced as specific blockers, preserving
+the active context instead of continuing expensive requests or dropping data.
+The summary must be smaller than its source; bounded chunking, request counts,
+timeouts and recovery attempts prevent a failing summarizer from looping.
 
 Recognized context rejections, including MiniMax's
 `context window exceeds limit (2013)`, trigger automatic compaction inside the
 native provider. Unrelated authentication, validation, and rate-limit errors
 do not. Recovery retries only the rejected model step, keeps the same turn and
-continuation, and shares a separate two-attempt emergency budget with inline
-media recovery. Proactive attempts do not consume this budget. A rejected step
+continuation, and shares a two-attempt recovery episode with inline media
+recovery. Only a successful normal model step resets that episode; a successful
+summary alone does not. Proactive compactions do not consume it. A rejected step
 that already streamed text or tool execution is not automatically retried.
 
 The full native transcript and checkpoint IDs remain unchanged. A persistent

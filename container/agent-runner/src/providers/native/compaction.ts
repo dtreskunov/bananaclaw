@@ -2,7 +2,6 @@ import type { ModelMessage } from 'ai';
 import { NativeStore, type NativeContextEntry } from './store.js';
 
 export const MAX_COMPACTION_ATTEMPTS = 2;
-export const MAX_PROACTIVE_COMPACTIONS = 2;
 export const COMPACTION_THRESHOLD = 0.75;
 export const COMPACTION_TIMEOUT_MS = 300_000;
 export const MAX_COMPACTION_LEAVES = 32;
@@ -17,10 +16,10 @@ export const COMPACTION_INSTRUCTIONS =
   'Do not infer contents of omitted media. Keep chronological source labels and distinguish superseded decisions ' +
   'from current decisions. Return only a concise factual continuation summary.';
 
-export function shouldCompactContext(tokens: number | undefined, window: number | undefined, maxTokens = Infinity): boolean {
+export function shouldCompactContext(tokens: number | undefined, window: number | undefined): boolean {
   return tokens !== undefined && Number.isFinite(tokens) && tokens >= 0 &&
     window !== undefined && Number.isFinite(window) && window > 0 &&
-    tokens >= Math.min(window * COMPACTION_THRESHOLD, maxTokens);
+    tokens >= Math.min(window * COMPACTION_THRESHOLD, 100_000);
 }
 
 export interface NativeCompactionPlan {
@@ -29,25 +28,19 @@ export interface NativeCompactionPlan {
   detail: string;
 }
 
-export function createCompactionPolicy(window: number | undefined, maxTokens = Infinity) {
+export function createCompactionPolicy(window: number | undefined) {
   let emergencyAttempts = 0;
-  let proactiveAttempts = 0;
-  let proactiveDisabled = false;
+  let ordinal = 0;
   let tokens: number | undefined;
   const plan = (attempt: number, detail: string): NativeCompactionPlan =>
-    ({ attempt, ordinal: emergencyAttempts + proactiveAttempts, detail });
+    ({ attempt, ordinal: ++ordinal, detail });
   return {
-    observe(value: number | undefined) { tokens = value; },
-    disableProactive() { proactiveDisabled = true; },
+    observe(value: number | undefined) { tokens = value; emergencyAttempts = 0; },
+    compacted() { tokens = undefined; },
     canRecover() { return emergencyAttempts < MAX_COMPACTION_ATTEMPTS; },
-    proactive(): NativeCompactionPlan | 'limit' | undefined {
-      if (proactiveDisabled || tokens === undefined || window === undefined || !shouldCompactContext(tokens, window, maxTokens))
+    proactive(): NativeCompactionPlan | undefined {
+      if (tokens === undefined || window === undefined || !shouldCompactContext(tokens, window))
         return undefined;
-      if (proactiveAttempts >= MAX_PROACTIVE_COMPACTIONS) {
-        proactiveDisabled = true;
-        return 'limit';
-      }
-      proactiveAttempts++;
       return plan(1, `Context utilization reached ${Math.round(tokens / window * 100)}% ` +
         `(${tokens} / ${window} tokens); summarizing older context`);
     },
@@ -233,7 +226,6 @@ export async function compactNativeContext(options: {
   contextWindow?: number;
   maxOutputTokens?: number;
   reasoning?: boolean;
-  maxRequests?: number;
   signal: AbortSignal;
   summarize: (prompt: string, request: CompactionRequest) => Promise<string | CompactionSummary>;
 }): Promise<{ sourceBytes: number; leafChunks: number; requests: number }> {
@@ -260,7 +252,6 @@ export async function compactNativeContext(options: {
   const cancellation = new AbortController();
   const compactSignal = AbortSignal.any([signal, cancellation.signal, AbortSignal.timeout(COMPACTION_TIMEOUT_MS)]);
   let requests = 0;
-  const maxRequests = options.maxRequests ?? MAX_COMPACTION_REQUESTS;
 
   async function summarize(text: string, budget: SummaryBudget, leaf: boolean): Promise<string> {
     compactSignal.throwIfAborted();
@@ -271,8 +262,8 @@ export async function compactNativeContext(options: {
     let retried = false;
     while (true) {
       compactSignal.throwIfAborted();
-      if (requests >= maxRequests) {
-        throw new Error(`Compaction exceeds the ${maxRequests}-request budget; full transcript was preserved`);
+      if (requests >= MAX_COMPACTION_REQUESTS) {
+        throw new Error(`Compaction exceeds the ${MAX_COMPACTION_REQUESTS}-request budget; full transcript was preserved`);
       }
       const requestId = ++requests;
       let response: string | CompactionSummary;

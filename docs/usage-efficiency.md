@@ -26,6 +26,10 @@ oversized individual lines; query larger files instead of loading them whole.
 Compaction starts at the smaller of 100,000 context tokens and 75% of the
 model's context window. Summaries preserve pending inputs, recent exchanges,
 completed actions and uncertain side effects. Full transcripts remain stored.
+Successful compactions can repeat throughout a task. Summaries must measurably
+shrink their source; a failure is reported as a blocker with the full context
+preserved. Two unresolved context/media recovery attempts are allowed per
+episode, reset by a successful normal model step, not by a summary.
 Quota exhaustion is terminal; ordinary transient errors retain bounded SDK
 retries. No paid-credit fallback or credential changes are performed.
 

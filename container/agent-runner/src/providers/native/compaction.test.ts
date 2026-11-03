@@ -21,11 +21,11 @@ afterEach(() => {
 
 describe('context overflow detection', () => {
   it('uses the economy target or model safety threshold, whichever is smaller', () => {
-    expect(shouldCompactContext(99_999, 1_000_000, 100_000)).toBe(false);
-    expect(shouldCompactContext(100_000, 1_000_000, 100_000)).toBe(true);
-    expect(shouldCompactContext(100_000, 1_000_000)).toBe(false);
-    expect(shouldCompactContext(96_000, 128_000, 100_000)).toBe(true);
-    const policy = createCompactionPolicy(1_000_000, 100_000);
+    expect(shouldCompactContext(99_999, 1_000_000)).toBe(false);
+    expect(shouldCompactContext(100_000, 1_000_000)).toBe(true);
+    expect(shouldCompactContext(95_999, 128_000)).toBe(false);
+    expect(shouldCompactContext(96_000, 128_000)).toBe(true);
+    const policy = createCompactionPolicy(1_000_000);
     policy.observe(100_000);
     expect(policy.proactive()).toMatchObject({ attempt: 1 });
   });
@@ -197,15 +197,15 @@ it('does not save a partial summary if a later fragment fails', async () => {
   expect(store.contextMessages(conversation)).toEqual(before);
 });
 
-it('preserves the full transcript when a smaller compaction-call budget is exhausted', async () => {
+it('preserves the full transcript when context rejection cannot be reduced further', async () => {
   const { conversation, protectedRef } = seed();
   const before = store.contextMessages(conversation);
   let calls = 0;
   await expect(compactNativeContext({
-    ...compactionOptions(conversation, protectedRef), maxRequests: 1,
+    ...compactionOptions(conversation, protectedRef),
     summarize: async () => { calls++; throw new Error('context_length_exceeded'); },
-  })).rejects.toThrow('1-request budget');
-  expect(calls).toBe(1);
+  })).rejects.toThrow();
+  expect(calls).toBeLessThanOrEqual(MAX_COMPACTION_REQUESTS);
   expect(store.contextMessages(conversation)).toEqual(before);
 });
 
@@ -243,8 +243,8 @@ it('invalidates a summary when history is rolled back before its boundary', asyn
 });
 
 it.each([
-  [749_999, 1_000_000, false],
-  [750_000, 1_000_000, true],
+  [99_999, 1_000_000, false],
+  [100_000, 1_000_000, true],
   [800_000, 1_000_000, true],
   [undefined, 1_000_000, false],
   [750_000, undefined, false],
@@ -256,35 +256,29 @@ it.each([
   expect(shouldCompactContext(tokens, window)).toBe(expected);
 });
 
-describe('per-turn compaction policy', () => {
-  it('derives unique ordinals from separate proactive and emergency attempts', () => {
+describe('compaction recovery episodes', () => {
+  it('assigns unique ordinals while allowing unlimited successful proactive compactions', () => {
     const policy = createCompactionPolicy(1_000_000);
     expect(policy.proactive()).toBeUndefined();
     expect(policy.recover('media')).toMatchObject({ ordinal: 1, attempt: 1 });
-    policy.observe(750_000);
-    expect(policy.proactive()).toMatchObject({ ordinal: 2, attempt: 1, detail: expect.stringContaining('75%') });
-    policy.observe(undefined);
-    expect(policy.proactive()).toBeUndefined();
-    expect(policy.canRecover()).toBe(true);
-    expect(policy.recover('context')).toMatchObject({ ordinal: 3, attempt: 2 });
-    expect(policy.canRecover()).toBe(false);
-    expect(() => policy.recover('context')).toThrow('context recovery exhausted');
-    policy.observe(800_000);
-    expect(policy.proactive()).toMatchObject({ ordinal: 4, attempt: 1 });
-    expect(policy.proactive()).toBe('limit');
-    expect(policy.proactive()).toBeUndefined();
+    for (let i = 0; i < 10; i++) {
+      policy.observe(100_000);
+      expect(policy.proactive()).toMatchObject({ ordinal: i + 2, attempt: 1 });
+      policy.compacted();
+      expect(policy.proactive()).toBeUndefined();
+    }
   });
 
-  it('disables proactive failures without disabling emergency recovery', () => {
+  it('bounds unresolved recovery but resets only after a normal successful step', () => {
     const policy = createCompactionPolicy(1_000_000);
-    policy.observe(750_000);
-    expect(policy.proactive()).toBeDefined();
-    policy.disableProactive();
-    policy.observe(800_000);
-    expect(policy.proactive()).toBeUndefined();
-    expect(policy.recover('context')).toMatchObject({ attempt: 1, ordinal: 2 });
-    expect(policy.recover('media')).toMatchObject({ attempt: 2, ordinal: 3 });
+    expect(policy.recover('context')).toMatchObject({ attempt: 1, ordinal: 1 });
+    policy.compacted();
+    expect(policy.recover('media')).toMatchObject({ attempt: 2, ordinal: 2 });
+    policy.compacted();
     expect(() => policy.recover('media')).toThrow('media budget recovery exhausted');
+    expect(policy.canRecover()).toBe(false);
+    policy.observe(10);
+    expect(policy.recover('context')).toMatchObject({ attempt: 1, ordinal: 3 });
   });
 
   it('does not spend proactive attempts on unknown or below-threshold measurements', () => {
@@ -293,11 +287,11 @@ describe('per-turn compaction policy', () => {
     expect(unknown.proactive()).toBeUndefined();
     expect(unknown.recover('context')).toMatchObject({ ordinal: 1, attempt: 1 });
     const policy = createCompactionPolicy(1_000_000);
-    for (const tokens of [749_999, undefined, Number.NaN]) {
+    for (const tokens of [99_999, undefined, Number.NaN]) {
       policy.observe(tokens);
       expect(policy.proactive()).toBeUndefined();
     }
-    policy.observe(750_000);
+    policy.observe(100_000);
     expect(policy.proactive()).toMatchObject({ ordinal: 1, attempt: 1 });
   });
 });

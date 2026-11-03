@@ -1248,7 +1248,7 @@ describe('NativeProvider', () => {
     },
   );
 
-  it('reports proactive failure once, continues unchanged, and keeps emergency recovery available', async () => {
+  it('surfaces a proactive failure without continuing costly calls or repeating completed actions', async () => {
     const provider = knownContext();
     const continuation = history();
     scriptedToolCalls = [
@@ -1259,25 +1259,23 @@ describe('NativeProvider', () => {
     rejectCompaction = true;
     const events = await collect(provider, continuation);
     expect(compactions(events, 'error')).toHaveLength(1);
-    expect(events.some((event) => event.type === 'error')).toBe(false);
-    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'notification' &&
-      event.step.text.includes('Automatic compaction failed'))).toBe(true);
-    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\ntwice\n');
+    expect(events.some((event) => event.type === 'error' && event.message.includes('Summary service rejected'))).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(requests).toHaveLength(2);
     rejectCompaction = false;
+    scriptedToolCalls = [];
     contextOverflows = 1;
     const recovered = await collect(provider, continuation);
     expect(compactions(recovered, 'completed')).toHaveLength(1);
     expect(recovered.some((event) => event.type === 'error')).toBe(false);
   });
 
-  it('caps proactive compactions without spending the emergency recovery budget', async () => {
+  it('allows more than two proactive compactions in one task', async () => {
     const provider = knownContext();
     scriptedToolCalls = Array.from({ length: 4 }, () => ['bash', '{"command":"echo once >> once.txt"}']);
     scriptedUsage = Array.from({ length: 4 }, () => ({ prompt_tokens: 800_000, completion_tokens: 2 }));
     const events = await collect(provider, history());
-    expect(compactions(events, 'completed')).toHaveLength(2);
-    expect(events.some((event) => event.type === 'progress' && event.step.kind === 'notification' &&
-      event.step.text.includes('compaction limit'))).toBe(true);
+    expect(compactions(events, 'completed')).toHaveLength(4);
     expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\nonce\nonce\nonce\n');
     expect(events.some((event) => event.type === 'error')).toBe(false);
   });
@@ -1349,14 +1347,14 @@ describe('NativeProvider', () => {
     } finally { store.close(); }
   });
 
-  it('continues after proactive compaction cannot remove protected or recent history', async () => {
+  it('reports the specific blocker when protected or recent history cannot be compacted', async () => {
     const provider = knownContext();
     scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
     scriptedUsage = [{ prompt_tokens: 749_998, completion_tokens: 2 }];
     const events = await collect(provider);
     expect(compactions(events, 'error')).toHaveLength(1);
-    expect(events.some((event) => event.type === 'error')).toBe(false);
-    expect(replyTexts(events)).toEqual([['hello from stub']]);
+    expect(events.some((event) => event.type === 'error' && event.message.includes('cannot be compacted'))).toBe(true);
+    expect(replyTexts(events)).toEqual([]);
     expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
   });
 
@@ -2881,13 +2879,24 @@ describe('final message', () => {
     expect(replyTexts(events)).toEqual([['See my summary above.']]);
   });
 
-  it('completes 120 model tool steps without forcing a handoff', async () => {
+  it('completes 120 model tool steps and four compactions without forcing a handoff', async () => {
+    catalogModels = { local: { models: { 'test-model': {
+      modalities: { input: ['text'], output: ['text'] },
+      limit: { context: 1_000_000, output: 8192 },
+    } } } };
     scriptedToolCalls = Array.from({ length: 120 }, (_, index) => sendCall(`update ${index}`));
+    scriptedUsage = Array.from({ length: 120 }, (_, index) => ({
+      prompt_tokens: (index + 1) % 30 === 0 ? 99_998 : 4, completion_tokens: 2,
+    }));
     scriptedTexts = ['All 120 steps completed.'];
     const events = await collect(new NativeProvider({ model: 'local/test-model' }));
 
-    expect(requests).toHaveLength(121);
-    expect(requests.every(request => request.tools !== undefined)).toBe(true);
+    expect(requests).toHaveLength(125);
+    const normal = requests.filter(request => !JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+    expect(normal).toHaveLength(121);
+    expect(normal.every(request => request.tools !== undefined)).toBe(true);
+    expect(events.filter(event => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'completed')).toHaveLength(4);
     expect(getOutboundDb().prepare("SELECT COUNT(*) AS count FROM messages_out WHERE kind='chat'").get())
       .toMatchObject({ count: 120 });
     expect(replyTexts(events)).toEqual([['All 120 steps completed.']]);

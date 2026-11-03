@@ -409,7 +409,7 @@ export class NativeProvider implements AgentProvider {
               let nudge: string | null = null;
               // Text written alongside tool calls, which is never delivered.
               let undeliveredChars = 0;
-              const compactionPolicy = createCompactionPolicy(resolved.contextWindow, 100_000);
+              const compactionPolicy = createCompactionPolicy(resolved.contextWindow);
               async function* compactContext(plan: NativeCompactionPlan): AsyncGenerator<ProviderEvent> {
                 abortController.signal.throwIfAborted();
                 const compactStartedAt = Date.now();
@@ -424,7 +424,6 @@ export class NativeProvider implements AgentProvider {
                     store, conversation, protectedInputs: turnJournal.inputRefs(),
                     attempt: plan.attempt, contextWindow: resolved.contextWindow, maxOutputTokens: resolved.maxOutputTokens,
                     reasoning: resolved.reasoning === true || miniMaxFlash,
-                    maxRequests: 4,
                     signal: abortController.signal,
                     summarize: async (prompt, request) => {
                       const compacted = streamText({
@@ -445,7 +444,7 @@ export class NativeProvider implements AgentProvider {
                     },
                   });
                   messages.splice(0, messages.length, ...history(store.contextMessages(conversation)));
-                  compactionPolicy.observe(undefined);
+                  compactionPolicy.compacted();
                   yield* flushCallUsage();
                   yield { type: 'progress', step: {
                     kind: 'compaction', id: compactId, auto: true, status: 'completed',
@@ -460,30 +459,6 @@ export class NativeProvider implements AgentProvider {
                     error: errorMessage(error), durationMs: Date.now() - compactStartedAt,
                   } };
                   throw error;
-                }
-              }
-              async function* maybeCompactContext(): AsyncGenerator<ProviderEvent> {
-                const plan = compactionPolicy.proactive();
-                if (!plan) return;
-                if (plan === 'limit') {
-                  yield { type: 'progress', step: {
-                    kind: 'notification', id: `native-compaction-limit-${continuation}-${startedAt}`,
-                    text: 'Automatic compaction limit reached for this turn',
-                    detail: 'Continuing normally; context-overflow and media recovery remain available.',
-                  } };
-                  return;
-                }
-                try {
-                  yield* compactContext(plan);
-                } catch (error) {
-                  abortController.signal.throwIfAborted();
-                  compactionPolicy.disableProactive();
-                  log(`Proactive compaction failed; retaining context: ${errorMessage(error)}`);
-                  yield { type: 'progress', step: {
-                    kind: 'notification', id: `native-compaction-${continuation}-${plan.ordinal}-${startedAt}-fallback`,
-                    text: 'Automatic compaction failed; continuing with existing context',
-                    detail: errorMessage(error),
-                  } };
                 }
               }
               async function* prepareInput(
@@ -537,7 +512,8 @@ export class NativeProvider implements AgentProvider {
                 if (!mediaRetry) {
                   while (inlineHistoryBytes(projectedContext()) > MAX_INLINE_BYTES)
                     yield* compactContext(compactionPolicy.recover('media'));
-                  yield* maybeCompactContext();
+                  const plan = compactionPolicy.proactive();
+                  if (plan) yield* compactContext(plan);
                 }
                 const requestContext = projectedContext();
                 if (!mediaRetry && !quarantineNoticeSent && quarantines.size &&
@@ -683,7 +659,8 @@ export class NativeProvider implements AgentProvider {
                 messages.push(...responseMessages);
                 const steps = await result.steps;
                 firstStep = false;
-                compactionPolicy.observe(callUsageFor(resolved, steps.at(-1)?.usage).context_tokens);
+                if (!toolMediaPressure)
+                  compactionPolicy.observe(callUsageFor(resolved, steps.at(-1)?.usage).context_tokens);
                 const stepText = (await result.text).trim() || null;
                 finishReason = String(await result.finishReason);
                 const step = steps.at(-1);
