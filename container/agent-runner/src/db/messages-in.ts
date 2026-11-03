@@ -9,7 +9,7 @@
  * the host over the same session link.
  */
 import { getConfig } from '../config.js';
-import { openInboundDb, getOutboundDb } from './connection.js';
+import { getInboundDb, getOutboundDb } from './connection.js';
 
 export const MAX_TIMER_DELAY_MS = 2_147_000_000;
 
@@ -60,15 +60,15 @@ function getMaxMessagesPerPrompt(): number {
  * trigger=1 separately (see src/db/session-db.ts).
  */
 export function getPendingMessages(
-  isFirstPoll = false, options: { uncapped?: boolean; wakeThroughSeq?: number } = {},
+  isFirstPoll = false,
+  options: { uncapped?: boolean; wakeThroughSeq?: number } = {},
 ): MessageInRow[] {
-  const inbound = openInboundDb();
+  const inbound = getInboundDb();
   const outbound = getOutboundDb();
 
-  try {
-    const pending = inbound
-      .prepare(
-        `SELECT * FROM messages_in
+  const pending = inbound
+    .prepare(
+      `SELECT * FROM messages_in
          WHERE status = 'pending'
            AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
            AND (on_wake = 0 OR (?1 = 1 AND (?3 IS NULL OR seq <= ?3)))
@@ -76,78 +76,78 @@ export function getPendingMessages(
              CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END, '') IN ('edit_input', 'cancel_input', 'restart'))
          ORDER BY seq DESC
          LIMIT ?2`,
-      )
-      .all(isFirstPoll ? 1 : 0, options.uncapped ? -1 : getMaxMessagesPerPrompt(),
-        options.wakeThroughSeq ?? null) as MessageInRow[];
+    )
+    .all(
+      isFirstPoll ? 1 : 0,
+      options.uncapped ? -1 : getMaxMessagesPerPrompt(),
+      options.wakeThroughSeq ?? null,
+    ) as MessageInRow[];
 
-    if (pending.length === 0) return [];
+  if (pending.length === 0) return [];
 
-    // Filter out messages already acknowledged in the local projection.
-    const ackedIds = new Set(
-      (outbound.prepare('SELECT message_id FROM processing_ack').all() as Array<{ message_id: string }>).map(
-        (r) => r.message_id,
-      ),
-    );
+  // Filter out messages already acknowledged in the local projection.
+  const ackedIds = new Set(
+    (outbound.prepare('SELECT message_id FROM processing_ack').all() as Array<{ message_id: string }>).map(
+      (r) => r.message_id,
+    ),
+  );
 
-    // Reverse: we fetched DESC to take the most recent N, but the agent
-    // should see them in chronological order (oldest first).
-    return pending.filter((m) => !ackedIds.has(m.id)).reverse();
-  } finally {
-    inbound.close();
-  }
+  // Reverse: we fetched DESC to take the most recent N, but the agent
+  // should see them in chronological order (oldest first).
+  return pending.filter((m) => !ackedIds.has(m.id)).reverse();
 }
 
 /** A new-runtime instruction is also a durable request to retire this runner at a turn boundary. */
 export function hasPendingRestart(afterSeq = -1): boolean {
-    const db = openInboundDb();
-    try {
-      const pending = db.prepare(
-        `SELECT id FROM messages_in WHERE status = 'pending' AND on_wake = 1 AND (?1 = -1 OR seq > ?1)
+  const db = getInboundDb();
+
+  const pending = db
+    .prepare(
+      `SELECT id FROM messages_in WHERE status = 'pending' AND on_wake = 1 AND (?1 = -1 OR seq > ?1)
          AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))`,
-      ).all(afterSeq) as { id: string }[];
-      const acknowledged = new Set(
-        (getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[])
-          .map((row) => row.message_id),
-      );
-      return pending.some((row) => !acknowledged.has(row.id));
-    } finally {
-      db.close();
-    }
+    )
+    .all(afterSeq) as { id: string }[];
+  const acknowledged = new Set(
+    (getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[]).map(
+      (row) => row.message_id,
+    ),
+  );
+  return pending.some((row) => !acknowledged.has(row.id));
 }
 
 /** Silent restart controls are consumed only by the runtime that loaded their saved configuration. */
 export function completeRestartRequests(wakeThroughSeq: number): number {
-  const db = openInboundDb();
-  try {
-    const rows = db.prepare(
+  const db = getInboundDb();
+
+  const rows = db
+    .prepare(
       `SELECT id FROM messages_in WHERE status = 'pending' AND kind = 'system' AND on_wake = 1
        AND seq <= ? AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
        AND CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END = 'restart'`,
-    ).all(wakeThroughSeq) as { id: string }[];
-    const acknowledged = getOutboundDb().prepare('SELECT 1 FROM processing_ack WHERE message_id = ?');
-    const ids = rows.filter((row) => !acknowledged.get(row.id)).map((row) => row.id);
-    markCompleted(ids);
-    return ids.length;
-  } finally {
-    db.close();
-  }
+    )
+    .all(wakeThroughSeq) as { id: string }[];
+  const acknowledged = getOutboundDb().prepare('SELECT 1 FROM processing_ack WHERE message_id = ?');
+  const ids = rows.filter((row) => !acknowledged.get(row.id)).map((row) => row.id);
+  markCompleted(ids);
+  return ids.length;
 }
 
 /** Control requests bypass the prompt cap and never become model input. */
 export function getPendingInputEdits(): MessageInRow[] {
-  const inbound = openInboundDb();
-  try {
-    const rows = inbound.prepare(
+  const inbound = getInboundDb();
+
+  const rows = inbound
+    .prepare(
       `SELECT * FROM messages_in WHERE status = 'pending' AND kind = 'system'
        AND CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END IN ('edit_input', 'cancel_input')
        ORDER BY seq ASC`,
-    ).all() as MessageInRow[];
-    const acknowledged = getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[];
-    const ids = new Set(acknowledged.map((row) => row.message_id));
-    return rows.filter((row) => !ids.has(row.id));
-  } finally {
-    inbound.close();
-  }
+    )
+    .all() as MessageInRow[];
+  const acknowledged = getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as {
+    message_id: string;
+  }[];
+  const ids = new Set(acknowledged.map((row) => row.message_id));
+  return rows.filter((row) => !ids.has(row.id));
 }
 
 /** Select steering candidates before applying the prompt cap, so queued input cannot hide them. */
@@ -155,11 +155,14 @@ export function getSteeringCandidates(
   routing: { channelType: string | null; platformId: string | null; threadId: string | null },
   excludedIds: string[],
 ): MessageInRow[] {
-  const acknowledged = getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[];
+  const acknowledged = getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as {
+    message_id: string;
+  }[];
   const exclude = JSON.stringify([...excludedIds, ...acknowledged.map((row) => row.message_id)]);
-  const db = openInboundDb();
-  try {
-    return db.prepare(
+  const db = getInboundDb();
+
+  return db
+    .prepare(
       `SELECT m.* FROM messages_in m
        WHERE m.status = 'pending' AND m.trigger = 1 AND m.on_wake = 0
          AND m.kind IN ('chat', 'chat-sdk') AND m.source_session_id IS NULL
@@ -169,30 +172,29 @@ export function getSteeringCandidates(
          AND (m.channel_type != 'web' OR
            CASE WHEN json_valid(m.content) THEN json_extract(m.content, '$.inputHandling.mode') END = 'steer')
        ORDER BY m.seq ASC LIMIT ?`,
-    ).all(
-      routing.channelType, routing.platformId, routing.threadId || '', exclude, getMaxMessagesPerPrompt(),
+    )
+    .all(
+      routing.channelType,
+      routing.platformId,
+      routing.threadId || '',
+      exclude,
+      getMaxMessagesPerPrompt(),
     ) as MessageInRow[];
-  } finally {
-    db.close();
-  }
 }
 
 /** Milliseconds until the next future pending row becomes due. */
 export function nextPendingDueDelayMs(): number | undefined {
-  const inbound = openInboundDb();
-  try {
-    const row = inbound
-      .prepare(
-        `SELECT CAST(MAX(0, (julianday(MIN(process_after)) - julianday('now')) * 86400000) AS INTEGER) AS delay_ms
+  const inbound = getInboundDb();
+
+  const row = inbound
+    .prepare(
+      `SELECT CAST(MAX(0, (julianday(MIN(process_after)) - julianday('now')) * 86400000) AS INTEGER) AS delay_ms
          FROM messages_in
          WHERE status = 'pending' AND process_after IS NOT NULL
            AND datetime(process_after) > datetime('now')`,
-      )
-      .get() as { delay_ms: number | null };
-    return row.delay_ms === null ? undefined : Math.min(row.delay_ms, MAX_TIMER_DELAY_MS);
-  } finally {
-    inbound.close();
-  }
+    )
+    .get() as { delay_ms: number | null };
+  return row.delay_ms === null ? undefined : Math.min(row.delay_ms, MAX_TIMER_DELAY_MS);
 }
 
 /** Mark messages as processing in the journaled local projection. */
@@ -214,7 +216,9 @@ export function markProcessing(ids: string[]): void {
 export function releaseProcessing(ids: string[]): void {
   const db = getOutboundDb();
   const stmt = db.prepare("DELETE FROM processing_ack WHERE message_id = ? AND status = 'processing'");
-  db.transaction(() => { for (const id of ids) stmt.run(id); })();
+  db.transaction(() => {
+    for (const id of ids) stmt.run(id);
+  })();
 }
 
 /** Mark messages as completed in the journaled local projection. */
@@ -240,10 +244,7 @@ export function markFailed(id: string): void {
 
 /** Get a message by ID (read from inbound.db). */
 export function getMessageIn(id: string): MessageInRow | undefined {
-  const inbound = openInboundDb();
-  try {
-    return inbound.prepare('SELECT * FROM messages_in WHERE id = ?').get(id) as MessageInRow | undefined;
-  } finally {
-    inbound.close();
-  }
+  const inbound = getInboundDb();
+
+  return inbound.prepare('SELECT * FROM messages_in WHERE id = ?').get(id) as MessageInRow | undefined;
 }

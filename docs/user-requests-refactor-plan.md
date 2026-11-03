@@ -127,6 +127,12 @@ Existing databases with `pending_approvals`, `approval_history` or the old
 `approval_workflows` are refused at startup. Fresh databases need no cutover.
 This intentionally removes old storage rather than carrying compatibility.
 
+The one-time reset tool was retired after the verified rollout. For an older
+database, use an isolated checkout of Git commit `64cb24db9`, where
+`scripts/cutover-approval-storage.ts` and its rehearsal test are preserved.
+Restore that checkout's dependencies from its frozen lockfiles. The commands
+below run from that historical checkout, never from a running installation.
+
 1. Finish the Agent Vault-only cutover first. Stop the host **and all its
    agent containers**, and prevent automatic restart during this procedure.
 2. Review outstanding approvals and uncertain external effects. The script

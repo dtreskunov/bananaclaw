@@ -730,32 +730,9 @@ Live bubbles retain essential progress feedback and Stop controls. Notable
 completed outcomes such as failures, warnings, interruptions, and silent turns
 remain visible even when technical details are hidden.
 
-An isolated production-component fixture covers initial Thinking, running and
-completed tools, two simultaneously running calls and one parallel call already
-completed, long activity text, stopping/disconnected/settling states,
-immediately visible simulated Stop failures and real simulated retry handling, final
-replies without recorded steps,
-replies, outputless turns, failures and display cards. Idle and busy submission
-scenarios exercise the production composer, retry action and queue/steering
-dialog. Chapter scenarios advance through a running step, completion, a related
-step and an unrelated step without resetting follow intent:
-
-```bash
-pnpm --dir src/ui/client/chat run build:turn-status-fixture
-```
-
-Open the content-hashed `/ui/chat/dist/turn-status-fixture-<hash>.html` URL printed
-by the build command on this host; the document hash includes both script and
-stylesheet references, so CSS-only changes also invalidate cached fixture pages.
-Its technical-info toggle is page-local and does not save preferences.
-Send and Stop are simulated through the real UI actions; every other fetch is
-explicitly blocked. In the submission scenarios, **Accept send** / **Fail send**
-resolve HTTP independently of **Echo message** and **Start response**, allowing
-both HTTP-first and echo-first validation without contacting a real conversation.
-The fixture can
-advance the same turn into a reply to verify trace ownership and frozen elapsed
-time across settlement. Generated fixture assets are ignored and rebuilt from
-`src/ui/client/chat/fixtures/`.
+Production-component tests cover turn states, concurrent tools, stopping,
+disconnection, settlement, response ownership and composer behavior. The former
+manual visual sandbox was retired; its source remains in Git at `64cb24db9`.
 
 **Credential UI (plan of record, revision 7):** the account menu includes
 **My Credentials** immediately after **My Profile**, opening the user-scoped
@@ -984,38 +961,12 @@ gateway. Runtime grants still authorize the agent to use shared connections
 without disclosing the owner's credential metadata.
 F12 copying is removed.
 
-Replace the old group-owned credential fixture/routes/DTOs in the coordinated
-release, not behind a permanent compatibility flag. New fixtures must cover
-owner-vs-recipient permissions, native managed-user/non-login behavior,
-cross-group grant denial, shared OAuth status, one-group detach vs global
-disconnect, scope/identity-change review and gateway failures. See the
+Production UI and API tests cover owner-versus-recipient permissions, native
+managed-user behavior, cross-group grant denial, OAuth status, detach versus
+disconnect, scope/identity changes and gateway failures. See the
 [plan of record](credential-gateway-agent-vault-fork-proposal.md#61-top-level-credentials-and-agent-access)
-for the target; this is not yet a statement about deployed navigation.
-
-A second fixture renders the production **Credentials** dialog and agent
-**Credentials** table on the canonical user-owned connection/grant APIs.
-It mocks all credential routes; no real keys or upstream authorizations are used:
-
-```bash
-pnpm --dir src/ui/client/chat run fixture:credentials
-```
-
-This typechecks, builds into `data/dev-fixtures/credentials/`, and serves it at
-`http://127.0.0.1:4175/`, rebuilding on change; `PORT` overrides the port. To
-view it through the running UI instead,
-`pnpm --dir src/ui/client/chat run build:credentials-fixture` writes
-content-hashed files to `dist/` and prints the
-`/ui/chat/dist/credentials-fixture-<hash>.html` path to open. `?tab=mcp` opens
-the MCP servers tab. Sign-ins open a simulated provider window
-with Allow and Deny. The fixture panel can:
-
-- switch between typical and new-group data,
-- add latency,
-- simulate the gateway being down, view-only access, a group admin who isn't an
-  owner (no install-wide changes), a failed change or a blocked sign-in popup,
-- show the API calls made, with credential values masked.
-
-Nothing leaves the page.
+for the coordinated contract. The manual credential simulator and its
+self-tests were retired; actual editor, request and backend tests remain.
 
 Your own pending native web-chat messages instead offer an **Edit** icon
 while the connected runner advertises input editing. This changes text in place,

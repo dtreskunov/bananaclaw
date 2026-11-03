@@ -1,5 +1,5 @@
 import { getCurrentInReplyTo } from '../current-batch.js';
-import { openInboundDb, getOutboundDb } from '../db/connection.js';
+import { getInboundDb, getOutboundDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting, type SessionRouting } from '../db/session-routing.js';
 import { registerTools } from './tool-registry.js';
@@ -14,31 +14,28 @@ function findActiveRequestMessageId(routing: SessionRouting): string | null {
     .prepare("SELECT message_id FROM processing_ack WHERE status = 'processing' ORDER BY status_changed DESC")
     .all() as Array<{ message_id: string }>;
   if (processing.length === 0) return null;
-  const inbound = openInboundDb();
-  try {
-    const messageStmt = inbound.prepare(
-      `SELECT id, seq
+  const inbound = getInboundDb();
+
+  const messageStmt = inbound.prepare(
+    `SELECT id, seq
          FROM messages_in
         WHERE id = ?
           AND kind IN ('chat', 'chat-sdk')
           AND channel_type = ?
           AND COALESCE(platform_id, '') = ?
           AND thread_id = ?`,
-    );
-    let active: { id: string; seq: number } | undefined;
-    for (const row of processing) {
-      const message = messageStmt.get(
-        row.message_id,
-        routing.channel_type,
-        routing.platform_id ?? '',
-        routing.thread_id,
-      ) as { id: string; seq: number } | undefined;
-      if (message && (!active || message.seq > active.seq)) active = message;
-    }
-    return active?.id ?? null;
-  } finally {
-    inbound.close();
+  );
+  let active: { id: string; seq: number } | undefined;
+  for (const row of processing) {
+    const message = messageStmt.get(
+      row.message_id,
+      routing.channel_type,
+      routing.platform_id ?? '',
+      routing.thread_id,
+    ) as { id: string; seq: number } | undefined;
+    if (message && (!active || message.seq > active.seq)) active = message;
   }
+  return active?.id ?? null;
 }
 
 export const setThreadTitle: McpToolDefinition = {
