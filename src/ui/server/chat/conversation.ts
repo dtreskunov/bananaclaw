@@ -149,7 +149,7 @@ export function projectConversation(
         const { turnId: _turn, ...visible } = message;
         return visible;
       }
-      return { ...message };
+      return message;
     });
   const visibleOutputIds = new Set(messages.filter((m) => m.direction === 'out').map((m) => m.id));
   for (const id of questionAnchors.keys()) visibleOutputIds.add(id);

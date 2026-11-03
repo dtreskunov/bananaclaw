@@ -65,6 +65,8 @@ objects or introduce a custom schema DSL.
 3. Consolidate authorized interaction presentation and conversation item shapes.
 4. Consider one current-state interaction record only if replacing existing
    duplicated storage and coordination is independently net-reducing.
+5. Finish integration by reusing shared message types in host read models and
+   removing obsolete response polling and redundant presentation copies.
 
 Measure each completed change and the cumulative delta against the baseline.
 Report production, tests, documentation, generated assets, and disposable

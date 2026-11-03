@@ -513,7 +513,7 @@ export function openSessionDb(agentGroupId: string, sessionId: string): Database
   return openInboundDb(agentGroupId, sessionId);
 }
 
-/** Write a system response to a session's inbound.db so the container's findQuestionResponse() picks it up. */
+/** Journal a system response for delivery through the session link. */
 export function writeSystemResponse(
   agentGroupId: string,
   sessionId: string,

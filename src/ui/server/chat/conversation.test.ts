@@ -60,6 +60,17 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('authoritative conversation projection', () => {
+  it('reuses authorized message bodies and only copies to remove off-route turn associations', () => {
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied' });
+    expect(read([output]).messages[0]).toBe(output);
+    putTurn(db, { ...turn, id: 'foreign', origin_thread_id: 'other', phase: 'settled', outcome: 'replied' });
+    const offRoute = { ...output, turnId: 'foreign' };
+    const projected = read([offRoute]).messages[0];
+    expect(projected).not.toBe(offRoute);
+    expect(projected.turnId).toBeUndefined();
+    expect(offRoute.turnId).toBe('foreign');
+  });
+
   it('gates per-tool cancellation on the route-matched live capability, not saved provider configuration', () => {
     const capable = {
       ...signals,

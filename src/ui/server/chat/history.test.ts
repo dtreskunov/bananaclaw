@@ -153,10 +153,12 @@ describe('chatSdkHistoryContent', () => {
             actions: [{ label: 'Open', url: 'https://example.com', style: 'primary' }],
           },
           fallbackText: 'Deployment completed',
+          timelinePosition: 1,
         }),
       ),
     ).toEqual({
       text: 'Deployment completed',
+      timelinePosition: 1,
       card: {
         title: 'Deployment',
         description: 'Version 2.4.1 is live',

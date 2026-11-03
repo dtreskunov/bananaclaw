@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { closeSessionDb, getInboundDb, getOutboundDb, initTestSessionDb } from '../db/connection.js';
 import { askUserQuestion, sendCard } from './interactive.js';
 import { writeMessageOut } from '../db/messages-out.js';
+import { markCompleted } from '../db/messages-in.js';
 
 describe('ask_user_question', () => {
   beforeEach(() => {
@@ -67,11 +68,40 @@ describe('ask_user_question', () => {
     const journal = getOutboundDb().prepare("SELECT payload FROM pending_runner_events WHERE event_type = 'message.upsert'").all();
     expect(journal).toHaveLength(2);
     expect(JSON.stringify(journal[0])).not.toContain('cancelled');
+    const questionId = JSON.parse(row.content).questionId;
     getInboundDb().prepare(`INSERT INTO messages_in (id, kind, timestamp, status, content)
-      VALUES ('answer', 'interactive_response', datetime('now'), 'pending', ?)`)
-      .run(JSON.stringify({ questionId: JSON.parse(row.content).questionId, value: 'yes' }));
+      VALUES (?, 'interactive_response', datetime('now'), 'pending', ?)`)
+      .run(`question-response:${questionId}`, JSON.stringify({
+        type: 'question_response', questionId, question: 'Old question', responseType: 'text', value: 'yes',
+      }));
     const answered = await askUserQuestion.handler({ question: 'New question', responseMode: 'text' });
     expect(answered.isError).not.toBe(true);
+  });
+
+  it.each(['choice', 'text', 'skipped'] as const)(
+    'opens the gate for a consumed %s answer using its durable host identity',
+    async responseType => {
+      await askUserQuestion.handler({ question: 'Choose', responseMode: 'choice_or_text', options: ['A'] });
+      const row = getOutboundDb().prepare('SELECT id FROM messages_out').get() as { id: string };
+      const id = `question-response:${row.id}`;
+      getInboundDb().prepare(`INSERT INTO messages_in(id,kind,timestamp,status,content)
+        VALUES(?,'interactive_response',datetime('now'),'completed',?)`).run(id, JSON.stringify({
+          type: 'question_response', questionId: row.id, question: 'Choose', responseType,
+          ...(responseType === 'skipped' ? {} : { value: 'A' }),
+        }));
+      markCompleted([id]);
+      expect((await askUserQuestion.handler({ question: 'Next', responseMode: 'text' })).isError).not.toBe(true);
+    },
+  );
+
+  it('does not release the question for a different response or a non-response message', async () => {
+    await askUserQuestion.handler({ question: 'Choose', responseMode: 'text' });
+    const row = getOutboundDb().prepare('SELECT id FROM messages_out').get() as { id: string };
+    const insert = getInboundDb().prepare(`INSERT INTO messages_in(id,kind,timestamp,content)
+      VALUES(?,?,datetime('now'),'{}')`);
+    insert.run(`question-response:${row.id}`, 'system');
+    insert.run('question-response:other', 'interactive_response');
+    expect((await askUserQuestion.handler({ question: 'Next', responseMode: 'text' })).isError).toBe(true);
   });
 
   it('persists choice_or_text with normalized options', async () => {
