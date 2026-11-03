@@ -244,8 +244,8 @@ beforeEach(() => {
   message = {
     id: 'message',
     text: 'Original',
-    files: [{ filename: 'instructions.txt' }],
-    ts: '1',
+    files: [{ filename: 'instructions.txt', size: 0 }],
+    timestamp: '1',
     direction: 'in',
     canEditPending: true,
     inputState: { messageId: 'message', status: 'queued', queuedForNextTurn: true },
@@ -983,8 +983,7 @@ describe('main composer pending edits', () => {
           direction: 'in',
           questionResponseType: 'skipped',
           text: 'Question skipped',
-          ts: 'later',
-          files: null,
+          timestamp: 'later',
         },
       });
       expect(bubble.props.children.props.dangerouslySetInnerHTML.__html).toBe(
@@ -2414,7 +2413,7 @@ describe('main composer pending edits', () => {
         viewport.scrollHeight = 4500;
         if (phase === 'completion') {
           completedResponse.value = 'response';
-          chatMessages.value = [{ id: 'response', direction: 'out', text: 'Long reply', ts: '2', files: null }];
+          chatMessages.value = [{ id: 'response', direction: 'out', text: 'Long reply', timestamp: '2' }];
         } else {
           pendingWebSends.value = [testWebSubmission];
           if (phase === 'submission') scrollToBottomTick.value++;

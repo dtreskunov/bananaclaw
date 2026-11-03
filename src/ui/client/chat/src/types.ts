@@ -1,6 +1,12 @@
 // Shared types used across the chat UI client.
-import type { InputHandling, InputState } from '../../../shared/input-state';
+import type { InputHandling } from '../../../shared/input-state';
 import type { ModelTime } from '../../../shared/activity-presentation';
+import type {
+  ConversationMessage,
+  ConversationQuestion,
+  ConversationUsage,
+  ConversationTurn,
+} from '../../../shared/conversation';
 export type { InputHandling, InputState } from '../../../shared/input-state';
 
 export type ChannelType =
@@ -129,88 +135,26 @@ export interface ThreadCtx {
   canSend: boolean;
 }
 
-export type Direction = 'in' | 'out' | 'event';
+export type Direction = ConversationMessage['direction'];
+export type ChatMessageFile = NonNullable<ConversationMessage['files']>[number];
+export type TurnUsage = ConversationUsage;
+export type DisplayCard = NonNullable<ConversationMessage['card']>;
+export type DisplayCardAction = DisplayCard['actions'][number];
+export type SuggestedAction = NonNullable<ConversationMessage['suggestedAction']>;
+export type ChatMessage = ConversationMessage & MessagePresentation;
 
-export interface ChatMessageFile {
-  filename: string;
-  size?: number;
-  path?: string | null;
-  url?: string | null;
-  contentType?: string | null;
-}
-
-export interface TurnUsage {
-  cost_usd: number;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  reasoning_tokens?: number;
-  /** Number of provider model calls made during this turn. */
-  num_turns?: number;
-  model: string;
-  context_window?: number;
-  max_output_tokens?: number;
-  /** Tokens resident in the context at turn end — the only token figure
-   *  comparable to `context_window`. The counts above are billing sums. */
-  context_tokens?: number;
-  duration_ms?: number;
-  duration_api_ms?: number;
-}
-
-export interface DisplayCardAction {
-  label: string;
-  url: string;
-  style?: 'primary' | 'danger' | 'default';
-}
-
-export interface DisplayCard {
-  title: string;
-  description: string;
-  children: string[];
-  actions: DisplayCardAction[];
-}
-
-export type SuggestedAction = 'continue' | 'retry' | 'report';
-
-export interface ChatMessage {
-  approval?: import('../../../shared/approval').ConversationApproval;
-  questionId?: string;
-  questionResponseType?: 'skipped';
-  turnId?: string;
+export interface MessagePresentation {
   /** Replies only: the settled turn whose accounting renders in this bubble's meta line. */
-  statsTurn?: import('../../../shared/conversation').ConversationTurn;
-  timelinePosition?: number;
-  canEditPending?: boolean;
-  inputState?: InputState;
+  statsTurn?: ConversationTurn;
   submission?: PendingWebSend;
   /** Suppress a generic queued receipt while a response starts or already owns this input. */
   hideInitialQueuedCaption?: boolean;
-  id?: string;
-  direction: Direction;
-  text: string;
-  files: ChatMessageFile[] | null;
-  ts: string;
-  author?: { userId: string; displayName: string };
-  /** How the agent emitted this row. Absent for legacy/unclassified messages. */
-  deliveryOrigin?: 'send_message' | 'send_file' | 'response';
-  /** True for host/runner notices rather than agent-authored content. */
-  systemGenerated?: boolean;
-  /** Safe next-turn action suggested by the agent runner. */
-  suggestedAction?: SuggestedAction;
-  /** Normalized fire-and-forget display card. `text` remains its fallback. */
-  card?: DisplayCard;
   /** Persisted activity trace for an outbound turn, in emit order. */
   activity?: ActivityLine[];
   /** This row currently owns the active/final trace state for its turn. */
   turnTraceOwner?: boolean;
   /** The owning turn trace is still receiving activity. */
   turnTraceLive?: boolean;
-  /** Timeline event payload; present when direction === 'event'. */
-  event?: TimelineEvent;
-  /** Emoji reactions the agent added to this message (already resolved to
-   *  unicode), in emit order. Rendered as chips under the bubble. */
-  reactions?: MessageReaction[];
 }
 
 export type TranscriptRow =
@@ -231,22 +175,10 @@ export type TranscriptRow =
     };
 
 /** One emoji reaction attached to a message. */
-export interface MessageReaction {
-  emoji: string;
-  ts: string;
-}
+export type MessageReaction = NonNullable<ConversationMessage['reactions']>[number];
 
 /** Non-chat timeline marker (e.g. a scheduled task firing). */
-export interface TimelineEvent {
-  kind: 'task-run';
-  taskId?: string;
-  summary: string;
-  recurrence?: string | null;
-  status?: TaskAttemptDto['status'];
-  triggerSource?: 'scheduled' | 'manual';
-  error?: string | null;
-  autoPaused?: boolean;
-}
+export type TimelineEvent = NonNullable<ConversationMessage['event']>;
 
 /** One step of a turn's activity trace: emit-time timestamp (epoch ms as a
  *  string) plus the whole progress text. */
@@ -356,21 +288,7 @@ export type PendingWebSend = ChatSendPacket & {
 
 export type PendingApprovalDto = import('../../../shared/approval').ConversationApproval;
 
-export interface PendingQuestionDto {
-  questionId: string;
-  question: string;
-  responseMode: 'choice' | 'text' | 'choice_or_text';
-  options: { label: string; selectedLabel: string; value: string }[];
-  status: 'pending' | 'answered' | 'cancelled';
-  answerValue: string | null;
-  answerType: 'choice' | 'text' | 'skipped' | null;
-  answeredAt: string | null;
-  activity?: ActivityLine[];
-  threadId: string | null;
-  agentGroupId: string;
-  createdAt: string;
-  timelinePosition?: number;
-}
+export type PendingQuestionDto = ConversationQuestion;
 
 export interface RouterApi {
   selectGroup: (gid: string, options?: { newConversation?: boolean }) => Promise<void>;

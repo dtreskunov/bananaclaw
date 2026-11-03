@@ -87,6 +87,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('authoritative turn presentation', () => {
+  it('uses undecorated wire messages directly without timestamp or file reshaping', () => {
+    const message = { id: 'input', direction: 'in' as const, text: 'Hello', timestamp: '2026-11-03T00:00:00Z' };
+    const view = testSnapshot({ messages: [message] }).conversation;
+    const presented = conversationPresentation(view).messages[0];
+    expect(presented).toBe(message);
+    expect(presented).not.toHaveProperty('ts');
+    expect(presented).not.toHaveProperty('files');
+  });
+
   it('resolves the supplied layout without parsing timestamps or fabricating messages', () => {
     const view = testSnapshot({
       messages: [{ id: 'input', direction: 'in', text: 'ask', timestamp: 'invalid', timelinePosition: 50 }],
@@ -339,12 +348,11 @@ describe('authoritative turn presentation', () => {
     });
     update(answered);
     const cardRows = chatTranscript.value.filter((row) => row.kind === 'question-answer');
-    const { timestamp: answerTimestamp, ...answerFields } = answer;
     expect(cardRows).toEqual([
       {
         kind: 'question-answer',
         question: metadataOnly.questions[0],
-        answer: { ...answerFields, ts: answerTimestamp, files: null },
+        answer,
       },
     ]);
     expect(dockQuestions(answered.questions, answered.messages, 'group', 'thread')).toEqual([]);

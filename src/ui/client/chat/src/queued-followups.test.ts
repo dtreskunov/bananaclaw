@@ -6,18 +6,14 @@ import type { ChatMessage } from './types';
 const sent = '2026-09-26T00:00:00Z';
 const base = Date.parse(sent) * 1000;
 function message(id: string, direction: ChatMessage['direction'], timelinePosition?: number): ChatMessage {
-  return { id, direction, timelinePosition, text: id, ts: sent, files: null };
+  return { id, direction, timelinePosition, text: id, timestamp: sent };
 }
 function followup(id: string): ChatMessage {
   return { ...message(id, 'in'), inputState: { messageId: id, status: 'queued', queuedForNextTurn: true } };
 }
 function layout(messages: ChatMessage[]) {
   const view = testSnapshot({
-    messages: messages.map(({ ts, files: _files, ...message }) => ({
-      ...message,
-      id: message.id!,
-      timestamp: ts,
-    })),
+    messages,
   }).conversation;
   const ordered = view.timeline.flatMap((row) =>
     row.kind === 'message' ? [messages.find((message) => message.id === row.messageId)!] : [],
@@ -90,7 +86,7 @@ describe('queued follow-up timeline', () => {
     live.push(message('own-answer', 'out', base + 4));
     expect(ids(layout(live).transcript)).toEqual(['initial', 'prior-answer', 'next', 'own-answer']);
     expect(layout(live).queued).toEqual([]);
-    expect(consumed.ts).toBe(sent);
+    expect(consumed.timestamp).toBe(sent);
     const refreshed = JSON.parse(JSON.stringify([live[3], live[1], live[0], live[2]])) as ChatMessage[];
     expect(layout(refreshed)).toEqual(layout(live));
     expect(new Set(ids(layout(live).transcript)).size).toBe(4);
@@ -108,7 +104,7 @@ describe('queued follow-up timeline', () => {
     const steering = { ...followup('steer'), inputState: { messageId: 'steer', status: 'steering' as const } };
     expect(isQueuedFollowup(initial)).toBe(false);
     expect(ids(layout([initial, steering, message('legacy', 'out')]).transcript)).toEqual(['idle', 'steer', 'legacy']);
-    const legacy = [message('later', 'in'), { ...message('earlier', 'out'), ts: '2026-09-25 23:59:59' }];
+    const legacy = [message('later', 'in'), { ...message('earlier', 'out'), timestamp: '2026-09-25 23:59:59' }];
     expect(ids(layout(legacy).transcript)).toEqual(['earlier', 'later']);
   });
   it('keeps the queue through Stop and promotes only the consumed successor', () => {

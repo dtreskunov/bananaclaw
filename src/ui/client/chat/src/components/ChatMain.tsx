@@ -755,7 +755,7 @@ function Message(
       >
         <span class="event-icon" aria-hidden="true">{'\u23F0'}</span>
         <span class="event-text">{ev?.summary || m.text}</span>
-        <span class="event-meta"><RelativeTime ts={m.ts} />{recur}</span>
+        <span class="event-meta"><RelativeTime ts={m.timestamp} />{recur}</span>
       </button>
     );
   }
@@ -793,7 +793,7 @@ function Message(
       send.groupId === groupId.value && send.threadId === threadId.value && send.status !== 'failed');
   const midTurnUpdate = m.deliveryOrigin === 'send_message' &&
     !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled');
-  const metadata = m.ts || m.inputState || activity.length ? <>
+  const metadata = m.timestamp || m.inputState || activity.length ? <>
     {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
     {submission?.status === 'sending' && !m.hideInitialQueuedCaption
       ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
@@ -814,7 +814,7 @@ function Message(
       data-msg-id={m.id}
       elementRef={ref}
       from={m.direction === 'in' && m.author && m.author.userId !== currentUserId.value ? m.author.displayName : undefined}
-      timestamp={m.ts} metadata={metadata}
+      timestamp={m.timestamp} metadata={metadata}
       reveal={highlightMessageId.value === m.id ? searchQuery.value : undefined}
     >
       {showTechnicalStatus
@@ -918,7 +918,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return (
     <MessageBubble class="msg out display-card agent-action" data-msg-id={message.id}
-      timestamp={message.ts} metadata={message.ts || activity.length ? <AgentActionLabel label="card" title="Sent with send_card" /> : null}
+      timestamp={message.timestamp} metadata={message.timestamp || activity.length ? <AgentActionLabel label="card" title="Sent with send_card" /> : null}
       reveal={highlightMessageId.value === message.id ? searchQuery.value : undefined}>
       {showTechnicalStatus
         ? <TurnTechnicalDetails turn={message.statsTurn} lines={activity}
@@ -962,18 +962,14 @@ type MsgGroup = SingleGroup | EventsGroup
   | { kind: 'turn'; row: Extract<TranscriptRow, { kind: 'turn' }> }
   | { kind: 'question-answer'; row: Extract<TranscriptRow, { kind: 'question-answer' }> };
 
-function messageKey(message: ChatMessage): string {
-  return message.id || `${message.direction}:${message.ts}:${message.text}`;
-}
-
 function groupKey(group: MsgGroup, responseTurnId: string | null): string {
   if (group.kind === 'starting' || (group.kind === 'turn' && group.row.status &&
     group.row.turn.phase !== 'settled' && group.row.turn.id === responseTurnId))
     return 'response:active';
   if (group.kind === 'turn') return `turn:${group.row.turn.id}`;
   if (group.kind === 'question-answer') return `question-answer:${group.row.answer.id}`;
-  if (group.kind === 'events') return `events:${messageKey(group.events[0]!)}`;
-  return `single:${messageKey(group.m)}`;
+  if (group.kind === 'events') return `events:${group.events[0]!.id}`;
+  return `single:${group.m.id}`;
 }
 
 function groupContains(group: MsgGroup, messageId: string): boolean {
@@ -1047,7 +1043,7 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
           ? `${taskCount} tasks attempted ${n}\u00d7${failed ? ` \u00b7 ${failed} failed` : ''}`
           : `Task attempted ${n}\u00d7${failed ? ` \u00b7 ${failed} failed` : ''}`}
       </span>
-      <span class="event-meta">last&nbsp;<RelativeTime ts={last.ts} /></span>
+      <span class="event-meta">last&nbsp;<RelativeTime ts={last.timestamp} /></span>
     </button>
   );
 }
@@ -1570,7 +1566,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                     </>
                   );
                 })}
-        {!chatLoading.value && queued.map((message) => <MessageRow key={`${threadId.value}:${messageKey(message)}`} m={message} />)}
+        {!chatLoading.value && queued.map((message) => <MessageRow key={`${threadId.value}:${message.id}`} m={message} />)}
         {!chatLoading.value && <ApprovalReferences />}
         <TaskIndicator />
     </div>

@@ -29,8 +29,7 @@ const answer: ChatMessage = {
   questionId: 'q',
   direction: 'in',
   text: '**Tuesday**',
-  files: null,
-  ts: '2026-10-05T17:01:00Z',
+  timestamp: '2026-10-05T17:01:00Z',
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -45,7 +44,7 @@ describe('answered question markdown', () => {
       '<blockquote>\n<p>Which <strong>day</strong>?</p>\n</blockquote>\n<p><strong>Tuesday</strong></p>\n',
     );
     expect(bubble.props['data-msg-id']).toBe(answer.id);
-    expect(bubble.props.timestamp).toBe(answer.ts);
+    expect(bubble.props.timestamp).toBe(answer.timestamp);
   });
 
   it('quotes every question line, including blank lines, without quoting the answer', () => {

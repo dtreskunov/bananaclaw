@@ -89,8 +89,7 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
     const cached = presentedMessages.get(source);
     if (cached && cached.statsTurn === statsTurn && cached.traceTurn === traceTurn && cached.traceKey === traceKey)
       return cached.message;
-    const { timestamp, ...fields } = source;
-    const message: ChatMessage = { ...fields, files: fields.files ?? null, ts: timestamp };
+    const message: ChatMessage = row.statsTurnId || row.trace ? { ...source } : source;
     if (row.statsTurnId) message.statsTurn = statsTurn;
     if (row.trace) {
       message.turnId = row.trace.turnId;

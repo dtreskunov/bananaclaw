@@ -19917,11 +19917,11 @@ function submissionPresentation(transcript, submissions, view, groupId2, threadI
   const seen = new Set(context.inputs.keys());
   const rows = transcript.map((row) => {
     if (row.kind !== "message") return row;
-    if (row.message.id) seen.add(row.message.id);
+    seen.add(row.message.id);
     const id2 = row.message.id;
-    const owned = !!id2 && context.ownedIds.has(id2);
+    const owned = context.ownedIds.has(id2);
     const startupReceipt = owned && row.message.inputState?.status === "queued" && !row.message.inputState.queuedForNextTurn;
-    if (!row.message.id || !startingIds.has(row.message.id) && !startupReceipt) return row;
+    if (!startingIds.has(id2) && !startupReceipt) return row;
     return { ...row, message: { ...row.message, hideInitialQueuedCaption: true } };
   });
   for (const submission of local) {
@@ -19930,7 +19930,7 @@ function submissionPresentation(transcript, submissions, view, groupId2, threadI
       id: submission.messageId,
       direction: "in",
       text: submission.text,
-      ts: submission.timestamp,
+      timestamp: submission.timestamp,
       files: submission.files.map((file) => ({
         filename: file.name,
         size: file.size,
@@ -19991,8 +19991,7 @@ function conversationPresentation(view) {
     const cached = presentedMessages.get(source);
     if (cached && cached.statsTurn === statsTurn && cached.traceTurn === traceTurn && cached.traceKey === traceKey)
       return cached.message;
-    const { timestamp, ...fields } = source;
-    const message2 = { ...fields, files: fields.files ?? null, ts: timestamp };
+    const message2 = row.statsTurnId || row.trace ? { ...source } : source;
     if (row.statsTurnId) message2.statsTurn = statsTurn;
     if (row.trace) {
       message2.turnId = row.trace.turnId;
@@ -26786,7 +26785,7 @@ function QuestionAnswerBubble({ question: question2, answer }) {
       class: `msg in${md != null ? " markdown" : ""}`,
       "data-msg-id": answer.id,
       from: answer.author && answer.author.userId !== currentUserId.value ? answer.author.displayName : void 0,
-      timestamp: answer.ts,
+      timestamp: answer.timestamp,
       reveal: highlightMessageId.value === answer.id ? searchQuery.value : void 0,
       children: md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 })
     }
@@ -27683,7 +27682,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           /* @__PURE__ */ u4("span", { class: "event-icon", "aria-hidden": "true", children: "\u23F0" }),
           /* @__PURE__ */ u4("span", { class: "event-text", children: ev?.summary || m6.text }),
           /* @__PURE__ */ u4("span", { class: "event-meta", children: [
-            /* @__PURE__ */ u4(RelativeTime, { ts: m6.ts }),
+            /* @__PURE__ */ u4(RelativeTime, { ts: m6.timestamp }),
             recur
           ] })
         ]
@@ -27720,7 +27719,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
-  const metadata = m6.ts || m6.inputState || activity.length ? /* @__PURE__ */ u4(k, { children: [
+  const metadata = m6.timestamp || m6.inputState || activity.length ? /* @__PURE__ */ u4(k, { children: [
     inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
     submission?.status === "sending" && !m6.hideInitialQueuedCaption ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: [
       "Sending",
@@ -27740,7 +27739,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
       "data-msg-id": m6.id,
       elementRef: ref,
       from: m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? m6.author.displayName : void 0,
-      timestamp: m6.ts,
+      timestamp: m6.timestamp,
       metadata,
       reveal: highlightMessageId.value === m6.id ? searchQuery.value : void 0,
       children: [
@@ -27841,8 +27840,8 @@ function DisplayCardMessage({ message: message2, card }) {
     {
       class: "msg out display-card agent-action",
       "data-msg-id": message2.id,
-      timestamp: message2.ts,
-      metadata: message2.ts || activity.length ? /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }) : null,
+      timestamp: message2.timestamp,
+      metadata: message2.timestamp || activity.length ? /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }) : null,
       reveal: highlightMessageId.value === message2.id ? searchQuery.value : void 0,
       children: [
         showTechnicalStatus ? /* @__PURE__ */ u4(
@@ -27879,16 +27878,13 @@ function DisplayCardMessage({ message: message2, card }) {
     }
   );
 }
-function messageKey(message2) {
-  return message2.id || `${message2.direction}:${message2.ts}:${message2.text}`;
-}
 function groupKey(group, responseTurnId) {
   if (group.kind === "starting" || group.kind === "turn" && group.row.status && group.row.turn.phase !== "settled" && group.row.turn.id === responseTurnId)
     return "response:active";
   if (group.kind === "turn") return `turn:${group.row.turn.id}`;
   if (group.kind === "question-answer") return `question-answer:${group.row.answer.id}`;
-  if (group.kind === "events") return `events:${messageKey(group.events[0])}`;
-  return `single:${messageKey(group.m)}`;
+  if (group.kind === "events") return `events:${group.events[0].id}`;
+  return `single:${group.m.id}`;
 }
 function groupContains(group, messageId) {
   if (group.kind === "turn" || group.kind === "starting") return false;
@@ -27953,7 +27949,7 @@ function EventsGroup({ events }) {
     /* @__PURE__ */ u4("span", { class: "event-text", children: multi ? `${taskCount} tasks attempted ${n3}\xD7${failed ? ` \xB7 ${failed} failed` : ""}` : `Task attempted ${n3}\xD7${failed ? ` \xB7 ${failed} failed` : ""}` }),
     /* @__PURE__ */ u4("span", { class: "event-meta", children: [
       "last\xA0",
-      /* @__PURE__ */ u4(RelativeTime, { ts: last.ts })
+      /* @__PURE__ */ u4(RelativeTime, { ts: last.timestamp })
     ] })
   ] });
 }
@@ -28454,7 +28450,7 @@ function MessageLog({ dockRef }) {
         branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
       ] });
     }),
-    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${messageKey(message2)}`)),
+    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${message2.id}`)),
     !chatLoading.value && /* @__PURE__ */ u4(ApprovalReferences, {}),
     /* @__PURE__ */ u4(TaskIndicator, {})
   ] });

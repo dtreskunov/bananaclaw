@@ -13,7 +13,7 @@ export function QuestionAnswerBubble({ question, answer }: { question: PendingQu
   return (
     <MessageBubble class={`msg in${md != null ? ' markdown' : ''}`} data-msg-id={answer.id}
       from={answer.author && answer.author.userId !== currentUserId.value ? answer.author.displayName : undefined}
-      timestamp={answer.ts}
+      timestamp={answer.timestamp}
       reveal={highlightMessageId.value === answer.id ? searchQuery.value : undefined}>
       {md != null
         ? <div class="transcript-copy-content" dangerouslySetInnerHTML={{ __html: md }} />

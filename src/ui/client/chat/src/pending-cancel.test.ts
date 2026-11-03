@@ -34,9 +34,9 @@ const thread: Thread = {
 const message: ChatMessage = {
   id: 'message/id',
   text: 'Original',
-  ts: '1',
+  timestamp: '1',
   direction: 'in',
-  files: [{ filename: 'keep.txt' }],
+  files: [{ filename: 'keep.txt', size: 0 }],
   canEditPending: true,
   inputState: { messageId: 'message/id', status: 'queued', queuedForNextTurn: true },
 };

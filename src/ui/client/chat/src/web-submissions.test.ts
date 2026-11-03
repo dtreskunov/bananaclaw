@@ -17,7 +17,7 @@ const echoed = testSnapshot({ messages: [input] }).conversation;
 const transcript: TranscriptRow[] = [
   {
     kind: 'message',
-    message: { ...input, ts: input.timestamp, files: null },
+    message: input,
   },
 ];
 const present = (submissions: PendingWebSend[], view: Conversation | null = null, rows: TranscriptRow[] = []) =>
@@ -66,9 +66,7 @@ describe('web submission presentation', () => {
         .conversation,
     ]) {
       expect(reconcileWebSubmissions([send], view, 'group')).toEqual([]);
-      const rows = present([send], view, [
-        { kind: 'message', message: { ...queued, ts: queued.timestamp, files: null } },
-      ]);
+      const rows = present([send], view, [{ kind: 'message', message: queued }]);
       expect(rows.some((row) => row.kind === 'starting')).toBe(false);
       expect(rows[0]).not.toMatchObject({ message: { hideInitialQueuedCaption: true } });
     }
@@ -126,9 +124,7 @@ describe('web submission presentation', () => {
       const message = { ...input, inputState: { ...input.inputState, status } };
       const view = testSnapshot({ messages: [message] }).conversation;
       expect(reconcileWebSubmissions([send], view, 'group')).toEqual([]);
-      const rows = present([send], view, [
-        { kind: 'message', message: { ...message, ts: message.timestamp, files: null } },
-      ]);
+      const rows = present([send], view, [{ kind: 'message', message }]);
       expect(rows).toHaveLength(1);
       expect(rows[0]).not.toMatchObject({ message: { hideInitialQueuedCaption: true } });
     },

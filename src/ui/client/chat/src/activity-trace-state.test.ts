@@ -38,10 +38,9 @@ describe('activity panel expansion', () => {
       id: 'reply',
       direction: 'out',
       text: 'Done',
-      ts: '',
+      timestamp: '',
       turnId: testTurn.id,
       activity: [],
-      files: null,
     };
 
     it('uses one turn owner across live and final rows', () => {
