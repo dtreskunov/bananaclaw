@@ -7,7 +7,7 @@ import { memo } from 'preact/compat';
 import { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
 import {
   chatMessages, chatStatus, chatLoading, chatReady, chatReloadRequired, threadId, channelType, canSend, pending,
-  threads, groups, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingApprovalIds,
+  threads, groups, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingInteractionIds,
   pendingQuestions,
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
@@ -18,7 +18,7 @@ import {
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
 import {
   sendChat, retryChatSend, warmChat, addPendingFiles, removePending,
-  navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondApproval,
+  navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondInteraction,
   openChat, openTaskPanel, reconnectChatNow, forkThreadAt, editMessageInBranch,
 } from '../actions';
 import { requestConfirm } from './PromptModal';
@@ -951,8 +951,8 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
 
 function ApprovalRow({ approval, reference }: { approval: PendingApprovalDto; reference?: boolean }) {
   return <ApprovalBubble approval={approval} reference={reference}
-    busy={respondingApprovalIds.value.has(approval.id)}
-    onRespond={(value, message) => { void respondApproval(approval.id, value, message).catch(console.error); }} />;
+    busy={respondingInteractionIds.value.has(approval.id)}
+    onRespond={(value, message) => { void respondInteraction(approval.id, { value, message }).catch(console.error); }} />;
 }
 
 interface SingleGroup { kind: 'single'; m: ChatMessage }

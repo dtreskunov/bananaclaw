@@ -13,11 +13,10 @@
  */
 
 import { log } from './log.js';
-import type { QuestionResponse } from './ui/shared/question.js';
+import type { InteractionResponse } from './ui/shared/conversation.js';
 
-export type ResponsePayload = (QuestionResponse | { value: string; responseType?: never }) & {
+export type ResponsePayload = InteractionResponse & {
   questionId: string;
-  message?: string;
   userId: string | null;
   channelType: string;
   platformId: string;

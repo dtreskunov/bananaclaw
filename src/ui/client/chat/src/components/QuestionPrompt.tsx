@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { respondQuestion } from '../actions';
+import { respondInteraction } from '../actions';
 import { isRecording } from '../recorder';
 import {
   channelType,
   chatReady,
   groupId,
   messagingGroupId,
-  respondingQuestionIds,
+  respondingInteractionIds,
   threadId,
   voiceInput,
 } from '../state';
@@ -28,7 +28,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
   const target = `${gid}:${tid}:question:${q.id}`;
   const voiceState = voice.state.value;
   const active = voiceState.target === target;
-  const busy = respondingQuestionIds.value.has(q.id);
+  const busy = respondingInteractionIds.value.has(q.id);
   const waiting = !!accepted || q.status === 'answered';
   const skipped = accepted === 'skipped' || q.answerType === 'skipped';
   const disconnected = (!channel || channel === 'web') && !chatReady.value;
@@ -57,7 +57,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
     submitting.current = true;
     setError('');
     try {
-      const sent = await respondQuestion(q.id, { responseType, value });
+      const sent = await respondInteraction(q.id, { responseType, value });
       if (sent) setAccepted('answer');
       else setError('Could not submit your answer. Please retry.');
       return sent;
@@ -79,7 +79,7 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
     setError('');
     if (voice.state.value.target === target) voice.detach();
     try {
-      const sent = await respondQuestion(q.id, { responseType: 'skipped' });
+      const sent = await respondInteraction(q.id, { responseType: 'skipped' });
       if (sent) setAccepted('skipped');
       else setError('Could not skip this question. Please retry.');
     } finally {

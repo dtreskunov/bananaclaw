@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
     slots: [] as unknown[],
     cursor: 0,
     resource: { data: null as unknown, error: '', loading: false, refresh: vi.fn().mockResolvedValue(undefined) },
-    respond: vi.fn().mockResolvedValue(undefined),
+    respond: vi.fn().mockResolvedValue(true),
   };
 });
 vi.mock('preact/hooks', () => ({
@@ -39,7 +39,7 @@ vi.mock('preact/hooks', () => ({
   useLayoutEffect: vi.fn(),
 }));
 vi.mock('./CredentialsParts', () => ({ ErrorNotice: () => null, useCredentialResource: () => mocks.resource }));
-vi.mock('../actions', () => ({ respondApproval: mocks.respond }));
+vi.mock('../actions', () => ({ respondInteraction: mocks.respond }));
 
 interface Node {
   type: unknown;
@@ -279,7 +279,10 @@ describe('optional approval messages', () => {
     const { tree } = accessReview();
     button(tree, 'Decline').props.onClick!();
     await vi.waitFor(() =>
-      expect(mocks.respond).toHaveBeenCalledWith('approval', 'reject', 'Already finished elsewhere.'),
+      expect(mocks.respond).toHaveBeenCalledWith('approval', {
+        value: 'reject',
+        message: 'Already finished elsewhere.',
+      }),
     );
   });
 });

@@ -1095,6 +1095,10 @@ The runner checks the host's durable response identity directly, including
 already-consumed answers and skips; it does not reconstruct an answer registry
 from message bodies or poll a separate question-response helper.
 
+Runner read helpers borrow `getInboundDb()`'s session-owned connection. They do
+not open or close read handles; `closeSessionDb()` alone owns shutdown. Test
+projections may use separate in-memory connections without a proxy API.
+
 #### edit_message
 
 Edit a previously sent message.

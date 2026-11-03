@@ -17,21 +17,7 @@ let _outbound: Database | null = null;
 let _testMode = false;
 
 /**
- * Compatibility wrapper for callers that own a short-lived read handle.
- * Production reads use the runner-state singleton; close() is intentionally
- * a no-op because the session link shares that connection.
- */
-export function openInboundDb(): Database {
-  const db = _testMode && _inbound ? _inbound : getOutboundDb();
-  return {
-    prepare: (sql: string) => db.prepare(sql),
-    exec: (sql: string) => db.exec(sql),
-    close: () => {},
-  } as unknown as Database;
-}
-
-/**
- * Host-state projection in the runner-owned database.
+ * Borrow the host-state projection handle; only closeSessionDb owns its lifetime.
  */
 export function getInboundDb(): Database {
   if (_testMode && _inbound) return _inbound;

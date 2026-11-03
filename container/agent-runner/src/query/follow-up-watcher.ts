@@ -18,11 +18,8 @@ function log(msg: string): void {
 }
 
 /**
- * True for SQLite errors that indicate a corrupt READ view — almost always a
- * cross-mount page-cache coherency issue on Docker Desktop macOS rather than
- * actual file damage (host-side integrity_check passes). Reopening the DB
- * handle inside this process does NOT recover; only a fresh container mount
- * does. Caller's job is to exit so host-sweep respawns the container.
+ * A corrupt runner projection requires a fresh runtime, not an endless retry
+ * against the same connection. Exit so the host can recover the session.
  */
 export function isCorruptionError(msg: string): boolean {
   return (
@@ -126,15 +123,12 @@ export class FollowUpWatcher {
     // Session DB gone — the host deleted the thread and removed the on-disk
     // session dir. Exit immediately instead of polling a dead file forever.
     if (isMissingDbError(errMsg)) {
-      log('Follow-up poll: inbound.db is gone — session was deleted by host. Exiting.');
+      log('Follow-up poll: runner-state.db is gone — session was deleted by host. Exiting.');
       this.fatal(0);
       return;
     }
 
-    // SQLite cross-mount corruption (Docker Desktop macOS virtiofs /
-    // gRPC-FUSE coherency bug): every fresh openInboundDb() in this process
-    // sees the same torn snapshot and only a fresh container mount recovers.
-    // Exit so the host sweep respawns us.
+    // Do not spin forever against a corrupt session-owned connection.
     if (!isCorruptionError(errMsg)) {
       this.corruptionStreak = 0;
       return;
@@ -143,7 +137,7 @@ export class FollowUpWatcher {
     if (this.corruptionStreak >= CORRUPTION_STREAK_EXIT) {
       log(
         `Follow-up poll: ${this.corruptionStreak} consecutive '${errMsg}' errors — ` +
-          `inbound.db page cache is poisoned. Exiting so host respawns with a fresh mount.`,
+          `runner-state.db is corrupt. Exiting so the host can recover the session.`,
       );
       this.fatal(75);
     }

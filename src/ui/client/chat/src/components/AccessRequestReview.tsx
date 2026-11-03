@@ -3,7 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { credentialRequest, credentialsPath, errorMessage, CredentialsError, type AppInfo, type Connection } from './CredentialsApi';
 import { ErrorNotice } from './CredentialsParts';
 import { accountRequestStatusText, connectionName, serviceDestination } from './credential-presentation';
-import { respondApproval } from '../actions';
+import { respondInteraction } from '../actions';
 import { approvalMessageDrafts, clearApprovalMessage } from '../approval-messages';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { ApprovalCardFrame } from './ApprovalCard';
@@ -197,7 +197,8 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
     setBusy(true);
     setError('');
     try {
-      await respondApproval(id, 'reject', approvalMessageDrafts.value[id]);
+      if (await respondInteraction(id, { value: 'reject', message: approvalMessageDrafts.value[id] }))
+        setSubmitted(`${id}:${request.revision}`);
     } catch (error) {
       setError(errorMessage(error));
     } finally { setBusy(false); }

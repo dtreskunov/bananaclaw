@@ -1,25 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { clearChat, respondApproval, respondQuestion, retryChatSend, sendChat } from './actions';
+import { clearChat, respondInteraction, retryChatSend, sendChat } from './actions';
 import { approvalMessageDrafts } from './approval-messages';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
 import { applyConversationFrame, conversationState } from './conversation-state';
 import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared/conversation-protocol';
-import { presentedConversation, testSnapshot, testTurn } from './conversation-test-fixtures';
+import { presentedConversation, testAccountInteraction, testSnapshot, testTurn } from './conversation-test-fixtures';
 import {
   activeTurn,
   canSend,
   channelType,
   chatMessages,
   chatReady,
+  chatStatus,
   groupId,
   highlightMessageId,
   messagingGroupId,
   pending,
   pendingWebSends,
+  pendingApprovals,
   pinnedContext,
   scrollToBottomTick,
-  respondingQuestionIds,
+  respondingInteractionIds,
   threadId,
 } from './state';
 import { splitPendingInputs } from './queued-followups';
@@ -46,7 +48,10 @@ beforeEach(() => {
   scrollToBottomTick.value = 0;
   applyTurnState({ id: 'captured-turn', status: 'running', supportsSteering: true }, true);
   vi.mocked(requestChoice).mockReset().mockResolvedValue('steer');
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ approvals: [] }) }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, approvals: [] }) }),
+  );
 });
 afterEach(() => {
   clearChat();
@@ -378,8 +383,10 @@ describe('question response requests', () => {
       approvalMessageDrafts.value = {};
     });
     approvalMessageDrafts.value = { 'approval-one': 'Keep the old labels.', other: 'Keep this draft.' };
-    await respondApproval('approval-one', 'approve', '  Keep the old labels.  ');
-    expect(fetch).toHaveBeenLastCalledWith(
+    expect(await respondInteraction('approval-one', { value: 'approve', message: '  Keep the old labels.  ' })).toBe(
+      true,
+    );
+    expect(fetch).toHaveBeenCalledWith(
       'api/approvals/approval-one/respond',
       expect.objectContaining({
         body: JSON.stringify({ value: 'approve', message: 'Keep the old labels.' }),
@@ -394,36 +401,65 @@ describe('question response requests', () => {
       approvalMessageDrafts.value = {};
     });
     vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"temporarily unavailable"}', { status: 503 }));
-    await respondApproval('approval-one', 'reject', 'Do not retry.');
+    expect(await respondInteraction('approval-one', { value: 'reject', message: 'Do not retry.' })).toBe(false);
     expect(approvalMessageDrafts.value['approval-one']).toBe('Do not retry.');
   });
 
-  it('keeps approval requests without a message backward compatible', async () => {
+  it('submits decisions without an optional note', async () => {
     vi.useFakeTimers();
     onTestFinished(() => {
       vi.useRealTimers();
     });
-    await respondApproval('approval-one', 'approve');
-    expect(fetch).toHaveBeenLastCalledWith(
+    expect(await respondInteraction('approval-one', { value: 'approve' })).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
       'api/approvals/approval-one/respond',
       expect.objectContaining({
         body: JSON.stringify({ value: 'approve' }),
       }),
     );
   });
+  it('keeps canonical requests visible while submitting and never invents an applied outcome', async () => {
+    let accept!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+    );
+    const request = testAccountInteraction({ id: 'approval-one' });
+    onTestFinished(() => {
+      pendingApprovals.value = [];
+    });
+    pendingApprovals.value = [request];
+    chatStatus.value = 'Current response is streaming';
+    const submission = respondInteraction(request.id, { value: 'review' });
+    expect(pendingApprovals.value).toEqual([request]);
+    expect(respondingInteractionIds.value.has(request.id)).toBe(true);
+    expect(await respondInteraction(request.id, { value: 'review' })).toBe(false);
+    accept(new Response('{"ok":true}'));
+    expect(await submission).toBe(true);
+    expect(chatStatus.value).toBe('Current response is streaming');
+    expect(respondingInteractionIds.value.has(request.id)).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/respond'))).toHaveLength(1);
+  });
+  it('does not accept an HTTP-success response without an explicit acknowledgement', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{}'));
+    expect(await respondInteraction('approval-one', { value: 'approve' })).toBe(false);
+    expect(respondingInteractionIds.value.has('approval-one')).toBe(false);
+  });
   it('uses the existing endpoint for typed skips and ordinary answers without submitting files or context', async () => {
     channelType.value = 'web';
-    respondingQuestionIds.value = new Set();
+    respondingInteractionIds.value = new Set();
     const files = [{ name: 'draft.txt', size: 1, file: new File(['x'], 'draft.txt') }];
     pending.value = files;
     pinnedContext.value = ['keep/context.txt'];
-    expect(await respondQuestion('q:one', { responseType: 'skipped' })).toBe(true);
-    expect(fetch).toHaveBeenLastCalledWith(
+    expect(await respondInteraction('q:one', { responseType: 'skipped' })).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
       'api/approvals/q%3Aone/respond',
       expect.objectContaining({ body: JSON.stringify({ responseType: 'skipped' }) }),
     );
-    expect(await respondQuestion('q:one', { responseType: 'text', value: 'Yes' })).toBe(true);
-    expect(fetch).toHaveBeenLastCalledWith(
+    expect(await respondInteraction('q:one', { responseType: 'text', value: 'Yes' })).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
       'api/approvals/q%3Aone/respond',
       expect.objectContaining({ body: JSON.stringify({ responseType: 'text', value: 'Yes' }) }),
     );

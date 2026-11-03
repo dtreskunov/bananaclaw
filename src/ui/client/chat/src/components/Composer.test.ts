@@ -34,7 +34,7 @@ import {
 import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, openPendingEditor } from '../pending-edit';
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
-import { clearPinnedContext, removePending, respondQuestion, retryChatSend, sendChat, warmChat } from '../actions';
+import { clearPinnedContext, removePending, respondInteraction, retryChatSend, sendChat, warmChat } from '../actions';
 import type { ActivityLine, ChatMessage, PendingQuestionDto } from '../types';
 import { testThread } from '../conversation-test-fixtures';
 import type { ConversationMessage, ConversationTurn } from '../../../../shared/conversation';
@@ -125,7 +125,7 @@ vi.mock('../actions', () => ({
   clearPinnedContext: vi.fn(),
   addPendingFiles: vi.fn(),
   removePending: vi.fn(),
-  respondQuestion: vi.fn(),
+  respondInteraction: vi.fn(),
 }));
 
 const thread = testThread({ messagingGroupId: null });
@@ -824,7 +824,7 @@ describe('main composer pending edits', () => {
     };
     beforeEach(() => {
       resetMount('');
-      vi.mocked(respondQuestion).mockReset().mockResolvedValue(true);
+      vi.mocked(respondInteraction).mockReset().mockResolvedValue(true);
     });
     it('shows the question beside Skip without a separate title', () => {
       mount();
@@ -946,21 +946,21 @@ describe('main composer pending edits', () => {
       click();
       click();
       find(tree, 'button', 'First').props.onClick();
-      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledOnce());
       mount();
-      expect(respondQuestion).toHaveBeenCalledWith('q', { responseType: 'skipped' });
+      expect(respondInteraction).toHaveBeenCalledWith('q', { responseType: 'skipped' });
       expect(sendChat).not.toHaveBeenCalled();
       expect(find(tree, 'button', 'First').props.disabled).toBe(true);
       expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
       expect(find(tree, 'div', 'Waiting for skip confirmation…')).toBeDefined();
     });
     it('retains typed text and offers a retry when skipping fails after the outcome is saved', async () => {
-      vi.mocked(respondQuestion).mockResolvedValueOnce(false);
+      vi.mocked(respondInteraction).mockResolvedValueOnce(false);
       mount();
       find(tree, 'textarea').props.onInput({ currentTarget: { value: 'Unsaved answer' } });
       mount();
       find(tree, 'button', 'Skip question and notify agent').props.onClick();
-      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledOnce());
       mount({ ...dockQuestion, status: 'answered', answerType: 'skipped' });
       expect(find(tree, 'textarea').props.value).toBe('Unsaved answer');
       expect(find(tree, 'p').props.role).toBe('alert');
@@ -968,7 +968,7 @@ describe('main composer pending edits', () => {
       expect(retry.props.children).toBe('Retry skip');
       expect(retry.props.disabled).toBe(false);
       retry.props.onClick();
-      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledTimes(2));
     });
     it('renders the skip event without interpreting it as a selected option', () => {
       const bubble = QuestionAnswerBubble({
@@ -994,22 +994,22 @@ describe('main composer pending edits', () => {
       const click = find(tree, 'button', 'First').props.onClick;
       click();
       click();
-      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledOnce());
       mount();
-      expect(respondQuestion).toHaveBeenCalledWith('q', { responseType: 'choice', value: 'first' });
+      expect(respondInteraction).toHaveBeenCalledWith('q', { responseType: 'choice', value: 'first' });
       expect(find(tree, 'button', 'First').props.disabled).toBe(true);
       expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
       expect(find(tree, 'section').props['aria-busy']).toBe(true);
       expect(find(tree, 'div', 'Waiting for answer confirmation…')).toBeDefined();
     });
     it('keeps a failed text answer for retry, without using the ordinary send path', async () => {
-      vi.mocked(respondQuestion).mockResolvedValueOnce(false);
+      vi.mocked(respondInteraction).mockResolvedValueOnce(false);
       mount();
       find(tree, 'textarea').props.onInput({ currentTarget: { value: '  My answer  ' } });
       mount();
       find(tree, 'form').props.onSubmit({ preventDefault() {} });
       await vi.waitFor(() =>
-        expect(respondQuestion).toHaveBeenCalledWith('q', { responseType: 'text', value: 'My answer' }),
+        expect(respondInteraction).toHaveBeenCalledWith('q', { responseType: 'text', value: 'My answer' }),
       );
       mount();
       expect(find(tree, 'textarea').props.value).toBe('  My answer  ');
@@ -1017,7 +1017,7 @@ describe('main composer pending edits', () => {
       expect(find(tree, 'button', 'Send answer').props.disabled).toBe(false);
       expect(sendChat).not.toHaveBeenCalled();
       find(tree, 'form').props.onSubmit({ preventDefault() {} });
-      await vi.waitFor(() => expect(respondQuestion).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledTimes(2));
     });
     it('locks a metadata-only answered prompt and disables sends while disconnected', () => {
       mount({ ...dockQuestion, status: 'answered' });
@@ -1060,7 +1060,7 @@ describe('main composer pending edits', () => {
         mount();
         expect(find(tree, 'textarea').props.value).toBe('Dictated answer');
         expect(await target.send()).toBe(true);
-        expect(respondQuestion).toHaveBeenCalledWith('q', { responseType: 'text', value: 'Dictated answer' });
+        expect(respondInteraction).toHaveBeenCalledWith('q', { responseType: 'text', value: 'Dictated answer' });
         expect(sendChat).not.toHaveBeenCalled();
       } finally {
         start.mockRestore();

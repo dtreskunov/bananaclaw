@@ -72,6 +72,10 @@ export interface ConversationQuestion extends QuestionInput {
 
 export type ConversationInteraction = ConversationQuestion | ConversationApproval;
 
+export type InteractionResponse = (QuestionResponse | { value: string; responseType?: never }) & {
+  message?: string;
+};
+
 export function isQuestionInteraction(item: ConversationInteraction): item is ConversationQuestion {
   return item.kind === 'question';
 }

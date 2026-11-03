@@ -40,9 +40,8 @@ import {
   nowTick,
   pinnedContext,
   pendingApprovals,
-  respondingApprovalIds,
+  respondingInteractionIds,
   pendingQuestions,
-  respondingQuestionIds,
   searchQuery,
   searchResults,
   searchLoading,
@@ -60,7 +59,7 @@ import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
 import { ConversationProtocolError, type ConversationSnapshot } from '../../../shared/conversation-protocol';
-import type { QuestionResponse } from '../../../shared/question';
+import type { InteractionResponse } from '../../../shared/conversation';
 import type { ChatStartResponse, ThreadSummary } from '../../../shared/thread';
 import { applyTurnState, resetTurnState } from './stop-turn';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
@@ -1605,76 +1604,31 @@ export function installLivenessHandlers(): void {
   });
 }
 
-// ── pending approvals (banner inbox) ────────────────────────────────
-export async function respondApproval(approvalId: string, value: string, message?: string): Promise<void> {
-  if (respondingApprovalIds.value.has(approvalId)) return;
-  const next = new Set(respondingApprovalIds.value);
-  next.add(approvalId);
-  respondingApprovalIds.value = next;
-  // Optimistically remove the row so the banner updates immediately. The
-  // server-side apply (e.g. install_packages → image rebuild) can take many
-  // seconds; keeping the row visible the whole time is misleading. If the
-  // POST fails we re-fetch the canonical list.
-  const before = pendingApprovals.value;
-  pendingApprovals.value = before.filter((a) => a.id !== approvalId);
-  const verb = value === 'approve' ? 'Approving' : value === 'reject' ? 'Rejecting' : 'Submitting';
-  chatStatus.value = verb + '\u2026';
+export async function respondInteraction(id: string, response: InteractionResponse): Promise<boolean> {
+  if (respondingInteractionIds.value.has(id)) return false;
+  respondingInteractionIds.value = new Set(respondingInteractionIds.value).add(id);
+  let accepted = false;
   try {
-    const res = await postJson<{ ok?: boolean; error?: string }>(
-      `api/approvals/${encodeURIComponent(approvalId)}/respond`,
-      { value, ...(message?.trim() ? { message: message.trim() } : {}) },
-    );
-    if (!res.ok) throw new Error(res.data?.error || 'HTTP ' + res.status);
-    clearApprovalMessage(approvalId);
-    chatStatus.value = verb.replace(/ing$/, 'ed') + ' \u2014 applied';
-    setTimeout(() => {
-      if (
-        chatStatus.value.startsWith('Approved') ||
-        chatStatus.value.startsWith('Rejected') ||
-        chatStatus.value.startsWith('Submitted')
-      ) {
-        chatStatus.value = '';
-      }
-    }, 4000);
-  } catch (err) {
-    console.error('approval respond failed', err);
-    chatStatus.value = '';
-    showToast('Approval failed: ' + (err instanceof Error ? err.message : String(err)), 'err');
-    // Restore canonical state from the server.
-    runSync().catch(() => {
-      /* ignore */
+    const { message, ...answer } = response;
+    const note = message?.trim();
+    const res = await postJson<{ ok?: boolean; error?: string }>(`api/approvals/${encodeURIComponent(id)}/respond`, {
+      ...answer,
+      ...(note ? { message: note } : {}),
     });
-  } finally {
-    const cleared = new Set(respondingApprovalIds.value);
-    cleared.delete(approvalId);
-    respondingApprovalIds.value = cleared;
-  }
-}
-
-export async function respondQuestion(questionId: string, response: QuestionResponse): Promise<boolean> {
-  if (respondingQuestionIds.value.has(questionId)) return false;
-  const next = new Set(respondingQuestionIds.value);
-  next.add(questionId);
-  respondingQuestionIds.value = next;
-  try {
-    // Reuse the approval respond endpoint — dispatchResponse routes to both handlers.
-    const res = await postJson<{ ok?: boolean; error?: string }>(
-      `api/approvals/${encodeURIComponent(questionId)}/respond`,
-      response,
-    );
     if (!res.ok) throw new Error(res.data?.error || 'HTTP ' + res.status);
-    if (channelType.value !== 'web') await runSync({ forceRefresh: true });
-    return true;
+    if (res.data?.ok !== true) throw new Error('Invalid interaction response. Refresh and retry.');
+    clearApprovalMessage(id);
+    accepted = true;
   } catch (err) {
-    console.error('question respond failed', err);
+    console.error('interaction respond failed', err);
     showToast('Response failed: ' + (err instanceof Error ? err.message : String(err)), 'err');
-    runSync().catch(() => {
-      /* ignore */
-    });
-    return false;
-  } finally {
-    const cleared = new Set(respondingQuestionIds.value);
-    cleared.delete(questionId);
-    respondingQuestionIds.value = cleared;
   }
+  try {
+    await runSync({ forceRefresh: true });
+  } finally {
+    const cleared = new Set(respondingInteractionIds.value);
+    cleared.delete(id);
+    respondingInteractionIds.value = cleared;
+  }
+  return accepted;
 }

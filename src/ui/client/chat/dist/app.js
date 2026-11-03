@@ -15722,9 +15722,8 @@ var previewBlock = y3(null);
 var nowTick = y3(Date.now());
 var pinnedContext = y3([]);
 var pendingApprovals = y3([]);
-var respondingApprovalIds = y3(/* @__PURE__ */ new Set());
+var respondingInteractionIds = y3(/* @__PURE__ */ new Set());
 var pendingQuestions = y3([]);
-var respondingQuestionIds = y3(/* @__PURE__ */ new Set());
 var refs = {
   ws: null,
   chatGeneration: 0,
@@ -21765,64 +21764,33 @@ function installLivenessHandlers() {
     }
   });
 }
-async function respondApproval(approvalId, value, message2) {
-  if (respondingApprovalIds.value.has(approvalId)) return;
-  const next = new Set(respondingApprovalIds.value);
-  next.add(approvalId);
-  respondingApprovalIds.value = next;
-  const before = pendingApprovals.value;
-  pendingApprovals.value = before.filter((a4) => a4.id !== approvalId);
-  const verb = value === "approve" ? "Approving" : value === "reject" ? "Rejecting" : "Submitting";
-  chatStatus.value = verb + "\u2026";
+async function respondInteraction(id2, response) {
+  if (respondingInteractionIds.value.has(id2)) return false;
+  respondingInteractionIds.value = new Set(respondingInteractionIds.value).add(id2);
+  let accepted = false;
   try {
-    const res = await postJson(
-      `api/approvals/${encodeURIComponent(approvalId)}/respond`,
-      { value, ...message2?.trim() ? { message: message2.trim() } : {} }
-    );
-    if (!res.ok) throw new Error(res.data?.error || "HTTP " + res.status);
-    clearApprovalMessage(approvalId);
-    chatStatus.value = verb.replace(/ing$/, "ed") + " \u2014 applied";
-    setTimeout(() => {
-      if (chatStatus.value.startsWith("Approved") || chatStatus.value.startsWith("Rejected") || chatStatus.value.startsWith("Submitted")) {
-        chatStatus.value = "";
-      }
-    }, 4e3);
-  } catch (err) {
-    console.error("approval respond failed", err);
-    chatStatus.value = "";
-    showToast("Approval failed: " + (err instanceof Error ? err.message : String(err)), "err");
-    runSync().catch(() => {
+    const { message: message2, ...answer } = response;
+    const note = message2?.trim();
+    const res = await postJson(`api/approvals/${encodeURIComponent(id2)}/respond`, {
+      ...answer,
+      ...note ? { message: note } : {}
     });
-  } finally {
-    const cleared = new Set(respondingApprovalIds.value);
-    cleared.delete(approvalId);
-    respondingApprovalIds.value = cleared;
-  }
-}
-async function respondQuestion(questionId, response) {
-  if (respondingQuestionIds.value.has(questionId)) return false;
-  const next = new Set(respondingQuestionIds.value);
-  next.add(questionId);
-  respondingQuestionIds.value = next;
-  try {
-    const res = await postJson(
-      `api/approvals/${encodeURIComponent(questionId)}/respond`,
-      response
-    );
     if (!res.ok) throw new Error(res.data?.error || "HTTP " + res.status);
-    if (channelType.value !== "web") await runSync({ forceRefresh: true });
-    return true;
+    if (res.data?.ok !== true) throw new Error("Invalid interaction response. Refresh and retry.");
+    clearApprovalMessage(id2);
+    accepted = true;
   } catch (err) {
-    console.error("question respond failed", err);
+    console.error("interaction respond failed", err);
     showToast("Response failed: " + (err instanceof Error ? err.message : String(err)), "err");
-    runSync().catch(() => {
-    });
-    return false;
-  } finally {
-    const cleared = new Set(respondingQuestionIds.value);
-    cleared.delete(questionId);
-    respondingQuestionIds.value = cleared;
   }
+  try {
+    await runSync({ forceRefresh: true });
+  } finally {
+    const cleared = new Set(respondingInteractionIds.value);
+    cleared.delete(id2);
+    respondingInteractionIds.value = cleared;
+  }
+  return accepted;
 }
 
 // src/credentials-navigation.ts
@@ -23840,7 +23808,7 @@ function QuestionPrompt({ question: q5 }) {
   const target = `${gid}:${tid}:question:${q5.id}`;
   const voiceState = voice.state.value;
   const active = voiceState.target === target;
-  const busy = respondingQuestionIds.value.has(q5.id);
+  const busy = respondingInteractionIds.value.has(q5.id);
   const waiting = !!accepted || q5.status === "answered";
   const skipped = accepted === "skipped" || q5.answerType === "skipped";
   const disconnected = (!channel || channel === "web") && !chatReady.value;
@@ -23858,7 +23826,7 @@ function QuestionPrompt({ question: q5 }) {
     submitting.current = true;
     setError("");
     try {
-      const sent = await respondQuestion(q5.id, { responseType, value });
+      const sent = await respondInteraction(q5.id, { responseType, value });
       if (sent) setAccepted("answer");
       else setError("Could not submit your answer. Please retry.");
       return sent;
@@ -23873,7 +23841,7 @@ function QuestionPrompt({ question: q5 }) {
     setError("");
     if (voice.state.value.target === target) voice.detach();
     try {
-      const sent = await respondQuestion(q5.id, { responseType: "skipped" });
+      const sent = await respondInteraction(q5.id, { responseType: "skipped" });
       if (sent) setAccepted("skipped");
       else setError("Could not skip this question. Please retry.");
     } finally {
@@ -24941,7 +24909,8 @@ function AccessRequestReview({
     setBusy(true);
     setError("");
     try {
-      await respondApproval(id2, "reject", approvalMessageDrafts.value[id2]);
+      if (await respondInteraction(id2, { value: "reject", message: approvalMessageDrafts.value[id2] }))
+        setSubmitted(`${id2}:${request.revision}`);
     } catch (error2) {
       setError(errorMessage(error2));
     } finally {
@@ -27992,9 +27961,9 @@ function ApprovalRow({ approval: approval2, reference }) {
     {
       approval: approval2,
       reference,
-      busy: respondingApprovalIds.value.has(approval2.id),
+      busy: respondingInteractionIds.value.has(approval2.id),
       onRespond: (value, message2) => {
-        void respondApproval(approval2.id, value, message2).catch(console.error);
+        void respondInteraction(approval2.id, { value, message: message2 }).catch(console.error);
       }
     }
   );
