@@ -1541,11 +1541,15 @@ nav.tab-bar-strip.group-strip {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 24px;
+  min-height: 1.2em;
+  font-size: var(--font-2xs);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: var(--muted);
 }
 .tab-item > .tab-item-sublabel {
-  min-height: 24px;
+  min-height: 1.2em;
   display: flex;
   align-items: center;
 }
@@ -1643,28 +1647,37 @@ nav.tab-bar-strip.group-strip {
 
 /* src/components/AttentionBadge.css */
 .attention-badge {
-  font-size: var(--font-xs);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
+  font: inherit;
+  font-weight: 700;
   white-space: nowrap;
 }
+.attention-separator {
+  flex: none;
+  color: var(--muted);
+  font-weight: 400;
+  white-space: pre;
+}
 .msg-action-btn:has(> .attention-badge) {
+  font: inherit;
+  letter-spacing: inherit;
   width: auto;
   height: auto;
-  min-height: 24px;
-  padding: 2px 6px;
-  border: 1px solid var(--warning-border);
-  border-radius: var(--radius-md);
-  background: var(--warning-bg);
-  color: var(--surface-fg);
-  vertical-align: middle;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--warning);
 }
 .msg-action-btn:has(> .attention-badge):hover:not(:disabled) {
-  background: var(--highlight);
+  color: var(--warning);
+  background: transparent;
+  text-decoration: underline;
 }
 .msg-action-btn:has(> .attention-badge):focus-visible {
-  border-color: var(--focus-ring);
+  color: var(--warning);
+  background: transparent;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 [data-attention-target]:focus,
 [data-attention-target]:focus-within {
@@ -1846,12 +1859,11 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
   font-size: var(--font-xs);
   color: var(--muted);
   margin-top: 2px;
 }
-.threads-rail .thread .meta > span {
+.threads-rail .thread .meta > span:not(.attention-separator) {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;

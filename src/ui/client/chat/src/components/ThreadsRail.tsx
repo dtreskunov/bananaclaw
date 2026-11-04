@@ -33,7 +33,9 @@ function ThreadAttention({ thread }: { thread: Thread }) {
     channelType: thread.channelType || 'web', messagingGroupId: thread.messagingGroupId ?? null,
   };
   const count = threadAttentionCount(location);
-  return count > 0 ? <button type="button" class="msg-action-btn thread-attention"
+  return count > 0 ? <>
+    <span class="attention-separator" aria-hidden="true">{' \u00b7 '}</span>
+    <button type="button" class="msg-action-btn thread-attention"
     disabled={!!attentionError.value}
     aria-label={attentionError.value
       ? `Input status unavailable. ${count} last known requests in ${thread.title}`
@@ -44,7 +46,8 @@ function ThreadAttention({ thread }: { thread: Thread }) {
       void navigateAttention(location);
     }}>
     <AttentionBadge value={count} label={`${count} requests need your input`} />
-  </button> : null;
+    </button>
+  </> : null;
 }
 
 function ThreadRow({ t }: { t: Thread }) {

@@ -29,7 +29,8 @@ describe('tab badge actions', () => {
     const status = group.props.children[1];
     expect(status.props.class).toBe('tab-item-status');
     expect(status.props.children[0].props.children).toBe('just now');
-    const action = status.props.children[1];
+    expect(status.props.children[1].props).toMatchObject({ class: 'attention-separator', children: ' \u00b7 ', 'aria-hidden': 'true' });
+    const action = status.props.children[2];
     expect(action.type).toBe('button');
     expect(action.props.class).toContain('msg-action-btn');
     expect(dropdown.type).toBe('div');
@@ -63,5 +64,16 @@ describe('tab badge actions', () => {
     expect(item.type).toBe('div');
     const buttons = toChildArray(item.props.children);
     expect(buttons).toMatchObject([{ type: 'button' }, { type: 'button', props: { disabled: true } }]);
+  });
+  it.each([
+    { sublabel: '2h', badge: undefined },
+    { sublabel: undefined, badge: '1 attn' },
+  ])('does not render a dangling separator for %j', ({ sublabel, badge }) => {
+    const root = TabBar({
+      ariaLabel: 'Agents', activeId: 'g', onSelect: vi.fn(),
+      items: [{ id: 'g', label: 'Group', sublabel, badge, reserveSublabel: true }],
+    });
+    const group = root.props.children[0].props.children[0][0];
+    expect(group.props.children[1].props.children[1]).toBeNull();
   });
 });

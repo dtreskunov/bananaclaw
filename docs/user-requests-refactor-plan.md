@@ -314,9 +314,9 @@ Shared subtle `N attn` badges appear inline in agent-tab and thread-card status
 lines, and in the mobile agent picker. Each opens the oldest actionable request in its agent or exact
 thread, using the server's existing oldest-first order directly. Native sibling
 buttons keep attention navigation distinct from ordinary tab/thread selection.
-There is no floating attention control or cyclic pager. Counts reuse the shared
-inline-action styling, a subtle existing warning-background token and the
-composer send button's corner-radius token. Delete controls retain their larger
+There is no floating attention control or cyclic pager. Counts read as a single dot-separated status string: `2h · 4 msg · 1 attn`.
+Only the attention text is bold and warning-colored, inheriting the surrounding
+font and size with no badge fill or border. Delete controls retain their larger
 32px hit targets and vertical centering. Only delete retains hover/focus reveal.
 Navigation uses existing routes and forms, preserves exact non-web context and
 focuses a request once without stealing focus on later snapshots.

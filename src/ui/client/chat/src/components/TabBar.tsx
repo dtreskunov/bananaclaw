@@ -120,6 +120,7 @@ export function TabBar(props: TabBarProps): JSX.Element {
                   <span class="tab-item-sublabel" aria-hidden={it.sublabel ? undefined : 'true'}>
                     {it.sublabel}
                   </span>
+                  {it.sublabel && it.badge ? <span class="attention-separator" aria-hidden="true">{' \u00b7 '}</span> : null}
                   {tabBadge(it)}
                 </div>
               ) : null}

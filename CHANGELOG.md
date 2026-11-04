@@ -4,9 +4,9 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
-- **Input attention.** Clickable `N attn` badges in agent-tab and thread-card status
-  lines open the oldest actionable request in their scope. Subtle theme-token
-  highlights and composer-style corners replace plain count controls. No floating
+- **Input attention.** Clickable `N attn` text in agent-tab and thread-card status
+  lines opens the oldest actionable request in its scope. Dot-separated status
+  text shares one font; attention alone is bold and warning-colored. No floating
   pager. Delete retains its larger centered target; attention stays visible
   without hover. Counts are authorized
   canonical projections, not unread flags or another agent lifecycle.
