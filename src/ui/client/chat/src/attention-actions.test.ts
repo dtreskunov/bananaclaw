@@ -42,13 +42,13 @@ describe('authoritative attention refresh', () => {
     expect(api).toHaveBeenCalledWith('api/sync', undefined);
     expect(attentionTargets.value).toEqual([]);
   });
-  it('presents the stable server order newest-first without mutating its snapshot', async () => {
+  it('preserves the authoritative oldest-first order without mutating its snapshot', async () => {
     const oldest = { ...target, id: 'oldest' };
     const newest = { ...target, id: 'newest' };
     const server = [oldest, newest];
     vi.mocked(api).mockResolvedValue({ approvals: [], attention: server });
     await runSync();
-    expect(attentionTargets.value).toEqual([newest, oldest]);
+    expect(attentionTargets.value).toEqual([oldest, newest]);
     expect(server).toEqual([oldest, newest]);
   });
   it.each(['missing', 'network'])('retains the last snapshot on %s failures', async (failure) => {
@@ -87,25 +87,26 @@ describe('authoritative attention refresh', () => {
     expect(attentionTargets.value).toEqual([]);
     expect(attentionError.value).toBeNull();
   });
-  it('navigates requests cyclically without changing request state or creating a thread', async () => {
+  it('always opens the oldest request in the selected agent without changing request state', async () => {
     groupId.value = 'g';
     threadId.value = 't';
     messagingGroupId.value = 'm';
-    attentionTargets.value = [target, { ...target, id: 'second' }];
-    expect(await navigateAttention()).toBe(true);
+    attentionTargets.value = [
+      { ...target, id: 'other-agent', origin: { ...target.origin, agentGroupId: 'other' } },
+      target,
+      { ...target, id: 'second' },
+    ];
+    attentionSelection.value = { id: 'second', navigation: 0 };
+    expect(await navigateAttention('g')).toBe(true);
     expect(attentionSelection.value?.id).toBe('q');
-    expect(await navigateAttention()).toBe(true);
-    expect(attentionSelection.value?.id).toBe('second');
-    expect(await navigateAttention()).toBe(true);
+    expect(await navigateAttention('g')).toBe(true);
     expect(attentionSelection.value?.id).toBe('q');
-    expect(await navigateAttention()).toBe(true);
-    expect(attentionSelection.value?.id).toBe('second');
     expect(postJson).not.toHaveBeenCalled();
     expect(api).not.toHaveBeenCalled();
-    expect(attentionTargets.value).toHaveLength(2);
+    expect(attentionTargets.value).toHaveLength(3);
     expect(threadId.value).toBe('t');
   });
-  it('opens the newest request in a thread regardless of the current selection', async () => {
+  it('opens the oldest request in an exact thread regardless of the current selection', async () => {
     groupId.value = 'g';
     threadId.value = 't';
     messagingGroupId.value = 'm';
@@ -115,14 +116,14 @@ describe('authoritative attention refresh', () => {
       { ...target, id: 'newer-elsewhere', origin: { ...target.origin, threadId: 'elsewhere' } },
       { ...target, id: 'other-channel', origin: { ...target.origin, channelType: 'slack' } },
       { ...target, id: 'other-messaging-group', origin: { ...target.origin, messagingGroupId: 'other' } },
-      newest,
       older,
+      newest,
     ];
-    attentionSelection.value = { id: older.id, navigation: 0 };
+    attentionSelection.value = { id: newest.id, navigation: 0 };
     expect(await navigateAttention({
       agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm',
     })).toBe(true);
-    expect(attentionSelection.value?.id).toBe(newest.id);
+    expect(attentionSelection.value?.id).toBe(older.id);
     expect(api).not.toHaveBeenCalled();
     expect(postJson).not.toHaveBeenCalled();
   });
@@ -153,12 +154,24 @@ describe('authoritative attention refresh', () => {
         threads: [latest, wanted],
         conversation: testSnapshot({ threadId: 'wanted' }),
       });
-    expect(await navigateAttention()).toBe(true);
+    expect(await navigateAttention(destination.origin)).toBe(true);
     expect(groupId.value).toBe('other');
     expect(threadId.value).toBe('wanted');
     expect(channelType.value).toBe('resend');
     expect(messagingGroupId.value).toBe('mailbox');
     expect(vi.mocked(api).mock.calls.at(-1)?.[0]).toContain('channel=resend&mg=mailbox');
     expect(postJson).not.toHaveBeenCalled();
+  });
+  it.each([null, []])('does not navigate without known pending requests: %s', async (targets) => {
+    attentionTargets.value = targets;
+    expect(await navigateAttention('g')).toBe(false);
+    expect(attentionSelection.value).toBeNull();
+  });
+  it('does not navigate to another agent or act on a stale attention snapshot', async () => {
+    expect(await navigateAttention('missing')).toBe(false);
+    attentionError.value = 'Offline';
+    expect(await navigateAttention('g')).toBe(false);
+    expect(attentionSelection.value).toBeNull();
+    expect(api).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,7 @@ export function AttentionBadge({
   label: string;
 }) {
   return (
-    <span class="attention-badge" aria-label={label}>
+    <span class="attention-badge" aria-label={label} title={label}>
       {value}
     </span>
   );

@@ -13,18 +13,21 @@ import {
   credentialsOpen,
 } from '../state';
 import { openChat } from '../credentials-navigation';
-import { selectGroup } from '../actions';
+import { navigateAttention, selectGroup } from '../actions';
 import { fmtRelative, fmtAbsolute } from '../utils';
 import type { Group } from '../types';
 import { createGroupOpen } from './CreateGroupModal';
 import { TabBar, type TabItem, type TabExtra } from './TabBar';
 import { MobileDialog, MobileDialogItem, MobileDialogList } from './MobileDialog';
 import { AttentionBadge } from './AttentionBadge';
-import { groupAttentionCount } from '../attention-state';
+import { attentionError, groupAttentionCount } from '../attention-state';
 
-function attentionBadge(id: string) {
-  const count = groupAttentionCount(id);
-  return count > 0 ? <AttentionBadge value={count} label={`${count} requests need your input`} /> : undefined;
+function attentionBadge(group: Group) {
+  const count = groupAttentionCount(group.id);
+  const label = attentionError.value
+    ? `Input status unavailable. ${count} last known requests for ${group.name}`
+    : `${count} requests need your input. Open oldest request in ${group.name}`;
+  return count > 0 ? <AttentionBadge value={count} label={label} /> : undefined;
 }
 
 function isElevatedOnly(g: Group): boolean {
@@ -68,7 +71,9 @@ export function GroupStrip(): JSX.Element | null {
     return {
       id: g.id,
       label: g.name,
-      badge: attentionBadge(g.id),
+      badge: attentionBadge(g),
+      badgeDisabled: !!attentionError.value,
+      onBadgeClick: () => { void navigateAttention(g.id); },
       sublabel: sublabel || undefined,
       reserveSublabel: true,
       title: tipFor(g, isAdminOnly),
@@ -150,7 +155,9 @@ export function GroupPickerModal() {
             <MobileDialogItem
               key={g.id}
               label={g.name}
-              badge={attentionBadge(g.id)}
+              badge={attentionBadge(g)}
+              badgeDisabled={!!attentionError.value}
+              onBadgeClick={() => { close(); void navigateAttention(g.id); }}
               sublabel={subtitle || undefined}
               active={isActive}
               className={isAdminOnly ? 'is-admin-visible' : undefined}

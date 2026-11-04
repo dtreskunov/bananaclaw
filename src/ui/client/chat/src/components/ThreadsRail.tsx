@@ -33,10 +33,12 @@ function ThreadAttention({ thread }: { thread: Thread }) {
     channelType: thread.channelType || 'web', messagingGroupId: thread.messagingGroupId ?? null,
   };
   const count = threadAttentionCount(location);
-  return count > 0 ? <button type="button" class="thread-attention"
+  return count > 0 ? <button type="button" class="msg-action-btn thread-attention"
     disabled={!!attentionError.value}
-    aria-label={`${count} requests need your input. Open newest request in ${thread.title}`}
-    title="Open newest input request in this thread"
+    aria-label={attentionError.value
+      ? `Input status unavailable. ${count} last known requests in ${thread.title}`
+      : `${count} requests need your input. Open oldest request in ${thread.title}`}
+    title={attentionError.value || 'Open oldest input request in this thread'}
     onClick={(event: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
       void navigateAttention(location);
@@ -124,7 +126,6 @@ function ThreadRow({ t }: { t: Thread }) {
           : null}
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
         <span class="title-text">{t.title}</span>
-        <ThreadAttention thread={t} />
         {branchCount > 0
           ? <span
               class="fork-count"
@@ -145,9 +146,12 @@ function ThreadRow({ t }: { t: Thread }) {
         ) : null}
       </div>
       <div class="meta"><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</div>
-      {isAdmin.value && (ct === 'web' || (t.sessionMode === 'per-thread' && !!t.messagingGroupId))
-        ? <button type="button" class="msg-action-btn danger del" title="Delete thread" aria-label="Delete thread" onClick={onDel}><TrashIcon /></button>
-        : null}
+      <div class="thread-actions">
+        <ThreadAttention thread={t} />
+        {isAdmin.value && (ct === 'web' || (t.sessionMode === 'per-thread' && !!t.messagingGroupId))
+          ? <button type="button" class="msg-action-btn danger del" title="Delete thread" aria-label="Delete thread" onClick={onDel}><TrashIcon /></button>
+          : null}
+      </div>
     </div>
   );
 }
@@ -165,13 +169,13 @@ function DmRow({ t }: { t: Thread }) {
       <div class="title">
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
         <span class="title-text">{meta.label}</span>
-        <ThreadAttention thread={t} />
       </div>
       <div class="meta">
         <RelativeTime ts={t.lastActivityAt} />
         {t.counterparty ? ' \u00b7 ' + t.counterparty : ''}
         {t.messageCount ? ' \u00b7 ' + t.messageCount + ' msg' : ''}
       </div>
+      <div class="thread-actions"><ThreadAttention thread={t} /></div>
     </div>
   );
 }

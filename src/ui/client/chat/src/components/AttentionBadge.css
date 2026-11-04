@@ -1,44 +1,8 @@
 .attention-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  min-width: 1.5em;
-  height: 1.5em;
-  box-sizing: border-box;
-  padding-inline: 0.3em;
-  border: 1px solid var(--warning-border);
-  border-radius: 999px;
-  background: var(--warning);
-  color: var(--warning-on-fill);
   font-size: var(--font-xs);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  vertical-align: middle;
 }
-.mobile-dialog-item-label:has(> .attention-badge) { display: flex; align-items: center; gap: 6px; }
-.attention-navigation {
-  position: absolute;
-  right: calc(var(--chat-scrollbar-width, 0px) + 8px);
-  bottom: min(calc(var(--chat-dock-height, 0px) + 8px), calc(100% - 44px));
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 36px;
-  min-height: 36px;
-  padding: 6px;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  cursor: pointer;
-}
-.attention-navigation .attention-badge { box-shadow: 0 2px 6px var(--shadow-color); }
-.attention-navigation:focus-visible { outline: 2px solid var(--warning-border); outline-offset: 1px; }
-.attention-navigation:disabled { cursor: default; }
-.attention-navigation[data-stale="true"] .attention-badge { border-style: dashed; }
-.thread-attention { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; cursor: pointer; }
-.thread-attention:focus-visible { outline: 2px solid var(--warning-border); outline-offset: 1px; border-radius: 999px; }
 [data-attention-target]:focus,
 [data-attention-target]:focus-within { outline: 2px solid var(--warning-border); outline-offset: 3px; }

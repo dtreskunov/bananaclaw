@@ -38,16 +38,16 @@
   display: flex; flex-direction: column;
 }
 .rail-label { display: none; }
-.threads-rail .thread { padding: var(--thread-padding-block) var(--thread-padding-inline); cursor: pointer; border-bottom: 1px solid var(--border); position: relative; }
+.threads-rail .thread { padding: var(--thread-padding-block) var(--thread-padding-inline); cursor: pointer; border-bottom: 1px solid var(--border); position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; align-items: center; }
 :where(
   .threads-rail .thread-section-body > .thread:nth-child(even),
   .threads-rail .search-results > .thread:nth-child(even)
 ) { background: var(--table-row-alt-bg); }
 .threads-rail .thread:hover { background: var(--wash-soft); }
 .threads-rail .thread.active { background: var(--accent); }
-.threads-rail .thread .title { font-size: var(--font-base); display: flex; align-items: center; min-width: 0; padding-right: 18px; }
+.threads-rail .thread .title { grid-column: 1; font-size: var(--font-base); display: flex; align-items: center; min-width: 0; }
 .threads-rail .thread .title .title-text { min-width: 0; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.threads-rail .thread .meta { font-size: var(--font-xs); color: var(--muted); margin-top: 2px; }
+.threads-rail .thread .meta { grid-column: 1; min-width: 0; font-size: var(--font-xs); color: var(--muted); margin-top: 2px; }
 .threads-rail .thread .title .ch-pill { font-size: var(--font-base); flex: none; margin-right: 5px; opacity: 0.85; display: inline-block; vertical-align: -1px; }
 .threads-rail .thread .title .task-badge { font-size: var(--font-xs); flex: none; margin-left: 5px; opacity: 0.75; display: inline-block; vertical-align: 0; cursor: pointer; padding: 0; border: none; background: none; line-height: 1; color: inherit; }
 .threads-rail .thread .title .task-badge:hover { opacity: 1; }
@@ -71,8 +71,10 @@
 }
 .readonly-banner { padding: 10px 12px; border-top: 1px solid var(--border); background: var(--wash-soft); font-size: var(--font-sm); color: var(--muted); }
 .chat-subnotice { padding: 4px 12px; border-top: 1px solid var(--border); background: var(--wash-subtle); font-size: var(--font-xs); color: var(--muted); }
-/* Look comes from the shared .msg-action-btn; only placement and reveal here. */
-.threads-rail .thread .del { position: absolute; top: 4px; right: 4px; opacity: 0; transition: opacity 0.12s ease; }
+.thread-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: 4px; }
+.thread-actions .msg-action-btn { width: 32px; height: 32px; }
+.thread-actions .msg-action-icon { width: 16px; height: 16px; }
+.threads-rail .thread .del { opacity: 0; transition: opacity 0.12s ease; }
 .threads-rail .thread:hover .del,
 .threads-rail .thread:focus-within .del,
 .threads-rail .thread .del:focus-visible { opacity: 1; }
@@ -130,8 +132,7 @@
 
 /* Show delete on touch devices (no hover). */
 @media (hover: none) {
-  .threads-rail .thread .del { opacity: 1; top: 50%; right: 4px; transform: translateY(-50%); }
-  .threads-rail .thread .title { padding-right: 40px; }
+  .threads-rail .thread .del { opacity: 1; }
 }
 
 /* ── Search results ────────────────────────────────────────────────── */

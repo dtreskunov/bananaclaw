@@ -310,15 +310,15 @@ eligibility before counting; private recovery/selection data is excluded.
 The host/browser sync contract is shared, with no waiting-state table, copied
 lifecycle, persistent counters, new poller, runner change or storage migration.
 
-One shared amber badge counts requests on agent tabs, the mobile agent picker
-and thread rows. A single clickable amber total floats over the transcript above
-the composer, with no position indicator or additional controls. It opens the
-newest request first, cycles through older requests and wraps. A thread badge
-always opens the newest request in that exact thread. Navigation uses existing
-routes and forms, preserves exact non-web context and focuses a request once
-without stealing focus on later snapshots. Manual request focus updates the
-navigation cursor. Newest-first presentation is client-only; the server's stable
-oldest-first contract is unchanged.
+Shared subtle count buttons appear on agent tabs, the mobile agent picker and
+thread cards. Each opens the oldest actionable request in its agent or exact
+thread, using the server's existing oldest-first order directly. Native sibling
+buttons keep attention navigation distinct from ordinary tab/thread selection.
+There is no floating attention control or cyclic pager. Counts reuse the shared
+inline-action styling; thread counts and delete controls have matching 32px hit
+targets centered vertically. Only delete retains hover/focus reveal.
+Navigation uses existing routes and forms, preserves exact non-web context and
+focuses a request once without stealing focus on later snapshots.
 
 Counts derive from the same authoritative list and do not clear when viewed or
 on HTTP acknowledgement. Refresh errors retain last-known information instead

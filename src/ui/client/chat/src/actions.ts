@@ -66,7 +66,6 @@ import {
   attentionError,
   matchesAttentionLocation,
   type AttentionLocation,
-  attentionSelection,
   attentionTargets,
   selectAttention,
 } from './attention-state';
@@ -524,7 +523,7 @@ export async function runSync(
   }
   if (requestId !== refs.syncRequestId) return false;
   batch(() => {
-    attentionTargets.value = [...res.attention].reverse();
+    attentionTargets.value = res.attention;
     attentionError.value = null;
   });
   if (
@@ -1144,20 +1143,12 @@ export async function selectGroup(
   }
 }
 
-export async function navigateAttention(thread?: AttentionLocation): Promise<boolean> {
+export async function navigateAttention(scope: string | AttentionLocation): Promise<boolean> {
   const targets = attentionTargets.value;
   if (!targets?.length || attentionError.value) return false;
-  const location = {
-    agentGroupId: groupId.value,
-    threadId: threadId.value,
-    channelType: channelType.value,
-    messagingGroupId: messagingGroupId.value,
-  };
-  const position = targets.findIndex(target =>
-    target.id === attentionSelection.value?.id && matchesAttentionLocation(target, location));
-  const target = thread
-    ? targets.find(target => matchesAttentionLocation(target, thread))
-    : targets[(position + 1) % targets.length];
+  const target = targets.find(target => typeof scope === 'string'
+    ? target.origin.agentGroupId === scope
+    : matchesAttentionLocation(target, scope));
   if (!target) return false;
   selectAttention(target.id, true);
   try {

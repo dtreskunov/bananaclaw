@@ -58,7 +58,7 @@ import { BRANCH_ACTION_EXPLANATION, editBranchActionExplanation } from '../trans
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { QuestionPrompt } from './QuestionPrompt';
-import { AttentionNavigator } from './AttentionNavigator';
+import { AttentionFocus } from './AttentionFocus';
 import { isApprovalThread } from '../approval-origin';
 import { ApprovalBubble } from './ApprovalBubble';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
@@ -1899,7 +1899,7 @@ export function ChatMain() {
   return (
     <section class="chat-main" id="chat-main" ref={ref}>
       <MessageLog dockRef={dockRef} />
-      <AttentionNavigator />
+      <AttentionFocus />
       <ImageViewer />
       <div class="chat-bottom-dock" ref={dockRef}>
         {reconnectPending

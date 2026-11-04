@@ -52,6 +52,9 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
   position: relative;
   transition: background 0.1s, border-color 0.1s, color 0.1s;
 }
+.tab-item-group { position: relative; display: flex; flex: none; }
+.tab-item-group:has(> .tab-item-badge) > .tab-item { padding-right: 46px; }
+.tab-item-group > .tab-item-badge { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
 .tab-item:not(.active):hover {
   background: var(--wash-soft);
   color: var(--surface-fg);
@@ -88,13 +91,14 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
 .tab-item.active .tab-item-label { font-weight: 600; }
 
 /* ---- Desktop: dropdown variant hidden ---- */
-.tab-bar-dropdown {
+.tab-bar-dropdown-group {
   display: none;
 }
 
 /* ---- Mobile: hide the strip, show the dropdown button ---- */
 @media (max-width: 720px) {
   .tab-bar-strip { display: none; }
+  .tab-bar-dropdown-group { display: flex; align-items: center; gap: 4px; }
 
   .tab-bar-dropdown {
     display: inline-flex;
@@ -111,6 +115,7 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
     font: inherit;
     text-align: left;
     min-width: 0;
+    flex: 1;
   }
   .tab-bar-dropdown:hover { background: var(--wash); }
   .tab-bar-dropdown-label {

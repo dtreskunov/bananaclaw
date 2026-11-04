@@ -35,19 +35,23 @@ incremental frames yields the same conversation as a fresh snapshot.
 
 ### Input attention
 
-The same amber count badge appears on agent tabs, the mobile agent picker and
+The same subtle count button appears on agent tabs, the mobile agent picker and
 thread rows. Agent counts cover their threads; thread counts use the exact
 agent/channel/messaging-group/thread route. Counts include only requests the
 viewer can act on, not every request they can read.
 Read-only references without a requesting thread or available response controls
 remain visible in the existing UI but do not inflate these actionable counts.
 
-A single amber total floats over the transcript, just above the composer. It
-has no position indicator or other controls. Clicking it starts at the newest
-request, then cycles through older requests and wraps. Clicking a thread's badge
-always opens its newest request. Navigation focuses the existing question or
-approval card, preserves the exact thread route, and does not steal focus on
-later refreshes. With no requests the floating control is hidden.
+Clicking an agent's count opens its oldest pending request across its threads;
+clicking a thread's count opens the oldest request in that exact thread. These
+are separate native buttons, not nested inside the agent/thread selection
+control. Navigation focuses the existing question or approval card and does not
+steal focus on later refreshes. There is no floating attention control.
+
+Counts reuse the shared muted inline-action button style rather than a filled
+amber badge. Thread count and delete buttons share 32px hit targets, centered
+vertically beside the card content. Counts remain visible without hover; delete
+keeps its existing hover/focus reveal and is always visible on touch devices.
 
 Attention comes from the canonical pending interactions through the existing
 global metadata sync, including off-screen agents. Viewing a request does not
@@ -56,8 +60,8 @@ terminal and expired requests are not input requests. Failures retain the last
 known counts with a stale indication; unknown status is not shown as zero.
 This is independent of whether an agent is currently running or disconnected.
 Private credential selections and recovery state are never included.
-The browser reverses the server's stable oldest-first attention references for
-newest-first navigation; no additional backend state or polling is needed.
+The browser uses the server's stable oldest-first attention references directly;
+no additional backend state or polling is needed.
 
 ## Enable
 

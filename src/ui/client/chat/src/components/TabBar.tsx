@@ -8,12 +8,15 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
 import './TabBar.css';
+import './ActionIcons.css';
 import { MobileDialog, MobileDialogDivider, MobileDialogItem, MobileDialogList } from './MobileDialog';
 
 export interface TabItem {
   id: string;
   label: string;
   badge?: ComponentChildren;
+  onBadgeClick?: () => void;
+  badgeDisabled?: boolean;
   /** Optional second line under the label (e.g. relative activity time). */
   sublabel?: string;
   /** Keep an empty second row when sibling tabs display sublabels. */
@@ -50,6 +53,15 @@ interface TabBarProps {
   mobileSheetTitle?: string;
   /** Label when the active item is intentionally absent from `items`. */
   mobileFallbackLabel?: string;
+}
+
+function tabBadge(item: TabItem) {
+  if (item.badge == null || item.badge === false) return null;
+  return item.onBadgeClick ? (
+    <button type="button" class="msg-action-btn tab-item-badge" disabled={item.badgeDisabled} onClick={item.onBadgeClick}>
+      {item.badge}
+    </button>
+  ) : <span class="tab-item-badge">{item.badge}</span>;
 }
 
 export function TabBar(props: TabBarProps): JSX.Element {
@@ -92,22 +104,24 @@ export function TabBar(props: TabBarProps): JSX.Element {
         {items.map((it) => {
           const isActive = it.id === activeId;
           return (
-            <button
-              type="button"
-              key={it.id}
-              role="tab"
-              aria-selected={isActive}
-              title={it.title}
-              class={`tab-item${isActive ? ' active' : ''}${it.className ? ` ${it.className}` : ''}`}
-              onClick={() => onSelect(it.id)}
-            >
-              <span class="tab-item-heading"><span class="tab-item-label">{it.label}</span>{it.badge}</span>
-              {it.sublabel || it.reserveSublabel ? (
-                <span class="tab-item-sublabel" aria-hidden={it.sublabel ? undefined : 'true'}>
-                  {it.sublabel}
-                </span>
-              ) : null}
-            </button>
+            <div class="tab-item-group" key={it.id}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                title={it.title}
+                class={`tab-item${isActive ? ' active' : ''}${it.className ? ` ${it.className}` : ''}`}
+                onClick={() => onSelect(it.id)}
+              >
+                <span class="tab-item-heading"><span class="tab-item-label">{it.label}</span></span>
+                {it.sublabel || it.reserveSublabel ? (
+                  <span class="tab-item-sublabel" aria-hidden={it.sublabel ? undefined : 'true'}>
+                    {it.sublabel}
+                  </span>
+                ) : null}
+              </button>
+              {tabBadge(it)}
+            </div>
           );
         })}
         {extras?.map((ex) => (
@@ -129,17 +143,20 @@ export function TabBar(props: TabBarProps): JSX.Element {
         ))}
       </nav>
 
-      <button
-        type="button"
-        class={cls('tab-bar-dropdown')}
-        aria-label={ariaLabel}
-        aria-haspopup="dialog"
-        aria-expanded={sheetOpen}
-        onClick={() => setSheetOpen(true)}
-      >
-        <span class="tab-bar-dropdown-label"><span class="tab-bar-dropdown-text">{dropdownLabel}</span>{activeItem?.badge}</span>
-        <span class="tab-bar-dropdown-caret" aria-hidden="true">{'\u25BE'}</span>
-      </button>
+      <div class={cls('tab-bar-dropdown-group')}>
+        <button
+          type="button"
+          class="tab-bar-dropdown"
+          aria-label={ariaLabel}
+          aria-haspopup="dialog"
+          aria-expanded={sheetOpen}
+          onClick={() => setSheetOpen(true)}
+        >
+          <span class="tab-bar-dropdown-label"><span class="tab-bar-dropdown-text">{dropdownLabel}</span></span>
+          <span class="tab-bar-dropdown-caret" aria-hidden="true">{'\u25BE'}</span>
+        </button>
+        {activeItem ? tabBadge(activeItem) : null}
+      </div>
 
       {sheetOpen ? (
         <TabBarSheet
@@ -176,6 +193,8 @@ function TabBarSheet(props: TabBarSheetProps): JSX.Element {
             key={it.id}
             label={it.label}
             badge={it.badge}
+            badgeDisabled={it.badgeDisabled}
+            onBadgeClick={it.onBadgeClick ? () => { onClose(); it.onBadgeClick?.(); } : undefined}
             sublabel={it.sublabel}
             active={it.id === activeId}
             title={it.title}

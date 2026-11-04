@@ -1,4 +1,5 @@
 import './MobileDialog.css';
+import './ActionIcons.css';
 import type { ComponentChildren, JSX } from 'preact';
 
 interface MobileDialogProps {
@@ -63,6 +64,8 @@ export function MobileDialogList({ children, className }: { children: ComponentC
 interface MobileDialogItemProps {
   label: string;
   badge?: ComponentChildren;
+  onBadgeClick?: () => void;
+  badgeDisabled?: boolean;
   sublabel?: string;
   onClick?: () => void;
   type?: 'button' | 'submit';
@@ -73,8 +76,8 @@ interface MobileDialogItemProps {
 }
 
 export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
-  const { label, badge, sublabel, onClick, type = 'button', active, chevron, title, className } = props;
-  return (
+  const { label, badge, onBadgeClick, badgeDisabled, sublabel, onClick, type = 'button', active, chevron, title, className } = props;
+  const item = (
     <button
       type={type}
       class={`mobile-dialog-item${active ? ' active' : ''}${className ? ` ${className}` : ''}`}
@@ -82,11 +85,21 @@ export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
       title={title}
       onClick={onClick}
     >
-      <span class="mobile-dialog-item-label"><span>{label}</span>{badge}</span>
+      <span class="mobile-dialog-item-label"><span>{label}</span></span>
       {sublabel ? <span class="mobile-dialog-item-sublabel">{sublabel}</span> : null}
       {chevron ? <span class="mobile-dialog-item-chevron" aria-hidden="true">{'\u203A'}</span> : null}
     </button>
   );
+  return badge != null && badge !== false ? (
+    <div class="mobile-dialog-item-row">
+      {item}
+      {onBadgeClick ? (
+        <button type="button" class="msg-action-btn mobile-dialog-item-badge" disabled={badgeDisabled} onClick={onBadgeClick}>
+          {badge}
+        </button>
+      ) : <span class="mobile-dialog-item-badge">{badge}</span>}
+    </div>
+  ) : item;
 }
 
 export function MobileDialogDivider(): JSX.Element {
