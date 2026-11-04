@@ -51,6 +51,9 @@ and an optional diagnostic. Nonzero exits remain failures even if stdout
 contains success-looking text. Timeout outcomes are unknown; explicit
 cancellation is interrupted and warns that effects may already have occurred.
 These fields reach model results, the native journal and activity consistently.
+Tool-specific model converters remain authoritative. Tools without one use
+the same default text rendering for both model output and canonical history,
+instead of separate fallback paths.
 The existing shell capture limit still applies before the 16 KiB model preview.
 Oversized results use the same private archive and ranged-read retrieval.
 

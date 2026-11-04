@@ -342,6 +342,30 @@ afterEach(() => {
 
 describe('NativeProvider', () => {
   it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'uses the same default tool text on the %s wire and in canonical history', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      const text = 'literal "quoted" tool text\nsecond line';
+      fs.writeFileSync(path.join(root, 'value.txt'), text);
+      scriptedToolCalls = [['read', '{"path":"value.txt"}']];
+      const events = await collect(new NativeProvider({ model: 'local/stub' }));
+      const messages = requests[1].messages as Array<{
+        role: string; content: string | Array<{ type: string; content?: unknown }>;
+      }>;
+      const wire = protocol === 'openai-chat' ? messages.find(message => message.role === 'tool')?.content :
+        messages.flatMap(message => Array.isArray(message.content) ? message.content : [])
+          .find(part => part.type === 'tool_result')?.content;
+      expect(wire).toBe(text);
+      const init = events.find(event => event.type === 'init');
+      if (init?.type !== 'init') throw new Error('Missing continuation');
+      const store = new NativeStore();
+      try {
+        const result = store.messages(init.continuation).find(message => message.role === 'tool');
+        expect(result).toMatchObject({ content: [{ output: { type: 'text', value: text } }] });
+      } finally { store.close(); }
+    },
+  );
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
     'reports a native shell failure consistently through %s and preserves partial output', async (protocol) => {
       process.env.NATIVE_PROTOCOL = protocol;
       scriptedToolCalls = [['bash', '{"command":"printf partial; printf diagnostic >&2; exit 7"}']];

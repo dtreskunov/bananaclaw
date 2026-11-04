@@ -1,7 +1,7 @@
 import type { ModelMessage, ToolSet } from 'ai';
 import { NativeStore } from './store.js';
 import type { ActivityStep, ProviderEvent } from '../types.js';
-import { nativeToolOutcome, toolActivityFields } from '../tool-activity.js';
+import { nativeToolOutcome, toolActivityFields, type NativeToolOutcome } from '../tool-activity.js';
 
 export const INTERRUPTED_TOOL =
   'Interrupted; outcome unknown. External side effects may have occurred. Do not retry without checking.';
@@ -12,9 +12,8 @@ type ModelToolOutput = Extract<
 interface JournalToolCall {
   name: string;
   input: unknown;
-  output: unknown;
-  failed: boolean;
-  modelOutput?: ModelToolOutput;
+  outcome: NativeToolOutcome;
+  modelOutput: ModelToolOutput;
 }
 
 /** Persist input and valid call/result pairs even before an SDK step finishes. */
@@ -70,19 +69,24 @@ export class NativeTurnJournal {
     return Object.fromEntries(
       Object.entries(tools).map(([name, definition]) => {
         const execute = definition.execute;
-        const toModelOutput = definition.toModelOutput;
         if (!execute) return [name, definition];
+        const toModelOutput: NonNullable<typeof definition.toModelOutput> =
+          definition.toModelOutput ?? (({ output }: { output: unknown }): ModelToolOutput => ({
+            type: 'text',
+            value: typeof output === 'string' ? output : (JSON.stringify(output) ?? 'null'),
+          }));
         return [
           name,
           {
             ...definition,
-            ...(toModelOutput ? {
-              toModelOutput: (options: Parameters<typeof toModelOutput>[0]) =>
-                this.calls.get(options.toolCallId)?.modelOutput ?? toModelOutput(options),
-            } : {}),
+            toModelOutput: (options: Parameters<typeof toModelOutput>[0]) =>
+              this.calls.get(options.toolCallId)?.modelOutput ?? toModelOutput(options),
             execute: (input: unknown, options: Parameters<NonNullable<typeof execute>>[1]) => {
               signal.throwIfAborted();
-              const call: JournalToolCall = { name, input, output: INTERRUPTED_TOOL, failed: true };
+              const call: JournalToolCall = {
+                name, input, outcome: { status: 'interrupted', error: INTERRUPTED_TOOL },
+                modelOutput: { type: 'error-text', value: INTERRUPTED_TOOL },
+              };
               const controller = this.registerTool(options.toolCallId);
               const toolSignal = AbortSignal.any([signal, controller.signal]);
               this.calls.set(options.toolCallId, call);
@@ -91,13 +95,13 @@ export class NativeTurnJournal {
                 try {
                   toolSignal.throwIfAborted();
                   const result = await execute(input, { ...options, abortSignal: toolSignal });
-                  call.output = result;
-                  if (toModelOutput)
-                    call.modelOutput = await toModelOutput({ toolCallId: options.toolCallId, input, output: result });
-                  call.failed = false;
+                  call.modelOutput = await toModelOutput({ toolCallId: options.toolCallId, input, output: result });
+                  call.outcome = nativeToolOutcome(name, result) ?? { status: 'completed' };
                   return result;
                 } catch (error) {
-                  call.output = toolSignal.aborted ? INTERRUPTED_TOOL : String(error);
+                  const message = toolSignal.aborted ? INTERRUPTED_TOOL : String(error);
+                  call.outcome = { status: toolSignal.aborted ? 'interrupted' : 'error', error: message };
+                  call.modelOutput = { type: 'error-text', value: message };
                   if (controller.signal.aborted && !signal.aborted) throw new Error(INTERRUPTED_TOOL);
                   throw error;
                 } finally {
@@ -128,20 +132,13 @@ export class NativeTurnJournal {
   }
 
   activity(): ActivityStep[] {
-    return [...this.completedActivity, ...[...this.calls].map(([id, call]): ActivityStep => {
-      const outcome = call.failed ? {
-        status: call.output === INTERRUPTED_TOOL ? 'interrupted' as const : 'error' as const,
-        error: String(call.output),
-      } : nativeToolOutcome(call.name, call.output);
-      return {
+    return [...this.completedActivity, ...[...this.calls].map(([id, call]): ActivityStep => ({
         kind: 'tool',
         id,
         tool: call.name,
-        status: outcome?.status ?? 'completed',
+        ...call.outcome,
         ...toolActivityFields(call.name, call.input),
-        ...(outcome?.error ? { error: outcome.error } : {}),
-      };
-    })];
+      }))];
   }
 
   private messages(): ModelMessage[] {
@@ -156,12 +153,7 @@ export class NativeTurnJournal {
               type: 'tool-result',
               toolCallId: id,
               toolName: call.name,
-              output: call.failed
-                ? { type: 'error-text', value: String(call.output) }
-                : call.modelOutput ?? {
-                    type: 'text',
-                    value: typeof call.output === 'string' ? call.output : (JSON.stringify(call.output) ?? 'null'),
-                  },
+              output: call.modelOutput,
             },
           ],
         },
