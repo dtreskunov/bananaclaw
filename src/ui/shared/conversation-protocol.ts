@@ -246,6 +246,9 @@ const account = shape({
   resolvedAt: nullable(text),
 });
 const interaction: Check = (value) => question(value) || approval(value) || account(value);
+export function isConversationApproval(value: unknown): value is import('./approval.js').ConversationApproval {
+  return approval(value) || account(value);
+}
 const tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
 const timelineRow: Check = (v) =>
   shape({ kind: oneOf('message'), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v) ||

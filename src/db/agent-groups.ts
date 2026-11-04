@@ -1,5 +1,6 @@
 import type { AgentGroup } from '../types.js';
 import { getDb } from './connection.js';
+import { invalidateUi } from '../ui-events.js';
 
 export function createAgentGroup(group: AgentGroup): void {
   getDb()
@@ -8,6 +9,7 @@ export function createAgentGroup(group: AgentGroup): void {
        VALUES (@id, @name, @folder, @agent_provider, @created_at)`,
     )
     .run(group);
+  invalidateUi({ kind: 'access' });
 }
 
 export function getAgentGroup(id: string): AgentGroup | undefined {
@@ -50,8 +52,10 @@ export function updateAgentGroup(
   getDb()
     .prepare(`UPDATE agent_groups SET ${fields.join(', ')} WHERE id = @id`)
     .run(values);
+  invalidateUi({ kind: 'group', groupId: id });
 }
 
 export function deleteAgentGroup(id: string): void {
   getDb().prepare('DELETE FROM agent_groups WHERE id = ?').run(id);
+  invalidateUi({ kind: 'access' });
 }

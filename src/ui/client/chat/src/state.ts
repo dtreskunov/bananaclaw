@@ -138,7 +138,6 @@ export interface Refs {
   syncRequestId: number;
   reconnectCancel: (() => void) | null;
   reconnectAttempt: number;
-  syncTimer: ReturnType<typeof setInterval> | null;
   wsConnectCancel: (() => void) | null;
   wsPingTimer: ReturnType<typeof setInterval> | null;
   seenIds: Set<string>;
@@ -153,7 +152,6 @@ export const refs: Refs = {
   syncRequestId: 0,
   reconnectCancel: null,
   reconnectAttempt: 0,
-  syncTimer: null,
   wsConnectCancel: null,
   wsPingTimer: null,
   seenIds: new Set<string>(),
@@ -163,7 +161,6 @@ export const refs: Refs = {
 };
 
 // ── constants ───────────────────────────────────────────────────────
-export const SYNC_INTERVAL_MS = 10000;
 export const UPLOAD_MAX_FILE_SIZE = 25 * 1024 * 1024;
 export const UPLOAD_MAX_TOTAL_SIZE = 50 * 1024 * 1024;
 export const UPLOAD_MAX_FILES = 10;

@@ -43,6 +43,7 @@ import {
   isAdminOfAgentGroup,
   isGlobalAdmin,
   isOwner,
+  revokeRole,
 } from '../../../modules/permissions/db/user-roles.js';
 import { listAccessibleAgentGroups } from '../../../modules/permissions/access.js';
 import {
@@ -1380,10 +1381,7 @@ function handleRevokeRole(res: http.ServerResponse, actorUserId: string, gid: st
     writeJson(res, 404, { error: 'role not found' });
     return;
   }
-  // Use the same SQL the permissions module exposes; one statement, scoped.
-  getDb()
-    .prepare('DELETE FROM user_roles WHERE user_id = ? AND role = ? AND agent_group_id = ?')
-    .run(userId, 'admin', gid);
+  revokeRole(userId, 'admin', gid);
   recordAdminAction({
     actorUserId,
     action: 'group_role_revoke',

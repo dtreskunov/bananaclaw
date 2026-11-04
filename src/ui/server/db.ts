@@ -9,6 +9,7 @@
 import crypto from 'crypto';
 
 import { getDb } from '../../db/connection.js';
+import { invalidateUi } from '../../ui-events.js';
 
 export interface UiSession {
   token_hash: string;
@@ -75,24 +76,32 @@ export function createSession(userId: string, ttlMs: number): { token: string; e
   return { token, expiresAt };
 }
 
-export function lookupSession(token: string): { tokenHash: string; userId: string; expiresAt: string } | null {
+export function lookupSession(
+  token: string,
+  options: { touch?: boolean } = {},
+): { tokenHash: string; userId: string; expiresAt: string } | null {
   const hash = hashToken(token);
-  const session = lookupSessionByHash(hash);
+  const session = lookupSessionByHash(hash, options);
   if (!session) return null;
   return { tokenHash: hash, ...session };
 }
 
-export function lookupSessionByHash(hash: string): { userId: string; expiresAt: string } | null {
+export function lookupSessionByHash(
+  hash: string,
+  options: { touch?: boolean } = {},
+): { userId: string; expiresAt: string } | null {
   const row = getDb().prepare('SELECT * FROM ui_sessions WHERE token_hash = ?').get(hash) as UiSession | undefined;
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) return null;
   // Best-effort touch; not in the hot path enough to batch.
-  getDb().prepare("UPDATE ui_sessions SET last_used = datetime('now') WHERE token_hash = ?").run(hash);
+  if (options.touch !== false)
+    getDb().prepare("UPDATE ui_sessions SET last_used = datetime('now') WHERE token_hash = ?").run(hash);
   return { userId: row.user_id, expiresAt: row.expires_at };
 }
 
 export function deleteSession(token: string): void {
   getDb().prepare('DELETE FROM ui_sessions WHERE token_hash = ?').run(hashToken(token));
+  invalidateUi({ kind: 'access' });
 }
 
 export function purgeExpired(): void {

@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { createHash } from 'node:crypto';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { PassThrough, Readable, Writable } from 'node:stream';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const signal = vi.hoisted(() => ({
@@ -76,7 +76,8 @@ import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
 import { createWebAdapter } from '../../../channels/web.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { COOKIE_NAME } from '../auth.js';
-import { handleChatRequest, handleChatUpgrade, matchChatPath } from './chat.js';
+import { uiBaseUrl } from '../config.js';
+import { closeChatSockets, handleChatRequest, handleChatUpgrade, matchChatPath } from './chat.js';
 import { readChatHistory } from './history.js';
 import { readConversation } from './conversation.js';
 import { handle } from './routes.js';
@@ -487,7 +488,7 @@ describe('durable input state history', () => {
     });
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     try {
       expect(socketView(frames).messages[0].timelinePosition).toBe(timelinePosition);
@@ -654,7 +655,7 @@ describe('durable input state history', () => {
     });
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     expect(socketView(frames).messages[0].inputState?.status).toBe('queued');
     const count = frames.length;
@@ -681,6 +682,88 @@ describe('durable input state history', () => {
 
     ws.emit('close');
     expect(signal.listeners.size).toBe(0);
+  });
+});
+
+describe('global and non-web WebSocket upgrades', () => {
+  it('closes upgraded global sockets before shared HTTP shutdown', async () => {
+    const server = http.createServer();
+    server.on('upgrade', handleChatUpgrade);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Test server did not bind a TCP port');
+    const client = new WebSocket(`ws://127.0.0.1:${address.port}/ui/chat/api/sync/ws`, {
+      headers: { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin },
+    });
+    try {
+      await once(client, 'open');
+      const closed = once(client, 'close');
+      closeChatSockets();
+      await closed;
+    } finally {
+      client.terminate();
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+
+  it.each(['/ui/chat/api/sync/ws', '/ui/chat/api/groups/agent/chat/thread-1/ws'])(
+    'requires the configured Origin for %s',
+    (url) => {
+      const upgrade = vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation(() => {});
+      const req = Readable.from([]) as unknown as http.IncomingMessage;
+      req.url = url;
+      req.headers = { cookie: `${COOKIE_NAME}=test`, origin: 'https://other.example' };
+      const rejected = new PassThrough();
+      let response = '';
+      rejected.on('data', (data) => {
+        response += data.toString();
+      });
+      handleChatUpgrade(req, rejected, Buffer.alloc(0));
+      expect(response).toContain('403 Forbidden');
+      expect(upgrade).not.toHaveBeenCalled();
+      req.headers.origin = new URL(uiBaseUrl()).origin;
+      handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+      expect(upgrade).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['thread-1', '__dm:mail-mg'])('streams a non-web conversation at encoded route %s', async (threadId) => {
+    insertIdentity({ userId: 'web:member', channel: 'resend', handle: 'bot@example.com' });
+    const thread = threadId.startsWith('__dm:') ? null : threadId;
+    const write = (id: string) =>
+      writeSessionMessage('agent', 'session-1', {
+        id,
+        kind: 'chat',
+        timestamp: NOW,
+        platformId: 'bot@example.com',
+        channelType: 'resend',
+        threadId: thread,
+        content: JSON.stringify({ text: id }),
+      });
+    write('first');
+    const frames: Record<string, unknown>[] = [];
+    const ws = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: (frame: string) => frames.push(JSON.parse(frame)),
+      close: vi.fn(),
+    });
+    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
+      callback(ws as unknown as WebSocket, _req);
+    });
+    const req = Readable.from([]) as unknown as http.IncomingMessage;
+    req.url = `/ui/chat/api/groups/agent/chat/${encodeURIComponent(threadId)}/ws?channel=resend&mg=mail-mg`;
+    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
+    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    try {
+      expect(socketView(frames).messages.map((row) => row.text)).toEqual(['first']);
+      expect(socketView(frames).capabilities.canSend).toBe(true);
+      write('second');
+      await vi.waitFor(() => expect(socketView(frames).messages.map((row) => row.text)).toEqual(['first', 'second']));
+      expect(ws.close).not.toHaveBeenCalled();
+    } finally {
+      ws.emit('close');
+    }
   });
 });
 
@@ -845,7 +928,7 @@ describe('pending web input editing', () => {
     });
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     try {
       const pending = cancel();
@@ -1046,7 +1129,7 @@ describe('chat turn snapshots and events', () => {
     });
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     try {
       writeSessionMessage('agent', 'session-1', {
@@ -1147,7 +1230,7 @@ describe('chat turn snapshots and events', () => {
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.method = 'GET';
     req.url = '/ui/chat/api/sync?gid=agent&tid=thread-1&channel=web&mg=web-mg';
-    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
     const chunks: Buffer[] = [];
     const res = new Writable({
       write(chunk, _encoding, callback) {
@@ -1188,7 +1271,7 @@ describe('chat turn snapshots and events', () => {
     });
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test` };
+    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     expect(frames).toHaveLength(1);
     expect(frames[0].kind).toBe('snapshot');

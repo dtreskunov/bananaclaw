@@ -32,7 +32,7 @@ export function sendConversationFrame(
     send: (data: string) => void;
     close: (code: number, reason: string) => void;
   },
-  frame: ConversationFrame,
+  frame: ConversationFrame | import('../../shared/sync.js').SyncFrame,
 ): void {
   const encoded = JSON.stringify(frame);
   if (socket.bufferedAmount > 1024 * 1024 || Buffer.byteLength(encoded) > 16 * 1024 * 1024) {

@@ -7,6 +7,7 @@
  */
 import { getDb, hasTable } from './connection.js';
 import { assertGroupApprovalsIdle } from './sessions.js';
+import { invalidateUi } from '../ui-events.js';
 
 export interface CascadeCounts {
   sessions: number;
@@ -90,5 +91,7 @@ export function cascadeDeleteAgentGroup(id: string): CascadeCounts {
     return counts;
   });
 
-  return cascade(id);
+  const counts = cascade(id);
+  invalidateUi({ kind: 'access' });
+  return counts;
 }

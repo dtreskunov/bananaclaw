@@ -7,6 +7,7 @@
 import type { ChannelAdapter, ChannelRegistration, ChannelSetup, OutboundFile } from './adapter.js';
 import type { ChannelDeliveryAdapter } from '../delivery.js';
 import { log } from '../log.js';
+import { invalidateConversation } from '../conversation-events.js';
 
 const SETUP_RETRY_DELAYS_MS = [2000, 5000, 10000];
 
@@ -165,6 +166,7 @@ export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => 
         log.warn('Duplicate adapter instance key — overwriting previous adapter', { key, channel: name });
       }
       activeAdapters.set(key, adapter);
+      invalidateConversation(null);
       log.info('Channel adapter started', { channel: name, type: adapter.channelType, instance: key });
     } catch (err) {
       log.error('Failed to start channel adapter', { channel: name, err });
@@ -183,4 +185,5 @@ export async function teardownChannelAdapters(): Promise<void> {
     }
   }
   activeAdapters.clear();
+  invalidateConversation(null);
 }

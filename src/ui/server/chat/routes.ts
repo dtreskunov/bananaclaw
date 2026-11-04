@@ -41,7 +41,7 @@ import { uiBaseUrl } from '../config.js';
 import { classify, resolveSafe } from './classify.js';
 import { fileEtag } from './etag.js';
 import { compareEntriesByDate, searchFilesByName } from './file-search.js';
-import { handleChatRequest, handleChatUpgrade, listThreadsForViewer, viewerHasContent } from './chat.js';
+import { handleChatRequest, listThreadsForViewer, viewerHasContent } from './chat.js';
 import { readChatHistory } from './history.js';
 import { canRespondToApproval, questionResponseOrigin } from './interaction-access.js';
 import { readInteractionSync } from './attention.js';
@@ -66,7 +66,7 @@ import {
 import { handleWriteRequest } from './write.js';
 import { resolveVoiceInputConfig } from './voice-input-config.js';
 
-export { handleChatUpgrade };
+export { handleChatUpgrade, closeChatSockets } from './chat.js';
 import { readConversation } from './conversation.js';
 import { conversationSnapshot } from './conversation-stream.js';
 

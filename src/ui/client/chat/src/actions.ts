@@ -1,5 +1,5 @@
 // Action orchestrators. Mutate signals + perform IO.
-import { batch, type Signal } from '@preact/signals';
+import { batch, effect, type Signal } from '@preact/signals';
 import { voice } from './voice-audio';
 import { cancelRecording } from './recorder';
 import { inheritActivityPanels, submissionTraceOwner } from './activity-trace-state';
@@ -52,15 +52,15 @@ import {
   taskPanelRequest,
   userMenuOpen,
   credentialsOpen,
-  SYNC_INTERVAL_MS,
 } from './state';
-import { api, postJson } from './api';
+import { api, postJson, redirectToLogin } from './api';
 import { clearApprovalMessage } from './approval-messages';
 import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
 import { ConversationProtocolError } from '../../../shared/conversation-protocol';
 import type { SyncResponse } from '../../../shared/sync';
+import { SyncConnection } from './sync-connection';
 import { isAttentionTargets } from '../../../shared/attention';
 import {
   attentionError,
@@ -200,9 +200,7 @@ export function warmChat(): Promise<void> {
   return request;
 }
 
-// Threads are part of the unified /api/sync response and live in the
-// `threads` signal. Callers that just want a fresh snapshot before
-// rendering can await this; everything else gets updated by the ticker.
+// Explicit refreshes are freshness barriers; background updates arrive on the global socket.
 /** Resolves false when the list could not be refreshed, so callers don't trust stale entries. */
 export async function loadThreads(_gid: string): Promise<boolean> {
   return runSync({ forceRefresh: true });
@@ -466,20 +464,31 @@ export function clearChat(): void {
   refs.seenIds.clear();
 }
 
-// Single global ticker. Hits /api/sync, which returns approvals plus
-// (when applicable) the active group's thread list and the active
-// non-web thread's history. Web threads use the WS for live updates;
-// /api/sync does NOT fetch history for them. Pauses when the tab is
-// hidden; resumes via the visibilitychange handler in installLivenessHandlers.
-export function startSyncPoll(): void {
-  if (refs.syncTimer) return;
-  runSync().catch(() => {
-    /* ignore */
+let syncConnection: SyncConnection | null = null;
+
+export function startGlobalSync(): () => void {
+  if (syncConnection) return () => {};
+  const connection = new SyncConnection({
+    socket: () =>
+      new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ui/chat/api/sync/ws`),
+    apply: (data, gid) => {
+      applyGlobalSync(data, gid);
+    },
+    unavailable: (message) => {
+      attentionError.value = message;
+    },
+    reload: () => showClientReloadPrompt('Global sync protocol changed'),
+    unauthorized: redirectToLogin,
   });
-  refs.syncTimer = setInterval(() => {
-    if (document.hidden) return;
-    runSync().catch((err) => console.error('sync failed', err));
-  }, SYNC_INTERVAL_MS);
+  syncConnection = connection;
+  const unsubscribe = effect(() => connection.setGroup(groupId.value));
+  connection.start();
+  return () => {
+    unsubscribe();
+    ++refs.syncRequestId;
+    connection.stop();
+    if (syncConnection === connection) syncConnection = null;
+  };
 }
 
 /** Returns whether `threads` now holds a fresh server list for the current group. */
@@ -492,6 +501,7 @@ export async function runSync(
   const tid = threadId.value;
   const ct = channelType.value;
   const mg = messagingGroupId.value;
+  const connection = syncConnection;
   const params = new URLSearchParams();
   if (gid) {
     params.set('gid', gid);
@@ -503,17 +513,26 @@ export async function runSync(
   }
   let res: SyncResponse;
   try {
-    res = await api<SyncResponse>(
-      'api/sync' + (params.toString() ? '?' + params.toString() : ''),
-      options.forceRefresh ? { cache: 'no-store' } : undefined,
-    );
+    res = connection
+      ? await connection.refresh(gid)
+      : await api<SyncResponse>(
+          'api/sync' + (params.toString() ? '?' + params.toString() : ''),
+          options.forceRefresh ? { cache: 'no-store' } : undefined,
+        );
     if (!isAttentionTargets(res.attention)) throw new Error('Invalid input request status. Reload and retry.');
   } catch (error) {
     if (requestId !== refs.syncRequestId) return false;
     const message = error instanceof Error ? error.message : 'Could not refresh input requests.';
     if (attentionError.value !== message) console.error('Input request sync failed', error);
     attentionError.value = message;
-    if (generation === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct !== 'web') {
+    if (
+      !syncConnection &&
+      !refs.ws &&
+      generation === refs.chatGeneration &&
+      gid === groupId.value &&
+      tid === threadId.value &&
+      ct !== 'web'
+    ) {
       applyTurnState(activeTurn.value, false);
       console.error('Conversation sync failed', error);
       chatReady.value = false;
@@ -521,11 +540,16 @@ export async function runSync(
     }
     return false;
   }
+  if (connection)
+    return (
+      connection === syncConnection &&
+      !!gid &&
+      gid === groupId.value &&
+      res.groupAccess !== false &&
+      Array.isArray(res.threads)
+    );
   if (requestId !== refs.syncRequestId) return false;
-  batch(() => {
-    attentionTargets.value = res.attention;
-    attentionError.value = null;
-  });
+  const threadsApplied = applyGlobalSync(res, gid, generation === refs.chatGeneration && tid === threadId.value);
   if (
     generation === refs.chatGeneration &&
     tid &&
@@ -533,7 +557,9 @@ export async function runSync(
     tid === threadId.value &&
     ct === channelType.value &&
     mg === messagingGroupId.value &&
-    ct !== 'web'
+    ct !== 'web' &&
+    !syncConnection &&
+    !refs.ws
   ) {
     {
       try {
@@ -547,12 +573,27 @@ export async function runSync(
       }
     }
   }
-  if (gid && groupId.value === gid && tid === threadId.value && res.voiceInput) {
+  return threadsApplied;
+}
+
+function applyGlobalSync(res: SyncResponse, gid: string | null, updateVoice = true): boolean {
+  batch(() => {
+    attentionTargets.value = res.attention;
+    attentionError.value = null;
+    pendingApprovals.value = res.approvals;
+  });
+  if (gid && groupId.value === gid && res.groupAccess === false) {
+    clearChat();
+    threads.value = [];
+    voiceInput.value = { backend: 'disabled', ready: false, reason: 'Agent access is no longer available.' };
+    attentionError.value = 'Agent access is no longer available.';
+    return false;
+  }
+  if (updateVoice && gid && groupId.value === gid && res.voiceInput) {
     voiceInput.value = res.voiceInput;
     if (!res.voiceInput.ready)
       voice.interrupt(res.voiceInput.reason || 'Live voice input is no longer available. Current text has been kept.');
   }
-  if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
   let threadsApplied = false;
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
     threadsApplied = true;
@@ -676,14 +717,8 @@ export async function openChat(
 
   if (resumeTid) {
     writeHash();
-    if (ct === 'web') {
-      connectChatWs({ gid, tid: resumeTid, mg, generation });
-      void runSync();
-    } else {
-      await runSync({ replaceThreadMessages: true });
-      if (generation !== refs.chatGeneration) return;
-      chatLoading.value = false;
-    }
+    connectChatWs({ gid, tid: resumeTid, mg, generation, channel: ct });
+    void runSync();
     // Don't steal focus from the search view when navigating via search result.
     if (!highlightMessageId.value && options.focusComposer !== false) focusComposerSoon();
     return;
@@ -784,6 +819,7 @@ interface ChatSocketContext {
   tid: string;
   mg: string | null;
   generation: number;
+  channel?: string;
 }
 
 const WS_CONNECT_TIMEOUT_MS = 10000;
@@ -797,11 +833,14 @@ function handleProtocolMismatch(error: unknown): boolean {
 }
 
 function connectChatWs(ctx: ChatSocketContext): void {
-  const { gid, tid, mg, generation } = ctx;
+  const { gid, tid, mg, generation, channel = 'web' } = ctx;
   if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   let wsUrl = `${proto}//${location.host}/ui/chat/api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/ws`;
-  if (mg) wsUrl += `?mg=${encodeURIComponent(mg)}`;
+  const params = new URLSearchParams();
+  if (mg) params.set('mg', mg);
+  if (channel !== 'web') params.set('channel', channel);
+  if (params.size) wsUrl += `?${params}`;
   const ws = new WebSocket(wsUrl);
   refs.ws = ws;
   refs.wsConnectCancel = startConnectionTimeout(WS_CONNECT_TIMEOUT_MS, () => {
@@ -1124,8 +1163,7 @@ export async function selectGroup(
   clearFileSearch();
   const threadsFresh = await loadThreads(gid);
   if (generation !== refs.chatGeneration || groupId.value !== gid) return;
-  // Threads list refresh now happens via the unified sync ticker
-  // (startSyncPoll), which picks up groupId.value automatically.
+  // The global socket follows the selected group automatically.
   await loadTree('');
   if (generation !== refs.chatGeneration || groupId.value !== gid) return;
   if (options.resume) {
@@ -1146,9 +1184,9 @@ export async function selectGroup(
 export async function navigateAttention(scope: string | AttentionLocation): Promise<boolean> {
   const targets = attentionTargets.value;
   if (!targets?.length || attentionError.value) return false;
-  const target = targets.find(target => typeof scope === 'string'
-    ? target.origin.agentGroupId === scope
-    : matchesAttentionLocation(target, scope));
+  const target = targets.find((target) =>
+    typeof scope === 'string' ? target.origin.agentGroupId === scope : matchesAttentionLocation(target, scope),
+  );
   if (!target) return false;
   selectAttention(target.id, true);
   try {
@@ -1573,7 +1611,7 @@ export function clearPinnedContext(): void {
 export function reconnectChatNow(): void {
   const gid = groupId.value;
   const tid = threadId.value;
-  if (!refs.reconnectCancel || channelType.value !== 'web' || !gid || !tid) return;
+  if (!refs.reconnectCancel || !gid || !tid) return;
   runReconnectImmediately(refs.reconnectCancel, () => {
     refs.reconnectCancel = null;
     chatStatus.value = 'disconnected \u00b7 reconnecting\u2026';
@@ -1582,6 +1620,7 @@ export function reconnectChatNow(): void {
       tid,
       mg: messagingGroupId.value,
       generation: refs.chatGeneration,
+      channel: channelType.value || 'web',
     });
   });
 }
@@ -1638,13 +1677,11 @@ export function installLivenessHandlers(): void {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     nowTick.value = Date.now();
-    runSync().catch(() => {
-      /* ignore */
-    });
+    syncConnection?.catchUp();
     if (!threadId.value) return;
     const ws = refs.ws;
     const open = !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
-    if (channelType.value === 'web' && !open) {
+    if (!open) {
       if (refs.reconnectCancel) {
         refs.reconnectCancel();
         refs.reconnectCancel = null;
@@ -1655,6 +1692,7 @@ export function installLivenessHandlers(): void {
           tid: threadId.value,
           mg: messagingGroupId.value,
           generation: refs.chatGeneration,
+          channel: channelType.value || 'web',
         });
       }
     }

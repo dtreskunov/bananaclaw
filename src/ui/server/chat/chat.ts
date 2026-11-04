@@ -114,6 +114,8 @@ import fs from 'fs';
 import { type InputHandling } from '../../shared/input-state.js';
 import { INPUT_EDIT_ID } from '../../../pending-input-edit.js';
 import { cancelPendingInput, editPendingInput } from './pending-input-edit.js';
+import { attachSyncSocket } from './sync-socket.js';
+import { onUiChange } from '../../../ui-events.js';
 
 /**
  * Idempotently ensure the shared `web` messaging group exists for this agent
@@ -162,6 +164,7 @@ interface ChatContext {
   messagingGroupId: string;
   threadId: string;
   canSend: boolean;
+  channelType: string;
 }
 
 /**
@@ -2075,7 +2078,11 @@ function handoffIndexedMessages(
 
 // ── WebSocket upgrade ──
 
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
+
+export function closeChatSockets(): void {
+  for (const client of wss.clients) client.terminate();
+}
 
 // Keepalive: send a ws-level ping to every open client every 30s. Browsers
 // auto-respond with pong, so any intermediary (Cloudflare, nginx, LB) sees
@@ -2112,7 +2119,12 @@ wss.on('close', () => clearInterval(wsKeepaliveTimer));
 function matchChatWsPath(pathname: string): { groupId: string; threadId: string } | null {
   const m = pathname.match(/^\/ui\/chat\/api\/groups\/([^/]+)\/chat\/([^/]+)\/ws$/);
   if (!m) return null;
-  return { groupId: m[1], threadId: m[2] };
+  try {
+    return { groupId: decodeURIComponent(m[1]), threadId: decodeURIComponent(m[2]) };
+  } catch (error) {
+    if (!(error instanceof URIError)) throw error;
+    return null;
+  }
 }
 
 function readCookieToken(req: http.IncomingMessage): string | null {
@@ -2129,6 +2141,24 @@ function readCookieToken(req: http.IncomingMessage): string | null {
 
 /** Upgrade handler — mount at `/ui/chat` via mountUpgradeHandler. */
 export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Duplex, head: Buffer): void {
+  if ((req.url || '').split('?')[0] === '/ui/chat/api/sync/ws') {
+    const session = authenticate(req);
+    const status = !session
+      ? '401 Unauthorized'
+      : req.headers.origin !== new URL(uiBaseUrl()).origin
+        ? '403 Forbidden'
+        : null;
+    if (status || !session) {
+      socket.write(`HTTP/1.1 ${status}\r\nContent-Length: 0\r\n\r\n`);
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      attachKeepalive(ws);
+      attachSyncSocket(ws, session.userId, session.sessionHash, listThreadsForViewer);
+    });
+    return;
+  }
   if (
     handleVoiceUpgrade(req, socket, head, {
       expectedOrigin: new URL(uiBaseUrl()).origin,
@@ -2161,6 +2191,11 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
     socket.destroy();
     return;
   }
+  if (req.headers.origin !== new URL(uiBaseUrl()).origin) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
   const access = canAccessAgentGroup(session.userId, match.groupId);
   if (!access.allowed) {
     socket.write('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
@@ -2176,25 +2211,26 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
 
   const query = new URLSearchParams(url.split('?')[1] || '');
   const requestedMg = query.get('mg');
+  const requestedChannel = query.get('channel') || WEB_CHANNEL_TYPE;
   let target: ReturnType<typeof resolveTargetMessagingGroup>;
   if (requestedMg) {
     target = resolveTargetMessagingGroup(
       session.userId,
       match.groupId,
-      { channelType: WEB_CHANNEL_TYPE, messagingGroupId: requestedMg },
+      { channelType: requestedChannel, messagingGroupId: requestedMg },
       isElevated(session.userId),
     );
   } else {
     ensureWebMessagingGroup(match.groupId);
     target = resolveTargetMessagingGroup(session.userId, match.groupId, undefined, isElevated(session.userId));
   }
-  if (!target || target.channelType !== WEB_CHANNEL_TYPE) {
+  if (!target || (requestedChannel !== WEB_CHANNEL_TYPE && !requestedMg)) {
     socket.write('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
   }
   const targetMg = getMessagingGroup(target.messagingGroupId);
-  if (!targetMg || targetMg.channel_type !== WEB_CHANNEL_TYPE) {
+  if (!targetMg || targetMg.channel_type !== target.channelType) {
     socket.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
@@ -2208,16 +2244,18 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
       platformId: targetMg.platform_id,
       messagingGroupId: target.messagingGroupId,
       threadId: match.threadId,
-      canSend: userOwnsMessagingGroup(session.userId, match.groupId, WEB_CHANNEL_TYPE, target.messagingGroupId),
+      canSend: userOwnsMessagingGroup(session.userId, match.groupId, target.channelType, target.messagingGroupId),
+      channelType: target.channelType,
     });
   });
 }
 
 async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> {
-  const override = { channelType: WEB_CHANNEL_TYPE, messagingGroupId: ctx.messagingGroupId };
+  const override = { channelType: ctx.channelType, messagingGroupId: ctx.messagingGroupId };
   const unsubscribe = startConversationStream({
     read: () => {
-      if (!authenticate(ctx.request)) throw new Error('Chat authentication expired');
+      if (authenticate(ctx.request, { touch: false })?.userId !== ctx.userId)
+        throw new Error('Chat authentication expired');
       return readConversation(ctx.userId, ctx.groupId, ctx.threadId, override);
     },
     subscribe: (invalidate) => {
@@ -2225,10 +2263,20 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
         const context = resolveTurnContext(ctx.userId, ctx.groupId, ctx.threadId, override);
         if (!context || !context.sessionId || sessionId === null || sessionId === context.sessionId) invalidate();
       });
-      const authCheck = setInterval(invalidate, 30_000);
+      const offUi = onUiChange((change) => {
+        if (change.kind === 'access' || (change.kind === 'group' && change.groupId === ctx.groupId)) invalidate();
+      });
+      const authCheck = setInterval(() => {
+        if (
+          authenticate(ctx.request, { touch: false })?.userId !== ctx.userId ||
+          !resolveTurnContext(ctx.userId, ctx.groupId, ctx.threadId, override)
+        )
+          ws.close(1008, 'Conversation access expired');
+      }, 30_000);
       authCheck.unref();
       return () => {
         off();
+        offUi();
         clearInterval(authCheck);
       };
     },
@@ -2238,6 +2286,12 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
       ws.close(1011, 'Conversation unavailable; reconnect or reload');
     },
   });
+  attachKeepalive(ws);
+  ws.on('close', unsubscribe);
+  ws.on('error', (err) => log.warn('web chat ws error', { err }));
+}
+
+function attachKeepalive(ws: WebSocket): void {
   const keepalive = ws as KeepaliveWs;
   keepalive.isAlive = true;
   ws.on('pong', () => {
@@ -2246,6 +2300,4 @@ async function attachChatSocket(ws: WebSocket, ctx: ChatContext): Promise<void> 
   ws.on('message', () => {
     keepalive.isAlive = true;
   });
-  ws.on('close', unsubscribe);
-  ws.on('error', (err) => log.warn('web chat ws error', { err }));
 }

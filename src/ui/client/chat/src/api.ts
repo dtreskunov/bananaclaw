@@ -8,11 +8,15 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export function redirectToLogin(): void {
+  const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
+  window.location.replace(`/ui/login?next=${next}`);
+}
+
 export async function api<T = unknown>(url: string, opts?: RequestInit): Promise<T> {
   const r = await fetch(url, { credentials: 'same-origin', ...opts });
   if (r.status === 401) {
-    const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
-    window.location.replace(`/ui/login?next=${next}`);
+    redirectToLogin();
     throw new UnauthorizedError();
   }
   if (!r.ok) throw new Error('HTTP ' + r.status);
