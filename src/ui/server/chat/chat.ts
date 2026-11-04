@@ -107,7 +107,7 @@ import { sendConversationFrame, startConversationStream } from './conversation-s
 
 import { setResendPendingWebOverride } from '../../../channels/resend.js';
 import type { OutboundMessage } from '../../../channels/adapter.js';
-import { authenticate, COOKIE_NAME } from '../auth.js';
+import { authenticate } from '../auth.js';
 import { handleVoiceUpgrade } from './voice-stream.js';
 import { uiBaseUrl } from '../config.js';
 import fs from 'fs';
@@ -160,10 +160,8 @@ interface ChatContext {
   request: http.IncomingMessage;
   userId: string;
   groupId: string;
-  platformId: string;
   messagingGroupId: string;
   threadId: string;
-  canSend: boolean;
   channelType: string;
 }
 
@@ -2127,32 +2125,21 @@ function matchChatWsPath(pathname: string): { groupId: string; threadId: string 
   }
 }
 
-function readCookieToken(req: http.IncomingMessage): string | null {
-  const header = req.headers.cookie;
-  if (!header) return null;
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq < 0) continue;
-    const k = part.slice(0, eq).trim();
-    if (k === COOKIE_NAME) return part.slice(eq + 1).trim();
+function authenticateChatUpgrade(req: http.IncomingMessage, socket: internal.Duplex): ReturnType<typeof authenticate> {
+  const session = authenticate(req);
+  if (!session || req.headers.origin !== new URL(uiBaseUrl()).origin) {
+    socket.write(`HTTP/1.1 ${session ? '403 Forbidden' : '401 Unauthorized'}\r\nContent-Length: 0\r\n\r\n`);
+    socket.destroy();
+    return null;
   }
-  return null;
+  return session;
 }
 
 /** Upgrade handler — mount at `/ui/chat` via mountUpgradeHandler. */
 export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Duplex, head: Buffer): void {
   if ((req.url || '').split('?')[0] === '/ui/chat/api/sync/ws') {
-    const session = authenticate(req);
-    const status = !session
-      ? '401 Unauthorized'
-      : req.headers.origin !== new URL(uiBaseUrl()).origin
-        ? '403 Forbidden'
-        : null;
-    if (status || !session) {
-      socket.write(`HTTP/1.1 ${status}\r\nContent-Length: 0\r\n\r\n`);
-      socket.destroy();
-      return;
-    }
+    const session = authenticateChatUpgrade(req, socket);
+    if (!session) return;
     wss.handleUpgrade(req, socket, head, (ws) => {
       attachKeepalive(ws);
       attachSyncSocket(ws, session.userId, session.sessionHash, listThreadsForViewer);
@@ -2184,31 +2171,14 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
     socket.destroy();
     return;
   }
-  const session = authenticate(req);
-  if (!session) {
-    // No cookie — reject with HTTP 401 before completing upgrade.
-    socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-  if (req.headers.origin !== new URL(uiBaseUrl()).origin) {
-    socket.write('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
-    socket.destroy();
-    return;
-  }
+  const session = authenticateChatUpgrade(req, socket);
+  if (!session) return;
   const access = canAccessAgentGroup(session.userId, match.groupId);
   if (!access.allowed) {
     socket.write('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
   }
-  // Verify token cookie was present (paranoia: authenticate succeeded so it
-  // must have been). Used to silence the unused-import lint.
-  if (!readCookieToken(req)) {
-    socket.destroy();
-    return;
-  }
-
   const query = new URLSearchParams(url.split('?')[1] || '');
   const requestedMg = query.get('mg');
   const requestedChannel = query.get('channel') || WEB_CHANNEL_TYPE;
@@ -2241,10 +2211,8 @@ export function handleChatUpgrade(req: http.IncomingMessage, socket: internal.Du
       request: req,
       userId: session.userId,
       groupId: match.groupId,
-      platformId: targetMg.platform_id,
       messagingGroupId: target.messagingGroupId,
       threadId: match.threadId,
-      canSend: userOwnsMessagingGroup(session.userId, match.groupId, target.channelType, target.messagingGroupId),
       channelType: target.channelType,
     });
   });

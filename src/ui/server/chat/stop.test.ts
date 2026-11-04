@@ -76,6 +76,7 @@ import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
 import { createWebAdapter } from '../../../channels/web.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { COOKIE_NAME } from '../auth.js';
+import * as auth from '../auth.js';
 import { uiBaseUrl } from '../config.js';
 import { closeChatSockets, handleChatRequest, handleChatUpgrade, matchChatPath } from './chat.js';
 import { readChatHistory } from './history.js';
@@ -686,6 +687,25 @@ describe('durable input state history', () => {
 });
 
 describe('global and non-web WebSocket upgrades', () => {
+  it.each(['/ui/chat/api/sync/ws', '/ui/chat/api/groups/agent/chat/thread-1/ws'])(
+    'rejects unauthenticated upgrades for %s before attaching a socket',
+    (url) => {
+      vi.spyOn(auth, 'authenticate').mockReturnValueOnce(null);
+      const upgrade = vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation(() => {});
+      const req = Readable.from([]) as unknown as http.IncomingMessage;
+      req.url = url;
+      req.headers = { origin: new URL(uiBaseUrl()).origin };
+      const rejected = new PassThrough();
+      let response = '';
+      rejected.on('data', (data) => {
+        response += data.toString();
+      });
+      handleChatUpgrade(req, rejected, Buffer.alloc(0));
+      expect(response).toContain('401 Unauthorized');
+      expect(upgrade).not.toHaveBeenCalled();
+    },
+  );
+
   it('closes upgraded global sockets before shared HTTP shutdown', async () => {
     const server = http.createServer();
     server.on('upgrade', handleChatUpgrade);
