@@ -18,7 +18,7 @@ import type {
   SteeringInput,
 } from './types.js';
 import { fingerprintToolInput } from './types.js';
-import { builtinToolResultError, toolActivityFields } from './tool-activity.js';
+import { nativeToolOutcome, toolActivityFields } from './tool-activity.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
 import { inlineHistoryBytes, MAX_INLINE_BYTES, prepareNativeUserMessage } from './native/attachments.js';
 export { prepareNativeUserMessage as userMessage } from './native/attachments.js';
@@ -131,7 +131,7 @@ export function formatNativeToolStep(
   const fields = toolActivityFields(tool, input);
   let detail = fields.detail;
   let title: string | undefined;
-  const resultError = status === 'completed' ? builtinToolResultError(tool, part.output) : undefined;
+  const outcome = status === 'completed' ? nativeToolOutcome(tool, part.output) : undefined;
   if (tool === 'skill' && typeof input?.name === 'string' && input.name.trim()) {
     detail = typeof input.path === 'string' && input.path.trim()
       ? `${input.name.trim()}/${input.path.trim()}`
@@ -160,11 +160,11 @@ export function formatNativeToolStep(
     kind: 'tool',
     id: String(part.toolCallId ?? `native-tool-${Date.now()}`),
     tool,
-    status: resultError ? 'error' : status,
+    status: outcome?.status ?? status,
     ...(detail ? { detail } : {}),
     ...(fields.description ? { description: fields.description } : {}),
     ...(title ? { title } : {}),
-    ...(resultError || status === 'error' ? { error: resultError ?? errorMessage(part.error) } : {}),
+    ...(outcome?.error || status === 'error' ? { error: outcome?.error ?? errorMessage(part.error) } : {}),
   };
 }
 

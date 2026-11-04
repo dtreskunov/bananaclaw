@@ -1,7 +1,7 @@
 import type { ModelMessage, ToolSet } from 'ai';
 import { NativeStore } from './store.js';
 import type { ActivityStep } from '../types.js';
-import { builtinToolResultError, toolActivityFields } from '../tool-activity.js';
+import { nativeToolOutcome, toolActivityFields } from '../tool-activity.js';
 
 export const INTERRUPTED_TOOL =
   'Interrupted; outcome unknown. External side effects may have occurred. Do not retry without checking.';
@@ -128,14 +128,17 @@ export class NativeTurnJournal {
 
   activity(): ActivityStep[] {
     return [...this.completedActivity, ...[...this.calls].map(([id, call]): ActivityStep => {
-      const error = call.failed ? String(call.output) : builtinToolResultError(call.name, call.output);
+      const outcome = call.failed ? {
+        status: call.output === INTERRUPTED_TOOL ? 'interrupted' as const : 'error' as const,
+        error: String(call.output),
+      } : nativeToolOutcome(call.name, call.output);
       return {
         kind: 'tool',
         id,
         tool: call.name,
-        status: call.failed && call.output === INTERRUPTED_TOOL ? 'interrupted' : error ? 'error' : 'completed',
+        status: outcome?.status ?? 'completed',
         ...toolActivityFields(call.name, call.input),
-        ...(error ? { error } : {}),
+        ...(outcome?.error ? { error: outcome.error } : {}),
       };
     })];
   }

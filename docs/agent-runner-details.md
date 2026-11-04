@@ -438,6 +438,16 @@ removes confirmations past its anchor. Changed media descriptors can be tried
 again, and switching models does not inherit another model's quarantines.
 There is no format-specific decoder, automatic conversion, or silent discard.
 
+### Native Provider: Structured shell outcomes
+
+Native `bash` tool results retain structured stdout/stderr, exit code, signal
+and outcome rather than returning an exit code embedded in formatted text.
+The model receives JSON on success and error JSON on failure/interruption;
+activity and incremental journals use the same outcome. A zero exit is
+completed, a nonzero exit is an error, a timeout or external signal is unknown,
+and explicit cancellation is interrupted. Unknown/interrupted results warn
+that side effects may have occurred. Stored legacy text results are unchanged.
+
 ### Native Provider: Automatic and context-overflow compaction
 
 The native provider automatically compacts at **75% context utilization**,

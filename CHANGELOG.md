@@ -4,6 +4,12 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Structured native shell outcomes.** Shell stdout/stderr, exit
+  status and signal remain structured through model output, history and
+  activity. Nonzero exits are errors; cancellation and unknown side effects
+  are not reported as successful execution. Existing transcripts remain
+  readable. See [migration and rollback](docs/usage-efficiency.md#detect--why--fix--verify--rollback).
+
 - **Input attention.** Clickable `N attn` text in agent-tab and thread-card status
   lines opens the oldest actionable request in its scope. Dot-separated status
   text shares one font; attention alone is bold and warning-colored. No floating

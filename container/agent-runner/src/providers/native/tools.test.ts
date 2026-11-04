@@ -7,6 +7,9 @@ import path from 'node:path';
 
 import { closeSessionDb, getOutboundDb, initTestSessionDb } from '../../db/connection.js';
 import { createNativeTools } from './tools.js';
+import { NativeStore } from './store.js';
+import { NativeTurnJournal } from './turn-journal.js';
+import { formatNativeToolStep } from '../native.js';
 
 let root: string;
 let outside: string;
@@ -260,7 +263,52 @@ describe('native coding tools', () => {
   });
 
   it('runs shell commands in the workspace', async () => {
-    expect(String(await execute('bash', { command: 'pwd' }))).toContain(root);
+    expect(await execute('bash', { command: 'pwd' })).toEqual({
+      status: 'completed', stdout: `${root}\n`, stderr: '', exitCode: 0, signal: null,
+    });
+  });
+
+  it('preserves nonzero exits and stderr as structured failures, not completed tools', async () => {
+    expect(await execute('bash', { command: 'printf partial; printf diagnostic >&2; exit 7' })).toEqual({
+      status: 'error', stdout: 'partial', stderr: 'diagnostic', exitCode: 7, signal: null,
+      error: 'Command exited with 7',
+    });
+
+
+    expect(await execute('bash', { command: 'kill -TERM $$' })).toMatchObject({
+      status: 'unknown', exitCode: null, signal: 'SIGTERM',
+      error: 'Command terminated by SIGTERM; outcome unknown.',
+    });
+  });
+
+  it('surfaces a process-start failure without inventing an exit code', async () => {
+    expect(await execute('bash', { command: 'pwd' }, path.join(root, 'missing'))).toMatchObject({
+      status: 'error', stdout: '', stderr: '', exitCode: null, signal: null,
+      error: expect.stringContaining('ENOENT'),
+    });
+  });
+
+  it('carries real shell failures through model conversion, activity, durable history and forks', async () => {
+    const store = new NativeStore(':memory:');
+    try {
+      const conversation = store.createConversation();
+      const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'Run a command' });
+      const tools = journal.wrap(createNativeTools(root), new AbortController().signal);
+      const input = { command: 'printf "exit: 0"; printf diagnostic >&2; exit 7' };
+      const output = await tools.bash.execute!(input, { toolCallId: 'failed-command', messages: [] });
+      expect(output).toMatchObject({ status: 'error', stdout: 'exit: 0', stderr: 'diagnostic', exitCode: 7 });
+      const modelOutput = await tools.bash.toModelOutput!({ toolCallId: 'failed-command', input, output });
+      expect(modelOutput).toMatchObject({ type: 'error-json', value: { status: 'error', exitCode: 7, stderr: 'diagnostic' } });
+      expect(journal.activity()[0]).toMatchObject({ status: 'error', error: 'Command exited with 7' });
+      expect(formatNativeToolStep({ toolName: 'bash', toolCallId: 'failed-command', input, output }, 'completed'))
+        .toMatchObject({ status: 'error', error: 'Command exited with 7' });
+      journal.save(true);
+      const child = store.fork(conversation, journal.checkpoint)!;
+      expect(store.messages(child)).toEqual(store.messages(conversation));
+      expect(store.messages(child)).toContainEqual(expect.objectContaining({
+        role: 'tool', content: [expect.objectContaining({ output: modelOutput })],
+      }));
+    } finally { store.close(); }
   });
 
   it('advertises a ten-minute maximum shell timeout', () => {
@@ -281,7 +329,7 @@ describe('native coding tools', () => {
       'SELECT current_tool, tool_declared_timeout_ms FROM container_state WHERE id = 1',
     ).get();
     expect(state()).toEqual({ current_tool: 'bash', tool_declared_timeout_ms: expected });
-    expect(String(await result)).toContain('stdout:\ndone');
+    expect(await result).toMatchObject({ status: 'completed', stdout: 'done', exitCode: 0 });
     expect(state()).toEqual({ current_tool: null, tool_declared_timeout_ms: null });
   });
 
@@ -291,10 +339,14 @@ describe('native coding tools', () => {
       command: 'printf partial; printf warning >&2; sleep 10',
       timeoutMs: 1000,
     });
-    await expect(result).rejects.toThrow('Command timed out after 1s; outcome unknown.');
-    await expect(result).rejects.toThrow('stdout:\npartial');
-    await expect(result).rejects.toThrow('stderr:\nwarning');
-    await expect(result).rejects.toThrow('exit: SIGTERM');
+    const output = await result;
+    expect(output).toEqual({
+      status: 'unknown', stdout: 'partial', stderr: 'warning', exitCode: null, signal: 'SIGTERM',
+      error: 'Command timed out after 1s; outcome unknown.',
+    });
+    expect(formatNativeToolStep({ toolName: 'bash', output }, 'completed')).toMatchObject({
+      status: 'unknown', error: 'Command timed out after 1s; outcome unknown.',
+    });
     expect(Date.now() - started).toBeGreaterThanOrEqual(900);
     expect(Date.now() - started).toBeLessThan(3500);
     expect(getOutboundDb().prepare(
@@ -314,8 +366,14 @@ describe('native coding tools', () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     controller.abort();
-    await expect(result).rejects.toThrow('Command cancelled; outcome unknown.');
-    await expect(result).rejects.toThrow('exit: SIGKILL');
+    const output = await result;
+    expect(output).toMatchObject({
+      status: 'interrupted', exitCode: null, signal: 'SIGKILL',
+      error: 'Command cancelled; outcome unknown.',
+    });
+    expect(formatNativeToolStep({ toolName: 'bash', output }, 'completed')).toMatchObject({
+      status: 'interrupted', error: 'Command cancelled; outcome unknown.',
+    });
     expect(Date.now() - started).toBeLessThan(3500);
     await expect(bash.execute!({ command: 'touch must-not-exist' }, {
       toolCallId: 'already-stopped', messages: [], abortSignal: controller.signal,

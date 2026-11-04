@@ -342,6 +342,22 @@ afterEach(() => {
 
 describe('NativeProvider', () => {
   it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'reports a native shell failure consistently through %s and preserves partial output', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      scriptedToolCalls = [['bash', '{"command":"printf partial; printf diagnostic >&2; exit 7"}']];
+      const events = await collect(new NativeProvider({ model: 'local/stub' }));
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'progress', step: expect.objectContaining({ tool: 'bash', status: 'error', error: 'Command exited with 7' }),
+      }));
+      const history = JSON.stringify(requests[1].messages);
+      expect(history).toContain('Command exited with 7');
+      expect(history).toContain('partial');
+      expect(history).toContain('diagnostic');
+      expect(events.some(event => event.type === 'error')).toBe(false);
+    },
+  );
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
     'does not retry confirmed plan exhaustion through %s', async (protocol) => {
       process.env.NATIVE_PROTOCOL = protocol;
       apiFailures = Array.from({ length: 3 }, () => ({

@@ -10,6 +10,7 @@ import { invokeRegisteredTool, listRegisteredTools } from '../../mcp-tools/regis
 import type { NativeSkillRegistry } from './skills.js';
 import { NativeTodoState, type NativeTodo } from './todos.js';
 import { createNativeMediaTools, createNativeMediaBudget, type NativeMediaToolOptions } from './media.js';
+import type { NativeToolOutcome } from '../tool-activity.js';
 
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_RESULTS = 200;
@@ -42,14 +43,16 @@ function wildcard(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-interface ShellResult {
-  text: string;
+interface ShellResult extends NativeToolOutcome {
+  stdout: string;
+  stderr: string;
   exitCode: number | null;
+  signal: NodeJS.Signals | null;
 }
 
 function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?: AbortSignal): Promise<ShellResult> {
   abortSignal?.throwIfAborted();
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const child = spawn('/bin/sh', ['-lc', command], { cwd, detached: true, env: process.env });
     let stdout = '';
     let stderr = '';
@@ -84,29 +87,26 @@ function runShell(command: string, cwd: string, timeoutMs: number, abortSignal?:
     const timer = setTimeout(() => stop(`Command timed out after ${timeoutMs / 1000}s`), timeoutMs);
     const onAbort = (): void => stop('Command cancelled');
     abortSignal?.addEventListener('abort', onAbort, { once: true });
-    child.on('error', (error) => {
+    const finish = (result: ShellResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(killTimer);
       abortSignal?.removeEventListener('abort', onAbort);
-      reject(error);
-    });
+      resolve(result);
+    };
+    child.on('error', (error) => finish({
+      status: 'error', stdout, stderr, exitCode: null, signal: null, error: error.message,
+    }));
     child.on('close', (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearTimeout(killTimer);
-      abortSignal?.removeEventListener('abort', onAbort);
-      const text = [
-        stdout && `stdout:\n${stdout}`,
-        stderr && `stderr:\n${stderr}`,
-        `exit: ${code ?? signal ?? 'unknown'}`,
-      ]
-        .filter(Boolean)
-        .join('\n');
-      if (interruption) reject(new Error(`${interruption}; outcome unknown.\n${text}`));
-      else resolve({ text, exitCode: code });
+      const error = interruption ? `${interruption}; outcome unknown.` :
+        signal ? `Command terminated by ${signal}; outcome unknown.` :
+        code !== 0 ? `Command exited with ${code ?? 'unknown status'}` : undefined;
+      finish({
+        status: interruption === 'Command cancelled' ? 'interrupted' :
+          interruption || signal || code === null ? 'unknown' : code === 0 ? 'completed' : 'error',
+        stdout, stderr, exitCode: code, signal, ...(error ? { error } : {}),
+      });
     });
   });
 }
@@ -234,7 +234,8 @@ export function createNativeTools(
           30_000,
           options.abortSignal,
         );
-        if (result.exitCode !== 0) throw new Error(result.text);
+        if (result.status !== 'completed')
+          throw new Error([result.error, result.stdout, result.stderr].filter(Boolean).join('\n'));
         return `Applied patch to ${[...new Set(paths)].join(', ')}`;
       } finally {
         fs.rmSync(patchFile, { force: true });
@@ -312,11 +313,19 @@ export function createNativeTools(
       const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 30_000, 1000), MAX_SHELL_TIMEOUT_MS);
       setContainerToolInFlight('bash', timeoutMs);
       try {
-        return (await runShell(args.command, cwd, timeoutMs, options.abortSignal)).text;
+        return await runShell(args.command, cwd, timeoutMs, options.abortSignal);
       } finally {
         clearContainerToolInFlight();
       }
     },
+    toModelOutput: ({ output }) => ({
+      type: output.status === 'completed' ? 'json' : 'error-json',
+      value: {
+        status: output.status, exitCode: output.exitCode, signal: output.signal,
+        ...(output.error ? { error: output.error } : {}),
+        stdout: output.stdout, stderr: output.stderr,
+      },
+    }),
   });
 
   if (todoState) {

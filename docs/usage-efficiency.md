@@ -16,6 +16,14 @@ database-only fork snapshot, whose existing size ceiling covers the archives.
 Errors remain errors; media is not truncated. The model-visible history uses
 the same bounded projection as subsequent requests.
 
+Native shell results carry `status`, `exitCode`, `signal`, `stdout`, `stderr`
+and an optional diagnostic. Nonzero exits remain failures even if stdout
+contains success-looking text. Timeout outcomes are unknown; explicit
+cancellation is interrupted and warns that effects may already have occurred.
+These fields reach model results, the native journal and activity consistently.
+The existing shell capture limit still applies before the 16 KiB model preview.
+Oversized results use the same private archive and ranged-read retrieval.
+
 Use `read({path, startLine, lineCount})` for up to 200 lines, or query a saved
 JSON result with `bash` and return only relevant fields. Whole-file reads keep
 their existing 256 KiB limit. Ranges support files up to 16 MiB and reject
