@@ -8,6 +8,7 @@ import { activeTurn, channelType, chatReady, groupId, messagingGroupId, threadId
 import { applyTurnState } from './stop-turn';
 import { testThread } from './conversation-test-fixtures';
 import { SYNC_PROTOCOL_VERSION } from '../../../shared/sync';
+import { installSyncFixture } from './sync-action-test-fixtures';
 
 let dispose = () => {};
 afterEach(() => {
@@ -58,9 +59,7 @@ it('pushes metadata and resolves refreshes without HTTP polling or overwriting a
   const data = {
     approvals: [],
     attention: [],
-    threads: [testThread()],
-    groupAccess: true,
-    voiceInput: { backend: 'disabled', ready: false },
+    group: { threads: [testThread()], voiceInput: { backend: 'disabled', ready: false } },
   };
   sockets[0].onmessage?.({
     data: JSON.stringify({
@@ -85,4 +84,20 @@ it('pushes metadata and resolves refreshes without HTTP polling or overwriting a
   expect(attentionError.value).toContain('disconnected');
   expect(threads.value).toHaveLength(2);
   expect(chatReady.value).toBe(true);
+});
+
+it('clears group state and conversation controls after access is revoked', async () => {
+  vi.useFakeTimers();
+  groupId.value = 'g';
+  threadId.value = 'external';
+  threads.value = [testThread()];
+  chatReady.value = true;
+  const sync = await installSyncFixture();
+  dispose = sync.dispose;
+  sync.read.mockResolvedValue({ approvals: [], attention: [], group: null });
+  expect(await runSync()).toBe(false);
+  expect(threads.value).toEqual([]);
+  expect(threadId.value).toBeNull();
+  expect(chatReady.value).toBe(false);
+  expect(attentionError.value).toContain('access');
 });

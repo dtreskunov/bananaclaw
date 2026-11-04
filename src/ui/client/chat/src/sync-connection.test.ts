@@ -27,13 +27,12 @@ class Socket {
         data: {
           approvals: [],
           attention: [],
-          ...(groupId
+          group: groupId
             ? {
                 threads: [],
-                groupAccess: true,
                 voiceInput: { backend: 'disabled', ready: false },
               }
-            : {}),
+            : null,
         },
       }),
     });
@@ -72,7 +71,7 @@ describe('global sync browser connection', () => {
     socket.open();
     expect(JSON.parse(socket.send.mock.calls[0][0])).toMatchObject({ groupId: null, subscriptionId: 0 });
     socket.frame(0, null);
-    expect(f.apply).toHaveBeenCalledWith({ approvals: [], attention: [] }, null);
+    expect(f.apply).toHaveBeenCalledWith({ approvals: [], attention: [], group: null }, null);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(socket.send).toHaveBeenCalledOnce();
     expect(f.sockets).toHaveLength(1);
@@ -85,7 +84,7 @@ describe('global sync browser connection', () => {
     f.sockets[0].frame(1, 'g');
     expect(f.apply).not.toHaveBeenCalled();
     f.sockets[0].frame(2, 'g');
-    expect((await refreshed).threads).toEqual([]);
+    expect((await refreshed).group?.threads).toEqual([]);
     expect(f.apply).toHaveBeenCalledOnce();
   });
 

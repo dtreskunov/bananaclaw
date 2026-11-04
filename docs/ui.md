@@ -1344,11 +1344,12 @@ response; metadata explicitly distinguishes provisional, partial, final and
 unavailable reports. Missing usage never becomes fabricated zero tokens.
 
 The app also keeps one authenticated, same-origin global socket at
-`/ui/chat/api/sync/ws`, independent of the selected conversation. Its version-2
+`/ui/chat/api/sync/ws`, independent of the selected conversation. Its version-3
 `subscribe` requests carry a monotonic `subscriptionId` and a nullable `groupId`.
 Global approvals and oldest-first attention are always included, even with no
-group selected. Selecting a group adds its authorized thread list and voice
-capability. Losing access explicitly clears group state.
+group selected. The required `group` field is null with no selected group or
+after access is revoked; otherwise it contains the authorized thread list and
+voice capability. Losing access explicitly clears group state.
 Global and conversation upgrades both require the browser Origin to match
 `UI_BASE_URL`; configure that external URL when using a reverse proxy.
 

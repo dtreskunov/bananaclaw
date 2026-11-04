@@ -7,23 +7,52 @@ describe('global sync protocol', () => {
     protocolVersion: SYNC_PROTOCOL_VERSION,
     subscriptionId: 1,
     groupId: null,
-    data: { approvals: [], attention: [] },
+    data: { approvals: [], attention: [], group: null },
   };
   it('accepts authoritative empty state but rejects missing attention and malformed approvals', () => {
     expect(parseSyncFrame(global)).toEqual(global);
     expect(() => parseSyncFrame({ ...global, data: { approvals: [] } })).toThrow('Invalid');
     expect(() => parseSyncFrame({ ...global, data: { approvals: [{}], attention: [] } })).toThrow('Invalid');
   });
-  it('requires explicit group visibility and complete group state', () => {
-    expect(() => parseSyncFrame({ ...global, groupId: 'g' })).toThrow('Invalid');
+  it('requires complete group state and explicitly represents revoked access', () => {
+    expect(() => parseSyncFrame({ ...global, data: { approvals: [], attention: [] } })).toThrow('Invalid');
     expect(
       parseSyncFrame({
         ...global,
         groupId: 'g',
-        data: { ...global.data, groupAccess: false, threads: [], voiceInput: { backend: 'disabled', ready: false } },
-      }).data.groupAccess,
-    ).toBe(false);
+      }).data.group,
+    ).toBeNull();
+    const group = { threads: [], voiceInput: { backend: 'disabled', ready: false } };
+    expect(parseSyncFrame({ ...global, groupId: 'g', data: { ...global.data, group } }).data.group).toEqual(group);
+    expect(() => parseSyncFrame({ ...global, data: { ...global.data, group } })).toThrow('Invalid');
+    expect(() => parseSyncFrame({ ...global, groupId: 'g', data: { ...global.data, group: { threads: [] } } })).toThrow(
+      'Invalid',
+    );
   });
+  it.each([{ sessionId: null }, { messageCount: -1 }, { liveTasks: [{}] }, { forkedFrom: {} }])(
+    'rejects malformed nested thread data: %s',
+    (invalid) => {
+      const thread = {
+        threadId: 't',
+        sessionId: 's',
+        channelType: 'web',
+        messagingGroupId: 'mg',
+        platformId: 'group:g',
+        title: '',
+        lastActivityAt: '',
+        sessionMode: 'per-thread',
+        messageCount: 0,
+        ...invalid,
+      };
+      expect(() =>
+        parseSyncFrame({
+          ...global,
+          groupId: 'g',
+          data: { ...global.data, group: { threads: [thread], voiceInput: { backend: 'disabled', ready: false } } },
+        }),
+      ).toThrow('Invalid');
+    },
+  );
   it('bounds subscription input and rejects protocol mismatches', () => {
     expect(
       isSyncSubscription({

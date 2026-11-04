@@ -55,11 +55,11 @@ var require_dist = __commonJS({
     exports.TokenData = TokenData;
     var PathError = class extends TypeError {
       constructor(message2, originalPath) {
-        let text3 = message2;
+        let text2 = message2;
         if (originalPath)
-          text3 += `: ${originalPath}`;
-        text3 += `; visit https://git.new/pathToRegexpError for info`;
-        super(text3);
+          text2 += `: ${originalPath}`;
+        text2 += `; visit https://git.new/pathToRegexpError for info`;
+        super(text2);
         this.originalPath = originalPath;
       }
     };
@@ -480,8 +480,8 @@ var require_core = __commonJS({
        * Adds texts to the output stream
        *
        * @param {string} text */
-      addText(text3) {
-        this.buffer += escapeHTML(text3);
+      addText(text2) {
+        this.buffer += escapeHTML(text2);
       }
       /**
        * Adds a node open to the output stream (if needed)
@@ -603,11 +603,11 @@ var require_core = __commonJS({
       /**
        * @param {string} text
        */
-      addText(text3) {
-        if (text3 === "") {
+      addText(text2) {
+        if (text2 === "") {
           return;
         }
-        this.add(text3);
+        this.add(text2);
       }
       /** @param {string} scope */
       startScope(scope) {
@@ -645,7 +645,7 @@ var require_core = __commonJS({
     function anyNumberOfTimes(re) {
       return concat("(?:", re, ")*");
     }
-    function optional3(re) {
+    function optional2(re) {
       return concat("(?:", re, ")?");
     }
     function concat(...args) {
@@ -1436,11 +1436,11 @@ var require_core = __commonJS({
               continue;
             }
             const klass = language.classNameAliases[scope[i5]] || scope[i5];
-            const text3 = match2[i5];
+            const text2 = match2[i5];
             if (klass) {
-              emitKeyword(text3, klass);
+              emitKeyword(text2, klass);
             } else {
-              modeBuffer = text3;
+              modeBuffer = text2;
               processKeywords();
               modeBuffer = "";
             }
@@ -1750,8 +1750,8 @@ var require_core = __commonJS({
           }
         }
         node = element;
-        const text3 = node.textContent;
-        const result = language ? highlight2(text3, { language, ignoreIllegals: true }) : highlightAuto(text3);
+        const text2 = node.textContent;
+        const result = language ? highlight2(text2, { language, ignoreIllegals: true }) : highlightAuto(text2);
         element.innerHTML = result.value;
         element.dataset.highlighted = "yes";
         updateClassName(element, language, result.language);
@@ -1767,7 +1767,7 @@ var require_core = __commonJS({
             relevance: result.secondBest.relevance
           };
         }
-        fire("after:highlightElement", { el: element, result, text: text3 });
+        fire("after:highlightElement", { el: element, result, text: text2 });
       }
       function configure(userOptions) {
         options = inherit(options, userOptions);
@@ -1912,7 +1912,7 @@ var require_core = __commonJS({
         concat,
         lookahead,
         either,
-        optional: optional3,
+        optional: optional2,
         anyNumberOfTimes
       };
       for (const key in MODES) {
@@ -15777,11 +15777,11 @@ function replaceSegment(segments, next) {
   if (previous.sequence >= next.sequence || previous.final && !next.final) return segments;
   return segments.map((segment, i5) => i5 === index ? next : segment);
 }
-function insertVoiceText(prefix, text3, suffix) {
-  if (!text3) return prefix + suffix;
-  const before = prefix && !/[\s([{]$/.test(prefix) && !/^[,.;:!?%)\]}]/.test(text3) ? " " : "";
-  const after = suffix && !/^[\s,.;:!?%)\]}]/.test(suffix) && !/[([{]$/.test(text3) ? " " : "";
-  return prefix + before + text3 + after + suffix;
+function insertVoiceText(prefix, text2, suffix) {
+  if (!text2) return prefix + suffix;
+  const before = prefix && !/[\s([{]$/.test(prefix) && !/^[,.;:!?%)\]}]/.test(text2) ? " " : "";
+  const after = suffix && !/^[\s,.;:!?%)\]}]/.test(suffix) && !/[([{]$/.test(text2) ? " " : "";
+  return prefix + before + text2 + after + suffix;
 }
 var initialState = () => ({
   phase: "idle",
@@ -15941,12 +15941,12 @@ var VoiceController = class {
         text: message2.text,
         final: message2.final
       });
-      const text3 = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
-      if (text3) {
+      const text2 = this.segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
+      if (text2) {
         const prefix = this.draft.slice(0, this.selection.start);
         const suffix = this.draft.slice(this.selection.end);
-        const caret = insertVoiceText(prefix, text3, "").length;
-        target.setText(insertVoiceText(prefix, text3, suffix), { start: caret, end: caret });
+        const caret = insertVoiceText(prefix, text2, "").length;
+        target.setText(insertVoiceText(prefix, text2, suffix), { start: caret, end: caret });
       } else {
         target.setText(this.draft, this.selection);
       }
@@ -15974,9 +15974,9 @@ var VoiceController = class {
       return;
     }
     for (let offset = 0; offset < chunk.byteLength; offset += VOICE_MAX_FRAME_BYTES) {
-      const frame = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
-      this.audioQueue.push(frame);
-      this.queuedBytes += frame.byteLength;
+      const frame2 = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
+      this.audioQueue.push(frame2);
+      this.queuedBytes += frame2.byteLength;
     }
     if (this.diagnostics)
       this.diagnostics.peakQueuedBytes = Math.max(this.diagnostics.peakQueuedBytes, this.queuedBytes);
@@ -15995,15 +15995,15 @@ var VoiceController = class {
     this.allowanceAt = now;
     try {
       while (this.audioQueue.length) {
-        const frame = this.audioQueue[0];
-        if (frame.byteLength > this.uploadAllowance || socket.bufferedAmount + frame.byteLength > VOICE_MAX_BUFFER_BYTES) {
+        const frame2 = this.audioQueue[0];
+        if (frame2.byteLength > this.uploadAllowance || socket.bufferedAmount + frame2.byteLength > VOICE_MAX_BUFFER_BYTES) {
           this.drainTimer = setTimeout(() => this.drainAudio(generation2), 25);
           return;
         }
-        socket.send(frame);
-        this.uploadAllowance -= frame.byteLength;
+        socket.send(frame2);
+        this.uploadAllowance -= frame2.byteLength;
         this.audioQueue.shift();
-        this.queuedBytes -= frame.byteLength;
+        this.queuedBytes -= frame2.byteLength;
       }
       if (this.captureFlushed) {
         socket.send(JSON.stringify({ type: "finish" }));
@@ -16229,9 +16229,9 @@ async function captureVoice(onChunk, onError, signal) {
     throw error;
   }
 }
-async function reportVoiceDiagnostic(groupId2, diagnostic) {
+async function reportVoiceDiagnostic(groupId3, diagnostic) {
   try {
-    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/voice/diagnostics`, {
+    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/voice/diagnostics`, {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
@@ -17854,11 +17854,11 @@ var Yt = x4.lex;
 g5.use({
   renderer: {
     link({ href, title, tokens }) {
-      const text3 = this.parser.parseInline(tokens);
+      const text2 = this.parser.parseInline(tokens);
       const isAbs = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//");
       const titleAttr = title ? ` title="${title.replace(/"/g, "&quot;")}"` : "";
       const targetAttr = isAbs ? ' target="_blank" rel="noopener noreferrer"' : "";
-      return `<a href="${href}"${titleAttr}${targetAttr}>${text3}</a>`;
+      return `<a href="${href}"${titleAttr}${targetAttr}>${text2}</a>`;
     }
   }
 });
@@ -17939,9 +17939,9 @@ function pathBelowRoot(path, root) {
   if (path === root) return "";
   return path.startsWith(root + "/") ? path.slice(root.length + 1) : path;
 }
-function normalizeFileLinks(text3) {
+function normalizeFileLinks(text2) {
   const re = /\[([^\]\n]+)\]\(([^<>\n()]*(?:\([^()\n]*\)[^<>\n()]*)*)\)/g;
-  return text3.replace(re, (match2, label, dest) => {
+  return text2.replace(re, (match2, label, dest) => {
     const d5 = dest.trim();
     if (!d5) return match2;
     if (/^[a-z][a-z0-9+.-]*:/i.test(d5)) return match2;
@@ -17962,22 +17962,22 @@ function decodeFileRef(ref) {
 function normalizeFileRef(ref) {
   return String(ref || "").replace(/^\.?\/+/, "").replace(/^workspace\/+/, "");
 }
-function toGroupFileUrl(groupId2, rel) {
-  const gid = encodeURIComponent(groupId2);
+function toGroupFileUrl(groupId3, rel) {
+  const gid = encodeURIComponent(groupId3);
   const segs = rel.split("/").filter(Boolean).map(encodeURIComponent);
   return `api/groups/${gid}/files/${segs.join("/")}`;
 }
-function renderMarkdown(text3, groupId2) {
+function renderMarkdown(text2, groupId3) {
   try {
-    const html = g5.parse(normalizeFileLinks(text3 || ""), { breaks: true, gfm: true });
-    if (!groupId2 || typeof document === "undefined") return html;
+    const html = g5.parse(normalizeFileLinks(text2 || ""), { breaks: true, gfm: true });
+    if (!groupId3 || typeof document === "undefined") return html;
     const template = document.createElement("template");
     template.innerHTML = html;
     template.content.querySelectorAll("img[src]").forEach((img) => {
       const src = img.getAttribute("src") || "";
       if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
       const rel = normalizeFileRef(decodeFileRef(src));
-      if (rel) img.setAttribute("src", toGroupFileUrl(groupId2, rel));
+      if (rel) img.setAttribute("src", toGroupFileUrl(groupId3, rel));
     });
     return template.innerHTML;
   } catch {
@@ -18018,8 +18018,8 @@ function highlightTextNodes(root, query) {
     textNode.parentNode.replaceChild(frag, textNode);
   }
 }
-function rewriteFileLinks(root, groupId2, onNavFile) {
-  if (!groupId2 || !root) return;
+function rewriteFileLinks(root, groupId3, onNavFile) {
+  if (!groupId3 || !root) return;
   const attachPreviewClick = (a4, rel) => {
     a4.addEventListener("click", (ev) => {
       if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
@@ -18032,7 +18032,7 @@ function rewriteFileLinks(root, groupId2, onNavFile) {
     if (!href || isExternalFileRef(href) || isGroupFileRef(href)) return;
     const rel = normalizeFileRef(decodeFileRef(href));
     if (!rel) return;
-    a4.setAttribute("href", toGroupFileUrl(groupId2, rel));
+    a4.setAttribute("href", toGroupFileUrl(groupId3, rel));
     a4.setAttribute("target", "_blank");
     a4.setAttribute("rel", "noopener");
     attachPreviewClick(a4, rel);
@@ -18042,7 +18042,7 @@ function rewriteFileLinks(root, groupId2, onNavFile) {
     if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
     const rel = normalizeFileRef(decodeFileRef(src));
     if (!rel) return;
-    img.setAttribute("src", toGroupFileUrl(groupId2, rel));
+    img.setAttribute("src", toGroupFileUrl(groupId3, rel));
   });
   const fileLikeRe = /^[\w.\-/ ]+\.[A-Za-z0-9]{1,8}$/;
   root.querySelectorAll("code").forEach((c4) => {
@@ -18053,7 +18053,7 @@ function rewriteFileLinks(root, groupId2, onNavFile) {
     const rel = normalizeFileRef(txt);
     if (!rel) return;
     const a4 = document.createElement("a");
-    a4.href = toGroupFileUrl(groupId2, rel);
+    a4.href = toGroupFileUrl(groupId3, rel);
     a4.target = "_blank";
     a4.rel = "noopener";
     a4.textContent = txt;
@@ -18254,9 +18254,9 @@ function isStep(value) {
   if (value.auto !== void 0 && typeof value.auto !== "boolean") return false;
   return value.files === void 0 || Array.isArray(value.files) && value.files.every((file) => typeof file === "string");
 }
-function parseStep(text3) {
+function parseStep(text2) {
   try {
-    const value = JSON.parse(text3);
+    const value = JSON.parse(text2);
     return isStep(value) ? value : {};
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
@@ -18627,8 +18627,8 @@ var TERMINAL_OUTCOMES = {
 };
 function terminalOutcomeStep(turn2) {
   if (turn2.phase !== "settled") return null;
-  const text3 = TERMINAL_OUTCOMES[turn2.outcome];
-  if (!text3) return null;
+  const text2 = TERMINAL_OUTCOMES[turn2.outcome];
+  if (!text2) return null;
   if (turn2.outcome === "stopped" && turn2.activity.some((line) => {
     const step = parseStep(line.text);
     return step.kind === "notification" && step.id === `stopped:${turn2.id}`;
@@ -18637,7 +18637,7 @@ function terminalOutcomeStep(turn2) {
   return {
     kind: "notification",
     id: `ui:outcome:${turn2.id}`,
-    text: text3,
+    text: text2,
     ...turn2.outcome === "interrupted" ? { status: "interrupted" } : {}
   };
 }
@@ -18698,19 +18698,19 @@ function withModelTime(turn2, lines, times, hostsStart) {
   const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
   if (!hostsStart || !Number.isFinite(startedAt2)) return timed;
   const modelTime = times.get(TURN_START);
-  const callStarts = turn2.activity.flatMap(({ ts, text: text4 }) => {
-    const step2 = parseStep(text4);
+  const callStarts = turn2.activity.flatMap(({ ts, text: text3 }) => {
+    const step2 = parseStep(text3);
     const at = activityTimestamp(ts);
     return step2.kind === "model" && Number.isFinite(at) ? [at - (step2.durationMs ?? 0)] : [];
   });
   const prepared = callStarts.length ? { durationMs: Math.max(0, Math.min(...callStarts) - startedAt2) } : {};
   const live = turn2.phase !== "settled";
-  const text3 = !live ? STARTED_TURN_TEXT : !callStarts.length ? PREPARING_TEXT : modelTime?.since !== void 0 ? THINKING_TEXT : STARTED_TURN_TEXT;
+  const text2 = !live ? STARTED_TURN_TEXT : !callStarts.length ? PREPARING_TEXT : modelTime?.since !== void 0 ? THINKING_TEXT : STARTED_TURN_TEXT;
   const step = {
     kind: "notification",
     id: `ui:start:${turn2.id}`,
-    text: text3,
-    status: text3 === STARTED_TURN_TEXT ? "completed" : "running",
+    text: text2,
+    status: text2 === STARTED_TURN_TEXT ? "completed" : "running",
     ...prepared
   };
   return [{ ts: String(startedAt2), text: JSON.stringify(step), ...modelTime ? { modelTime } : {} }, ...timed];
@@ -18877,6 +18877,20 @@ function accessRequestInput(raw) {
   };
 }
 
+// ../../shared/validation.ts
+var object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var text = (value) => typeof value === "string";
+var id = (value) => text(value) && value.length > 0;
+var bool = (value) => typeof value === "boolean";
+var number = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+var integer = (value) => number(value) && Number.isSafeInteger(value);
+var position = (value) => integer(value) && Number(value) > 0;
+var optional = (check) => (value) => value === void 0 || check(value);
+var nullable = (check) => (value) => value === null || check(value);
+var array = (check) => (value) => Array.isArray(value) && value.every(check);
+var oneOf = (...values) => (value) => typeof value === "string" && values.includes(value);
+var shape = (fields) => (value) => object(value) && Object.entries(fields).every(([key, check]) => check(value[key]));
+
 // ../../shared/conversation-protocol.ts
 var CONVERSATION_PROTOCOL_VERSION = 10;
 var ConversationProtocolError = class extends Error {
@@ -18887,18 +18901,6 @@ var ConversationProtocolError = class extends Error {
     this.code = code;
   }
 };
-var object = (v5) => !!v5 && typeof v5 === "object" && !Array.isArray(v5);
-var text = (v5) => typeof v5 === "string";
-var id = (v5) => typeof v5 === "string" && v5.length > 0;
-var bool = (v5) => typeof v5 === "boolean";
-var number = (v5) => typeof v5 === "number" && Number.isFinite(v5) && v5 >= 0;
-var integer = (v5) => number(v5) && Number.isSafeInteger(v5);
-var position = (v5) => integer(v5) && Number(v5) > 0;
-var optional = (check) => (v5) => v5 === void 0 || check(v5);
-var nullable = (check) => (v5) => v5 === null || check(v5);
-var array = (check) => (v5) => Array.isArray(v5) && v5.every(check);
-var oneOf = (...values) => (v5) => typeof v5 === "string" && values.includes(v5);
-var shape = (fields) => (v5) => object(v5) && Object.entries(fields).every(([key, check]) => check(v5[key]));
 var strings = array(id);
 var questionInput = shape({
   question: text,
@@ -19173,24 +19175,24 @@ function validateTimeline(view) {
   if (messages.size || interactions.size || view.turns.some((turn2) => turn2.activity.some((line) => !seenActivity.has(`${turn2.id}:${line.ordinal}`))))
     throw new ConversationProtocolError("invalid_frame");
 }
-function reduceConversation(state, frame) {
-  if (frame.kind === "snapshot") {
-    if (state?.streamId === frame.streamId && frame.revision <= state.revision) return state;
-    unique(frame.conversation.messages);
-    unique(frame.conversation.turns);
-    unique(frame.conversation.interactions);
-    validateTimeline(frame.conversation);
-    return frame;
+function reduceConversation(state, frame2) {
+  if (frame2.kind === "snapshot") {
+    if (state?.streamId === frame2.streamId && frame2.revision <= state.revision) return state;
+    unique(frame2.conversation.messages);
+    unique(frame2.conversation.turns);
+    unique(frame2.conversation.interactions);
+    validateTimeline(frame2.conversation);
+    return frame2;
   }
-  if (!state || state.streamId !== frame.streamId) throw new ConversationProtocolError("unknown_stream");
-  if (frame.revision <= state.revision) return state;
-  if (frame.baseRevision !== state.revision) throw new ConversationProtocolError("revision_gap");
-  const changes2 = frame.changes;
+  if (!state || state.streamId !== frame2.streamId) throw new ConversationProtocolError("unknown_stream");
+  if (frame2.revision <= state.revision) return state;
+  if (frame2.baseRevision !== state.revision) throw new ConversationProtocolError("revision_gap");
+  const changes2 = frame2.changes;
   const next = {
     kind: "snapshot",
     protocolVersion: CONVERSATION_PROTOCOL_VERSION,
     streamId: state.streamId,
-    revision: frame.revision,
+    revision: frame2.revision,
     conversation: {
       threadId: state.conversation.threadId,
       messages: applyEntities(state.conversation.messages, changes2.messages),
@@ -19213,9 +19215,9 @@ var TOOL_STOP_ERRORS = {
   disconnected: "Runner disconnected. Reconnect to check this tool.",
   timeout: "The runner did not confirm the tool stop request. Try again."
 };
-async function sendStopRequest(groupId2, threadId2, target, signal) {
+async function sendStopRequest(groupId3, threadId2, target, signal) {
   const tool = target.toolCallId !== void 0;
-  let url = `api/groups/${encodeURIComponent(groupId2)}/chat/${encodeURIComponent(threadId2)}/${tool ? "stop-tool" : "stop"}`;
+  let url = `api/groups/${encodeURIComponent(groupId3)}/chat/${encodeURIComponent(threadId2)}/${tool ? "stop-tool" : "stop"}`;
   if (channelType.value !== "web" && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
   }
@@ -19480,10 +19482,10 @@ var PendingEditDraft = class {
   }
   state;
   request = null;
-  setText(text3) {
+  setText(text2) {
     if (this.state.value.busy || this.state.value.unresolved) return;
-    if (text3 !== this.state.value.text) this.request = null;
-    this.state.value = { ...this.state.value, text: text3, error: "", retry: !!this.request };
+    if (text2 !== this.state.value.text) this.request = null;
+    this.state.value = { ...this.state.value, text: text2, error: "", retry: !!this.request };
   }
   async save() {
     if (this.state.value.busy) return false;
@@ -19722,11 +19724,11 @@ function enqueueToast(message2, ms = 1800) {
     displayToast(message2, ms);
   }
 }
-function showToast(text3, kind = "ok", ms = 1800) {
-  enqueueToast({ id: nextId++, text: text3, kind }, ms);
+function showToast(text2, kind = "ok", ms = 1800) {
+  enqueueToast({ id: nextId++, text: text2, kind }, ms);
 }
-function showStickyToast(text3, onClick, kind = "ok", actionLabel) {
-  enqueueToast({ id: nextId++, text: text3, kind, action: onClick, actionLabel });
+function showStickyToast(text2, onClick, kind = "ok", actionLabel) {
+  enqueueToast({ id: nextId++, text: text2, kind, action: onClick, actionLabel });
 }
 function dismissToast() {
   if (hideTimer) {
@@ -19900,10 +19902,10 @@ function watchForUpdates(reg) {
 function requestClientReload() {
   void reloadChatClient();
 }
-function showClientReloadPrompt(text3) {
+function showClientReloadPrompt(text2) {
   if (updatePromptShown) return;
   updatePromptShown = true;
-  showStickyToast(text3, requestClientReload, "ok", "Reload");
+  showStickyToast(text2, requestClientReload, "ok", "Reload");
 }
 function activateUpdatedWorker(worker) {
   return new Promise((resolve, reject) => {
@@ -20098,17 +20100,17 @@ function classifySubmission(send, context) {
     starting: awaitingTurn && send.status !== "failed"
   };
 }
-function reconcileWebSubmissions(submissions, view, groupId2) {
+function reconcileWebSubmissions(submissions, view, groupId3) {
   const context = submissionContext(view);
   return submissions.flatMap((submission) => {
-    if (submission.groupId !== groupId2 || submission.threadId !== view.threadId) return [submission];
+    if (submission.groupId !== groupId3 || submission.threadId !== view.threadId) return [submission];
     const disposition = classifySubmission(submission, context);
     if (!disposition.retain) return [];
     return [disposition.echoed ? withWebSendState(submission, { status: "accepted" }) : submission];
   });
 }
-function submissionPresentation(transcript, submissions, view, groupId2, threadId2) {
-  const local = submissions.filter((send) => send.groupId === groupId2 && send.threadId === threadId2);
+function submissionPresentation(transcript, submissions, view, groupId3, threadId2) {
+  const local = submissions.filter((send) => send.groupId === groupId3 && send.threadId === threadId2);
   const context = submissionContext(view);
   const starts = local.filter((send) => classifySubmission(send, context).starting);
   const startingIds = new Set(starts.map((send) => send.messageId));
@@ -20237,16 +20239,16 @@ function conversationPresentation(view) {
   };
 }
 function applyConversationFrame(raw, expectedThreadId) {
-  const frame = parseConversationFrame(raw);
+  const frame2 = parseConversationFrame(raw);
   const previous = conversationState.value;
-  const next = reduceConversation(previous, frame);
+  const next = reduceConversation(previous, frame2);
   if (next.conversation.threadId !== expectedThreadId) throw new ConversationProtocolError("invalid_frame");
   if (next === previous) return;
   const view = next.conversation;
   const current = view.turns.find((turn2) => turn2.id === view.connection.activeTurnId);
   const caps = view.capabilities;
   const { messages, transcript } = conversationPresentation(view);
-  const changedConversation = frame.kind === "snapshot" && previous?.conversation.threadId !== view.threadId;
+  const changedConversation = frame2.kind === "snapshot" && previous?.conversation.threadId !== view.threadId;
   n2(() => {
     conversationState.value = next;
     for (const message2 of view.messages) {
@@ -20258,7 +20260,7 @@ function applyConversationFrame(raw, expectedThreadId) {
       inheritActivityPanels(`turn:${current.id}`);
     chatMessages.value = messages;
     chatTranscript.value = transcript;
-    if (frame.kind === "update") {
+    if (frame2.kind === "update") {
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
     }
@@ -20283,7 +20285,7 @@ function applyConversationFrame(raw, expectedThreadId) {
     chatReloadRequired.value = false;
     chatStatus.value = "connected";
   });
-  if (frame.kind !== "update" || !previous) return;
+  if (frame2.kind !== "update" || !previous) return;
   const oldTurns = new Map(previous.conversation.turns.map((turn2) => [turn2.id, turn2]));
   for (const turn2 of view.turns) {
     if (turn2.phase === "settled" && oldTurns.get(turn2.id)?.phase !== "settled") playCompletionChime();
@@ -20300,52 +20302,81 @@ function applyConversationFrame(raw, expectedThreadId) {
 function isAttentionTargets(value) {
   if (!Array.isArray(value)) return false;
   const ids = /* @__PURE__ */ new Set();
-  const text3 = (v5) => typeof v5 === "string" && v5.length > 0;
+  const text2 = (v5) => typeof v5 === "string" && v5.length > 0;
   return value.every((target) => {
-    if (!target || typeof target !== "object" || !("id" in target) || !text3(target.id) || ids.has(target.id))
+    if (!target || typeof target !== "object" || !("id" in target) || !text2(target.id) || ids.has(target.id))
       return false;
     ids.add(target.id);
     if (!("origin" in target)) return false;
     const origin = target.origin;
-    return !!origin && typeof origin === "object" && "agentGroupId" in origin && text3(origin.agentGroupId) && "threadId" in origin && text3(origin.threadId) && "channelType" in origin && text3(origin.channelType) && "messagingGroupId" in origin && text3(origin.messagingGroupId);
+    return !!origin && typeof origin === "object" && "agentGroupId" in origin && text2(origin.agentGroupId) && "threadId" in origin && text2(origin.threadId) && "channelType" in origin && text2(origin.channelType) && "messagingGroupId" in origin && text2(origin.messagingGroupId);
   });
 }
 
 // ../../shared/sync.ts
-var SYNC_PROTOCOL_VERSION = 2;
-var object2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-var integer2 = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-var text2 = (value) => typeof value === "string";
-var optional2 = (value, check) => value === void 0 || check(value);
-var nullableText = (value) => value === null || text2(value);
-function thread(value) {
-  if (!object2(value)) return false;
-  return ["threadId", "sessionId", "channelType", "messagingGroupId", "platformId", "title", "lastActivityAt"].every(
-    (key) => text2(value[key])
-  ) && ["per-thread", "shared", "agent-shared"].includes(String(value.sessionMode)) && integer2(value.messageCount) && optional2(value.canSend, (v5) => typeof v5 === "boolean") && optional2(value.kind, (v5) => v5 === "thread" || v5 === "dm") && optional2(value.counterparty, text2) && ["totalCost", "totalTokens", "turnCount"].every(
-    (key) => optional2(value[key], (v5) => typeof v5 === "number" && Number.isFinite(v5) && v5 >= 0)
-  ) && optional2(
-    value.liveTasks,
-    (v5) => Array.isArray(v5) && v5.every(
-      (task) => object2(task) && text2(task.seriesId) && nullableText(task.nextRunAt) && nullableText(task.recurrence) && text2(task.summary) && typeof task.paused === "boolean"
+var SYNC_PROTOCOL_VERSION = 3;
+var thread = shape({
+  threadId: id,
+  sessionId: id,
+  channelType: id,
+  messagingGroupId: id,
+  platformId: text,
+  title: text,
+  lastActivityAt: text,
+  sessionMode: oneOf("per-thread", "shared", "agent-shared"),
+  messageCount: integer,
+  canSend: optional(bool),
+  kind: optional(oneOf("thread", "dm")),
+  counterparty: optional(text),
+  totalCost: optional(number),
+  totalTokens: optional(number),
+  turnCount: optional(number),
+  liveTasks: optional(
+    array(
+      shape({
+        seriesId: id,
+        nextRunAt: nullable(text),
+        recurrence: nullable(text),
+        summary: text,
+        paused: bool
+      })
     )
-  ) && optional2(
-    value.forkedFrom,
-    (v5) => object2(v5) && text2(v5.threadId) && text2(v5.messageId) && nullableText(v5.title) && (v5.fidelity === "native" || v5.fidelity === "transcript") && typeof v5.deleted === "boolean"
-  ) && optional2(
-    value.forkChildren,
-    (v5) => Array.isArray(v5) && v5.every((child) => object2(child) && text2(child.threadId) && text2(child.messageId) && text2(child.title))
-  );
-}
+  ),
+  forkedFrom: optional(
+    shape({
+      threadId: id,
+      messageId: id,
+      title: nullable(text),
+      fidelity: oneOf("native", "transcript"),
+      deleted: bool
+    })
+  ),
+  forkChildren: optional(array(shape({ threadId: id, messageId: id, title: text })))
+});
+var groupId2 = (value) => text(value) && value.length > 0 && value.length <= 512;
+var subscription = shape({
+  kind: oneOf("subscribe"),
+  protocolVersion: (value) => value === SYNC_PROTOCOL_VERSION,
+  subscriptionId: integer,
+  groupId: nullable(groupId2)
+});
+var frame = shape({
+  kind: oneOf("sync"),
+  subscriptionId: integer,
+  groupId: nullable(groupId2),
+  data: shape({
+    approvals: array(isConversationApproval),
+    attention: isAttentionTargets,
+    group: nullable(
+      shape({
+        threads: array(thread),
+        voiceInput: shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) })
+      })
+    )
+  })
+});
 function isSyncFrame(value) {
-  if (!object2(value)) return false;
-  const data = value.data;
-  if (value.kind !== "sync" || !integer2(value.subscriptionId) || !(value.groupId === null || text2(value.groupId)) || !object2(data) || !Array.isArray(data.approvals) || !data.approvals.every(isConversationApproval) || !isAttentionTargets(data.attention) || !optional2(data.threads, (v5) => Array.isArray(v5) && v5.every(thread)) || !optional2(data.groupAccess, (v5) => typeof v5 === "boolean") || !optional2(
-    data.voiceInput,
-    (v5) => object2(v5) && (v5.backend === "disabled" || v5.backend === "elevenlabs") && typeof v5.ready === "boolean" && optional2(v5.reason, text2)
-  ) || value.groupId !== null && (!Array.isArray(data.threads) || typeof data.groupAccess !== "boolean" || !data.voiceInput))
-    return false;
-  return true;
+  return frame(value);
 }
 var SyncProtocolError = class extends Error {
   constructor() {
@@ -20353,8 +20384,9 @@ var SyncProtocolError = class extends Error {
   }
 };
 function parseSyncFrame(value) {
-  if (!object2(value) || value.protocolVersion !== SYNC_PROTOCOL_VERSION) throw new SyncProtocolError();
-  if (!isSyncFrame(value)) throw new Error("Invalid global sync snapshot. Reconnect or reload.");
+  if (!object(value) || value.protocolVersion !== SYNC_PROTOCOL_VERSION) throw new SyncProtocolError();
+  if (!isSyncFrame(value) || value.groupId === null && value.data.group !== null)
+    throw new Error("Invalid global sync snapshot. Reconnect or reload.");
   return value;
 }
 
@@ -20389,13 +20421,13 @@ var SyncConnection = class {
       if (this.socket !== socket) return;
       try {
         const value = JSON.parse(event.data);
-        const frame = parseSyncFrame(value);
-        if (frame.subscriptionId !== this.subscriptionId || frame.groupId !== this.groupId) return;
-        this.options.apply(frame.data, frame.groupId);
+        const frame2 = parseSyncFrame(value);
+        if (frame2.subscriptionId !== this.subscriptionId || frame2.groupId !== this.groupId) return;
+        this.options.apply(frame2.data, frame2.groupId);
         this.attempt = 0;
         if (this.pending) {
           clearTimeout(this.pending.timer);
-          this.pending.resolve(frame.data);
+          this.pending.resolve(frame2.data);
           this.pending = null;
         }
       } catch (error) {
@@ -20426,16 +20458,16 @@ var SyncConnection = class {
       this.retryTimer = setTimeout(() => this.start(), delay * (0.75 + Math.random() * 0.5));
     };
   }
-  setGroup(groupId2) {
-    if (this.groupId === groupId2) return;
-    this.groupId = groupId2;
+  setGroup(groupId3) {
+    if (this.groupId === groupId3) return;
+    this.groupId = groupId3;
     this.rejectPending(new Error("Global sync selection changed"));
     ++this.subscriptionId;
     this.sendSubscription();
   }
-  refresh(groupId2) {
+  refresh(groupId3) {
     if (this.stopped) return Promise.reject(new Error("Global synchronization is stopped. Reload this page."));
-    this.setGroup(groupId2);
+    this.setGroup(groupId3);
     if (this.pending) return this.pending.promise;
     let resolve;
     let reject;
@@ -20499,8 +20531,8 @@ function matchesAttentionLocation(target, location2) {
   const origin = target.origin;
   return origin.agentGroupId === location2.agentGroupId && origin.threadId === location2.threadId && origin.channelType === (location2.channelType || "web") && (origin.messagingGroupId === location2.messagingGroupId || origin.channelType === "web" && location2.messagingGroupId === null);
 }
-function groupAttentionCount(groupId2) {
-  return attentionTargets.value?.filter((target) => target.origin.agentGroupId === groupId2).length ?? 0;
+function groupAttentionCount(groupId3) {
+  return attentionTargets.value?.filter((target) => target.origin.agentGroupId === groupId3).length ?? 0;
 }
 function threadAttentionCount(location2) {
   return attentionTargets.value?.filter((target) => matchesAttentionLocation(target, location2)).length ?? 0;
@@ -21122,7 +21154,7 @@ async function runSync() {
   if (!connection2) throw new Error("Global synchronization must be started before refreshing.");
   try {
     const data = await connection2.refresh(gid);
-    return connection2 === syncConnection && gid === groupId.value && data.groupAccess === true;
+    return connection2 === syncConnection && gid === groupId.value && data.group !== null;
   } catch (error) {
     if (connection2 === syncConnection && gid === groupId.value) console.error("Global sync refresh failed", error);
     return false;
@@ -21134,25 +21166,23 @@ function applyGlobalSync(res, gid) {
     attentionError.value = null;
     pendingApprovals.value = res.approvals;
   });
-  if (gid && groupId.value === gid && res.groupAccess === false) {
+  if (!gid || groupId.value !== gid) return;
+  if (res.group === null) {
     clearChat();
     threads.value = [];
     voiceInput.value = { backend: "disabled", ready: false, reason: "Agent access is no longer available." };
     attentionError.value = "Agent access is no longer available.";
     return;
   }
-  if (gid && groupId.value === gid && res.voiceInput) {
-    voiceInput.value = res.voiceInput;
-    if (!res.voiceInput.ready)
-      voice.interrupt(res.voiceInput.reason || "Live voice input is no longer available. Current text has been kept.");
-  }
-  if (gid && groupId.value === gid && Array.isArray(res.threads)) {
-    const serverIds = new Set(res.threads.map((t4) => t4.threadId));
-    const ephemeral = threads.value.filter(
-      (t4) => !serverIds.has(t4.threadId) && (t4.channelType || "web") === "web" && t4.title === "(new thread)" && !t4.messageCount
-    );
-    threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
-  }
+  const { voiceInput: capability, threads: serverThreads } = res.group;
+  voiceInput.value = capability;
+  if (!capability.ready)
+    voice.interrupt(capability.reason || "Live voice input is no longer available. Current text has been kept.");
+  const serverIds = new Set(serverThreads.map((t4) => t4.threadId));
+  const ephemeral = threads.value.filter(
+    (t4) => !serverIds.has(t4.threadId) && (t4.channelType || "web") === "web" && t4.title === "(new thread)" && !t4.messageCount
+  );
+  threads.value = ephemeral.length > 0 ? [...ephemeral, ...serverThreads] : serverThreads;
 }
 function taskUrl(gid, tid, suffix = "") {
   let u5 = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/tasks${suffix}`;
@@ -21461,7 +21491,7 @@ function confirmedWebSend(gid, tid, messageId) {
     (send) => send.groupId === gid && send.threadId === tid && send.messageId === messageId && send.status === "accepted"
   ) || groupId.value === gid && threadId.value === tid && !!view && view.threadId === tid && view.messages.some((message2) => message2.direction === "in" && message2.id === messageId);
 }
-async function sendChat(text3, files, options = {}) {
+async function sendChat(text2, files, options = {}) {
   const context = captureChatSendContext();
   if (!context?.canSubmit()) return false;
   let inputHandling;
@@ -21482,7 +21512,7 @@ async function sendChat(text3, files, options = {}) {
   return submitChatPacket(
     {
       clientMessageId: crypto.randomUUID(),
-      text: text3,
+      text: text2,
       files: files?.slice() ?? [],
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       inputHandling,
@@ -21492,7 +21522,7 @@ async function sendChat(text3, files, options = {}) {
     options.onSubmitted
   );
 }
-async function submitChatPacket({ clientMessageId, text: text3, files, timestamp, inputHandling, startsResponse }, { gid, tid, isWeb, url, contextCurrent, canSubmit }, onSubmitted) {
+async function submitChatPacket({ clientMessageId, text: text2, files, timestamp, inputHandling, startsResponse }, { gid, tid, isWeb, url, contextCurrent, canSubmit }, onSubmitted) {
   if (!canSubmit()) return false;
   const messageId = publicWebMessageId(clientMessageId);
   n2(() => {
@@ -21505,7 +21535,7 @@ async function submitChatPacket({ clientMessageId, text: text3, files, timestamp
       threadId: tid,
       messageId,
       clientMessageId,
-      text: text3,
+      text: text2,
       files,
       timestamp,
       inputHandling,
@@ -21520,7 +21550,7 @@ async function submitChatPacket({ clientMessageId, text: text3, files, timestamp
     let res;
     if (files.length) {
       const fd = new FormData();
-      fd.append("text", text3 || "");
+      fd.append("text", text2 || "");
       fd.append("clientMessageId", clientMessageId);
       if (inputHandling) fd.append("inputHandling", JSON.stringify(inputHandling));
       for (const f5 of files) {
@@ -21532,7 +21562,7 @@ async function submitChatPacket({ clientMessageId, text: text3, files, timestamp
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text3, clientMessageId, ...inputHandling ? { inputHandling } : {} })
+        body: JSON.stringify({ text: text2, clientMessageId, ...inputHandling ? { inputHandling } : {} })
       });
     }
     if (!res.ok) {
@@ -21812,8 +21842,8 @@ async function previewAttachment(file) {
     }
     const contentType = response.headers.get("content-type") || mime;
     if (contentType.startsWith("text/") || contentType.includes("json") || contentType.includes("xml")) {
-      const text3 = await response.text();
-      setPreview({ kind: ext === "md" || ext === "markdown" ? "markdown" : "text", text: text3, ...meta, mime: contentType });
+      const text2 = await response.text();
+      setPreview({ kind: ext === "md" || ext === "markdown" ? "markdown" : "text", text: text2, ...meta, mime: contentType });
       return;
     }
     setPreview({ kind: "binary", ...meta, mime: contentType });
@@ -23381,9 +23411,9 @@ function VoiceButton({ target, controller, onStart, configured, unavailable, dis
 }
 
 // src/components/ComposerInput.tsx
-function setVoiceTextareaText(input, text3, selection) {
+function setVoiceTextareaText(input, text2, selection) {
   if (!input) return;
-  input.value = text3;
+  input.value = text2;
   if (selection) input.setSelectionRange(selection.start, selection.end);
 }
 function useComposerTextarea(inputRef, value, maxHeight = 200) {
@@ -23641,8 +23671,8 @@ function usePendingComposer(inputRef, autosize) {
     state,
     error,
     disabled,
-    input(text3) {
-      session?.draft.setText(text3);
+    input(text2) {
+      session?.draft.setText(text2);
     },
     exit() {
       if (key) exitPendingEditor(key);
@@ -23757,8 +23787,8 @@ function hasTurnStats(turn2, view) {
 function toolCallMs(turn2, now) {
   const live = turn2.phase !== "settled";
   let unplacedMs = 0;
-  const spans = turn2.activity.flatMap(({ ts, text: text3 }) => {
-    const step = parseStep(text3);
+  const spans = turn2.activity.flatMap(({ ts, text: text2 }) => {
+    const step = parseStep(text2);
     const at = activityTimestamp(ts);
     if (step.kind !== "tool") return [];
     if (!Number.isFinite(at)) {
@@ -24181,10 +24211,10 @@ function QuestionPrompt({ question: q5 }) {
         channelType: channel,
         messagingGroupId: mg,
         getText: () => answerRef.current,
-        setText: (text3, selection) => {
-          setVoiceTextareaText(textareaRef.current, text3, selection);
-          answerRef.current = text3;
-          setAnswer(text3);
+        setText: (text2, selection) => {
+          setVoiceTextareaText(textareaRef.current, text2, selection);
+          answerRef.current = text2;
+          setAnswer(text2);
         },
         isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && current.current,
         send: submit
@@ -24321,14 +24351,14 @@ function AttentionFocus() {
   y2(() => {
     if (!selection?.navigation || !selected || handled.current === selection.navigation || !matchesAttentionLocation(selected, location2))
       return;
-    const frame = requestAnimationFrame(() => {
+    const frame2 = requestAnimationFrame(() => {
       const target = document.getElementById(`attention-${selection.id}`);
       if (!target) return;
       handled.current = selection.navigation;
       target.scrollIntoView({ block: "center", behavior: "auto" });
       target.focus({ preventScroll: true });
     });
-    return () => cancelAnimationFrame(frame);
+    return () => cancelAnimationFrame(frame2);
   }, [
     selection,
     selected,
@@ -24579,10 +24609,10 @@ async function credentialRequest(url, method = "GET", body, signal) {
     body: body === void 0 ? void 0 : JSON.stringify(body),
     signal
   });
-  const text3 = await response.text();
+  const text2 = await response.text();
   let data;
   try {
-    data = text3 ? JSON.parse(text3) : null;
+    data = text2 ? JSON.parse(text2) : null;
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
     throw new CredentialsError(
@@ -24979,24 +25009,24 @@ function accessCreationDefaults(request, apps) {
   return { kind, appId: app?.id ?? "", scopes: request.scopes ?? app?.default_scopes ?? [], routes };
 }
 function parseUrlPattern(value) {
-  const text3 = value.trim();
-  const source = /^[a-z][a-z0-9+.-]*:\/\//i.test(text3) ? text3 : `https://${text3}`;
+  const text2 = value.trim();
+  const source = /^[a-z][a-z0-9+.-]*:\/\//i.test(text2) ? text2 : `https://${text2}`;
   const url = URL.parse(source);
-  if (!text3 || !url || url.protocol !== "https:" || !url.hostname || /\s/.test(text3) || url.username || url.password || source.includes("?") || source.includes("#"))
+  if (!text2 || !url || url.protocol !== "https:" || !url.hostname || /\s/.test(text2) || url.username || url.password || source.includes("?") || source.includes("#"))
     throw new CredentialsError("Enter an HTTPS URL pattern without credentials, query parameters or a fragment.");
   const authority = source.slice(source.indexOf("://") + 3);
   return { host: url.host + (authority.includes("/") ? url.pathname : ""), hostname: url.hostname };
 }
 function hostnameFromPattern(value) {
-  const text3 = value.trim();
-  const url = URL.parse(/^[a-z][a-z0-9+.-]*:\/\//i.test(text3) ? text3 : `https://${text3}`);
+  const text2 = value.trim();
+  const url = URL.parse(/^[a-z][a-z0-9+.-]*:\/\//i.test(text2) ? text2 : `https://${text2}`);
   return url?.protocol === "https:" && !url.username && !url.password ? url.hostname : "";
 }
 function oauthResourceUrl(value) {
-  const text3 = value.trim();
-  const source = /^[a-z][a-z0-9+.-]*:\/\//i.test(text3) ? text3 : `https://${text3}`;
+  const text2 = value.trim();
+  const source = /^[a-z][a-z0-9+.-]*:\/\//i.test(text2) ? text2 : `https://${text2}`;
   const url = URL.parse(source);
-  if (!text3 || !url || url.protocol !== "https:" || url.username || url.password || url.hash || url.host.includes("*") || url.pathname.includes("*"))
+  if (!text2 || !url || url.protocol !== "https:" || url.username || url.password || url.hash || url.host.includes("*") || url.pathname.includes("*"))
     throw new CredentialsError(
       "Enter the exact HTTPS address for these tools, without wildcards, passwords or a # section."
     );
@@ -25583,7 +25613,7 @@ function AccessRequestReview({
 var BUBBLE_MARGIN = 6;
 var BUBBLE_MAX_WIDTH = 320;
 var VIEWPORT_PADDING = 8;
-function Tooltip({ text: text3, children, side = "top" }) {
+function Tooltip({ text: text2, children, side = "top" }) {
   const [pos, setPos] = h2(null);
   const wrapRef = A2(null);
   const bubbleRef = A2(null);
@@ -25653,7 +25683,7 @@ function Tooltip({ text: text3, children, side = "top" }) {
               class: `tooltip-bubble tooltip-${pos.side}`,
               role: "tooltip",
               style: { top: pos.top + "px", left: pos.left + "px" },
-              children: text3.split("\n").map((line, i5) => /* @__PURE__ */ u4("span", { class: "tooltip-line", children: line }, i5))
+              children: text2.split("\n").map((line, i5) => /* @__PURE__ */ u4("span", { class: "tooltip-line", children: line }, i5))
             }
           ),
           document.body
@@ -25662,8 +25692,8 @@ function Tooltip({ text: text3, children, side = "top" }) {
     }
   );
 }
-function InfoIcon({ text: text3 }) {
-  return /* @__PURE__ */ u4(Tooltip, { text: text3, children: /* @__PURE__ */ u4("span", { class: "info-icon", tabindex: 0, "aria-label": "More info", children: "i" }) });
+function InfoIcon({ text: text2 }) {
+  return /* @__PURE__ */ u4(Tooltip, { text: text2, children: /* @__PURE__ */ u4("span", { class: "info-icon", tabindex: 0, "aria-label": "More info", children: "i" }) });
 }
 
 // src/components/GroupAdminField.tsx
@@ -27250,8 +27280,8 @@ ${response}`;
 // src/components/QuestionAnswerBubble.tsx
 function QuestionAnswerBubble({ question: question2, answer }) {
   const response = answer.questionResponseType === "skipped" ? "Question skipped" : answer.questionResponseType === "choice" ? question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text : answer.text;
-  const text3 = formatQuestionResponse(question2.question, response);
-  const md = renderMarkdown(text3, groupId.value);
+  const text2 = formatQuestionResponse(question2.question, response);
+  const md = renderMarkdown(text2, groupId.value);
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
@@ -27260,18 +27290,18 @@ function QuestionAnswerBubble({ question: question2, answer }) {
       from: answer.author && answer.author.userId !== currentUserId.value ? answer.author.displayName : void 0,
       timestamp: answer.timestamp,
       reveal: highlightMessageId.value === answer.id ? searchQuery.value : void 0,
-      children: md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text3 })
+      children: md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 })
     }
   );
 }
 
 // src/question-dock.ts
-function dockQuestions(questions, messages, groupId2, threadId2) {
+function dockQuestions(questions, messages, groupId3, threadId2) {
   const answered = new Set(
     messages.filter((message2) => message2.direction === "in" && message2.inputState?.status !== "cancelled").map((message2) => message2.questionId)
   );
   return questions.filter(
-    (question2) => question2.kind === "question" && question2.agentGroupId === groupId2 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.id)
+    (question2) => question2.kind === "question" && question2.agentGroupId === groupId3 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.id)
   ).sort(
     (a4, b5) => timelineSortKey(a4.createdAt, a4.timelinePosition) - timelineSortKey(b5.createdAt, b5.timelinePosition)
   );
@@ -27466,11 +27496,11 @@ function captureReadingPosition(viewport, followingBottom) {
   };
 }
 function attachDensityReflow(controller, viewport, options) {
-  let frame = null;
+  let frame2 = null;
   const finish = () => {
-    if (frame === null) return;
-    cancelAnimationFrame(frame);
-    frame = null;
+    if (frame2 === null) return;
+    cancelAnimationFrame(frame2);
+    frame2 = null;
     options.afterReflow();
   };
   const unsubscribe = controller.beforeDensityChange(() => {
@@ -27479,9 +27509,9 @@ function attachDensityReflow(controller, viewport, options) {
     options.beforeReflow();
     return () => {
       restore();
-      frame = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
         restore();
-        frame = null;
+        frame2 = null;
         options.afterReflow();
       });
     };
@@ -28087,7 +28117,7 @@ function openThreadAt(targetThreadId, messageId) {
   highlightMessageId.value = messageId;
   openChat2(groupId.value, targetThreadId, null).catch(console.error);
 }
-function MessageText({ text: text3, md }) {
+function MessageText({ text: text2, md }) {
   const mdRef = A2(null);
   const q5 = searchQuery.value;
   const gid = groupId.value;
@@ -28130,8 +28160,8 @@ function MessageText({ text: text3, md }) {
       }
     }
     if (q5 && mdRef.current) highlightTextNodes(mdRef.current, q5);
-  }, [text3, md, q5, gid]);
-  return md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, children: text3 || "" });
+  }, [text2, md, q5, gid]);
+  return md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, children: text2 || "" });
 }
 function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const ref = A2(null);
@@ -28978,12 +29008,12 @@ function Composer() {
   };
   const doSubmit = async () => {
     if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg || isWeb && !chatReady.value || currentDockQuestions().length) return false;
-    const text3 = (inputRef.current?.value || "").trim();
+    const text2 = (inputRef.current?.value || "").trim();
     const files = pending.value.slice();
-    if (!text3 && files.length === 0) return false;
+    if (!text2 && files.length === 0) return false;
     const pins = pinnedContext.value;
     const prefix = pins.length > 0 ? "> Context (file browser):\n" + pins.map((p5) => `> - \`${p5}\``).join("\n") + "\n\n" : "";
-    const fullText = prefix + text3;
+    const fullText = prefix + text2;
     sendBusyRef.current = true;
     composerSendInFlight.value = true;
     try {
@@ -28992,7 +29022,7 @@ function Composer() {
         if (draftReleased) return;
         draftReleased = true;
         if (groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return;
-        if (inputRef.current?.value.trim() === text3) inputRef.current.value = "";
+        if (inputRef.current?.value.trim() === text2) inputRef.current.value = "";
         autosize();
         for (const file of files) {
           const index = pending.value.indexOf(file);
@@ -29040,8 +29070,8 @@ function Composer() {
       channelType: channel,
       messagingGroupId: mg,
       getText: () => inputRef.current?.value || "",
-      setText: (text3, selection) => {
-        setVoiceTextareaText(inputRef.current, text3, selection);
+      setText: (text2, selection) => {
+        setVoiceTextareaText(inputRef.current, text2, selection);
         autosize();
       },
       isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg,
@@ -29624,8 +29654,8 @@ async function notifyAgent(paths) {
   if (!threadId.value || !groupId.value || paths.length === 0) return;
   const list = paths.slice(0, 20).map((p5) => "`" + p5 + "`").join(", ");
   const more = paths.length > 20 ? ` (and ${paths.length - 20} more)` : "";
-  const text3 = `Files updated via web UI: ${list}${more}`;
-  const r4 = await postJson(`api/groups/${groupId.value}/chat/${threadId.value}/send`, { text: text3 });
+  const text2 = `Files updated via web UI: ${list}${more}`;
+  const r4 = await postJson(`api/groups/${groupId.value}/chat/${threadId.value}/send`, { text: text2 });
   if (!r4.ok) {
     showToast("notify failed: " + (r4.data.error || r4.status), "err");
     return;
@@ -29835,11 +29865,11 @@ function MediaPlayer({ kind, url, name, floating }) {
 // src/components/LyricsPanel.tsx
 var TS_RE = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 var OFFSET_RE = /^\s*\[offset:\s*([+-]?\d+)\s*\]\s*$/i;
-function parseLyrics(text3) {
+function parseLyrics(text2) {
   const lines = [];
   let sawTimestamp = false;
   let offset = 0;
-  for (const raw of text3.split(/\r?\n/)) {
+  for (const raw of text2.split(/\r?\n/)) {
     const om = OFFSET_RE.exec(raw);
     if (om) {
       offset = Number(om[1]) / 1e3;
@@ -29881,8 +29911,8 @@ function findActiveIdx(lines, t4) {
   }
   return ans;
 }
-function LyricsPanel({ text: text3 }) {
-  const parsed = T2(() => parseLyrics(text3 || ""), [text3]);
+function LyricsPanel({ text: text2 }) {
+  const parsed = T2(() => parseLyrics(text2 || ""), [text2]);
   const [showSynced, setShowSynced] = h2(true);
   const synced = parsed.synced && showSynced;
   const t4 = mediaCurrentTime.value;
@@ -29924,7 +29954,7 @@ function LyricsPanel({ text: text3 }) {
         children: l7.text || "\xA0"
       },
       i5
-    )) }) : /* @__PURE__ */ u4("pre", { children: text3 })
+    )) }) : /* @__PURE__ */ u4("pre", { children: text2 })
   ] });
 }
 function formatTime(s5) {
@@ -29942,7 +29972,7 @@ function forwardedFragment(hash) {
 }
 
 // src/components/PrivateWebView.tsx
-function PrivateWebView({ groupId: groupId2, path, title, fragment }) {
+function PrivateWebView({ groupId: groupId3, path, title, fragment }) {
   const [url, setUrl] = h2(null);
   const [error, setError] = h2(null);
   const [revision, setRevision] = h2(0);
@@ -29952,7 +29982,7 @@ function PrivateWebView({ groupId: groupId2, path, title, fragment }) {
     const controller = new AbortController();
     setUrl(null);
     setError(null);
-    fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/private-web-session`, {
+    fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/private-web-session`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -29977,7 +30007,7 @@ function PrivateWebView({ groupId: groupId2, path, title, fragment }) {
       setError(reason instanceof Error ? reason.message : "Unable to open page.");
     });
     return () => controller.abort();
-  }, [groupId2, path, fragment, revision]);
+  }, [groupId3, path, fragment, revision]);
   y2(() => {
     if (!url) return void 0;
     const expectedOrigin = new URL(url).origin;
@@ -30174,15 +30204,15 @@ function detectLanguage(name) {
   if (dot < 0) return null;
   return EXT_LANG[base.slice(dot + 1)] || null;
 }
-function highlightCode(text3, name) {
-  if (!text3) return null;
+function highlightCode(text2, name) {
+  if (!text2) return null;
   const lang = detectLanguage(name);
   try {
     if (lang && common_default.getLanguage(lang)) {
-      const r5 = common_default.highlight(text3, { language: lang, ignoreIllegals: true });
+      const r5 = common_default.highlight(text2, { language: lang, ignoreIllegals: true });
       return { html: r5.value, language: r5.language || lang };
     }
-    const r4 = common_default.highlightAuto(text3);
+    const r4 = common_default.highlightAuto(text2);
     if (!r4 || !r4.language) return null;
     return { html: r4.value, language: r4.language };
   } catch {
@@ -31679,7 +31709,7 @@ function ShareLinkModal() {
     return () => window.removeEventListener("keydown", onKey);
   }, [req]);
   if (!req) return null;
-  const { groupId: groupId2, entry } = req;
+  const { groupId: groupId3, entry } = req;
   const title = entry?.name || (entry?.path || "").slice((entry?.path || "").lastIndexOf("/") + 1);
   function close() {
     shareModalRequest.value = null;
@@ -31688,7 +31718,7 @@ function ShareLinkModal() {
     setBusy(true);
     setError(null);
     try {
-      const r4 = await postJson(`api/groups/${encodeURIComponent(groupId2)}/share-token`, {
+      const r4 = await postJson(`api/groups/${encodeURIComponent(groupId3)}/share-token`, {
         path: entry.path,
         ttlMinutes: ttl,
         uses
@@ -32277,7 +32307,7 @@ function Combobox({
   onChange
 }) {
   const [open, setOpen] = h2(false);
-  const [text3, setText] = h2(value ?? "");
+  const [text2, setText] = h2(value ?? "");
   const [filtering, setFiltering] = h2(false);
   const [highlight, setHighlight] = h2(-1);
   const rootRef = A2(null);
@@ -32286,7 +32316,7 @@ function Combobox({
   valueRef.current = value;
   y2(() => {
     const v5 = value ?? "";
-    if (v5 !== text3) {
+    if (v5 !== text2) {
       setText(v5);
       setFiltering(false);
     }
@@ -32295,7 +32325,7 @@ function Combobox({
     if (!open) return void 0;
     const onDoc = (e4) => {
       if (!rootRef.current?.contains(e4.target)) {
-        if (freeform) commitText(text3);
+        if (freeform) commitText(text2);
         setOpen(false);
         setFiltering(false);
         if (!freeform) setText(valueRef.current ?? "");
@@ -32303,8 +32333,8 @@ function Combobox({
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [open, freeform, text3]);
-  const filterText = text3.trim().toLowerCase();
+  }, [open, freeform, text2]);
+  const filterText = text2.trim().toLowerCase();
   const matches2 = filtering && filterText ? options.filter(
     (o4) => o4.value.toLowerCase().includes(filterText) || o4.label.toLowerCase().includes(filterText)
   ) : options;
@@ -32338,7 +32368,7 @@ function Combobox({
         e4.preventDefault();
         commitOption(matches2[highlight].value);
       } else if (freeform) {
-        commitText(text3);
+        commitText(text2);
       }
     } else if (e4.key === "Escape") {
       setOpen(false);
@@ -32353,7 +32383,7 @@ function Combobox({
         ref: inputRef,
         type: "text",
         class: "combobox-input",
-        value: text3,
+        value: text2,
         placeholder,
         disabled,
         autocomplete: "off",
@@ -36621,13 +36651,13 @@ function handleShareTarget() {
   const onShareRoute = window.location.pathname.endsWith("/share");
   const sp = new URLSearchParams(window.location.search);
   const title = sp.get("title") || "";
-  const text3 = sp.get("text") || "";
+  const text2 = sp.get("text") || "";
   const url = sp.get("url") || "";
-  if (!title && !text3 && !url) {
+  if (!title && !text2 && !url) {
     if (onShareRoute) window.history.replaceState(window.history.state, "", "/ui/chat/" + window.location.hash);
     return;
   }
-  const combined = [title, text3, url].filter(Boolean).join("\n").trim();
+  const combined = [title, text2, url].filter(Boolean).join("\n").trim();
   const apply2 = () => {
     const el = document.getElementById("chat-input");
     if (!el) return false;

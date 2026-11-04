@@ -1,12 +1,15 @@
 import { vi } from 'vitest';
 import { runSync, startGlobalSync } from './actions';
-import { SYNC_PROTOCOL_VERSION, type SyncResponse } from '../../../shared/sync';
+import { SYNC_PROTOCOL_VERSION, type SyncResponse, type SyncGroupState } from '../../../shared/sync';
 import type { ThreadSummary } from '../../../shared/thread';
 import { threads } from './state';
 import type { Thread } from './types';
 import { attentionTargets } from './attention-state';
 
-export type SyncFixtureData = Partial<Omit<SyncResponse, 'threads'>> & { threads?: Thread[] };
+export type SyncFixtureData = Partial<Omit<SyncResponse, 'threads'>> & {
+  threads?: Thread[];
+  group?: SyncGroupState | null;
+};
 
 export async function installSyncFixture(
   read = vi.fn<(groupId: string | null) => Promise<SyncFixtureData>>().mockImplementation(async () => ({
@@ -51,14 +54,16 @@ export async function installSyncFixture(
               subscriptionId: request.subscriptionId,
               groupId: request.groupId,
               data: {
-                ...(request.groupId
-                  ? {
-                      threads: [],
-                      groupAccess: true,
-                      voiceInput: { backend: 'disabled', ready: false },
-                    }
-                  : {}),
                 ...data,
+                group:
+                  data.group !== undefined
+                    ? data.group
+                    : request.groupId
+                      ? {
+                          threads: data.threads ?? [],
+                          voiceInput: data.voiceInput ?? { backend: 'disabled', ready: false },
+                        }
+                      : null,
               },
             });
           },

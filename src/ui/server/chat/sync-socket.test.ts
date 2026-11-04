@@ -114,12 +114,10 @@ describe('global sync WebSocket integration', () => {
     await connect('g');
     ensureContainerConfig('g');
     updateContainerConfigScalars('g', { voice_input_enabled: 0 });
-    await vi.waitFor(() => expect(frames.at(-1)?.data.voiceInput?.reason).toBe('Voice input is disabled.'));
+    await vi.waitFor(() => expect(frames.at(-1)?.data.group?.voiceInput.reason).toBe('Voice input is disabled.'));
     getDb().prepare("DELETE FROM user_roles WHERE user_id='viewer'").run();
     removeMember('viewer', 'g');
-    await vi.waitFor(() => expect(frames.at(-1)?.data.groupAccess).toBe(false));
-    expect(frames.at(-1)?.data.threads).toEqual([]);
-    expect(frames.at(-1)?.data.voiceInput?.ready).toBe(false);
+    await vi.waitFor(() => expect(frames.at(-1)?.data.group).toBeNull());
   });
 
   it('closes a revoked UI session without waiting for another projection mutation', async () => {
@@ -145,6 +143,6 @@ describe('global sync WebSocket integration', () => {
     finish([]);
     await connecting;
     expect(frames).toHaveLength(1);
-    expect(frames[0].data.groupAccess).toBe(false);
+    expect(frames[0].data.group).toBeNull();
   });
 });

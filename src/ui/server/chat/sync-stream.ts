@@ -1,8 +1,8 @@
-import type { SyncFrame, SyncResponse } from '../../shared/sync.js';
+import type { SyncFrame, GlobalSyncState } from '../../shared/sync.js';
 import { SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
 
 export interface SyncStreamOptions {
-  read: (groupId: string | null) => Promise<Omit<SyncResponse, 'conversation'>>;
+  read: (groupId: string | null) => Promise<GlobalSyncState>;
   authorize: () => void;
   subscribe: (invalidate: (groupId?: string) => void) => () => void;
   deadline: () => number | null;

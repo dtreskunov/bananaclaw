@@ -1,8 +1,8 @@
-import { parseSyncFrame, SyncProtocolError, SYNC_PROTOCOL_VERSION, type SyncResponse } from '../../../shared/sync';
+import { parseSyncFrame, SyncProtocolError, SYNC_PROTOCOL_VERSION, type GlobalSyncState } from '../../../shared/sync';
 
 export interface SyncConnectionOptions {
   socket: () => WebSocket;
-  apply: (data: SyncResponse, groupId: string | null) => void;
+  apply: (data: GlobalSyncState, groupId: string | null) => void;
   unavailable: (message: string) => void;
   reload: () => void;
   unauthorized: () => void;
@@ -17,8 +17,8 @@ export class SyncConnection {
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private connectTimer: ReturnType<typeof setTimeout> | undefined;
   private pending: {
-    promise: Promise<SyncResponse>;
-    resolve: (value: SyncResponse) => void;
+    promise: Promise<GlobalSyncState>;
+    resolve: (value: GlobalSyncState) => void;
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
@@ -90,13 +90,13 @@ export class SyncConnection {
     this.sendSubscription();
   }
 
-  refresh(groupId: string | null): Promise<SyncResponse> {
+  refresh(groupId: string | null): Promise<GlobalSyncState> {
     if (this.stopped) return Promise.reject(new Error('Global synchronization is stopped. Reload this page.'));
     this.setGroup(groupId);
     if (this.pending) return this.pending.promise;
-    let resolve!: (value: SyncResponse) => void;
+    let resolve!: (value: GlobalSyncState) => void;
     let reject!: (error: Error) => void;
-    const promise = new Promise<SyncResponse>((yes, no) => {
+    const promise = new Promise<GlobalSyncState>((yes, no) => {
       resolve = yes;
       reject = no;
     });

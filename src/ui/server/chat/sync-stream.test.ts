@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SyncFrame, SyncResponse } from '../../shared/sync.js';
+import type { SyncFrame, GlobalSyncState } from '../../shared/sync.js';
 import { startSyncStream, type SyncStreamOptions } from './sync-stream.js';
 
 afterEach(() => vi.useRealTimers());
@@ -9,7 +9,7 @@ function fixture(overrides: Partial<SyncStreamOptions> = {}) {
   const frames: SyncFrame[] = [];
   let invalidate: (groupId?: string) => void = () => {};
   const unsubscribe = vi.fn();
-  const read = vi.fn(async (): Promise<SyncResponse> => ({ approvals: [], attention: [] }));
+  const read = vi.fn(async (): Promise<GlobalSyncState> => ({ approvals: [], attention: [], group: null }));
   const fail = vi.fn();
   const stream = startSyncStream({
     read,
@@ -66,6 +66,7 @@ describe('global synchronization stream', () => {
     await vi.advanceTimersByTimeAsync(100);
     f.read.mockResolvedValue({
       approvals: [],
+      group: null,
       attention: [
         { id: 'q', origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'mg' } },
       ],
@@ -81,23 +82,23 @@ describe('global synchronization stream', () => {
   });
 
   it('does not publish an async scan after navigation', async () => {
-    let finish!: (data: SyncResponse) => void;
+    let finish!: (data: GlobalSyncState) => void;
     const read = vi
       .fn()
       .mockImplementationOnce(
         () =>
-          new Promise<SyncResponse>((resolve) => {
+          new Promise<GlobalSyncState>((resolve) => {
             finish = resolve;
           }),
       )
-      .mockResolvedValue({ approvals: [], attention: [] });
+      .mockResolvedValue({ approvals: [], attention: [], group: null });
     const f = fixture({ read });
     f.stream.subscribe(1, 'old');
     await vi.advanceTimersByTimeAsync(100);
     f.stream.subscribe(2, 'new');
     for (let i = 0; i < 1000; i++) f.invalidate();
     expect(read).toHaveBeenCalledOnce();
-    finish({ approvals: [], attention: [] });
+    finish({ approvals: [], attention: [], group: null });
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames).toHaveLength(1);
     expect(f.frames[0]).toMatchObject({ subscriptionId: 2, groupId: 'new' });
@@ -113,6 +114,7 @@ describe('global synchronization stream', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return {
           approvals: [],
+          group: null,
           attention: [{ id, origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'mg' } }],
         };
       },
@@ -130,7 +132,7 @@ describe('global synchronization stream', () => {
   });
 
   it('rechecks authorization after an async read and never sends its unauthorized result', async () => {
-    let finish!: (data: SyncResponse) => void;
+    let finish!: (data: GlobalSyncState) => void;
     let allowed = true;
     const f = fixture({
       read: () =>
@@ -144,7 +146,7 @@ describe('global synchronization stream', () => {
     f.stream.subscribe(1, 'g');
     await vi.advanceTimersByTimeAsync(100);
     allowed = false;
-    finish({ approvals: [], attention: [] });
+    finish({ approvals: [], attention: [], group: null });
     await vi.advanceTimersByTimeAsync(0);
     expect(f.frames).toEqual([]);
     expect(f.fail).toHaveBeenCalledWith(expect.objectContaining({ message: 'revoked' }));

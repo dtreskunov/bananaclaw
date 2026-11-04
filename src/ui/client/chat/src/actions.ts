@@ -59,7 +59,7 @@ import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
 import { ConversationProtocolError } from '../../../shared/conversation-protocol';
-import type { SyncResponse } from '../../../shared/sync';
+import type { GlobalSyncState } from '../../../shared/sync';
 import { SyncConnection } from './sync-connection';
 import {
   attentionError,
@@ -496,48 +496,43 @@ export async function runSync(): Promise<boolean> {
   if (!connection) throw new Error('Global synchronization must be started before refreshing.');
   try {
     const data = await connection.refresh(gid);
-    return connection === syncConnection && gid === groupId.value && data.groupAccess === true;
+    return connection === syncConnection && gid === groupId.value && data.group !== null;
   } catch (error) {
     if (connection === syncConnection && gid === groupId.value) console.error('Global sync refresh failed', error);
     return false;
   }
 }
 
-function applyGlobalSync(res: SyncResponse, gid: string | null): void {
+function applyGlobalSync(res: GlobalSyncState, gid: string | null): void {
   batch(() => {
     attentionTargets.value = res.attention;
     attentionError.value = null;
     pendingApprovals.value = res.approvals;
   });
-  if (gid && groupId.value === gid && res.groupAccess === false) {
+  if (!gid || groupId.value !== gid) return;
+  if (res.group === null) {
     clearChat();
     threads.value = [];
     voiceInput.value = { backend: 'disabled', ready: false, reason: 'Agent access is no longer available.' };
     attentionError.value = 'Agent access is no longer available.';
     return;
   }
-  if (gid && groupId.value === gid && res.voiceInput) {
-    voiceInput.value = res.voiceInput;
-    if (!res.voiceInput.ready)
-      voice.interrupt(res.voiceInput.reason || 'Live voice input is no longer available. Current text has been kept.');
-  }
-  if (gid && groupId.value === gid && Array.isArray(res.threads)) {
-    // Preserve any client-only "(new thread)" entries — they have no
-    // server session yet (neither warmup nor a send has created one), so they
-    // won't appear in res.threads. Without this, sync would silently
-    // drop the user's just-created blank thread and a subsequent
-    // "New thread" click would mint yet another UUID instead of
-    // reusing the blank one.
-    const serverIds = new Set(res.threads.map((t) => t.threadId));
-    const ephemeral = threads.value.filter(
-      (t) =>
-        !serverIds.has(t.threadId) &&
-        (t.channelType || 'web') === 'web' &&
-        t.title === '(new thread)' &&
-        !t.messageCount,
-    );
-    threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
-  }
+  const { voiceInput: capability, threads: serverThreads } = res.group;
+  voiceInput.value = capability;
+  if (!capability.ready)
+    voice.interrupt(capability.reason || 'Live voice input is no longer available. Current text has been kept.');
+  // Preserve any client-only "(new thread)" entries — they have no
+  // server session yet (neither warmup nor a send has created one), so they
+  // won't appear in res.threads. Without this, sync would silently
+  // drop the user's just-created blank thread and a subsequent
+  // "New thread" click would mint yet another UUID instead of
+  // reusing the blank one.
+  const serverIds = new Set(serverThreads.map((t) => t.threadId));
+  const ephemeral = threads.value.filter(
+    (t) =>
+      !serverIds.has(t.threadId) && (t.channelType || 'web') === 'web' && t.title === '(new thread)' && !t.messageCount,
+  );
+  threads.value = ephemeral.length > 0 ? [...ephemeral, ...serverThreads] : serverThreads;
 }
 
 /**

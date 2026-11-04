@@ -1,7 +1,7 @@
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
-import type { SyncResponse } from '../../shared/sync.js';
+import type { GlobalSyncState } from '../../shared/sync.js';
 import { readInteractionSync } from './attention.js';
 import type { ThreadSummary } from '../../shared/thread.js';
 import { resolveVoiceInputConfig } from './voice-input-config.js';
@@ -10,24 +10,20 @@ export async function readGlobalSync(
   userId: string,
   groupId: string | null,
   listThreads: (userId: string, groupId: string) => Promise<ThreadSummary[]>,
-): Promise<SyncResponse> {
-  const data: SyncResponse = readInteractionSync(userId);
+): Promise<GlobalSyncState> {
+  const data: GlobalSyncState = { ...readInteractionSync(userId), group: null };
   if (!groupId) return data;
   const accessible = () => !!getAgentGroup(groupId) && canAccessAgentGroup(userId, groupId).allowed;
   const denied = () => ({
     ...readInteractionSync(userId),
-    groupAccess: false,
-    threads: [],
-    voiceInput: { backend: 'disabled' as const, ready: false, reason: 'Agent access is no longer available.' },
+    group: null,
   });
   if (!accessible()) return denied();
   const threads = await listThreads(userId, groupId);
   if (!accessible()) return denied();
   return {
     ...readInteractionSync(userId),
-    groupAccess: true,
-    threads,
-    voiceInput: resolveVoiceInputConfig(groupId),
+    group: { threads, voiceInput: resolveVoiceInputConfig(groupId) },
   };
 }
 
