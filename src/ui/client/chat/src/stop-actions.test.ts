@@ -69,6 +69,7 @@ describe('Stop integration with chat actions', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
+          attention: [],
           approvals: [],
           conversation: testSnapshot({
             turns: [{ ...testTurn, id: 'external-turn' }],
@@ -92,6 +93,7 @@ describe('Stop integration with chat actions', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
+          attention: [],
           approvals: [],
           conversation: testSnapshot({
             turns: [{ ...testTurn, id: 'stale-turn', phase: 'stopping' }],
@@ -123,7 +125,12 @@ describe('Stop integration with chat actions', () => {
     clearChat();
     resolve({
       ok: true,
-      json: async () => ({ approvals: [], activeTurn: { id: 'old-turn', status: 'running' }, connected: true }),
+      json: async () => ({
+        attention: [],
+        approvals: [],
+        activeTurn: { id: 'old-turn', status: 'running' },
+        connected: true,
+      }),
     });
     await syncing;
     expect(activeTurn.value).toBeNull();
@@ -153,7 +160,7 @@ describe('Stop integration with chat actions', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ approvals: [], questions: [question] }),
+        json: async () => ({ attention: [], approvals: [], questions: [question] }),
       }),
     );
     await stopActiveTurn('turn-1');

@@ -50,7 +50,9 @@ beforeEach(() => {
   vi.mocked(requestChoice).mockReset().mockResolvedValue('steer');
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, approvals: [] }) }),
+    vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ attention: [], ok: true, approvals: [] }) }),
   );
 });
 afterEach(() => {

@@ -26,7 +26,7 @@ describe('loadThreads', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ approvals: [], threads: [freshThread] }),
+        json: async () => ({ attention: [], approvals: [], threads: [freshThread] }),
       } as Response),
     );
     groupId.value = 'agent';
@@ -119,7 +119,7 @@ describe('deleteThread', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ approvals: [], threads: [latest], threadMessages: [] }),
+        json: async () => ({ attention: [], approvals: [], threads: [latest], threadMessages: [] }),
       } as Response),
     );
     groupId.value = 'agent';

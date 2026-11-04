@@ -61,7 +61,7 @@ beforeEach(() => {
           messagingGroupId: 'web-context',
           platformId: 'group:agent',
         });
-      if (url.startsWith('api/sync?')) return Response.json({ approvals: [], threads: serverThreads });
+      if (url.startsWith('api/sync?')) return Response.json({ attention: [], approvals: [], threads: serverThreads });
       if (url === 'api/groups/agent/dirs/') return Response.json({ entries: [] });
       throw new Error(`Unexpected request: ${url}`);
     }),
@@ -133,7 +133,7 @@ describe('new conversation on startup', () => {
     expect(threadId.value).toBeNull();
     expect(chatReady.value).toBe(false);
     expect(threads.value).toEqual([]);
-    finishSync(Response.json({ approvals: [], threads: [latest] }));
+    finishSync(Response.json({ attention: [], approvals: [], threads: [latest] }));
     await navigation;
     expect(threadId.value).toBe('latest');
   });
@@ -147,14 +147,14 @@ describe('new conversation on startup', () => {
         });
       if (url === 'api/groups/other-agent/dirs/') return Response.json({ entries: [] });
       if (String(url).startsWith('api/sync?'))
-        return Response.json({ approvals: [], threads: [{ ...latest, threadId: 'new-latest' }] });
+        return Response.json({ attention: [], approvals: [], threads: [{ ...latest, threadId: 'new-latest' }] });
       throw new Error(`Unexpected request: ${url}`);
     });
     location.hash = '#g/agent';
     const navigation = applyHash(router);
 
     await selectGroup('other-agent');
-    finishSync(Response.json({ approvals: [], threads: [latest] }));
+    finishSync(Response.json({ attention: [], approvals: [], threads: [latest] }));
     await navigation;
 
     expect(groupId.value).toBe('other-agent');
@@ -172,6 +172,7 @@ describe('new conversation on startup', () => {
       if (url === 'api/groups/other-agent/dirs/') return Response.json({ entries: [] });
       if (String(url).startsWith('api/sync?'))
         return Response.json({
+          attention: [],
           approvals: [],
           threads: [{ ...latest, threadId: groupId.value === 'agent' ? 'old-latest' : 'new-latest' }],
         });

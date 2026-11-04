@@ -300,3 +300,25 @@ one builtin-count fixture). The eleven host-routing tests formerly blocked by
 eager UI initialization now pass without changing their tests. New import
 guards prove authorized readers and configuration load without HTTP startup;
 configuration precedence and URL fallback behavior are covered explicitly.
+
+## Input attention phase
+
+The approved user-facing follow-up adds one authorized, ordered navigation
+projection of canonical pending questions, confirmations, account setup and
+access grants to global sync. Shared response authorization determines
+eligibility before counting; private recovery/selection data is excluded.
+The host/browser sync contract is shared, with no waiting-state table, copied
+lifecycle, persistent counters, new poller, runner change or storage migration.
+
+One shared amber badge counts requests on agent tabs, the mobile agent picker
+and thread rows. The compact header is a neutral position badge, plain `of`,
+an amber total and previous/next chevrons. The total opens the selected/first
+request, including the single-request case. Navigation uses existing routes and
+forms, preserves exact non-web context and focuses a request once without
+stealing focus on later snapshots. Manual request focus updates the position.
+
+Counts derive from the same authoritative list and do not clear when viewed or
+on HTTP acknowledgement. Refresh errors retain last-known information instead
+of reporting a fabricated zero. Stable canonical IDs handle pending queues and
+cross-client resolution. Browser push and a separate inbox are not part of this
+phase.

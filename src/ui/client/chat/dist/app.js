@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/path-to-regexp/dist/index.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "node_modules/path-to-regexp/dist/index.js"(exports) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/core.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "node_modules/highlight.js/lib/core.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/xml.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/bash.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/c.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/cpp.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/csharp.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/css.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/markdown.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/diff.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/ruby.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/go.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/graphql.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/ini.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/java.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/javascript.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/json.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/kotlin.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/less.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/lua.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/makefile.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/perl.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/objectivec.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/php.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/php-template.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/plaintext.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/python.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/python-repl.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/r.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/rust.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/scss.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/shell.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/sql.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/swift.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/yaml.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/typescript.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/vbnet.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/wasm.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/common.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "node_modules/highlight.js/lib/common.js"(exports, module) {
+  "../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// node_modules/preact/dist/preact.module.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// node_modules/preact/hooks/dist/hooks.module.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// node_modules/@preact/signals-core/dist/signals-core.module.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// node_modules/@preact/signals/dist/signals.module.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -16611,7 +16611,7 @@ function clearApprovalMessage(approvalId) {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// node_modules/marked/lib/marked.esm.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -19681,7 +19681,7 @@ function playCompletionChime() {
   setTimeout(() => tone(880, 180, 0.05), 110);
 }
 
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -20293,6 +20293,93 @@ function applyConversationFrame(raw, expectedThreadId) {
   }
 }
 
+// ../../shared/attention.ts
+function isAttentionTargets(value) {
+  if (!Array.isArray(value)) return false;
+  const ids = /* @__PURE__ */ new Set();
+  const text2 = (v5) => typeof v5 === "string" && v5.length > 0;
+  return value.every((target) => {
+    if (!target || typeof target !== "object" || !("id" in target) || !text2(target.id) || ids.has(target.id))
+      return false;
+    ids.add(target.id);
+    if (!("origin" in target)) return false;
+    const origin = target.origin;
+    return !!origin && typeof origin === "object" && "agentGroupId" in origin && text2(origin.agentGroupId) && "threadId" in origin && text2(origin.threadId) && "channelType" in origin && text2(origin.channelType) && "messagingGroupId" in origin && text2(origin.messagingGroupId);
+  });
+}
+
+// src/attention-state.ts
+var attentionTargets = y3(null);
+var attentionError = y3(null);
+var attentionSelection = y3(null);
+var navigationSequence = 0;
+function selectAttention(id2, navigate = false) {
+  if (!navigate && attentionSelection.value?.id === id2) return;
+  attentionSelection.value = { id: id2, navigation: navigate ? ++navigationSequence : 0 };
+}
+function matchesAttentionLocation(target, location2) {
+  const origin = target.origin;
+  return origin.agentGroupId === location2.agentGroupId && origin.threadId === location2.threadId && origin.channelType === (location2.channelType || "web") && (origin.messagingGroupId === location2.messagingGroupId || origin.channelType === "web" && location2.messagingGroupId === null);
+}
+function attentionPosition(targets, selectedId, location2) {
+  const selected = targets.findIndex(
+    (target) => target.id === selectedId && matchesAttentionLocation(target, location2)
+  );
+  return selected >= 0 ? selected : targets.findIndex((target) => matchesAttentionLocation(target, location2));
+}
+function groupAttentionCount(groupId2) {
+  return attentionTargets.value?.filter((target) => target.origin.agentGroupId === groupId2).length ?? 0;
+}
+function threadAttentionCount(location2) {
+  return attentionTargets.value?.filter((target) => matchesAttentionLocation(target, location2)).length ?? 0;
+}
+
+// src/credentials-navigation.ts
+var credentialsIntent = y3(null);
+var accessApprovalId = y3(
+  typeof location === "undefined" ? null : new URLSearchParams(location.search).get("access_request")
+);
+function openCredentials(intent) {
+  drawerOpen.threads.value = false;
+  drawerOpen.files.value = false;
+  const navigate = () => {
+    if (intent?.approvalId) {
+      accessApprovalId.value = intent.approvalId;
+      const url = new URL(location.href);
+      url.searchParams.set("access_request", intent.approvalId);
+      history.replaceState(history.state, "", url);
+    }
+    credentialsIntent.value = intent ?? null;
+    credentialsOpen.value = true;
+    writeHash();
+  };
+  if (groupAdminOpen.value && history.state?.__modal_back__) {
+    window.addEventListener(
+      "popstate",
+      () => {
+        setTimeout(navigate, 0);
+      },
+      { once: true }
+    );
+    groupAdminOpen.value = false;
+  } else {
+    groupAdminOpen.value = false;
+    navigate();
+  }
+}
+function clearAccessApproval() {
+  accessApprovalId.value = null;
+  const url = new URL(location.href);
+  url.searchParams.delete("access_request");
+  history.replaceState(history.state, "", url);
+}
+function openChat() {
+  clearAccessApproval();
+  credentialsOpen.value = false;
+  writeHash();
+  if (location.hash === "#credentials") location.hash = "";
+}
+
 // src/components/MobileDialog.tsx
 function MobileDialog(props) {
   const {
@@ -20346,7 +20433,7 @@ function MobileDialogList({ children, className }) {
   return /* @__PURE__ */ u4("div", { class: `mobile-dialog-list${className ? ` ${className}` : ""}`, children });
 }
 function MobileDialogItem(props) {
-  const { label, sublabel, onClick, type = "button", active, chevron, title, className } = props;
+  const { label, badge, sublabel, onClick, type = "button", active, chevron, title, className } = props;
   return /* @__PURE__ */ u4(
     "button",
     {
@@ -20356,7 +20443,10 @@ function MobileDialogItem(props) {
       title,
       onClick,
       children: [
-        /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-label", children: label }),
+        /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-label", children: [
+          /* @__PURE__ */ u4("span", { children: label }),
+          badge
+        ] }),
         sublabel ? /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-sublabel", children: sublabel }) : null,
         chevron ? /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-chevron", "aria-hidden": "true", children: "\u203A" }) : null
       ]
@@ -20687,7 +20777,7 @@ async function deleteThread(thread, cascade = false) {
   });
   if (threadId.value && gone.has(threadId.value)) {
     const latest = threads.value.length > 0 ? threads.value[0] : null;
-    if (latest) openChat(groupId.value, latest.threadId, threadCtxOf(latest)).catch(console.error);
+    if (latest) openChat2(groupId.value, latest.threadId, threadCtxOf(latest)).catch(console.error);
     else clearChat();
   }
 }
@@ -20724,7 +20814,7 @@ async function forkThreadAt(thread, atMessageId, options = {}) {
   }
   await loadThreads(gid);
   const branch = threads.value.find((x6) => x6.threadId === created.threadId) ?? null;
-  await openChat(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
+  await openChat2(gid, created.threadId, threadCtxOf(branch)).catch(console.error);
   focusBranchComposerSoon({ groupId: gid, threadId: created.threadId }, options.composerDraft);
   return true;
 }
@@ -20732,7 +20822,7 @@ async function editMessageInBranch(thread, previousMessageId, draft) {
   if (previousMessageId) return forkThreadAt(thread, previousMessageId, { composerDraft: draft });
   const gid = groupId.value;
   if (!gid) return false;
-  await openChat(gid, null, null);
+  await openChat2(gid, null, null);
   const targetThreadId = threadId.value;
   if (!targetThreadId || targetThreadId === thread.threadId) return false;
   focusBranchComposerSoon({ groupId: gid, threadId: targetThreadId }, draft);
@@ -20860,7 +20950,12 @@ async function runSync(options = {}) {
       "api/sync" + (params.toString() ? "?" + params.toString() : ""),
       options.forceRefresh ? { cache: "no-store" } : void 0
     );
+    if (!isAttentionTargets(res.attention)) throw new Error("Invalid input request status. Reload and retry.");
   } catch (error) {
+    if (requestId !== refs.syncRequestId) return false;
+    const message2 = error instanceof Error ? error.message : "Could not refresh input requests.";
+    if (attentionError.value !== message2) console.error("Input request sync failed", error);
+    attentionError.value = message2;
     if (generation2 === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct !== "web") {
       applyTurnState(activeTurn.value, false);
       console.error("Conversation sync failed", error);
@@ -20870,6 +20965,10 @@ async function runSync(options = {}) {
     return false;
   }
   if (requestId !== refs.syncRequestId) return false;
+  n2(() => {
+    attentionTargets.value = res.attention;
+    attentionError.value = null;
+  });
   if (generation2 === refs.chatGeneration && tid && gid === groupId.value && tid === threadId.value && ct === channelType.value && mg === messagingGroupId.value && ct !== "web") {
     {
       try {
@@ -20917,8 +21016,9 @@ function taskUrl(gid, tid, suffix = "") {
 function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
-async function openChat(gid, resumeTid, opts) {
-  if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
+async function openChat2(gid, resumeTid, opts, options = {}) {
+  if (resumeTid && groupId.value === gid && threadId.value === resumeTid && (!opts || opts.channelType === channelType.value && (opts.messagingGroupId || null) === messagingGroupId.value))
+    return;
   if (!resumeTid && refs.newChatInFlight) return;
   resetConversation();
   resetTurnState();
@@ -20986,7 +21086,7 @@ async function openChat(gid, resumeTid, opts) {
       if (generation2 !== refs.chatGeneration) return;
       chatLoading.value = false;
     }
-    if (!highlightMessageId.value) focusComposerSoon();
+    if (!highlightMessageId.value && options.focusComposer !== false) focusComposerSoon();
     return;
   }
   const empty = threads.value.find(
@@ -21063,7 +21163,7 @@ async function openChat(gid, resumeTid, opts) {
 function startNewThread() {
   const gid = groupId.value;
   if (!gid) return;
-  openChat(gid, null, null).then(() => {
+  openChat2(gid, null, null).then(() => {
     drawerOpen.threads.value = false;
     drawerOpen.files.value = false;
   }).catch(console.error);
@@ -21334,13 +21434,46 @@ async function selectGroup(gid, options = {}) {
   if (generation2 !== refs.chatGeneration || groupId.value !== gid) return;
   await loadTree("");
   if (generation2 !== refs.chatGeneration || groupId.value !== gid) return;
+  if (options.resume) {
+    await openChat2(gid, options.resume.threadId, options.resume.context, { focusComposer: options.focusComposer });
+    return;
+  }
   const latest = threadsFresh && !options.newConversation && threads.value.length > 0 ? threads.value[0] : null;
   if (latest) {
-    openChat(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error("chat open failed", err));
+    openChat2(gid, latest.threadId, threadCtxOf(latest)).catch((err) => console.error("chat open failed", err));
   } else if (threadsFresh) {
-    openChat(gid, null, null).catch((err) => console.error("auto-start chat failed", err));
+    openChat2(gid, null, null).catch((err) => console.error("auto-start chat failed", err));
   } else {
     showToast("Could not load threads", "err");
+  }
+}
+async function navigateAttention(direction) {
+  const targets = attentionTargets.value;
+  if (!targets?.length || attentionError.value) return false;
+  const position2 = attentionPosition(targets, attentionSelection.value?.id ?? null, {
+    agentGroupId: groupId.value,
+    threadId: threadId.value,
+    channelType: channelType.value,
+    messagingGroupId: messagingGroupId.value
+  });
+  const index = direction === 0 ? Math.max(position2, 0) : position2 < 0 ? direction < 0 ? targets.length - 1 : 0 : (position2 + direction + targets.length) % targets.length;
+  const target = targets[index];
+  selectAttention(target.id, true);
+  try {
+    if (credentialsOpen.value) openChat();
+    drawerOpen.threads.value = false;
+    drawerOpen.files.value = false;
+    if (target.origin) {
+      const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
+      const context = { channelType: channel, messagingGroupId: mg, canSend: false };
+      if (groupId.value !== gid) await selectGroup(gid, { resume: { threadId: tid, context }, focusComposer: false });
+      else await openChat2(gid, tid, context, { focusComposer: false });
+    }
+    return true;
+  } catch (error) {
+    console.error("Input request navigation failed", error);
+    showToast("Could not open input request: " + (error instanceof Error ? error.message : String(error)), "err");
+    return false;
   }
 }
 var fileSearchGeneration = 0;
@@ -21795,52 +21928,6 @@ async function respondInteraction(id2, response) {
   return accepted;
 }
 
-// src/credentials-navigation.ts
-var credentialsIntent = y3(null);
-var accessApprovalId = y3(
-  typeof location === "undefined" ? null : new URLSearchParams(location.search).get("access_request")
-);
-function openCredentials(intent) {
-  drawerOpen.threads.value = false;
-  drawerOpen.files.value = false;
-  const navigate = () => {
-    if (intent?.approvalId) {
-      accessApprovalId.value = intent.approvalId;
-      const url = new URL(location.href);
-      url.searchParams.set("access_request", intent.approvalId);
-      history.replaceState(history.state, "", url);
-    }
-    credentialsIntent.value = intent ?? null;
-    credentialsOpen.value = true;
-    writeHash();
-  };
-  if (groupAdminOpen.value && history.state?.__modal_back__) {
-    window.addEventListener(
-      "popstate",
-      () => {
-        setTimeout(navigate, 0);
-      },
-      { once: true }
-    );
-    groupAdminOpen.value = false;
-  } else {
-    groupAdminOpen.value = false;
-    navigate();
-  }
-}
-function clearAccessApproval() {
-  accessApprovalId.value = null;
-  const url = new URL(location.href);
-  url.searchParams.delete("access_request");
-  history.replaceState(history.state, "", url);
-}
-function openChat2() {
-  clearAccessApproval();
-  credentialsOpen.value = false;
-  writeHash();
-  if (location.hash === "#credentials") location.hash = "";
-}
-
 // src/components/CreateGroupModal.tsx
 var createGroupOpen = y3(false);
 function errMsg(data, fallback) {
@@ -22006,7 +22093,10 @@ function TabBar(props) {
                 class: `tab-item${isActive ? " active" : ""}${it.className ? ` ${it.className}` : ""}`,
                 onClick: () => onSelect(it.id),
                 children: [
-                  /* @__PURE__ */ u4("span", { class: "tab-item-label", children: it.label }),
+                  /* @__PURE__ */ u4("span", { class: "tab-item-heading", children: [
+                    /* @__PURE__ */ u4("span", { class: "tab-item-label", children: it.label }),
+                    it.badge
+                  ] }),
                   it.sublabel || it.reserveSublabel ? /* @__PURE__ */ u4("span", { class: "tab-item-sublabel", "aria-hidden": it.sublabel ? void 0 : "true", children: it.sublabel }) : null
                 ]
               },
@@ -22041,7 +22131,10 @@ function TabBar(props) {
         "aria-expanded": sheetOpen,
         onClick: () => setSheetOpen(true),
         children: [
-          /* @__PURE__ */ u4("span", { class: "tab-bar-dropdown-label", children: dropdownLabel }),
+          /* @__PURE__ */ u4("span", { class: "tab-bar-dropdown-label", children: [
+            /* @__PURE__ */ u4("span", { class: "tab-bar-dropdown-text", children: dropdownLabel }),
+            activeItem?.badge
+          ] }),
           /* @__PURE__ */ u4("span", { class: "tab-bar-dropdown-caret", "aria-hidden": "true", children: "\u25BE" })
         ]
       }
@@ -22073,6 +22166,7 @@ function TabBarSheet(props) {
       MobileDialogItem,
       {
         label: it.label,
+        badge: it.badge,
         sublabel: it.sublabel,
         active: it.id === activeId,
         title: it.title,
@@ -22096,7 +22190,20 @@ function TabBarSheet(props) {
   ] }) });
 }
 
+// src/components/AttentionBadge.tsx
+function AttentionBadge({
+  value,
+  neutral = false,
+  label
+}) {
+  return /* @__PURE__ */ u4("span", { class: `attention-badge${neutral ? " attention-badge-neutral" : ""}`, "aria-label": label, children: value });
+}
+
 // src/components/GroupPicker.tsx
+function attentionBadge(id2) {
+  const count = groupAttentionCount(id2);
+  return count > 0 ? /* @__PURE__ */ u4(AttentionBadge, { value: count, label: `${count} requests need your input` }) : void 0;
+}
 function isElevatedOnly(g8) {
   return g8.elevatedOnly === true;
 }
@@ -22126,6 +22233,7 @@ function GroupStrip() {
     return {
       id: g8.id,
       label: g8.name,
+      badge: attentionBadge(g8.id),
       sublabel: sublabel || void 0,
       reserveSublabel: true,
       title: tipFor(g8, isAdminOnly),
@@ -22147,7 +22255,7 @@ function GroupStrip() {
     });
   }
   const pick = (gid) => {
-    if (credentialsOpen.value) openChat2();
+    if (credentialsOpen.value) openChat();
     if (gid !== groupId.value) selectGroup(gid).catch(console.error);
   };
   return /* @__PURE__ */ u4(
@@ -22199,6 +22307,7 @@ function GroupPickerModal() {
       MobileDialogItem,
       {
         label: g8.name,
+        badge: attentionBadge(g8.id),
         sublabel: subtitle || void 0,
         active: isActive,
         className: isAdminOnly ? "is-admin-visible" : void 0,
@@ -22297,6 +22406,111 @@ function UserMenu() {
   ] });
 }
 
+// src/components/AttentionNavigator.tsx
+function AttentionNavigator() {
+  const targets = attentionTargets.value;
+  const error = attentionError.value;
+  const selection = attentionSelection.value;
+  const handled = A2(null);
+  const location2 = {
+    agentGroupId: groupId.value,
+    threadId: threadId.value,
+    channelType: channelType.value,
+    messagingGroupId: messagingGroupId.value
+  };
+  const selected = targets?.find((target) => target.id === selection?.id);
+  const revision = conversationState.value?.revision;
+  const approvals = pendingApprovals.value;
+  const questions = pendingQuestions.value;
+  y2(() => {
+    if (!selection?.navigation || !selected || handled.current === selection.navigation || !matchesAttentionLocation(selected, location2))
+      return;
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(`attention-${selection.id}`);
+      if (!target) return;
+      handled.current = selection.navigation;
+      target.scrollIntoView({ block: "center", behavior: "auto" });
+      target.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    selection,
+    selected,
+    location2.agentGroupId,
+    location2.threadId,
+    location2.channelType,
+    location2.messagingGroupId,
+    revision,
+    approvals,
+    questions
+  ]);
+  if ((!targets || targets.length === 0) && !error) return null;
+  const count = targets?.length;
+  const position2 = targets ? attentionPosition(targets, selection?.id ?? null, location2) : -1;
+  const disabled = !!error || count === void 0 || count < 2;
+  const title = error ? `Input status unavailable: ${error}. Showing last known requests.` : "Requests needing your input";
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: "attention-navigation",
+      "data-stale": error ? "true" : void 0,
+      role: "group",
+      "aria-label": error ? `Input request status unavailable. ${count ?? "Unknown"} last known requests.` : "Requests needing your input",
+      title,
+      children: [
+        /* @__PURE__ */ u4(AttentionBadge, { value: position2 < 0 ? "\u2014" : position2 + 1, neutral: true, label: "Current request position" }),
+        /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: "of" }),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "attention-open",
+            "aria-label": "Open input request",
+            title,
+            disabled: !!error || !count,
+            onClick: () => {
+              void navigateAttention(0);
+            },
+            children: /* @__PURE__ */ u4(
+              AttentionBadge,
+              {
+                value: count ?? "?",
+                label: count === void 0 ? "Input request count unavailable" : `${count} requests need your input`
+              }
+            )
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            "aria-label": "Previous input request",
+            title: "Previous input request",
+            disabled,
+            onClick: () => {
+              void navigateAttention(-1);
+            },
+            children: "\u2039"
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            "aria-label": "Next input request",
+            title: "Next input request",
+            disabled,
+            onClick: () => {
+              void navigateAttention(1);
+            },
+            children: "\u203A"
+          }
+        )
+      ]
+    }
+  );
+}
+
 // src/components/Header.tsx
 function Header() {
   return /* @__PURE__ */ u4("header", { class: "app-header", children: [
@@ -22327,6 +22541,7 @@ function Header() {
       }
     ) : null,
     /* @__PURE__ */ u4(GroupStrip, {}),
+    /* @__PURE__ */ u4(AttentionNavigator, {}),
     /* @__PURE__ */ u4(UserMenu, {}),
     !credentialsOpen.value ? /* @__PURE__ */ u4(
       "button",
@@ -22444,6 +22659,15 @@ function RelativeTime({ ts, className }) {
 }
 
 // src/components/ThreadsRail.tsx
+function ThreadAttention({ thread }) {
+  const count = threadAttentionCount({
+    agentGroupId: groupId.value,
+    threadId: thread.threadId,
+    channelType: thread.channelType || "web",
+    messagingGroupId: thread.messagingGroupId ?? null
+  });
+  return count > 0 ? /* @__PURE__ */ u4(AttentionBadge, { value: count, label: `${count} requests need your input` }) : null;
+}
 function ThreadRow({ t: t4 }) {
   const ct = t4.channelType || "web";
   const meta = channelMeta(ct);
@@ -22461,7 +22685,7 @@ function ThreadRow({ t: t4 }) {
   ].filter(Boolean).join(" \xB7 ") : void 0;
   const onOpen = (ev) => {
     if (ev.target.classList.contains("del")) return;
-    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
+    if (groupId.value) openChat2(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
   const onDel = async (ev) => {
@@ -22520,6 +22744,7 @@ This also cancels its outstanding approval requests. Already applied changes are
           ) : null,
           ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
           /* @__PURE__ */ u4("span", { class: "title-text", children: t4.title }),
+          /* @__PURE__ */ u4(ThreadAttention, { thread: t4 }),
           branchCount > 0 ? /* @__PURE__ */ u4(
             "span",
             {
@@ -22562,13 +22787,14 @@ function DmRow({ t: t4 }) {
   const meta = channelMeta(ct);
   const active = t4.threadId === threadId.value;
   const onOpen = () => {
-    if (groupId.value) openChat(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
+    if (groupId.value) openChat2(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
   return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
       /* @__PURE__ */ u4("span", { class: "ch-pill dm", title: meta.label, children: meta.icon }),
-      /* @__PURE__ */ u4("span", { class: "title-text", children: meta.label })
+      /* @__PURE__ */ u4("span", { class: "title-text", children: meta.label }),
+      /* @__PURE__ */ u4(ThreadAttention, { thread: t4 })
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
@@ -22648,7 +22874,7 @@ function SearchResultRow({ r: r4 }) {
       }, 100);
     } else {
       highlightMessageId.value = msgId;
-      openChat(groupId.value, tid, opts).catch(console.error);
+      openChat2(groupId.value, tid, opts).catch(console.error);
     }
   };
   const raw = r4.snippet || "";
@@ -22816,7 +23042,7 @@ function ThreadsRail() {
   );
 }
 
-// node_modules/preact/compat/dist/compat.module.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -23885,6 +24111,10 @@ function QuestionPrompt({ question: q5 }) {
     "section",
     {
       class: "question-prompt",
+      id: `attention-${q5.id}`,
+      "data-attention-target": q5.id,
+      tabIndex: -1,
+      onFocus: () => selectAttention(q5.id),
       "data-question-id": q5.id,
       "aria-label": q5.question || "Question",
       "aria-busy": busy || waiting,
@@ -24137,7 +24367,11 @@ function MessageBubble({
   from,
   timestamp,
   metadata,
-  children
+  children,
+  id: elementId,
+  tabIndex,
+  "data-attention-target": attentionTarget,
+  onFocus
 }) {
   const ownRef = A2(null);
   const ref = elementRef ?? ownRef;
@@ -24175,7 +24409,19 @@ function MessageBubble({
       metadata
     ] }) : null
   ] }) : children;
-  return /* @__PURE__ */ u4("div", { class: className, "data-msg-id": id2, ref, children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children: content }) });
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: className,
+      "data-msg-id": id2,
+      id: elementId,
+      tabIndex,
+      "data-attention-target": attentionTarget,
+      onFocus,
+      ref,
+      children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children: content })
+    }
+  );
 }
 
 // src/components/CredentialsApi.ts
@@ -26851,6 +27097,10 @@ function ApprovalBubble({ approval: approval2, busy, onRespond, reference }) {
     {
       class: `msg ${answered ? "in" : "out"} approval-message${access ? " markdown access-approval-message" : ""}${reference ? " approval-reference" : ""}`,
       "data-msg-id": approval2.id,
+      id: `attention-${approval2.id}`,
+      "data-attention-target": approval2.id,
+      tabIndex: -1,
+      onFocus: () => selectAttention(approval2.id),
       from,
       timestamp: approval2.resolvedAt ?? approval2.createdAt,
       children: approval2.kind === "confirmation" ? /* @__PURE__ */ u4(ApprovalCard, { approval: approval2, busy, onRespond }) : access ? /* @__PURE__ */ u4(AccessRequestCard, { request: approval2, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(AccountRequestSummary, { request: approval2 })
@@ -27704,7 +27954,7 @@ function BranchDivider({ child }) {
 function openThreadAt(targetThreadId, messageId) {
   if (!groupId.value) return;
   highlightMessageId.value = messageId;
-  openChat(groupId.value, targetThreadId, null).catch(console.error);
+  openChat2(groupId.value, targetThreadId, null).catch(console.error);
 }
 function MessageText({ text: text2, md }) {
   const mdRef = A2(null);
@@ -27742,7 +27992,7 @@ function MessageText({ text: text2, md }) {
                 highlightMessageId.value = msgId || null;
               }, 50);
             } else {
-              openChat(gid, tid, null).catch(console.error);
+              openChat2(gid, tid, null).catch(console.error);
             }
           }
         });
@@ -29716,7 +29966,7 @@ function FilePreviewDialog({ expanded, title, onClose, children }) {
   );
 }
 
-// node_modules/highlight.js/es/common.js
+// ../../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 
@@ -32650,7 +32900,7 @@ function CredentialsContent({ agent } = {}) {
   y2(() => {
     if (agent) return;
     const key = (event) => {
-      if (event.key === "Escape" && !dialog) openChat2();
+      if (event.key === "Escape" && !dialog) openChat();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
@@ -32797,9 +33047,9 @@ function CredentialsContent({ agent } = {}) {
     {
       title: "My Credentials",
       ariaLabel: "My Credentials",
-      onClose: openChat2,
+      onClose: openChat,
       onBack: isMobile.value ? () => {
-        openChat2();
+        openChat();
         returnToUserMenu(credentialsOpen);
       } : void 0,
       backLabel: "Back to account menu",
@@ -36009,7 +36259,7 @@ function applyPanelClasses() {
 var router = {
   selectGroup,
   loadThreads,
-  openChat,
+  openChat: openChat2,
   clearChat,
   loadTree,
   selectFile,

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { respondInteraction } from '../actions';
+import { selectAttention } from '../attention-state';
 import { isRecording } from '../recorder';
 import {
   channelType,
@@ -129,6 +130,10 @@ export function QuestionPrompt({ question: q }: { question: PendingQuestionDto }
   return (
     <section
       class="question-prompt"
+      id={`attention-${q.id}`}
+      data-attention-target={q.id}
+      tabIndex={-1}
+      onFocus={() => selectAttention(q.id)}
       data-question-id={q.id}
       aria-label={q.question || 'Question'}
       aria-busy={busy || waiting}

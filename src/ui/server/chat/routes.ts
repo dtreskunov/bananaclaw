@@ -12,10 +12,8 @@ import Router from 'find-my-way';
 
 import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
-import { getMessagingGroupByPlatform } from '../../../db/messaging-groups.js';
 import { getDb } from '../../../db/connection.js';
-import { getInteraction, queryInteractions } from '../../../db/interactions.js';
-import { getSession } from '../../../db/sessions.js';
+import { getInteraction } from '../../../db/interactions.js';
 import { log } from '../../../log.js';
 import {
   listAccessibleAgentGroups,
@@ -28,13 +26,11 @@ import { createGroup, GroupCreateError } from '../../../modules/groups/create.js
 import { deleteSubscriptionByEndpoint, upsertSubscription } from '../../../modules/push/db.js';
 import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
-import type { Approval } from '../../../types.js';
 import { questionAcceptsResponse, type QuestionResponse } from '../../shared/question.js';
 import { isQuestionResponse } from '../../shared/conversation-protocol.js';
 import { ApprovalMessageError, parseApprovalMessage } from '../../shared/approval-message.js';
-import { projectApproval } from './approval-transcript.js';
 import { isVoiceDiagnostic } from '../../shared/voice.js';
-import type { ConversationApproval } from '../../shared/approval.js';
+import type { SyncResponse } from '../../shared/sync.js';
 import { authenticate, recordAccess } from '../auth.js';
 import { applyBrandTokens, brandBootstrapScript, getBranding } from '../branding.js';
 import { createDownloadToken, redeemDownloadToken } from '../download-tokens.js';
@@ -47,8 +43,8 @@ import { fileEtag } from './etag.js';
 import { compareEntriesByDate, searchFilesByName } from './file-search.js';
 import { handleChatRequest, handleChatUpgrade, listThreadsForViewer, viewerHasContent } from './chat.js';
 import { readChatHistory } from './history.js';
-import { resolveTurnContext } from './conversation-context.js';
-import type { ThreadSummary } from '../../shared/thread.js';
+import { canRespondToApproval, questionResponseOrigin } from './interaction-access.js';
+import { readInteractionSync } from './attention.js';
 import { handleGroupAdminRequest } from './group-admin.js';
 import { handleCredentialsRequest } from './credentials-admin.js';
 import { usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';
@@ -71,7 +67,7 @@ import { handleWriteRequest } from './write.js';
 import { resolveVoiceInputConfig } from './voice-input-config.js';
 
 export { handleChatUpgrade };
-import { readConversation, routeMatches } from './conversation.js';
+import { readConversation } from './conversation.js';
 import { conversationSnapshot } from './conversation-stream.js';
 
 // UI assets live under src/ (not compiled by tsc); resolve from project root,
@@ -552,42 +548,14 @@ async function handleCreateGroup(ctx: Ctx, userId: string): Promise<void> {
   });
 }
 
-type ApprovalDto = ConversationApproval;
-
-function approvalGroupId(row: { agent_group_id?: string | null; session_id: string | null }): string | null {
-  return row.agent_group_id ?? (row.session_id ? (getSession(row.session_id)?.agent_group_id ?? null) : null);
-}
-
-function listApprovalsForUser(userId: string): ApprovalDto[] {
-  // approvals are unbounded global rows; filter to those the user
-  // is eligible to approve. Owner/global-admin sees all (incl. agent_group_id IS NULL);
-  // a scoped admin sees only rows for their agent groups.
-  const rows = queryInteractions<Approval>(
-    "SELECT * FROM interactions WHERE kind!='question' AND status IN ('pending','applying') ORDER BY created_at DESC",
-  );
-  const elevated = isOwner(userId) || isGlobalAdmin(userId);
-  const visible: ApprovalDto[] = [];
-  for (const r of rows) {
-    const scope = approvalGroupId(r);
-    if (scope == null) {
-      if (!elevated) continue;
-    } else if (!hasAdminPrivilege(userId, scope)) {
-      continue;
-    }
-    visible.push(projectApproval(userId, r));
-  }
-  return visible;
-}
-
-interface SyncResponse {
-  approvals: ApprovalDto[];
-  threads?: ThreadSummary[];
-  conversation?: import('../../shared/conversation-protocol.js').ConversationSnapshot;
-  voiceInput?: ReturnType<typeof resolveVoiceInputConfig>;
-}
-
 async function handleSync(ctx: Ctx, userId: string): Promise<void> {
-  const out: SyncResponse = { approvals: listApprovalsForUser(userId) };
+  let out: SyncResponse;
+  try {
+    out = readInteractionSync(userId);
+  } catch (error) {
+    log.error('Interaction sync failed', { userId, error });
+    return json(ctx, 503, { error: 'Input requests unavailable; retry the request' });
+  }
   const gid = ctx.url.searchParams.get('gid') || '';
   if (gid && canAccessAgentGroup(userId, gid).allowed && getAgentGroup(gid)) {
     out.voiceInput = resolveVoiceInputConfig(gid);
@@ -624,12 +592,7 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   if (!row) return json(ctx, 404, { error: 'not_found' });
   if (row.kind !== 'question') {
     if (row.status !== 'pending') return json(ctx, 409, { error: 'not_pending' });
-    const scope = approvalGroupId(row);
-    if (scope == null) {
-      if (!isOwner(userId) && !isGlobalAdmin(userId)) return json(ctx, 403, { error: 'forbidden' });
-    } else if (!hasAdminPrivilege(userId, scope)) {
-      return json(ctx, 403, { error: 'forbidden' });
-    }
+    if (!canRespondToApproval(userId, row)) return json(ctx, 403, { error: 'forbidden' });
   }
 
   let body: { value?: unknown; responseType?: unknown; message?: unknown };
@@ -656,24 +619,7 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   } else {
     const question = row;
     if (question.status === 'cancelled') return json(ctx, 409, { error: 'question_cancelled' });
-    const session = getSession(question.session_id);
-    const mg =
-      question.channel_type && question.platform_id
-        ? getMessagingGroupByPlatform(question.channel_type, question.platform_id)
-        : undefined;
-    const context =
-      session && mg
-        ? resolveTurnContext(userId, session.agent_group_id, question.thread_id ?? `__dm:${mg.id}`, {
-            channelType: mg.channel_type,
-            messagingGroupId: mg.id,
-          })
-        : null;
-    if (
-      !context ||
-      context.sessionId !== question.session_id ||
-      !routeMatches(context, question.channel_type, question.platform_id, question.thread_id)
-    )
-      return json(ctx, 403, { error: 'forbidden' });
+    if (!questionResponseOrigin(userId, question)) return json(ctx, 403, { error: 'forbidden' });
     if (
       !isQuestionResponse(body) ||
       !questionAcceptsResponse(question.input.responseMode, question.input.options, body)

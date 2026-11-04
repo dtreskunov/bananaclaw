@@ -70,7 +70,7 @@ beforeEach(async () => {
       close() {}
     },
   );
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ approvals: [] }) }));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ attention: [], approvals: [] }) }));
   vi.spyOn(console, 'error').mockImplementation(() => {});
   threadId.value = null;
   highlightMessageId.value = 'skip-focus';
@@ -868,10 +868,7 @@ describe('authoritative turn presentation', () => {
   it('requires the same reload for incompatible non-Web snapshots', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
-        JSON.stringify({
-          approvals: [],
-          conversation: { kind: 'snapshot', protocolVersion: 99 },
-        }),
+        JSON.stringify({ attention: [], approvals: [], conversation: { kind: 'snapshot', protocolVersion: 99 } }),
         { status: 200 },
       ),
     );

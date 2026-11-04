@@ -33,6 +33,30 @@ incremental frames yields the same conversation as a fresh snapshot.
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 
+### Input attention
+
+The same amber count badge appears on agent tabs, the mobile agent picker and
+thread rows. Agent counts cover their threads; thread counts use the exact
+agent/channel/messaging-group/thread route. Counts include only requests the
+viewer can act on, not every request they can read.
+Read-only references without a requesting thread or available response controls
+remain visible in the existing UI but do not inflate these actionable counts.
+
+The compact header shows a neutral current-position badge, plain **of**, an
+amber total, and previous/next chevrons. Navigation wraps through the ordered
+requests and focuses the existing question or approval card. The total is also
+clickable so a single request remains reachable when both chevrons are disabled.
+With no requests the control is hidden. No dropdown or duplicate request form
+is introduced.
+
+Attention comes from the canonical pending interactions through the existing
+global metadata sync, including off-screen agents. Viewing a request does not
+clear it, and HTTP acknowledgement alone never decrements a count. Applying,
+terminal and expired requests are not input requests. Failures retain the last
+known counts with a stale indication; unknown status is not shown as zero.
+This is independent of whether an agent is currently running or disconnected.
+Private credential selections and recovery state are never included.
+
 ## Enable
 
 Set in `.env`:

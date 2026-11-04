@@ -18,21 +18,7 @@ import type {
   ConversationUsage,
 } from '../../shared/conversation.js';
 import { publicInboundMessageId, readChatHistory } from './history.js';
-import { resolveTurnContext, type TurnContext } from './conversation-context.js';
-
-export function routeMatches(
-  context: TurnContext,
-  channel: string | null,
-  platform: string | null,
-  thread: string | null,
-): boolean {
-  return (
-    channel === context.channelType &&
-    platform !== null &&
-    context.platformIds.includes(platform) &&
-    thread === context.threadId
-  );
-}
+import { resolveTurnContext, routeMatches, type TurnContext } from './conversation-context.js';
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
 

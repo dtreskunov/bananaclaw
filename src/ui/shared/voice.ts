@@ -1,4 +1,10 @@
 export const VOICE_SAMPLE_RATE = 16_000;
+export interface VoiceInputCapability {
+  backend: 'elevenlabs' | 'disabled';
+  ready: boolean;
+  reason?: string;
+}
+
 export const VOICE_BYTES_PER_SECOND = VOICE_SAMPLE_RATE * 2;
 export const VOICE_MAX_FRAME_BYTES = 32_768;
 export const VOICE_MAX_BUFFER_BYTES = VOICE_BYTES_PER_SECOND * 4;

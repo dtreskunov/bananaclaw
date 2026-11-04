@@ -19,6 +19,13 @@ import type { Group } from '../types';
 import { createGroupOpen } from './CreateGroupModal';
 import { TabBar, type TabItem, type TabExtra } from './TabBar';
 import { MobileDialog, MobileDialogItem, MobileDialogList } from './MobileDialog';
+import { AttentionBadge } from './AttentionBadge';
+import { groupAttentionCount } from '../attention-state';
+
+function attentionBadge(id: string) {
+  const count = groupAttentionCount(id);
+  return count > 0 ? <AttentionBadge value={count} label={`${count} requests need your input`} /> : undefined;
+}
 
 function isElevatedOnly(g: Group): boolean {
   return g.elevatedOnly === true;
@@ -61,6 +68,7 @@ export function GroupStrip(): JSX.Element | null {
     return {
       id: g.id,
       label: g.name,
+      badge: attentionBadge(g.id),
       sublabel: sublabel || undefined,
       reserveSublabel: true,
       title: tipFor(g, isAdminOnly),
@@ -142,6 +150,7 @@ export function GroupPickerModal() {
             <MobileDialogItem
               key={g.id}
               label={g.name}
+              badge={attentionBadge(g.id)}
               sublabel={subtitle || undefined}
               active={isActive}
               className={isAdminOnly ? 'is-admin-visible' : undefined}

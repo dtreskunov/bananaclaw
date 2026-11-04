@@ -2,13 +2,9 @@ import { getContainerConfig } from '../../../db/container-configs.js';
 import { readEnvFile } from '../../../env.js';
 import { log } from '../../../log.js';
 
-export type VoiceInputBackend = 'disabled' | 'elevenlabs';
-
-export interface VoiceInputConfig {
-  backend: VoiceInputBackend;
-  ready: boolean;
-  reason?: string;
-}
+import type { VoiceInputCapability } from '../../shared/voice.js';
+export type VoiceInputBackend = VoiceInputCapability['backend'];
+export type VoiceInputConfig = VoiceInputCapability;
 
 export const VOICE_INPUT_MODEL = 'scribe_v2_realtime';
 const INVALID_DEFAULT_REASON = 'DEFAULT_VOICE_INPUT_BACKEND must be disabled or elevenlabs.';

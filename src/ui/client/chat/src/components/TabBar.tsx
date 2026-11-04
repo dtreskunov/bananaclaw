@@ -6,13 +6,14 @@
 // non-tab buttons that appear after the tabs on desktop and at the
 // bottom of the sheet on mobile (e.g. "More agents…", "+ New agent").
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { JSX } from 'preact';
+import type { ComponentChildren, JSX } from 'preact';
 import './TabBar.css';
 import { MobileDialog, MobileDialogDivider, MobileDialogItem, MobileDialogList } from './MobileDialog';
 
 export interface TabItem {
   id: string;
   label: string;
+  badge?: ComponentChildren;
   /** Optional second line under the label (e.g. relative activity time). */
   sublabel?: string;
   /** Keep an empty second row when sibling tabs display sublabels. */
@@ -100,7 +101,7 @@ export function TabBar(props: TabBarProps): JSX.Element {
               class={`tab-item${isActive ? ' active' : ''}${it.className ? ` ${it.className}` : ''}`}
               onClick={() => onSelect(it.id)}
             >
-              <span class="tab-item-label">{it.label}</span>
+              <span class="tab-item-heading"><span class="tab-item-label">{it.label}</span>{it.badge}</span>
               {it.sublabel || it.reserveSublabel ? (
                 <span class="tab-item-sublabel" aria-hidden={it.sublabel ? undefined : 'true'}>
                   {it.sublabel}
@@ -136,7 +137,7 @@ export function TabBar(props: TabBarProps): JSX.Element {
         aria-expanded={sheetOpen}
         onClick={() => setSheetOpen(true)}
       >
-        <span class="tab-bar-dropdown-label">{dropdownLabel}</span>
+        <span class="tab-bar-dropdown-label"><span class="tab-bar-dropdown-text">{dropdownLabel}</span>{activeItem?.badge}</span>
         <span class="tab-bar-dropdown-caret" aria-hidden="true">{'\u25BE'}</span>
       </button>
 
@@ -174,6 +175,7 @@ function TabBarSheet(props: TabBarSheetProps): JSX.Element {
           <MobileDialogItem
             key={it.id}
             label={it.label}
+            badge={it.badge}
             sublabel={it.sublabel}
             active={it.id === activeId}
             title={it.title}

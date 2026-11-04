@@ -114,6 +114,20 @@ export interface TurnContext {
   canSend: boolean;
 }
 
+export function routeMatches(
+  context: TurnContext,
+  channel: string | null,
+  platform: string | null,
+  thread: string | null,
+): boolean {
+  return (
+    channel === context.channelType &&
+    platform !== null &&
+    context.platformIds.includes(platform) &&
+    thread === context.threadId
+  );
+}
+
 export function resolveTurnContext(
   userId: string,
   groupId: string,

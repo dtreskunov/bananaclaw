@@ -73,6 +73,8 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tab-item-heading { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; }
+.tab-item-heading > .tab-item-label { min-width: 0; }
 .tab-item-sublabel {
   font-size: var(--font-2xs);
   line-height: 1.2;
@@ -112,6 +114,9 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
   }
   .tab-bar-dropdown:hover { background: var(--wash); }
   .tab-bar-dropdown-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     flex: 1;
     min-width: 0;
     font-size: var(--font-lg);
@@ -121,6 +126,7 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .tab-bar-dropdown-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .tab-bar-dropdown-caret {
     flex-shrink: 0;
     font-size: var(--font-sm);

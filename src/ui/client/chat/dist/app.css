@@ -1459,6 +1459,16 @@ nav.tab-bar-strip.group-strip {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tab-item-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+.tab-item-heading > .tab-item-label {
+  min-width: 0;
+}
 .tab-item-sublabel {
   font-size: var(--font-2xs);
   line-height: 1.2;
@@ -1499,12 +1509,20 @@ nav.tab-bar-strip.group-strip {
     background: var(--wash);
   }
   .tab-bar-dropdown-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     flex: 1;
     min-width: 0;
     font-size: var(--font-lg);
     font-weight: 600;
     line-height: 1.2;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tab-bar-dropdown-text {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -1518,6 +1536,87 @@ nav.tab-bar-strip.group-strip {
 .tab-bar-dropdown.is-admin-visible,
 .mobile-dialog-item.is-admin-visible {
   opacity: 0.7;
+}
+
+/* src/components/AttentionBadge.css */
+.attention-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 1.5em;
+  height: 1.5em;
+  box-sizing: border-box;
+  padding-inline: 0.3em;
+  border: 1px solid var(--warning-border);
+  border-radius: 999px;
+  background: var(--warning);
+  color: var(--warning-on-fill);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  vertical-align: middle;
+}
+.attention-badge-neutral {
+  border-color: var(--border);
+  background: var(--wash);
+  color: var(--muted);
+}
+.mobile-dialog-item-label:has(> .attention-badge) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.attention-navigation {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+.attention-navigation button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-lg);
+  cursor: pointer;
+}
+.attention-navigation button:hover:not(:disabled),
+.attention-navigation button:focus-visible {
+  background: var(--wash);
+  color: var(--surface-fg);
+}
+.attention-navigation button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.attention-navigation .attention-open {
+  width: auto;
+  height: auto;
+  min-width: 24px;
+  min-height: 24px;
+  font-size: inherit;
+}
+.attention-navigation .attention-open:disabled {
+  opacity: 1;
+}
+.attention-navigation[data-stale=true] .attention-badge {
+  border-style: dashed;
+}
+[data-attention-target]:focus,
+[data-attention-target]:focus-within {
+  outline: 2px solid var(--warning-border);
+  outline-offset: 3px;
 }
 
 /* src/components/UserMenu.css */

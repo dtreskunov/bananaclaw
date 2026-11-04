@@ -24,6 +24,7 @@ describe('voice capability integration', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
+          attention: [],
           approvals: [],
           voiceInput: { backend: 'elevenlabs', ready: true },
           conversation: testSnapshot({ threadId: 't' }),
@@ -49,7 +50,10 @@ describe('voice capability integration', () => {
     );
     const syncing = runSync();
     clearChat();
-    resolve({ ok: true, json: async () => ({ approvals: [], voiceInput: { backend: 'elevenlabs', ready: true } }) });
+    resolve({
+      ok: true,
+      json: async () => ({ attention: [], approvals: [], voiceInput: { backend: 'elevenlabs', ready: true } }),
+    });
     await syncing;
     expect(voiceInput.value.ready).toBe(false);
   });
@@ -76,6 +80,7 @@ describe('voice capability integration', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
+          attention: [],
           approvals: [],
           voiceInput: { backend: 'elevenlabs', ready: false, reason: 'API key missing' },
         }),

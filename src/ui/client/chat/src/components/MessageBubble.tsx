@@ -5,6 +5,10 @@ import { RelativeTime } from './RelativeTime';
 
 interface Props {
   class: string;
+  id?: string;
+  tabIndex?: number;
+  'data-attention-target'?: string;
+  onFocus?: () => void;
   'data-msg-id'?: string;
   elementRef?: RefObject<HTMLDivElement>;
   reveal?: string;
@@ -16,7 +20,7 @@ interface Props {
 
 export function MessageBubble({
   class: className, 'data-msg-id': id, elementRef, reveal, from, timestamp, metadata,
-  children,
+  children, id: elementId, tabIndex, 'data-attention-target': attentionTarget, onFocus,
 }: Props) {
   const ownRef = useRef<HTMLDivElement | null>(null);
   const ref = elementRef ?? ownRef;
@@ -56,7 +60,8 @@ export function MessageBubble({
     </div> : null}
   </> : children;
   return (
-    <div class={className} data-msg-id={id} ref={ref}>
+    <div class={className} data-msg-id={id} id={elementId} tabIndex={tabIndex}
+      data-attention-target={attentionTarget} onFocus={onFocus} ref={ref}>
       <div class="message-scroll" ref={scrollRef}>
         {content}
       </div>

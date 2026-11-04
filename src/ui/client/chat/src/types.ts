@@ -230,8 +230,4 @@ export interface ActiveTurn {
   supportsToolCancellation?: boolean;
 }
 
-export interface VoiceInputCapability {
-  backend: 'elevenlabs' | 'disabled';
-  ready: boolean;
-  reason?: string;
-}
+export type { VoiceInputCapability } from '../../../shared/voice';

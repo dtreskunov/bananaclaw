@@ -23,6 +23,16 @@ import { Pane } from './Pane';
 import { TrashIcon } from './ActionIcons';
 import { RelativeTime } from './RelativeTime';
 import type { Thread, SearchResult } from '../types';
+import { AttentionBadge } from './AttentionBadge';
+import { threadAttentionCount } from '../attention-state';
+
+function ThreadAttention({ thread }: { thread: Thread }) {
+  const count = threadAttentionCount({
+    agentGroupId: groupId.value, threadId: thread.threadId,
+    channelType: thread.channelType || 'web', messagingGroupId: thread.messagingGroupId ?? null,
+  });
+  return count > 0 ? <AttentionBadge value={count} label={`${count} requests need your input`} /> : null;
+}
 
 function ThreadRow({ t }: { t: Thread }) {
   const ct = t.channelType || 'web';
@@ -103,6 +113,7 @@ function ThreadRow({ t }: { t: Thread }) {
           : null}
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
         <span class="title-text">{t.title}</span>
+        <ThreadAttention thread={t} />
         {branchCount > 0
           ? <span
               class="fork-count"
@@ -143,6 +154,7 @@ function DmRow({ t }: { t: Thread }) {
       <div class="title">
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
         <span class="title-text">{meta.label}</span>
+        <ThreadAttention thread={t} />
       </div>
       <div class="meta">
         <RelativeTime ts={t.lastActivityAt} />

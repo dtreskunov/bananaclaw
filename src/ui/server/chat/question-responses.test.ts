@@ -76,10 +76,10 @@ afterEach(() => {
   fs.rmSync(runtime.root, { recursive: true, force: true });
 });
 
-async function respond(body: unknown, id = 'q') {
-  const req = Readable.from([Buffer.from(JSON.stringify(body))]) as http.IncomingMessage;
-  req.method = 'POST';
-  req.url = `/ui/chat/api/approvals/${id}/respond`;
+async function request(method: string, url: string, body?: unknown) {
+  const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]) as http.IncomingMessage;
+  req.method = method;
+  req.url = url;
   req.headers = { host: 'localhost', 'content-type': 'application/json' };
   const res = new http.ServerResponse(req);
   let status = 0;
@@ -95,6 +95,30 @@ async function respond(body: unknown, id = 'q') {
   await handle(req, res);
   return { status, body: JSON.parse(content) };
 }
+
+function respond(body: unknown, id = 'q') {
+  return request('POST', `/ui/chat/api/approvals/${id}/respond`, body);
+}
+
+describe('global attention sync', () => {
+  it('includes questions without selecting a group and clears only after canonical resolution', async () => {
+    const first = await request('GET', '/ui/chat/api/sync');
+    expect(first.status).toBe(200);
+    expect(first.body.attention).toEqual([
+      {
+        id: 'q',
+        origin: { agentGroupId: 'agent', threadId: 'thread', channelType: 'web', messagingGroupId: 'mg' },
+      },
+    ]);
+    expect(await respond({ responseType: 'skipped' })).toMatchObject({ status: 200 });
+    expect((await request('GET', '/ui/chat/api/sync')).body.attention).toEqual([]);
+  });
+
+  it('does not disclose counts or destinations to another user', async () => {
+    runtime.userId = 'web:other';
+    expect((await request('GET', '/ui/chat/api/sync')).body.attention).toEqual([]);
+  });
+});
 
 describe('approval response messages', () => {
   const applied = vi.fn();

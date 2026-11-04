@@ -51,6 +51,7 @@ import {
   scrollToBottomTick,
   taskPanelRequest,
   userMenuOpen,
+  credentialsOpen,
   SYNC_INTERVAL_MS,
 } from './state';
 import { api, postJson } from './api';
@@ -58,9 +59,19 @@ import { clearApprovalMessage } from './approval-messages';
 import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
-import { ConversationProtocolError, type ConversationSnapshot } from '../../../shared/conversation-protocol';
+import { ConversationProtocolError } from '../../../shared/conversation-protocol';
+import type { SyncResponse } from '../../../shared/sync';
+import { isAttentionTargets } from '../../../shared/attention';
+import {
+  attentionError,
+  attentionPosition,
+  attentionSelection,
+  attentionTargets,
+  selectAttention,
+} from './attention-state';
+import { openChat as openChatView } from './credentials-navigation';
 import type { InteractionResponse } from '../../../shared/conversation';
-import type { ChatStartResponse, ThreadSummary } from '../../../shared/thread';
+import type { ChatStartResponse } from '../../../shared/thread';
 import { applyTurnState, resetTurnState } from './stop-turn';
 import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { parentPath } from './utils';
@@ -77,8 +88,6 @@ import type {
   PendingFile,
   ChatSendPacket,
   PendingWebSend,
-  PendingApprovalDto,
-  VoiceInputCapability,
   SearchResult,
   InputHandling,
 } from './types';
@@ -473,13 +482,6 @@ export function startSyncPoll(): void {
   }, SYNC_INTERVAL_MS);
 }
 
-interface SyncResponse {
-  approvals: PendingApprovalDto[];
-  threads?: ThreadSummary[];
-  conversation?: ConversationSnapshot;
-  voiceInput?: VoiceInputCapability;
-}
-
 /** Returns whether `threads` now holds a fresh server list for the current group. */
 export async function runSync(
   options: { replaceThreadMessages?: boolean; forceRefresh?: boolean } = {},
@@ -505,7 +507,12 @@ export async function runSync(
       'api/sync' + (params.toString() ? '?' + params.toString() : ''),
       options.forceRefresh ? { cache: 'no-store' } : undefined,
     );
+    if (!isAttentionTargets(res.attention)) throw new Error('Invalid input request status. Reload and retry.');
   } catch (error) {
+    if (requestId !== refs.syncRequestId) return false;
+    const message = error instanceof Error ? error.message : 'Could not refresh input requests.';
+    if (attentionError.value !== message) console.error('Input request sync failed', error);
+    attentionError.value = message;
     if (generation === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct !== 'web') {
       applyTurnState(activeTurn.value, false);
       console.error('Conversation sync failed', error);
@@ -515,6 +522,10 @@ export async function runSync(
     return false;
   }
   if (requestId !== refs.syncRequestId) return false;
+  batch(() => {
+    attentionTargets.value = res.attention;
+    attentionError.value = null;
+  });
   if (
     generation === refs.chatGeneration &&
     tid &&
@@ -589,8 +600,19 @@ export function openTaskPanel(gid: string, tid: string, focusSeriesId?: string):
   taskPanelRequest.value = { gid, tid, ...(focusSeriesId ? { focusSeriesId } : {}) };
 }
 
-export async function openChat(gid: string, resumeTid: string | null, opts: ThreadCtx | null): Promise<void> {
-  if (resumeTid && groupId.value === gid && threadId.value === resumeTid) return;
+export async function openChat(
+  gid: string,
+  resumeTid: string | null,
+  opts: ThreadCtx | null,
+  options: { focusComposer?: boolean } = {},
+): Promise<void> {
+  if (
+    resumeTid &&
+    groupId.value === gid &&
+    threadId.value === resumeTid &&
+    (!opts || (opts.channelType === channelType.value && (opts.messagingGroupId || null) === messagingGroupId.value))
+  )
+    return;
   if (!resumeTid && refs.newChatInFlight) return;
   resetConversation();
   resetTurnState();
@@ -663,7 +685,7 @@ export async function openChat(gid: string, resumeTid: string | null, opts: Thre
       chatLoading.value = false;
     }
     // Don't steal focus from the search view when navigating via search result.
-    if (!highlightMessageId.value) focusComposerSoon();
+    if (!highlightMessageId.value && options.focusComposer !== false) focusComposerSoon();
     return;
   }
 
@@ -1070,7 +1092,14 @@ async function submitChatPacket(
 }
 
 // ── files ───────────────────────────────────────────────────────────
-export async function selectGroup(gid: string, options: { newConversation?: boolean } = {}): Promise<void> {
+export async function selectGroup(
+  gid: string,
+  options: {
+    newConversation?: boolean;
+    resume?: { threadId: string; context: ThreadCtx };
+    focusComposer?: boolean;
+  } = {},
+): Promise<void> {
   const groupChanged = groupId.value !== gid;
   // Tear down the previous group's thread/WS state synchronously before we
   // start awaiting the new group's thread list. selectGroup sets groupId
@@ -1099,6 +1128,10 @@ export async function selectGroup(gid: string, options: { newConversation?: bool
   // (startSyncPoll), which picks up groupId.value automatically.
   await loadTree('');
   if (generation !== refs.chatGeneration || groupId.value !== gid) return;
+  if (options.resume) {
+    await openChat(gid, options.resume.threadId, options.resume.context, { focusComposer: options.focusComposer });
+    return;
+  }
   // Only open a thread after the selected group's list has loaded.
   const latest = threadsFresh && !options.newConversation && threads.value.length > 0 ? threads.value[0]! : null;
   if (latest) {
@@ -1107,6 +1140,43 @@ export async function selectGroup(gid: string, options: { newConversation?: bool
     openChat(gid, null, null).catch((err) => console.error('auto-start chat failed', err));
   } else {
     showToast('Could not load threads', 'err');
+  }
+}
+
+export async function navigateAttention(direction: -1 | 0 | 1): Promise<boolean> {
+  const targets = attentionTargets.value;
+  if (!targets?.length || attentionError.value) return false;
+  const position = attentionPosition(targets, attentionSelection.value?.id ?? null, {
+    agentGroupId: groupId.value,
+    threadId: threadId.value,
+    channelType: channelType.value,
+    messagingGroupId: messagingGroupId.value,
+  });
+  const index =
+    direction === 0
+      ? Math.max(position, 0)
+      : position < 0
+        ? direction < 0
+          ? targets.length - 1
+          : 0
+        : (position + direction + targets.length) % targets.length;
+  const target = targets[index];
+  selectAttention(target.id, true);
+  try {
+    if (credentialsOpen.value) openChatView();
+    drawerOpen.threads.value = false;
+    drawerOpen.files.value = false;
+    if (target.origin) {
+      const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
+      const context: ThreadCtx = { channelType: channel, messagingGroupId: mg, canSend: false };
+      if (groupId.value !== gid) await selectGroup(gid, { resume: { threadId: tid, context }, focusComposer: false });
+      else await openChat(gid, tid, context, { focusComposer: false });
+    }
+    return true;
+  } catch (error) {
+    console.error('Input request navigation failed', error);
+    showToast('Could not open input request: ' + (error instanceof Error ? error.message : String(error)), 'err');
+    return false;
   }
 }
 

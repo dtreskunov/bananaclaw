@@ -62,6 +62,7 @@ export function MobileDialogList({ children, className }: { children: ComponentC
 
 interface MobileDialogItemProps {
   label: string;
+  badge?: ComponentChildren;
   sublabel?: string;
   onClick?: () => void;
   type?: 'button' | 'submit';
@@ -72,7 +73,7 @@ interface MobileDialogItemProps {
 }
 
 export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
-  const { label, sublabel, onClick, type = 'button', active, chevron, title, className } = props;
+  const { label, badge, sublabel, onClick, type = 'button', active, chevron, title, className } = props;
   return (
     <button
       type={type}
@@ -81,7 +82,7 @@ export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
       title={title}
       onClick={onClick}
     >
-      <span class="mobile-dialog-item-label">{label}</span>
+      <span class="mobile-dialog-item-label"><span>{label}</span>{badge}</span>
       {sublabel ? <span class="mobile-dialog-item-sublabel">{sublabel}</span> : null}
       {chevron ? <span class="mobile-dialog-item-chevron" aria-hidden="true">{'\u203A'}</span> : null}
     </button>
