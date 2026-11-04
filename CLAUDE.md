@@ -230,6 +230,21 @@ A **catalog** is a git repo, either a Claude Code plugin marketplace (`.claude-p
 
 Before creating a PR, adding a skill, or preparing any contribution, you MUST read [CONTRIBUTING.md](CONTRIBUTING.md). It covers accepted change types, the four skill types and their guidelines, `SKILL.md` format rules, and the pre-submission checklist.
 
+## Before Every Commit
+
+Follow the [code-metrics skill](.claude/skills/code-metrics/SKILL.md). After staging
+the final intended changes and before every commit, run:
+
+```bash
+pnpm exec tsx .claude/skills/code-metrics/scripts/compare.ts --staged
+```
+
+Compare HEAD with the staged index only, summarize the LOC and complexity deltas
+and notable hotspots, and surface any analysis errors. Rerun if staged content
+changes, including after restaging hook-generated edits. This report does not
+replace tests or impose a complexity threshold. Historical/week-over-week
+comparisons are available separately through the skill.
+
 ## PR Hygiene
 
 Before creating a PR, run these checks:
