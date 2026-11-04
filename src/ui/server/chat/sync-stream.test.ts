@@ -80,7 +80,7 @@ describe('global synchronization stream', () => {
     f.stream.stop();
   });
 
-  it('does not publish an async scan after navigation or a mutation during its read', async () => {
+  it('does not publish an async scan after navigation', async () => {
     let finish!: (data: SyncResponse) => void;
     const read = vi
       .fn()
@@ -103,6 +103,30 @@ describe('global synchronization stream', () => {
     expect(f.frames[0]).toMatchObject({ subscriptionId: 2, groupId: 'new' });
     expect(read).toHaveBeenCalledTimes(2);
     f.stream.stop();
+  });
+
+  it('publishes within the update budget during sustained asynchronous invalidation', async () => {
+    let revision = 0;
+    const f = fixture({
+      read: async () => {
+        const id = String(++revision);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return {
+          approvals: [],
+          attention: [{ id, origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'mg' } }],
+        };
+      },
+    });
+    f.stream.subscribe(1, 'g');
+    const mutations = setInterval(() => f.invalidate('g'), 5);
+    try {
+      await vi.advanceTimersByTimeAsync(250);
+      expect(f.frames).toHaveLength(2);
+      expect(f.frames[1].data.attention[0].id).toBe('2');
+    } finally {
+      clearInterval(mutations);
+      f.stream.stop();
+    }
   });
 
   it('rechecks authorization after an async read and never sends its unauthorized result', async () => {

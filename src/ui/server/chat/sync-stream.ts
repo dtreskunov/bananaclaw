@@ -51,10 +51,7 @@ export function startSyncStream(options: SyncStreamOptions) {
       const data = await options.read(current.groupId);
       if (stopped) return;
       options.authorize();
-      if (current !== subscription || dirty) {
-        dirty = true;
-        return;
-      }
+      if (current !== subscription) return;
       const encoded = JSON.stringify(data);
       if (previous !== encoded) {
         options.send({
