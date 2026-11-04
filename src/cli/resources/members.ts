@@ -1,6 +1,7 @@
 import { getDb } from '../../db/connection.js';
 import { registerResource } from '../crud.js';
-import { invalidateUi } from '../../ui-events.js';
+
+import { recordHostChange } from '../../db/transaction.js';
 
 registerResource({
   name: 'member',
@@ -45,7 +46,7 @@ registerResource({
              VALUES (?, ?, ?, datetime('now'))`,
           )
           .run(userId, groupId, addedBy);
-        invalidateUi({ kind: 'access' });
+        recordHostChange({ kind: 'access' });
         return { user_id: userId, agent_group_id: groupId };
       },
     },
@@ -61,7 +62,7 @@ registerResource({
           .prepare('DELETE FROM agent_group_members WHERE user_id = ? AND agent_group_id = ?')
           .run(userId, groupId);
         if (result.changes === 0) throw new Error('member not found');
-        invalidateUi({ kind: 'access' });
+        recordHostChange({ kind: 'access' });
         return { removed: { user_id: userId, agent_group_id: groupId } };
       },
     },

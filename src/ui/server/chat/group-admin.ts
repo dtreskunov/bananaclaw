@@ -80,6 +80,7 @@ import { groupSkillRoots } from '../../../skills/registry.js';
 import { McpAuthenticationError, parseMcpAuthentication } from '../../shared/mcp-authentication.js';
 import { defaultVoiceInputBackend, resolveVoiceInputConfig, type VoiceInputConfig } from './voice-input-config.js';
 import { allocateSiteSlug, isValidSlug, pagesBaseDomain, pagesEnabled, siteFqdn, siteUrl } from '../pages/site.js';
+import { transaction } from '../../../db/transaction.js';
 
 // ── allowed scalar config fields (mirrors ncl groups config update) ───────
 
@@ -639,7 +640,7 @@ async function handlePatchSettings(
     Pick<AgentGroup, 'name' | 'site_slug' | 'site_enabled' | 'email_slug' | 'email_enabled'>
   > = { ...siteUpdates, ...emailUpdates };
   if (nameUpdate !== undefined) agentGroupUpdates.name = nameUpdate;
-  getDb().transaction(() => {
+  transaction(getDb(), () => {
     if (Object.keys(agentGroupUpdates).length > 0) updateAgentGroup(gid, agentGroupUpdates);
     if (Object.keys(updates).length > 0) updateContainerConfigScalars(gid, updates);
     if (emailTouched) reconcileAgentEmail(getAgentGroup(gid)!, emailConfig.baseDomain!);

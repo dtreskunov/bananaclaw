@@ -8,7 +8,7 @@ import { reduceActivityLines } from './activity.js';
 import type { ActivityLine } from './channels/adapter.js';
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
-import { invalidateConversation } from './conversation-events.js';
+import { publishHostChange } from './host-changes.js';
 import { applyDurableRunnerEvent, type DurableApplyResult } from './session-link-durable.js';
 import {
   isAny,
@@ -122,7 +122,7 @@ export function onSessionTurnChange(listener: (sessionId: string, change: Sessio
 }
 
 function notifyTurnChange(sessionId: string, change: SessionTurnChange): void {
-  invalidateConversation(sessionId);
+  publishHostChange({ kind: 'sessions', sessionId });
   for (const listener of turnChangeListeners) {
     try {
       listener(sessionId, change);
@@ -238,7 +238,7 @@ function applyHostNack(frame: Record<string, unknown>, { sessionId, entry }: Fra
 }
 
 export function notifySessionHostState(sessionId: string): void {
-  invalidateConversation(sessionId);
+  publishHostChange({ kind: 'sessions', sessionId });
   const entry = servers.get(sessionId);
   if (entry) flushHostEvents(sessionId, entry);
 }
@@ -371,7 +371,7 @@ function stateFor(sessionId: string): SessionSignalState {
 }
 
 function emit(sessionId: string, kind: SignalKind): void {
-  if (kind !== 'heartbeat') invalidateConversation(sessionId);
+  if (kind !== 'heartbeat') publishHostChange({ kind: 'sessions', sessionId });
   for (const listener of listeners) {
     try {
       listener(sessionId, kind);

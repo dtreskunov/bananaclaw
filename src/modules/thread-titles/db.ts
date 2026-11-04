@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
-import { invalidateSessionDatabase } from '../../conversation-events.js';
+
+import { recordSessionDatabaseChange } from '../../db/transaction.js';
 
 export interface ThreadTitleKey {
   channelType: string;
@@ -42,7 +43,7 @@ export function upsertThreadTitle(db: Database.Database, input: ThreadTitleUpdat
          updated_at = excluded.updated_at`,
     )
     .run({ ...keyParams(input), title, requestMessageId: input.requestMessageId });
-  if (result.changes) invalidateSessionDatabase(db.name);
+  if (result.changes) recordSessionDatabaseChange(db);
   return result.changes > 0;
 }
 

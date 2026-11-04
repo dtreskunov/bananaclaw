@@ -7,6 +7,7 @@ import { getContainerConfig, updateContainerConfigJson } from '../../db/containe
 import type { McpServerConfig } from '../../container-config.js';
 import { registerDeliveryAction, onDeliveryAdapterReady } from '../../delivery.js';
 import { onShutdown } from '../../response-registry.js';
+import { onHostChange } from '../../host-changes.js';
 import { log } from '../../log.js';
 import { uiBaseUrl } from '../../ui/server/config.js';
 import { openInboundDb } from '../../session-manager.js';
@@ -46,9 +47,9 @@ import {
   type SharedConnection,
 } from './shared-connections.js';
 import { AgentVaultError, usesAgentVault } from './agent-vault-client.js';
+import { transaction } from '../../db/transaction.js';
 
 export const ACCESS_ACTION = 'request_access';
-const TTL_MS = 24 * 60 * 60_000;
 const activeApplications = new Set<string>();
 const reviewUrl = (id: string): string => `${uiBaseUrl()}/chat/?access_request=${encodeURIComponent(id)}#credentials`;
 
@@ -124,7 +125,6 @@ export async function requestAccess(
     action: ACCESS_ACTION,
     approvalId: id,
     workflowKey: key,
-    expiresAt: new Date(Date.now() + TTL_MS).toISOString(),
     payload: { ...input },
     title: `${group?.name ?? 'Agent'} requests access`,
     question: `${input.reason}\nDestination: ${input.resource_url}\nReview privately in BananaClaw: ${reviewUrl(id)}\nReviewing is not approval; no credentials have changed.`,
@@ -167,7 +167,7 @@ export function prepareAccountRequest(userId: string, id: string, raw: unknown) 
   if (request.status !== 'pending' || request.revision !== body.request_revision)
     throw new ConnectionInputError('The request changed. Refresh before setting up an account.', 409);
   if (request.kind === 'account_setup') return request;
-  getDb().transaction(() => {
+  transaction(getDb(), () => {
     if (!updateApprovalStatus(request.id, 'pending', undefined, Number(body.request_revision)))
       throw new ConnectionInputError('The request changed. Refresh before setting up an account.', 409);
     getDb().prepare("UPDATE interactions SET kind='account_setup' WHERE id=?").run(request.id);
@@ -209,7 +209,7 @@ export async function completeAccountRequest(userId: string, id: string, raw: un
     scope_source: preview.connection.kind === 'static' ? undefined : preview.connection.scope_source,
   };
   const responseMessage = message ? { userId, message } : undefined;
-  getDb().transaction(() => {
+  transaction(getDb(), () => {
     if (!claimApprovalWorkflow(request.id, Number(body.request_revision), { userId, responseMessage }))
       throw new ConnectionInputError('The request changed. Refresh before confirming account setup.', 409);
     finishApprovalWorkflow(
@@ -425,7 +425,7 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
           ),
         ),
       };
-      getDb().transaction(() => {
+      transaction(getDb(), () => {
         updateContainerConfigJson(request.agentGroupId, 'mcp_servers', servers);
         selection.appliedConfigRevision = mcpConfiguration(
           request.agentGroupId,
@@ -602,8 +602,6 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
             selection.userId,
           );
         }
-      } else {
-        getAccountRequest(row.id);
       }
       await notifyApprovalWorkflow(row.id);
     } catch (error) {
@@ -626,17 +624,36 @@ export async function recoverAccessRequests(recoverApplying = false): Promise<vo
   }
 }
 
-let timer: ReturnType<typeof setInterval> | undefined;
-onDeliveryAdapterReady(async () => {
-  await recoverAccessRequests(true);
-  if (!timer) {
-    timer = setInterval(() => {
-      void recoverAccessRequests(true).catch((error) => log.error('Access approval recovery failed', { error }));
-    }, 30_000);
-    timer.unref();
+let timer: ReturnType<typeof setTimeout> | undefined;
+let recoveryReady = false;
+function armRecovery(): void {
+  if (!recoveryReady || timer || !recoverableApprovalWorkflows().length) return;
+  timer = setTimeout(drainRecovery, 30_000);
+  timer.unref();
+}
+async function drainRecovery(): Promise<void> {
+  timer = undefined;
+  try {
+    await recoverAccessRequests(true);
+    armRecovery();
+  } catch (err) {
+    log.error('Access approval recovery failed', { err });
+    if (recoveryReady) {
+      timer = setTimeout(drainRecovery, 30_000);
+      timer.unref();
+    }
   }
+}
+const stopRecoveryChanges = onHostChange((change) => {
+  if (change.kind === 'interactions' || change.kind === 'access') armRecovery();
+});
+onDeliveryAdapterReady(async () => {
+  recoveryReady = true;
+  await drainRecovery();
 });
 onShutdown(() => {
-  if (timer) clearInterval(timer);
+  recoveryReady = false;
+  if (timer) clearTimeout(timer);
   timer = undefined;
+  stopRecoveryChanges();
 });

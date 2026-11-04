@@ -37,6 +37,7 @@ import { createApprovalWorkflow } from './workflows.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
 import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
+import { transaction } from '../../db/transaction.js';
 
 /** Two-button approval UI — the only options the primitive supports today. */
 const APPROVAL_OPTIONS: RawOption[] = [
@@ -179,7 +180,6 @@ export interface RequestApprovalOptions {
   approvalId?: string;
   workflowKey?: string;
   options?: RawOption[];
-  expiresAt?: string;
 }
 
 /**
@@ -204,7 +204,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
   const approvalId = opts.approvalId ?? `appr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const options = opts.options ?? APPROVAL_OPTIONS;
   const normalizedOptions = normalizeOptions(options);
-  getDb().transaction(() => {
+  transaction(getDb(), () => {
     const created = createApproval({
       id: approvalId,
       session_id: session.id,
@@ -212,7 +212,6 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
       created_at: new Date().toISOString(),
       origin_message_id: opts.originMessageId ?? null,
       ...(opts.workflowKey ? { agent_group_id: session.agent_group_id } : {}),
-      expires_at: opts.expiresAt ?? null,
       input: { action: action, payload: payload, title: title, options: normalizedOptions },
     });
     if (created && opts.workflowKey) createApprovalWorkflow(approvalId, opts.workflowKey);

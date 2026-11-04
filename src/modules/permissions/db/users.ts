@@ -1,6 +1,7 @@
 import type { User } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
-import { invalidateUi } from '../../../ui-events.js';
+
+import { recordHostChange } from '../../../db/transaction.js';
 
 export function createUser(user: User): void {
   getDb()
@@ -9,7 +10,7 @@ export function createUser(user: User): void {
        VALUES (@id, @kind, @display_name, @created_at)`,
     )
     .run(user);
-  invalidateUi({ kind: 'interactions' });
+  recordHostChange({ kind: 'interactions' });
 }
 
 export function upsertUser(user: User): void {
@@ -21,7 +22,7 @@ export function upsertUser(user: User): void {
          display_name = COALESCE(excluded.display_name, users.display_name)`,
     )
     .run(user);
-  invalidateUi({ kind: 'interactions' });
+  recordHostChange({ kind: 'interactions' });
 }
 
 export function getUser(id: string): User | undefined {
@@ -34,7 +35,7 @@ export function getAllUsers(): User[] {
 
 export function updateDisplayName(id: string, displayName: string): void {
   getDb().prepare('UPDATE users SET display_name = ? WHERE id = ?').run(displayName, id);
-  invalidateUi({ kind: 'interactions' });
+  recordHostChange({ kind: 'interactions' });
 }
 
 export function isUserOnboarded(id: string): boolean {
@@ -50,5 +51,5 @@ export function markUserOnboarded(id: string): void {
 
 export function deleteUser(id: string): void {
   getDb().prepare('DELETE FROM users WHERE id = ?').run(id);
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }

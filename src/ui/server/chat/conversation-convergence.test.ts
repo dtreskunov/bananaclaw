@@ -20,7 +20,7 @@ import {
   startSessionSignalServer,
   stopSessionSignalServer,
 } from '../../../session-link.js';
-import { onConversationChange, invalidateConversation } from '../../../conversation-events.js';
+import { onHostChange, publishHostChange } from '../../../host-changes.js';
 import {
   parseConversationFrame,
   reduceConversation,
@@ -157,7 +157,7 @@ function browser(thread = 'thread') {
   const stop = startConversationStream({
     read: () => read(thread),
     subscribe: (invalidate) =>
-      onConversationChange(() => {
+      onHostChange(() => {
         if (!dropInvalidations) invalidate();
       }),
     send: (frame) => {
@@ -391,7 +391,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
     expect(other.state.conversation.turns[0].activity[0].text).toBe('private trace');
     const sent = client.frames.length;
     getDb().prepare('DELETE FROM agent_group_members WHERE user_id=? AND agent_group_id=?').run(user, group);
-    invalidateConversation(session);
+    publishHostChange({ kind: 'sessions', sessionId: session });
     await flush();
     expect(client.errors).toHaveLength(1);
     expect(client.frames).toHaveLength(sent);

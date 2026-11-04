@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { transaction } from './transaction.js';
 
 // Mirrored in the Bun runner's db/turns.ts; neither runtime imports the other.
 export type TurnPhase = 'running' | 'stopping' | 'settling' | 'settled';
@@ -163,7 +164,7 @@ export type TurnAssociationTarget =
 
 /** Link an existing record without permitting accidental reassignment. Storage-only. */
 export function linkTurnRecord(db: Database.Database, turnId: string, target: TurnAssociationTarget): void {
-  db.transaction(() => {
+  transaction(db, () => {
     if (!getTurn(db, turnId)) throw new Error(`Unknown turn: ${turnId}`);
     const where = target.table === 'turn_activity' ? 'message_out_id = ? AND ordinal = ?' : 'id = ?';
     const values = target.table === 'turn_activity' ? [target.message_out_id, target.ordinal] : [target.id];

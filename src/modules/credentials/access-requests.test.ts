@@ -55,6 +55,7 @@ import {
   claimApprovalWorkflow,
   finishApprovalWorkflow,
   notifyApprovalWorkflow,
+  recoverableApprovalWorkflows,
 } from '../approvals/workflows.js';
 import {
   accessRequestInput,
@@ -167,6 +168,34 @@ function resultMessage(id: string) {
 }
 
 describe('assisted access approvals', () => {
+  it('keeps new requests pending without a deadline or an expiry timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const request = await seed();
+      expect(request.expiresAt).toBeNull();
+      expect(recoverableApprovalWorkflows()).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.setSystemTime(Date.now() + 7 * 24 * 60 * 60_000);
+      expect(getAccountRequest(request.id).status).toBe('pending');
+      expect(getApproval(request.id)?.status).toBe('pending');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not resurrect or mutate a legacy expired request while projecting it', async () => {
+    const request = await seed();
+    getDb().prepare('UPDATE interactions SET expires_at=? WHERE id=?').run('2000-01-01', request.id);
+    const before = getApprovalWorkflow(request.id);
+    expect(getAccountRequest(request.id).status).toBe('expired');
+    expect(getAccountRequest(request.id).status).toBe('expired');
+    expect(getApprovalWorkflow(request.id)).toEqual(before);
+    expect(recoverableApprovalWorkflows()).toEqual([]);
+    await recoverAccessRequests(true);
+    expect(getApprovalWorkflow(request.id)).toEqual(before);
+    expect(mocks.grant).not.toHaveBeenCalled();
+  });
+
   it('requires the requested permissions in confirmed account grants before access can be approved', async () => {
     connection.kind = 'mcp_oauth';
     connection.requested_scopes = ['read', 'write'];

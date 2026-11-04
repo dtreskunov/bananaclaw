@@ -13,7 +13,8 @@
 import type Database from 'better-sqlite3';
 
 import { nextEvenSeq } from '../../db/session-db.js';
-import { invalidateSessionDatabase } from '../../conversation-events.js';
+
+import { recordSessionDatabaseChange, transaction } from '../../db/transaction.js';
 
 export const DEFAULT_TASK_SCRIPT_TIMEOUT_MS = 10 * 60_000;
 export const MIN_TASK_SCRIPT_TIMEOUT_MS = 1_000;
@@ -40,7 +41,7 @@ export function insertTask(
     ...task,
     seq: nextEvenSeq(db),
   });
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
 }
 
 export function cancelTask(db: Database.Database, taskId: string): void {
@@ -49,7 +50,7 @@ export function cancelTask(db: Database.Database, taskId: string): void {
       WHERE (id = ? OR series_id = ?) AND kind = 'task'
         AND status IN ('pending', 'paused') AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
 }
 
 export function pauseTask(db: Database.Database, taskId: string): void {
@@ -58,7 +59,7 @@ export function pauseTask(db: Database.Database, taskId: string): void {
       WHERE (id = ? OR series_id = ?) AND kind = 'task'
         AND status = 'pending' AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
 }
 
 export function resumeTask(db: Database.Database, taskId: string): void {
@@ -67,7 +68,7 @@ export function resumeTask(db: Database.Database, taskId: string): void {
       WHERE (id = ? OR series_id = ?) AND kind = 'task'
         AND status = 'paused' AND ${SCHEDULED_OCCURRENCE_SQL}`,
   ).run(taskId, taskId);
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
 }
 
 export interface TaskUpdate {
@@ -98,7 +99,7 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
   const mergeContent =
     update.prompt !== undefined || update.script !== undefined || update.scriptTimeoutMs !== undefined;
 
-  const tx = db.transaction(() => {
+  const tx = transaction(db, () => {
     for (const row of rows) {
       let content = row.content;
       if (mergeContent) {
@@ -126,7 +127,7 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
     }
   });
   tx();
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
   return rows.length;
 }
 
@@ -171,7 +172,7 @@ export function runTaskNow(db: Database.Database, taskId: string, processAfter: 
     JSON.stringify(parsed),
     row.series_id,
   );
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
   return id;
 }
 
@@ -214,10 +215,10 @@ export function insertRecurrence(
     msg.content,
     msg.series_id,
   );
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
 }
 
 export function clearRecurrence(db: Database.Database, messageId: string): void {
   db.prepare('UPDATE messages_in SET recurrence = NULL WHERE id = ?').run(messageId);
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
 }

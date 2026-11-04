@@ -82,7 +82,7 @@ import { closeChatSockets, handleChatRequest, handleChatUpgrade, matchChatPath }
 import { readChatHistory } from './history.js';
 import { readConversation } from './conversation.js';
 import { handle } from './routes.js';
-import { invalidateConversation } from '../../../conversation-events.js';
+import { publishHostChange } from '../../../host-changes.js';
 import { putTurn } from '../../../db/turns.js';
 import {
   parseConversationFrame,
@@ -97,7 +97,7 @@ function socketView(frames: Record<string, unknown>[]) {
   )!.conversation;
 }
 async function flushConversation(): Promise<void> {
-  invalidateConversation('session-1');
+  publishHostChange({ kind: 'sessions', sessionId: 'session-1' });
   await new Promise((resolve) => setTimeout(resolve, 60));
 }
 
@@ -660,7 +660,7 @@ describe('durable input state history', () => {
     handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
     expect(socketView(frames).messages[0].inputState?.status).toBe('queued');
     const count = frames.length;
-    invalidateConversation('unrelated-session');
+    publishHostChange({ kind: 'sessions', sessionId: 'unrelated-session' });
     expect(frames).toHaveLength(count);
     const db = openOutboundDbRw('agent', 'session-1');
     db.prepare(

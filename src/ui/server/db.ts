@@ -9,7 +9,8 @@
 import crypto from 'crypto';
 
 import { getDb } from '../../db/connection.js';
-import { invalidateUi } from '../../ui-events.js';
+
+import { recordHostChange } from '../../db/transaction.js';
 
 export interface UiSession {
   token_hash: string;
@@ -101,7 +102,7 @@ export function lookupSessionByHash(
 
 export function deleteSession(token: string): void {
   getDb().prepare('DELETE FROM ui_sessions WHERE token_hash = ?').run(hashToken(token));
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }
 
 export function purgeExpired(): void {

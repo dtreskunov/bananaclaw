@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads';
 
 import { DATA_DIR } from '../../../config.js';
 import { onShutdown } from '../../../response-registry.js';
-import { onConversationChange } from '../../../conversation-events.js';
+import { onHostChange } from '../../../host-changes.js';
 import type { SessionThreadScan, ThreadScanSpec } from './thread-scan.js';
 import type { ScanResponse } from './thread-scanner-worker.js';
 
@@ -116,5 +116,7 @@ export class ThreadScanner {
 }
 
 export const threadScanner = new ThreadScanner();
-onConversationChange((sessionId) => threadScanner.invalidate(sessionId));
+onHostChange((change) => {
+  if (change.kind === 'sessions') threadScanner.invalidate(change.sessionId ?? null);
+});
 onShutdown(() => threadScanner.close());

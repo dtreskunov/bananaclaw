@@ -12,6 +12,12 @@ Optional read-only web UI mounted on the existing webhook HTTP server under `/ui
   dispositions; [conversation](../src/ui/server/chat/conversation.ts) and
   [approval](../src/ui/server/chat/approval-transcript.ts) readers project their
   public views.
+- [Threads](../src/ui/server/chat/threads.ts) owns authorized thread listing.
+  [Global projections](../src/ui/server/chat/sync-state.ts) cache expensive thread
+  scans while keeping interaction and voice reads fresh; the
+  [subscription service](../src/ui/server/chat/global-sync.ts) maps host changes
+  to those dependencies. Socket controllers contain no thread-reader callback
+  plumbing or workflow lifecycle policy.
 - The [server](../src/ui/server/server.ts), [router](../src/ui/server/chat/routes.ts)
   and [chat controller](../src/ui/server/chat/chat.ts) own HTTP/socket orchestration.
   Shared readers never import these transport modules or compatibility re-exports.
@@ -34,6 +40,19 @@ incremental frames yields the same conversation as a fresh snapshot.
 > listener) are documented separately in [pages.md](pages.md).
 
 ### Input attention
+
+Requests have an explicit-resolution lifetime: new questions and approvals stay
+pending until answered, approved, rejected or cancelled. Removing their originating
+session/group removes its requests. Request age is not a transition and no
+request-expiry scheduler runs. Current authority, ownership and revision are still
+checked when a decision is applied. Authentication/OAuth deadlines are separate.
+
+The [host change feed](../src/host-changes.ts) carries only resource identifiers.
+Interaction mutations use [the shared mutation boundary](../src/db/interactions.ts);
+write transactions use [the commit-aware helper](../src/db/transaction.ts).
+Nested commits merge their notices into the parent; rollback discards them.
+Read models re-authorize committed state rather than trusting event payloads.
+There are no separate UI or conversation invalidation registries.
 
 The same subtle count button appears on agent tabs, the mobile agent picker and
 thread rows. Agent counts cover their threads; thread counts use the exact
@@ -1366,12 +1385,19 @@ Committed mutation helpers invalidate metadata, including CLI operations,
 session-less approvals, session/fork changes, configuration and access changes.
 Session projection events refresh the selected group's summaries. Reads are
 coalesced for 100 ms with one in-flight async build and a bounded dirty flag.
+Interaction changes refresh approvals and attention without rescanning the selected
+group's threads. Session changes invalidate thread summaries only for the affected
+group; configuration changes refresh voice capability without rescanning threads.
+Access changes invalidate cached visibility. An internal access generation also
+prevents a cached snapshot from being published if authority changes across an
+asynchronous read.
+
 Changes during a scan schedule a further read without starving publication of
 completed, authorized snapshots. Obsolete subscriptions are never published.
 Interaction metadata is read once after the thread scan, using current approval
-permissions. Authorization is checked again before publication. Expiry uses the next
-interaction/session deadline, not a recurring
-scan. Host `.env` replacements/edits trigger a filesystem notification. Manual
+permissions. Authorization is checked again before publication. Only the UI
+authentication session has a socket expiry deadline; interaction lifetimes do not
+schedule refreshes. Host `.env` replacements/edits trigger a filesystem notification. Manual
 SQL edits outside normal host mutation helpers require an explicit refresh or
 host restart.
 
@@ -1387,6 +1413,38 @@ requires global synchronization to be initialized and never uses a REST fallback
 
 Local composer drafts, uploads and command request IDs remain separate from
 the server store; HTTP acceptance does not prove a command took effect.
+
+### Request lifetime upgrade
+
+- **Detect:** older credential requests have `expires_at` populated. Custom host
+  modules may still import `ui-events`/`conversation-events`, call `interactionChanged`, pass
+  `requestApproval({ expiresAt: ... })`, or wrap state mutations with a native
+  `db.transaction`. The new mutation guard reports an explicit error for an
+  unmanaged outer transaction.
+- **Why:** pending requests are durable decisions, not scheduled jobs. Lifecycle
+  writes must not be hidden inside a read, and a rollback must not publish a
+  state-change notice.
+- **Fix:** remove automatic request deadlines from custom callers. Use
+  `transaction(db, operation)(...args)` from `src/db/transaction.ts` for outer
+  write transactions, and the interaction mutation helpers for interaction
+  writes. Other host mutations record typed host changes. Do not copy the old
+  UI invalidation hooks into new writers.
+- **Existing requests:** no schema rewrite, deadline reset or startup conversion
+  occurs. Legacy expired requests remain non-actionable on projection and action.
+  Their stored pending row can remain for audit; a read does not rewrite it.
+  Legacy future deadlines are enforced on the next read/action, not by a timer.
+  Do not clear legacy deadlines to reopen requests automatically.
+- **Verify:** a new account request has `expiresAt: null` and stays pending after
+  a day. Reading a legacy expired request does not change its revision or private
+  workflow state and cannot grant access. Rollback emits no host changes.
+  An inactive-group interaction updates attention without scanning active-group
+  threads; role revocation invalidates cached visibility before publication.
+- **Recovery:** interrupted external applications and undelivered results remain
+  durable. Startup recovery and a retry timer for actual unfinished work remain;
+  ordinary pending requests do not start a recurring recovery scan.
+- **Rollback:** restore the previous matching host/UI code with the host stopped.
+  Storage is unchanged. Requests created without deadlines remain open under the
+  older host too; do not invent deadlines or replay credential writes on rollback.
 
 The host publishes an explicit `timeline` of message references, question
 references, and typed turn trace/status rows. The host selects the final response

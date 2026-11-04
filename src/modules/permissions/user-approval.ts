@@ -52,6 +52,7 @@ import {
   type PendingUserApproval,
 } from './db/pending-user-approvals.js';
 import { grantRole, isGlobalAdmin, isOwner } from './db/user-roles.js';
+import { transaction } from '../../db/transaction.js';
 
 const APPROVAL_OPTIONS: RawOption[] = [
   { label: 'Approve', selectedLabel: '✅ Approved', value: 'approve' },
@@ -186,7 +187,7 @@ export function ensurePerUserAgentGroup(userId: string): string | null {
   const now = new Date().toISOString();
 
   let agentGroupId = '';
-  getDb().transaction(() => {
+  transaction(getDb(), () => {
     agentGroupId = scaffoldPerUserAgentGroupDb({
       provider: link.provider,
       sub: link.sub,

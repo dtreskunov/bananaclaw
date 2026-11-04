@@ -13,7 +13,7 @@ import Router from 'find-my-way';
 import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
-import { getInteraction } from '../../../db/interactions.js';
+import { getInteraction, legacyInteractionExpired } from '../../../db/interactions.js';
 import { log } from '../../../log.js';
 import {
   listAccessibleAgentGroups,
@@ -41,7 +41,8 @@ import { uiBaseUrl } from '../config.js';
 import { classify, resolveSafe } from './classify.js';
 import { fileEtag } from './etag.js';
 import { compareEntriesByDate, searchFilesByName } from './file-search.js';
-import { handleChatRequest, listThreadsForViewer, viewerHasContent } from './chat.js';
+import { handleChatRequest } from './chat.js';
+import { listThreadsForViewer, viewerHasContent } from './threads.js';
 import { readChatHistory } from './history.js';
 import { canRespondToApproval, questionResponseOrigin } from './interaction-access.js';
 import { readInteractionSync } from './attention.js';
@@ -593,6 +594,7 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   if (row.kind !== 'question') {
     if (row.status !== 'pending') return json(ctx, 409, { error: 'not_pending' });
     if (!canRespondToApproval(userId, row)) return json(ctx, 403, { error: 'forbidden' });
+    if (legacyInteractionExpired(row)) return json(ctx, 409, { error: 'request_expired' });
   }
 
   let body: { value?: unknown; responseType?: unknown; message?: unknown };
@@ -620,6 +622,7 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
     const question = row;
     if (question.status === 'cancelled') return json(ctx, 409, { error: 'question_cancelled' });
     if (!questionResponseOrigin(userId, question)) return json(ctx, 403, { error: 'forbidden' });
+    if (legacyInteractionExpired(question)) return json(ctx, 409, { error: 'request_expired' });
     if (
       !isQuestionResponse(body) ||
       !questionAcceptsResponse(question.input.responseMode, question.input.options, body)

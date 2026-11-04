@@ -9,9 +9,10 @@
 import { randomUUID } from 'crypto';
 
 import { getDb } from '../db/connection.js';
-import { invalidateUi } from '../ui-events.js';
+
 import { register } from './registry.js';
 import type { CallerContext } from './frame.js';
+import { recordHostChange } from '../db/transaction.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -169,7 +170,7 @@ function genericCreate(def: ResourceDef) {
     getDb()
       .prepare(`INSERT INTO ${def.table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')})`)
       .run(values);
-    invalidateUi({ kind: 'access' });
+    recordHostChange({ kind: 'access' });
     return values;
   };
 }
@@ -203,7 +204,7 @@ function genericUpdate(def: ResourceDef) {
       .prepare(`UPDATE ${def.table} SET ${setClause} WHERE ${def.idColumn} = @_id`)
       .run({ ...updates, _id: id });
     if (result.changes === 0) throw new Error(`${def.name} not found: ${id}`);
-    invalidateUi({ kind: 'access' });
+    recordHostChange({ kind: 'access' });
 
     const cols = visibleColumns(def).join(', ');
     return getDb().prepare(`SELECT ${cols} FROM ${def.table} WHERE ${def.idColumn} = ?`).get(id);
@@ -216,7 +217,7 @@ function genericDelete(def: ResourceDef) {
     if (!id) throw new Error(`${def.name} id is required`);
     const result = getDb().prepare(`DELETE FROM ${def.table} WHERE ${def.idColumn} = ?`).run(id);
     if (result.changes === 0) throw new Error(`${def.name} not found: ${id}`);
-    invalidateUi({ kind: 'access' });
+    recordHostChange({ kind: 'access' });
     return { deleted: id };
   };
 }

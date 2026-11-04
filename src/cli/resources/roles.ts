@@ -1,6 +1,7 @@
 import { getDb } from '../../db/connection.js';
 import { registerResource } from '../crud.js';
-import { invalidateUi } from '../../ui-events.js';
+
+import { recordHostChange } from '../../db/transaction.js';
 
 registerResource({
   name: 'role',
@@ -45,7 +46,7 @@ registerResource({
              VALUES (?, ?, ?, ?, datetime('now'))`,
           )
           .run(userId, role, groupId, grantedBy);
-        invalidateUi({ kind: 'access' });
+        recordHostChange({ kind: 'access' });
         return { user_id: userId, role, agent_group_id: groupId };
       },
     },
@@ -62,7 +63,7 @@ registerResource({
           .prepare('DELETE FROM user_roles WHERE user_id = ? AND role = ? AND agent_group_id IS ?')
           .run(userId, role, groupId);
         if (result.changes === 0) throw new Error('role not found');
-        invalidateUi({ kind: 'access' });
+        recordHostChange({ kind: 'access' });
         return { revoked: { user_id: userId, role, agent_group_id: groupId } };
       },
     },

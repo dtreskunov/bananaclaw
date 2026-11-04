@@ -101,6 +101,18 @@ function respond(body: unknown, id = 'q') {
 }
 
 describe('global attention sync', () => {
+  it('does not make a legacy expired question actionable or mutate it during reads', async () => {
+    getDb().prepare("UPDATE interactions SET expires_at='2000-01-01' WHERE id='q'").run();
+    const before = getQuestion('q');
+    expect((await request('GET', '/ui/chat/api/sync')).body.attention).toEqual([]);
+    expect(await respond({ responseType: 'choice', value: 'yes' })).toMatchObject({
+      status: 409,
+      body: { error: 'request_expired' },
+    });
+    expect(getQuestion('q')).toEqual(before);
+    expect(runtime.wake).not.toHaveBeenCalled();
+  });
+
   it('includes questions without selecting a group and clears only after canonical resolution', async () => {
     const first = await request('GET', '/ui/chat/api/sync');
     expect(first.status).toBe(200);
@@ -144,6 +156,16 @@ describe('approval response messages', () => {
       applied(payload);
       notify('Approved and applied.');
     });
+  });
+
+  it('rejects a legacy expired approval before applying any effects', async () => {
+    getDb().prepare("UPDATE interactions SET expires_at='2000-01-01' WHERE id='message-approval'").run();
+    expect(await respond({ value: 'approve' }, 'message-approval')).toMatchObject({
+      status: 409,
+      body: { error: 'request_expired' },
+    });
+    expect(applied).not.toHaveBeenCalled();
+    expect(runtime.wake).not.toHaveBeenCalled();
   });
   function notificationRows() {
     const db = openInboundDb('agent', 'session');

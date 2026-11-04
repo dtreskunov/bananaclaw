@@ -1,6 +1,11 @@
 import { getDb } from '../../db/connection.js';
 import { getApproval, updateApprovalStatus, type Approval } from '../../db/approvals.js';
-import { getInteraction, queryInteractions } from '../../db/interactions.js';
+import {
+  getInteraction,
+  queryInteractions,
+  legacyInteractionExpired,
+  mutateInteraction,
+} from '../../db/interactions.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { writeApprovalNotification } from './notification.js';
@@ -8,6 +13,7 @@ import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.j
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { ConnectionInputError } from '../../ui/shared/connection-input.js';
 import type { AccountRequestData, AccountRequestStatus } from '../../ui/shared/approval.js';
+import { transaction } from '../../db/transaction.js';
 
 export type ApprovalWorkflow = Approval & {
   data_json: string;
@@ -41,19 +47,11 @@ export function getAccountRequest(id: string, sessionId?: string): AccountReques
     throw new ConnectionInputError('Access request not found', 404);
   if (!workflow && (approval.status === 'pending' || approval.status === 'applying'))
     throw new ConnectionInputError('Account recovery state unavailable; review this request on the host.', 409);
-  if (approval.status === 'pending' && approval.expires_at && approval.expires_at <= new Date().toISOString()) {
-    finishApprovalWorkflow(
-      approval.id,
-      'expired',
-      'Your access request expired without changing credentials. Request access again if still needed.',
-    );
-    return getAccountRequest(id, sessionId);
-  }
   return {
     id: approval.id,
     kind: approval.kind,
     requirements: approval.input.payload,
-    status: approval.status,
+    status: legacyInteractionExpired(approval) ? 'expired' : approval.status,
     revision: approval.revision,
     retryable: approval.status === 'failed' && workflow !== undefined,
     agentGroupId: session.agent_group_id,
@@ -93,19 +91,21 @@ export function latestApprovalWorkflow(key: string): ApprovalWorkflow | undefine
 export function recoverableApprovalWorkflows(): ApprovalWorkflow[] {
   return queryInteractions<ApprovalWorkflow>(
     `${workflowSelect}
-    WHERE json_extract(a.input_json,'$.action')='request_access' AND (a.status IN ('pending','applying') OR w.notified=0)`,
+    WHERE json_extract(a.input_json,'$.action')='request_access'
+      AND (a.status='applying' OR (w.notified=0 AND a.resolved_at IS NOT NULL AND a.outcome_message IS NOT NULL))`,
   );
 }
 
 export function createApprovalWorkflow(id: string, key: string): void {
-  getDb().transaction(() => {
+  mutateInteraction(id, () => {
     getDb().prepare('UPDATE interactions SET dedupe_key=? WHERE id=?').run(key, id);
     getDb().prepare('INSERT INTO interaction_progress(id) VALUES(?)').run(id);
-  })();
+    return true;
+  });
 }
 
 export function claimApprovalWorkflow(id: string, revision: number, data: Record<string, unknown>): boolean {
-  return getDb().transaction(() => {
+  return transaction(getDb(), () => {
     const previous = getApprovalWorkflow(id);
     if (!previous || previous.status !== 'pending' || previous.revision !== revision) return false;
     const stored = JSON.parse(previous.data_json) as Record<string, unknown>;
@@ -142,7 +142,7 @@ export function updateApprovalWorkflowData(id: string, data: Record<string, unkn
 }
 
 export function retryApprovalWorkflow(id: string, revision: number, userId: string): boolean {
-  return getDb().transaction(() => {
+  return transaction(getDb(), () => {
     const workflow = getApprovalWorkflow(id);
     if (
       !workflow ||
@@ -181,7 +181,7 @@ export function finishApprovalWorkflow(
   responseMessage?: ApprovalResponseMessage,
   resolvedBy?: string,
 ): void {
-  getDb().transaction(() => {
+  transaction(getDb(), () => {
     const workflow = getApprovalWorkflow(id);
     if (!workflow || !['pending', 'applying'].includes(workflow.status)) return;
     const data = JSON.parse(workflow.data_json) as { userId?: string };

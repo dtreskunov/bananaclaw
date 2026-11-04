@@ -10,7 +10,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { getDb } from '../../../db/connection.js';
-import { invalidateUi } from '../../../ui-events.js';
+
+import { recordHostChange, transaction } from '../../../db/transaction.js';
 
 export interface Identity {
   user_id: string;
@@ -69,12 +70,12 @@ export function insertIdentity(args: {
       (args.primary ?? false) ? 1 : 0,
       args.metadata ? JSON.stringify(args.metadata) : null,
     );
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }
 
 export function deleteIdentity(channel: string, handle: string): void {
   getDb().prepare('DELETE FROM identities WHERE channel = ? AND handle = ?').run(channel, handle);
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }
 
 /**
@@ -100,7 +101,7 @@ export function getOrCreateUserByIdentity(args: {
         args.displayName,
         existing.user_id,
       );
-      invalidateUi({ kind: 'interactions' });
+      recordHostChange({ kind: 'interactions' });
     }
     return existing.user_id;
   }
@@ -108,7 +109,7 @@ export function getOrCreateUserByIdentity(args: {
   const userId = randomUUID();
   const now = new Date().toISOString();
 
-  db.transaction(() => {
+  transaction(db, () => {
     db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, ?, ?, ?)`).run(
       userId,
       args.channel,
@@ -121,6 +122,6 @@ export function getOrCreateUserByIdentity(args: {
     ).run(userId, args.channel, args.handle, now, args.metadata ? JSON.stringify(args.metadata) : null);
   })();
 
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
   return userId;
 }

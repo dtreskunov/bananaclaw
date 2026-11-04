@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 
 import { getTurn, linkTurnInput, putTurn, type TurnInputRow } from './turns.js';
+import { transaction } from './transaction.js';
 
 type Row = Record<string, unknown>;
 
@@ -32,7 +33,7 @@ export function copyForkTurnHistory(
     threadId: string;
   },
 ): Set<string> {
-  return src.transaction(() => {
+  return transaction(src, () => {
     const outputIds = new Set(options.outputRows.map((r) => String(r.id)));
     const activity = rows(src, 'turn_activity');
     const usage = rows(src, 'turn_usage');
@@ -66,7 +67,7 @@ export function copyForkTurnHistory(
     }
     const copied = new Set<string>();
     const complete = new Set<string>();
-    dst.transaction(() => {
+    transaction(dst, () => {
       for (const id of candidates) {
         const turn = getTurn(src, id);
         if (!turn) continue;

@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { reduceActivityLines } from '../../../activity.js';
 import type { Question } from '../../../types.js';
 import type { ConversationApproval } from '../../shared/approval.js';
-import { queryInteractions } from '../../../db/interactions.js';
+import { queryInteractions, legacyInteractionExpired } from '../../../db/interactions.js';
 import { outboundTimelinePosition } from '../../../input-timeline.js';
 import { conversationTimeline } from './conversation-timeline.js';
 import { approvalTranscript } from './approval-transcript.js';
@@ -232,7 +232,7 @@ export function projectConversation(
       kind: 'question',
       id: q.id,
       ...q.input,
-      status: q.status,
+      status: legacyInteractionExpired(q) ? 'cancelled' : q.status,
       response: q.response,
       answeredAt: q.responded_at,
       threadId: q.thread_id,

@@ -13,6 +13,7 @@ import { getDb, hasTable } from '../../db/connection.js';
 import { getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
 import type { ArchiveDump } from './archive-group.js';
+import { transaction } from '../../db/transaction.js';
 
 export interface RestoreOptions {
   /** Replay `sessions`, `pending_*` rows too. Default false. */
@@ -120,7 +121,7 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
     interactions: 0,
   };
 
-  const tx = db.transaction(() => {
+  const tx = transaction(db, () => {
     insertAgentGroup(dump.agent_group);
     counts.agent_groups = 1;
 

@@ -16,6 +16,7 @@ import { DATA_DIR } from '../src/config.js';
 import { getAgentGroupByFolder, deleteAgentGroup } from '../src/db/agent-groups.js';
 import { initDb } from '../src/db/connection.js';
 import { runMigrations } from '../src/db/migrations/index.js';
+import { transaction } from '../src/db/transaction.js';
 
 interface Args {
   folder: string;
@@ -45,7 +46,7 @@ if (!ag) {
   process.exit(0);
 }
 
-const cleanup = db.transaction(() => {
+const cleanup = transaction(db, () => {
   const tables = db
     .prepare(
       `SELECT DISTINCT m.name FROM sqlite_master m

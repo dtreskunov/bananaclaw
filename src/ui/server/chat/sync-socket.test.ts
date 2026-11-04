@@ -5,21 +5,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
 import { createApproval, updateApprovalStatus } from '../../../db/approvals.js';
 import { createInteraction } from '../../../db/interactions.js';
+import { createQuestion } from '../../../db/sessions.js';
 import { removeMember } from '../../../modules/permissions/db/agent-group-members.js';
 import { updateContainerConfigScalars, ensureContainerConfig } from '../../../db/container-configs.js';
 import { authenticate, COOKIE_NAME } from '../auth.js';
 import { createSession, deleteSession } from '../db.js';
 import { parseSyncFrame, SYNC_PROTOCOL_VERSION, SYNC_RELOAD_CLOSE_CODE, type SyncFrame } from '../../shared/sync.js';
 import { attachSyncSocket } from './sync-socket.js';
-import { readGlobalSync } from './sync-state.js';
+import { readGlobalSync, createGlobalProjection } from './sync-state.js';
 import * as attention from './attention.js';
-import { revokeRole } from '../../../modules/permissions/db/user-roles.js';
+import { revokeRole, grantRole } from '../../../modules/permissions/db/user-roles.js';
+vi.mock('./threads.js', () => ({ listThreadsForViewer: vi.fn(async () => []) }));
+import { listThreadsForViewer } from './threads.js';
 
 let server: WebSocketServer;
 let token: string;
 const clients: WebSocket[] = [];
 const frames: SyncFrame[] = [];
-const listThreads = vi.fn(async () => []);
+const listThreads = vi.mocked(listThreadsForViewer);
 const now = () => new Date().toISOString();
 
 beforeEach(async () => {
@@ -43,7 +46,7 @@ beforeEach(async () => {
   server.on('connection', (socket, req) => {
     const session = authenticate(req);
     if (!session) throw new Error('Test socket was not authenticated');
-    attachSyncSocket(socket, session.userId, session.sessionHash, listThreads);
+    attachSyncSocket(socket, session.userId, session.sessionHash);
   });
   await once(server, 'listening');
 });
@@ -71,6 +74,74 @@ async function connect(groupId: string | null = null) {
 }
 
 describe('global sync WebSocket integration', () => {
+  it('updates inactive-group question attention without rescanning the selected group', async () => {
+    grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
+    getDb().exec(`
+      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
+        VALUES('other-mg','web','web','group:other',1,'now');
+      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
+        VALUES('other-wire','other-mg','other','per-thread','now');
+      INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
+        VALUES('other-session','other','other-mg','other-thread','now');
+    `);
+    await connect('g');
+    createQuestion({
+      id: 'off-screen-question',
+      session_id: 'other-session',
+      message_out_id: 'other-output',
+      in_reply_to: null,
+      channel_type: 'web',
+      platform_id: 'group:other',
+      thread_id: 'other-thread',
+      created_at: now(),
+      input: { question: 'Choose?', responseMode: 'text', options: [] },
+    });
+    await vi.waitFor(() =>
+      expect(frames.at(-1)?.data.attention).toEqual([
+        {
+          id: 'off-screen-question',
+          origin: { agentGroupId: 'other', threadId: 'other-thread', channelType: 'web', messagingGroupId: 'other-mg' },
+        },
+      ]),
+    );
+    expect(listThreads).toHaveBeenCalledOnce();
+  });
+
+  it('pushes an inactive-group approval without rescanning the selected group threads', async () => {
+    grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
+    await connect('g');
+    expect(listThreads).toHaveBeenCalledOnce();
+    createApproval({
+      id: 'off-screen',
+      request_id: 'off-screen',
+      agent_group_id: 'other',
+      created_at: now(),
+      input: { action: 'test', title: 'Review', payload: {}, options: [] },
+    });
+    await vi.waitFor(() => expect(frames.at(-1)?.data.approvals.map((row) => row.id)).toEqual(['off-screen']));
+    expect(listThreads).toHaveBeenCalledOnce();
+  });
+
+  it('rejects cached approval visibility immediately after a committed role change', async () => {
+    createApproval({
+      id: 'private-cache',
+      request_id: 'private-cache',
+      agent_group_id: 'g',
+      created_at: now(),
+      input: { action: 'test', title: 'Review', payload: {}, options: [] },
+    });
+    const projection = createGlobalProjection('viewer');
+    const first = await projection.read('g', true);
+    expect(first.approvals).toHaveLength(1);
+    revokeRole('viewer', 'admin', 'g');
+    expect(projection.canPublish()).toBe(false);
+    const next = await projection.read('g', false);
+    expect(next.approvals).toEqual([]);
+    expect(next.group).not.toBeNull();
+    expect(listThreads).toHaveBeenCalledTimes(2);
+    expect(projection.canPublish()).toBe(true);
+  });
+
   it('reads interaction metadata once after the asynchronous thread scan', async () => {
     let finish!: (value: never[]) => void;
     listThreads.mockImplementationOnce(
@@ -80,7 +151,7 @@ describe('global sync WebSocket integration', () => {
         }),
     );
     const readInteractions = vi.spyOn(attention, 'readInteractionSync');
-    const snapshot = readGlobalSync('viewer', 'g', listThreads);
+    const snapshot = readGlobalSync('viewer', 'g');
     expect(readInteractions).not.toHaveBeenCalled();
     createApproval({
       id: 'during-scan',
@@ -109,7 +180,7 @@ describe('global sync WebSocket integration', () => {
       created_at: now(),
       input: { action: 'test', title: 'Review', payload: {}, options: [] },
     });
-    const snapshot = readGlobalSync('viewer', 'g', listThreads);
+    const snapshot = readGlobalSync('viewer', 'g');
     revokeRole('viewer', 'admin', 'g');
     finish([]);
     const result = await snapshot;
@@ -119,7 +190,7 @@ describe('global sync WebSocket integration', () => {
 
   it.each([null, 'missing'])('reads metadata once without scanning an inaccessible group: %s', async (groupId) => {
     const readInteractions = vi.spyOn(attention, 'readInteractionSync');
-    expect((await readGlobalSync('viewer', groupId, listThreads)).group).toBeNull();
+    expect((await readGlobalSync('viewer', groupId)).group).toBeNull();
     expect(readInteractions).toHaveBeenCalledOnce();
     expect(listThreads).not.toHaveBeenCalled();
   });
@@ -170,7 +241,7 @@ describe('global sync WebSocket integration', () => {
     expect(listThreads).not.toHaveBeenCalled();
   });
 
-  it('removes expired attention without another database mutation', async () => {
+  it('enforces legacy deadlines on refresh without scheduling a workflow transition', async () => {
     const expiresAt = new Date(Date.now() + 700).toISOString();
     createInteraction({
       id: 'q',
@@ -185,17 +256,24 @@ describe('global sync WebSocket integration', () => {
       created_at: now(),
       input: { question: 'Continue?', responseMode: 'text', options: [] },
     });
-    await connect();
+    const client = await connect();
     expect(frames[0].data.attention.map((row) => row.id)).toEqual(['q']);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(frames).toHaveLength(1);
+    client.send(
+      JSON.stringify({ kind: 'subscribe', protocolVersion: SYNC_PROTOCOL_VERSION, subscriptionId: 2, groupId: null }),
+    );
     await vi.waitFor(() => expect(frames.at(-1)?.data.attention).toEqual([]), { timeout: 2000 });
     expect(getDb().prepare("SELECT status FROM interactions WHERE id='q'").get()).toEqual({ status: 'pending' });
   });
 
   it('pushes voice configuration and explicitly clears revoked group state', async () => {
     await connect('g');
+    const scans = listThreads.mock.calls.length;
     ensureContainerConfig('g');
     updateContainerConfigScalars('g', { voice_input_enabled: 0 });
     await vi.waitFor(() => expect(frames.at(-1)?.data.group?.voiceInput.reason).toBe('Voice input is disabled.'));
+    expect(listThreads).toHaveBeenCalledTimes(scans);
     getDb().prepare("DELETE FROM user_roles WHERE user_id='viewer'").run();
     removeMember('viewer', 'g');
     await vi.waitFor(() => expect(frames.at(-1)?.data.group).toBeNull());
@@ -207,6 +285,17 @@ describe('global sync WebSocket integration', () => {
     deleteSession(token);
     const [code] = await closed;
     expect(code).toBe(4401);
+  });
+
+  it('uses the authenticated session expiry to disconnect without another state mutation', async () => {
+    getDb()
+      .prepare('UPDATE ui_sessions SET expires_at=?')
+      .run(new Date(Date.now() + 700).toISOString());
+    const client = await connect('g');
+    expect(listThreads).toHaveBeenCalledOnce();
+    const [code] = await once(client, 'close');
+    expect(code).toBe(4401);
+    expect(listThreads).toHaveBeenCalledOnce();
   });
 
   it('never sends a selected group list after its access is revoked during an async scan', async () => {

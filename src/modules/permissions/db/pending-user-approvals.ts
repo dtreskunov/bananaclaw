@@ -17,6 +17,7 @@ import { insertIdentity } from './identities.js';
 import { insertOidcLink } from './oidc-links.js';
 import { grantRole } from './user-roles.js';
 import { createUser } from './users.js';
+import { transaction } from '../../../db/transaction.js';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired';
 
@@ -191,7 +192,7 @@ export function approvePendingUser(args: ApprovePendingUserArgs): ApprovePending
   const now = new Date().toISOString();
   let resolvedAgentGroupId: string | null = args.agentGroupId ?? null;
 
-  const txn = getDb().transaction(() => {
+  const txn = transaction(getDb(), () => {
     createUser({
       id: userId,
       kind: row.provider === 'google' ? 'oidc' : row.provider,

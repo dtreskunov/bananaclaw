@@ -7,25 +7,38 @@ afterEach(() => vi.useRealTimers());
 function fixture(overrides: Partial<SyncStreamOptions> = {}) {
   vi.useFakeTimers();
   const frames: SyncFrame[] = [];
-  let invalidate: (groupId?: string) => void = () => {};
+  let invalidate: (groupId?: string, refreshThreads?: boolean) => void = () => {};
   const unsubscribe = vi.fn();
-  const read = vi.fn(async (): Promise<GlobalSyncState> => ({ approvals: [], attention: [], group: null }));
+  const read = vi.fn(
+    async (_groupId: string | null, _refreshThreads: boolean): Promise<GlobalSyncState> => ({
+      approvals: [],
+      attention: [],
+      group: null,
+    }),
+  );
   const fail = vi.fn();
   const stream = startSyncStream({
     read,
-    authorize: () => {},
+    authorize: () => null,
+    canPublish: () => true,
     subscribe: (fn) => {
       invalidate = fn;
       return unsubscribe;
     },
-    deadline: () => null,
     send: (frame) => {
       frames.push(frame);
     },
     fail,
     ...overrides,
   });
-  return { stream, frames, invalidate: (gid?: string) => invalidate(gid), unsubscribe, read, fail };
+  return {
+    stream,
+    frames,
+    invalidate: (gid?: string, refreshThreads?: boolean) => invalidate(gid, refreshThreads),
+    unsubscribe,
+    read,
+    fail,
+  };
 }
 
 describe('global synchronization stream', () => {
@@ -57,6 +70,62 @@ describe('global synchronization stream', () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames).toHaveLength(2);
     expect(f.frames[1]).toMatchObject({ subscriptionId: 2 });
+    f.stream.stop();
+  });
+
+  it('rescans threads only when requested, including every explicit refresh', async () => {
+    const f = fixture();
+    f.stream.subscribe(1, 'g');
+    await vi.advanceTimersByTimeAsync(100);
+    f.invalidate(undefined, false);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.read.mock.calls[1][1]).toBe(false);
+    f.invalidate('other');
+    f.invalidate('g', false);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.read.mock.calls[2][1]).toBe(false);
+    f.stream.subscribe(2, 'g');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.read.mock.calls[3][1]).toBe(true);
+    f.stream.stop();
+  });
+
+  it('does not lose a thread refresh when metadata invalidations arrive during its read', async () => {
+    let finish!: (data: GlobalSyncState) => void;
+    const read = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<GlobalSyncState>((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue({ approvals: [], attention: [], group: null });
+    const f = fixture({ read });
+    f.stream.subscribe(1, 'g');
+    await vi.advanceTimersByTimeAsync(100);
+    f.invalidate('g');
+    f.invalidate(undefined, false);
+    finish({ approvals: [], attention: [], group: null });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(read).toHaveBeenLastCalledWith('g', true);
+    f.invalidate(undefined, false);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(read).toHaveBeenLastCalledWith('g', false);
+    f.stream.stop();
+  });
+
+  it('re-reads instead of publishing when access changes after the asynchronous boundary', async () => {
+    let current = false;
+    const f = fixture({ canPublish: () => current });
+    f.stream.subscribe(1, 'g');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.frames).toEqual([]);
+    current = true;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.frames).toHaveLength(1);
+    expect(f.fail).not.toHaveBeenCalled();
+    expect(f.read.mock.calls[1][1]).toBe(true);
     f.stream.stop();
   });
 
@@ -141,6 +210,7 @@ describe('global synchronization stream', () => {
         }),
       authorize: () => {
         if (!allowed) throw new Error('revoked');
+        return null;
       },
     });
     f.stream.subscribe(1, 'g');
@@ -154,7 +224,7 @@ describe('global synchronization stream', () => {
   });
 
   it('refreshes at an expiry deadline without recurring database scans', async () => {
-    const f = fixture({ deadline: () => (Date.now() < 1000 ? 1000 : null) });
+    const f = fixture({ authorize: () => (Date.now() < 1000 ? 1000 : null) });
     vi.setSystemTime(0);
     f.stream.subscribe(1, null);
     await vi.advanceTimersByTimeAsync(100);

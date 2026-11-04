@@ -1,7 +1,7 @@
 import type { Interaction } from '../types.js';
-import { invalidateConversation } from '../conversation-events.js';
 import { getDb } from './connection.js';
-import { invalidateUi } from '../ui-events.js';
+
+import { recordHostChange, transaction } from './transaction.js';
 
 export function queryInteractions<T extends Interaction>(sql: string, ...params: unknown[]): T[] {
   return (
@@ -22,10 +22,24 @@ export function getInteraction(id: string): Interaction | undefined {
   return queryInteractions<Interaction>('SELECT * FROM interactions WHERE id=?', id)[0];
 }
 
-export function interactionChanged(id: string): void {
-  invalidateUi({ kind: 'interactions' });
-  const sessionId = getInteraction(id)?.session_id;
-  if (sessionId) queueMicrotask(() => invalidateConversation(sessionId));
+export function legacyInteractionExpired(
+  row: Pick<Interaction, 'status' | 'expires_at'>,
+  now = new Date().toISOString(),
+): boolean {
+  return row.status === 'pending' && row.expires_at !== null && row.expires_at <= now;
+}
+
+export function mutateInteraction(id: string, write: () => boolean): boolean {
+  const db = getDb();
+  return transaction(db, () => {
+    const previous = getInteraction(id);
+    const changed = write();
+    if (changed) {
+      const current = getInteraction(id) ?? previous;
+      recordHostChange({ kind: 'interactions', sessionId: current?.session_id }, db);
+    }
+    return changed;
+  })();
 }
 
 export function createInteraction(
@@ -39,14 +53,15 @@ export function createInteraction(
     response_json: response === null ? null : JSON.stringify(response),
   };
   const keys = Object.keys(values);
-  const result = getDb()
-    .prepare(
-      `INSERT INTO interactions(${keys}) VALUES(${keys.map((key) => `@${key}`)})
+  return mutateInteraction(record.id, () => {
+    const result = getDb()
+      .prepare(
+        `INSERT INTO interactions(${keys}) VALUES(${keys.map((key) => `@${key}`)})
     ON CONFLICT(id) DO NOTHING`,
-    )
-    .run(values);
-  if (!result.changes && getInteraction(record.id)?.kind !== record.kind)
-    throw new Error(`Global interaction ID collision: ${record.id}`);
-  if (result.changes) interactionChanged(record.id);
-  return result.changes > 0;
+      )
+      .run(values);
+    if (!result.changes && getInteraction(record.id)?.kind !== record.kind)
+      throw new Error(`Global interaction ID collision: ${record.id}`);
+    return result.changes > 0;
+  });
 }

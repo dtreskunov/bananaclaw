@@ -1,5 +1,6 @@
 import { getDb } from './connection.js';
-import { invalidateUi } from '../ui-events.js';
+
+import { recordHostChange } from './transaction.js';
 
 export interface ThreadFork {
   agent_group_id: string;
@@ -29,7 +30,7 @@ export function createThreadFork(row: ThreadFork): void {
           @parent_message_ts, @parent_title, @fidelity, @created_at)`,
     )
     .run(row);
-  invalidateUi({ kind: 'group', groupId: row.agent_group_id });
+  recordHostChange({ kind: 'sessions', groupId: row.agent_group_id });
 }
 
 export function getThreadFork(
@@ -77,7 +78,7 @@ export function deleteThreadFork(agentGroupId: string, messagingGroupId: string,
   getDb()
     .prepare('DELETE FROM thread_forks WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id = ?')
     .run(agentGroupId, messagingGroupId, threadId);
-  invalidateUi({ kind: 'group', groupId: agentGroupId });
+  recordHostChange({ kind: 'sessions', groupId: agentGroupId });
 }
 
 /** Recursive descendants of a thread, breadth-first. Used by cascading delete. */

@@ -1,6 +1,7 @@
 import type { UserRole, UserRoleKind } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
-import { invalidateUi } from '../../../ui-events.js';
+
+import { recordHostChange } from '../../../db/transaction.js';
 
 /**
  * Grant a role. Owner rows must have agent_group_id = null (enforced here,
@@ -16,11 +17,10 @@ export function grantRole(row: UserRole): void {
        VALUES (@user_id, @role, @agent_group_id, @granted_by, @granted_at)`,
     )
     .run(row);
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }
 
 export function revokeRole(userId: string, role: UserRoleKind, agentGroupId: string | null): void {
-  invalidateUi({ kind: 'access' });
   if (agentGroupId === null) {
     getDb()
       .prepare('DELETE FROM user_roles WHERE user_id = ? AND role = ? AND agent_group_id IS NULL')
@@ -30,6 +30,7 @@ export function revokeRole(userId: string, role: UserRoleKind, agentGroupId: str
       .prepare('DELETE FROM user_roles WHERE user_id = ? AND role = ? AND agent_group_id = ?')
       .run(userId, role, agentGroupId);
   }
+  recordHostChange({ kind: 'access' });
 }
 
 export function getUserRoles(userId: string): UserRole[] {

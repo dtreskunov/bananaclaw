@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from '../../../db/schema.js';
-import { onConversationChange } from '../../../conversation-events.js';
+import { onHostChange } from '../../../host-changes.js';
 import { upsertThreadTitle } from '../../../modules/thread-titles/db.js';
 import { scanThreadSession, type ThreadScanSpec } from './thread-scan.js';
 import { ThreadScanner } from './thread-scanner.js';
@@ -181,7 +181,9 @@ describe('thread scanner', () => {
     const key = spec.thread!;
     expect((await scanner.scan([spec]))[0].threads[0].title).toBe('Hello');
 
-    const unsubscribe = onConversationChange((sessionId) => scanner.invalidate(sessionId));
+    const unsubscribe = onHostChange((change) => {
+      if (change.kind === 'sessions') scanner.invalidate(change.sessionId ?? null);
+    });
     try {
       upsertThreadTitle(inbound, { ...key, title: 'Greeting', requestMessageId: 'one' });
       await Promise.resolve();

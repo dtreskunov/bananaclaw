@@ -22,7 +22,8 @@
  */
 import { getDb } from '../../db/connection.js';
 import { log } from '../../log.js';
-import { invalidateUi } from '../../ui-events.js';
+
+import { recordHostChange, transaction } from '../../db/transaction.js';
 
 export type ClaimOutcome = 'noop' | 'transferred' | 'merged';
 
@@ -45,8 +46,8 @@ export function claimIdentity(args: { targetUserId: string; channel: string; han
     return { outcome: 'noop', donorUserId: existing.user_id, donorDeleted: false };
   }
 
-  invalidateUi({ kind: 'access' });
-  return db.transaction((): ClaimResult => {
+  return transaction(db, (): ClaimResult => {
+    recordHostChange({ kind: 'access' });
     if (!existing) {
       // Fresh insert.
       db.prepare(

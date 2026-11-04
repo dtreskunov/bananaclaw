@@ -17,6 +17,7 @@ import { getDb, hasTable } from '../../db/connection.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { assertGroupApprovalsIdle, getSessionsByAgentGroup } from '../../db/sessions.js';
 import { log } from '../../log.js';
+import { transaction } from '../../db/transaction.js';
 
 export interface ArchiveResult {
   id: string;
@@ -185,7 +186,7 @@ export function archiveAgentGroup(
   // 1. Snapshot all DB state before any deletes.
   const archivedAt = new Date().toISOString();
   const archiveJsonPath = path.join(groupDir, 'archive.json');
-  getDb().transaction(() => {
+  transaction(getDb(), () => {
     assertGroupApprovalsIdle(groupId);
     getDb()
       .prepare(

@@ -45,6 +45,7 @@ import { moduleCredentialConnections } from './module-credential-connections.js'
 import { migration044 } from './044-agent-vault-default.js';
 import { migration048 } from './048-agent-vault-only.js';
 import { migration049 } from './049-interactions.js';
+import { transaction } from '../transaction.js';
 
 export interface Migration {
   version: number;
@@ -152,7 +153,7 @@ export function runMigrations(db: Database.Database, list: Migration[] = migrati
     // recreate rolls back atomically with nothing committed.
     if (m.disableForeignKeys) db.pragma('foreign_keys = OFF');
     try {
-      db.transaction(() => {
+      transaction(db, () => {
         // Snapshot violations BEFORE up() runs: live DBs can carry latent
         // FK orphans (e.g. parents deleted through a FK-OFF sqlite3 CLI
         // session — ensureUserDm tolerates exactly this at runtime). The

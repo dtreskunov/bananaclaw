@@ -6,12 +6,12 @@
  * (open-write-close per op). See session-manager.ts header for invariants.
  */
 import Database from 'better-sqlite3';
-import { invalidateSessionDatabase } from '../conversation-events.js';
 
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
 import { CONTAINER_MAX_OUTPUT_SIZE } from '../config.js';
 import { assertUserUuid } from './uuid.js';
 import { assertActivityOrderSchema } from './turns.js';
+import { recordSessionDatabaseChange, transaction } from './transaction.js';
 
 /** Apply the inbound or outbound schema to a DB file. Idempotent. */
 export function ensureSchema(dbPath: string, schema: 'inbound' | 'outbound'): void {
@@ -105,7 +105,7 @@ export function upsertSessionRouting(
   db: Database.Database,
   routing: { channel_type: string | null; platform_id: string | null; thread_id: string | null },
 ): void {
-  db.transaction(() => {
+  transaction(db, () => {
     db.prepare(
       `INSERT INTO session_routing (id, channel_type, platform_id, thread_id)
        VALUES (1, @channel_type, @platform_id, @thread_id)
@@ -142,7 +142,7 @@ export function replaceDestinations(db: Database.Database, entries: DestinationR
       throw new Error('invalid destination snapshot row');
     }
   }
-  const tx = db.transaction((rows: DestinationRow[]) => {
+  const tx = transaction(db, (rows: DestinationRow[]) => {
     db.prepare('DELETE FROM destinations').run();
     const stmt = db.prepare(
       `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
@@ -247,7 +247,7 @@ export function insertMessage(
     senderIdentity: message.senderIdentity ?? null,
     seq: nextEvenSeq(db),
   });
-  invalidateSessionDatabase(db.name);
+  recordSessionDatabaseChange(db);
 }
 
 export function countDueMessages(db: Database.Database): number {
@@ -335,7 +335,7 @@ export function insertOutboundBounce(
       threadId: msg.threadId,
       content: JSON.stringify({ text: msg.text }),
     });
-  invalidateSessionDatabase(outDb.name);
+  recordSessionDatabaseChange(outDb);
 }
 
 /**
@@ -353,12 +353,12 @@ export function syncProcessingAcks(inDb: Database.Database, outDb: Database.Data
 
   const updateStmt = inDb.prepare("UPDATE messages_in SET status = 'completed' WHERE id = ? AND status != 'completed'");
   const transitioned: string[] = [];
-  inDb.transaction(() => {
+  transaction(inDb, () => {
     for (const { message_id } of completed) {
       if (updateStmt.run(message_id).changes > 0) transitioned.push(message_id);
     }
   })();
-  invalidateSessionDatabase(inDb.name);
+  recordSessionDatabaseChange(inDb);
   return transitioned;
 }
 

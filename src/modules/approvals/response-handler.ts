@@ -12,6 +12,7 @@
 import { wakeContainer } from '../../container-runner.js';
 import { beginApprovalExecution, endApprovalExecution, getSession } from '../../db/sessions.js';
 import { getApproval, updateApprovalStatus } from '../../db/approvals.js';
+import { legacyInteractionExpired } from '../../db/interactions.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import type { Approval } from '../../types.js';
@@ -39,7 +40,7 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
     });
     return true;
   }
-  if (approval.status !== 'pending') {
+  if (approval.status !== 'pending' || legacyInteractionExpired(approval)) {
     log.info('Ignoring response to an approval that is no longer pending', { approvalId: approval.id });
     return true;
   }

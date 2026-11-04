@@ -15,11 +15,16 @@ import { writeSessionMessage } from '../../session-manager.js';
 import { startTypingRefresh, stopTypingRefresh } from '../typing/index.js';
 import { questionAcceptsResponse } from '../../ui/shared/question.js';
 import { isQuestionResponse } from '../../ui/shared/conversation-protocol.js';
+import { legacyInteractionExpired } from '../../db/interactions.js';
 
 export async function handleInteractiveResponse(payload: ResponsePayload): Promise<boolean> {
   const question = getQuestion(payload.questionId);
   if (!question) return false;
   if (question.status === 'cancelled') return true;
+  if (legacyInteractionExpired(question)) {
+    log.warn('Ignoring response to a legacy expired question', { questionId: question.id });
+    return true;
+  }
 
   if (question.status === 'pending') {
     if (

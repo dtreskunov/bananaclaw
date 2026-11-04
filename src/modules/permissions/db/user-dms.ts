@@ -1,6 +1,7 @@
 import type { UserDm } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
-import { invalidateUi } from '../../../ui-events.js';
+
+import { recordHostChange } from '../../../db/transaction.js';
 
 export function upsertUserDm(row: UserDm): void {
   getDb()
@@ -12,7 +13,7 @@ export function upsertUserDm(row: UserDm): void {
          resolved_at = excluded.resolved_at`,
     )
     .run(row);
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }
 
 export function getUserDm(userId: string, channelType: string): UserDm | undefined {
@@ -33,5 +34,5 @@ export function getUserDmByMessagingGroup(messagingGroupId: string): UserDm | un
 
 export function deleteUserDm(userId: string, channelType: string): void {
   getDb().prepare('DELETE FROM user_dms WHERE user_id = ? AND channel_type = ?').run(userId, channelType);
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }

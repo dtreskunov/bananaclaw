@@ -1,6 +1,6 @@
 import type { Approval } from '../types.js';
 import { getDb } from './connection.js';
-import { createInteraction, getInteraction, interactionChanged } from './interactions.js';
+import { createInteraction, getInteraction, mutateInteraction } from './interactions.js';
 import { accessRequestInput } from '../ui/shared/connection-input.js';
 
 export type { Approval } from '../types.js';
@@ -32,9 +32,10 @@ export function updateApprovalStatus(
   response?: { userId?: string; decision?: string; message?: string; outcome?: string },
   expectedRevision?: number,
 ): boolean {
-  const result = getDb()
-    .prepare(
-      `UPDATE interactions SET status=@status,revision=revision+1,updated_at=@now,
+  return mutateInteraction(id, () => {
+    const result = getDb()
+      .prepare(
+        `UPDATE interactions SET status=@status,revision=revision+1,updated_at=@now,
        response_json=json_object(
          'decision',CASE WHEN @status='pending' THEN NULL ELSE COALESCE(@decision,json_extract(response_json,'$.decision')) END,
          'message',CASE WHEN @status='pending' THEN NULL WHEN @hasResponse THEN @message ELSE json_extract(response_json,'$.message') END),
@@ -43,18 +44,18 @@ export function updateApprovalStatus(
        outcome_message=CASE WHEN @status='pending' THEN NULL ELSE COALESCE(@outcome,outcome_message) END,
        resolved_at=CASE WHEN @status IN ('pending','applying') THEN NULL ELSE @now END
        WHERE id=@id AND kind!='question' AND (@revision IS NULL OR revision=@revision)`,
-    )
-    .run({
-      id,
-      status,
-      now: new Date().toISOString(),
-      revision: expectedRevision ?? null,
-      decision: response?.decision ?? null,
-      userId: response?.userId ?? null,
-      message: response?.message ?? null,
-      outcome: response?.outcome ?? null,
-      hasResponse: response !== undefined ? 1 : 0,
-    });
-  if (result.changes) interactionChanged(id);
-  return result.changes === 1;
+      )
+      .run({
+        id,
+        status,
+        now: new Date().toISOString(),
+        revision: expectedRevision ?? null,
+        decision: response?.decision ?? null,
+        userId: response?.userId ?? null,
+        message: response?.message ?? null,
+        outcome: response?.outcome ?? null,
+        hasResponse: response !== undefined ? 1 : 0,
+      });
+    return result.changes === 1;
+  });
 }

@@ -1,9 +1,9 @@
 import type { Approval, Question, Session } from '../types.js';
 import type { QuestionResponse } from '../ui/shared/question.js';
 import { getDb, hasTable } from './connection.js';
-import { createInteraction, getInteraction, interactionChanged } from './interactions.js';
-import { invalidateUi } from '../ui-events.js';
-import { invalidateConversation } from '../conversation-events.js';
+import { createInteraction, getInteraction, mutateInteraction } from './interactions.js';
+
+import { recordHostChange, transaction } from './transaction.js';
 
 // ── Sessions ──
 
@@ -14,7 +14,7 @@ export function createSession(session: Session): void {
        VALUES (@id, @agent_group_id, @messaging_group_id, @thread_id, @agent_provider, @status, @container_status, @last_active, @created_at)`,
     )
     .run(session);
-  invalidateUi({ kind: 'group', groupId: session.agent_group_id });
+  recordHostChange({ kind: 'sessions', groupId: session.agent_group_id });
 }
 
 export function getSession(id: string): Session | undefined {
@@ -95,7 +95,7 @@ export function updateSession(
     .prepare(`UPDATE sessions SET ${fields.join(', ')} WHERE id = @id`)
     .run(values);
   const session = getSession(id);
-  if (session) invalidateUi({ kind: 'group', groupId: session.agent_group_id });
+  if (session) recordHostChange({ kind: 'sessions', groupId: session.agent_group_id });
 }
 
 export class SessionApprovalCancellationRequiredError extends Error {
@@ -144,10 +144,7 @@ export function deleteSession(id: string, cancelApprovals = false): number {
   if ([...executingApprovals.values()].includes(id)) throw new SessionApprovalInProgressError();
   const db = getDb();
   const session = getSession(id);
-  invalidateUi({ kind: 'interactions' });
-  if (session) invalidateUi({ kind: 'group', groupId: session.agent_group_id });
-  queueMicrotask(() => invalidateConversation(id));
-  return db.transaction(() => {
+  return transaction(db, () => {
     if (db.prepare("SELECT 1 FROM interactions WHERE session_id=? AND status='applying'").get(id))
       throw new SessionApprovalInProgressError();
     const approval = db
@@ -159,6 +156,8 @@ export function deleteSession(id: string, cancelApprovals = false): number {
       .run(id).changes;
     db.prepare('DELETE FROM interactions WHERE session_id = ?').run(id);
     db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+    recordHostChange({ kind: 'interactions', sessionId: id });
+    recordHostChange({ kind: 'sessions', sessionId: id, groupId: session?.agent_group_id });
     return cancelledApprovals;
   })();
 }
@@ -194,22 +193,23 @@ export function answerQuestion(
     answeredAt: string;
   },
 ): boolean {
-  const result = getDb()
-    .prepare(
-      `UPDATE interactions
+  return mutateInteraction(questionId, () => {
+    const result = getDb()
+      .prepare(
+        `UPDATE interactions
           SET status = 'answered', response_json = @response,
               responded_by = @userId, responded_at = @answeredAt, resolved_at = @answeredAt,
               updated_at = @answeredAt, revision = revision + 1
         WHERE id = @questionId AND kind='question' AND status = 'pending'`,
-    )
-    .run({
-      questionId,
-      userId: answer.userId,
-      answeredAt: answer.answeredAt,
-      response: JSON.stringify(answer, ['responseType', 'value']),
-    });
-  if (result.changes) interactionChanged(questionId);
-  return result.changes > 0;
+      )
+      .run({
+        questionId,
+        userId: answer.userId,
+        answeredAt: answer.answeredAt,
+        response: JSON.stringify(answer, ['responseType', 'value']),
+      });
+    return result.changes > 0;
+  });
 }
 
 type AskQuestionRender = {

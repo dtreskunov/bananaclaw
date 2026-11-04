@@ -1,7 +1,8 @@
 import type { AgentGroupMember } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
 import { isAdminOfAgentGroup, isGlobalAdmin, isOwner } from './user-roles.js';
-import { invalidateUi } from '../../../ui-events.js';
+
+import { recordHostChange } from '../../../db/transaction.js';
 
 export function addMember(row: AgentGroupMember): void {
   getDb()
@@ -10,12 +11,12 @@ export function addMember(row: AgentGroupMember): void {
        VALUES (@user_id, @agent_group_id, @added_by, @added_at)`,
     )
     .run(row);
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }
 
 export function removeMember(userId: string, agentGroupId: string): void {
   getDb().prepare('DELETE FROM agent_group_members WHERE user_id = ? AND agent_group_id = ?').run(userId, agentGroupId);
-  invalidateUi({ kind: 'access' });
+  recordHostChange({ kind: 'access' });
 }
 
 export function getMembers(agentGroupId: string): AgentGroupMember[] {

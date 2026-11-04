@@ -13,6 +13,8 @@
  */
 import http from 'http';
 import path from 'path';
+import fs from 'node:fs';
+import { publishHostChange } from '../../host-changes.js';
 
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
@@ -44,6 +46,7 @@ const PURGE_INTERVAL_MS = 60 * 60 * 1000;
 
 let purgeTimer: NodeJS.Timeout | null = null;
 let mounted = false;
+let configWatcher: fs.FSWatcher | undefined;
 
 export function startUi(): void {
   const cfg = readUiConfig();
@@ -54,6 +57,10 @@ export function startUi(): void {
   if (mounted) return;
 
   ensureSharedHttpServer();
+  configWatcher = fs.watch(process.cwd(), { persistent: false }, (_event, filename) => {
+    if (filename === null || filename === '.env') publishHostChange({ kind: 'configuration' });
+  });
+  configWatcher.on('error', (err) => log.error('Live UI configuration watcher failed', { err }));
 
   const withAccessLog =
     (app: string, handler: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>) =>
@@ -210,6 +217,8 @@ async function handlePrivateWebView(req: http.IncomingMessage, res: http.ServerR
 }
 
 export async function stopUi(): Promise<void> {
+  configWatcher?.close();
+  configWatcher = undefined;
   closeChatSockets();
   if (purgeTimer) {
     clearInterval(purgeTimer);

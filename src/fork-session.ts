@@ -24,7 +24,12 @@ import { createSession } from './db/sessions.js';
 import { createThreadFork } from './db/thread-forks.js';
 import { readEnvFile } from './env.js';
 import { log } from './log.js';
-import { inputStateKey, isCancelledInputContent, outboundTimelinePosition, readInputTimeline } from './input-timeline.js';
+import {
+  inputStateKey,
+  isCancelledInputContent,
+  outboundTimelinePosition,
+  readInputTimeline,
+} from './input-timeline.js';
 import { timelineSortKey } from './ui/shared/timeline.js';
 import { getProviderForkSessionState } from './providers/provider-container-registry.js';
 import { extractInboundText, extractOutboundText } from './search-index.js';
@@ -38,6 +43,7 @@ import {
   writeSessionRouting,
 } from './session-manager.js';
 import type { Session } from './types.js';
+import { transaction } from './db/transaction.js';
 
 /** Message kinds that must never be inherited — a copied task would double-fire. */
 const EXCLUDED_INBOUND_KINDS = new Set(['task']);
@@ -106,10 +112,13 @@ function findAnchor(
     .prepare(
       'SELECT id, timestamp, content FROM messages_in WHERE (id = ? OR id = ?) AND channel_type = ? AND thread_id = ? LIMIT 1',
     )
-    .get(anchorMessageId, namespaced, channelType, threadId) as { id: string; timestamp: string; content: string } | undefined;
+    .get(anchorMessageId, namespaced, channelType, threadId) as
+    | { id: string; timestamp: string; content: string }
+    | undefined;
   if (inRow) {
     const state = readInputTimeline(outDb, inRow.id);
-    if (state?.status === 'cancelled' || isCancelledInputContent(inRow.content)) throw new ForkError('anchor_not_found');
+    if (state?.status === 'cancelled' || isCancelledInputContent(inRow.content))
+      throw new ForkError('anchor_not_found');
     if (state?.queuedForNextTurn && state.status === 'queued') throw new ForkError('anchor_pending');
     return { timestamp: inRow.timestamp, direction: 'in', timelinePosition: state?.timelinePosition };
   }
@@ -117,9 +126,12 @@ function findAnchor(
   const outRow = outDb
     .prepare('SELECT timestamp, content FROM messages_out WHERE id = ? AND channel_type = ? AND thread_id = ? LIMIT 1')
     .get(anchorMessageId, channelType, threadId) as { timestamp: string; content: string } | undefined;
-  if (outRow) return {
-    timestamp: outRow.timestamp, direction: 'out', timelinePosition: outboundTimelinePosition(outRow.content),
-  };
+  if (outRow)
+    return {
+      timestamp: outRow.timestamp,
+      direction: 'out',
+      timelinePosition: outboundTimelinePosition(outRow.content),
+    };
 
   throw new ForkError('anchor_not_found');
 }
@@ -147,7 +159,7 @@ function insertRows(db: Database.Database, table: string, rows: Row[]): void {
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => '@' + c).join(', ')})`,
   );
-  const run = db.transaction((batch: Row[]) => {
+  const run = transaction(db, (batch: Row[]) => {
     for (const row of batch) stmt.run(row);
   });
   run(rows);
@@ -279,8 +291,9 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
         timelinePosition: outboundTimelinePosition(String(r.content)),
       });
     }
-    digestParts.sort((a, b) =>
-      timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition));
+    digestParts.sort(
+      (a, b) => timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition),
+    );
 
     // A fork inherits the parent's title. The container only requests a title
     // when the thread's first chat message is in the batch it is processing,
@@ -490,15 +503,24 @@ function populateForkSession(args: {
       platformId: args.platformId,
       threadId: newThreadId,
     });
-    insertRows(dstOut, 'messages_out', rethread(outRows).map((row) => ({
-      ...row, turn_id: typeof row.turn_id === 'string' && copiedTurns.has(row.turn_id) ? row.turn_id : null,
-    })));
+    insertRows(
+      dstOut,
+      'messages_out',
+      rethread(outRows).map((row) => ({
+        ...row,
+        turn_id: typeof row.turn_id === 'string' && copiedTurns.has(row.turn_id) ? row.turn_id : null,
+      })),
+    );
     for (const row of inRows) {
       const state = readInputTimeline(srcOut, String(row.id));
       if (state?.timelinePosition === undefined) continue;
-      insertRows(dstOut, 'session_state', [{
-        key: inputStateKey(String(row.id)), value: JSON.stringify(state), updated_at: args.createdAt,
-      }]);
+      insertRows(dstOut, 'session_state', [
+        {
+          key: inputStateKey(String(row.id)),
+          value: JSON.stringify(state),
+          updated_at: args.createdAt,
+        },
+      ]);
     }
 
     // Mark inherited inbound rows as already handled so the fork's first

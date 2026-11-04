@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
-import { invalidateConversation } from './conversation-events.js';
+import { publishHostChange } from './host-changes.js';
 import path from 'node:path';
 
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
@@ -14,6 +14,7 @@ import {
 import { getTurn, putTurn, linkTurnInput, type TurnRow } from './db/turns.js';
 import { isModelDurationMs } from './session-link-validate.js';
 import { log } from './log.js';
+import { transaction } from './db/transaction.js';
 
 class DurableValidationError extends Error {}
 
@@ -540,7 +541,7 @@ function applyTaskAttempt(db: Database.Database, payload: Record<string, unknown
 
 function applyOptionalTelemetry(db: Database.Database, event: DurableRunnerFrame['event']): string | undefined {
   try {
-    db.transaction(() => {
+    transaction(db, () => {
       const payload = record(event.payload);
       if (!payload) throw new DurableValidationError('invalid telemetry payload');
       if (event.type === 'usage.persist') applyUsage(db, payload);
@@ -602,7 +603,7 @@ export function applyDurableRunnerEvent(
     // DELETE journals make the receipt and host text one atomic multi-DB commit.
     if (isInputEdit)
       db.prepare('ATTACH DATABASE ? AS input_edit_host').run(dbPath(agentGroupId, sessionId, 'inbound.db'));
-    db.transaction(() => {
+    transaction(db, () => {
       const existing = db
         .prepare('SELECT sequence, event_type, event_digest FROM applied_runner_events WHERE event_id = ?')
         .get(frame.eventId) as { sequence: number; event_type: string; event_digest: string } | undefined;
@@ -726,7 +727,7 @@ export function applyDurableRunnerEvent(
       type: frame.event.type,
       error: skippedTelemetry,
     });
-  invalidateConversation(sessionId);
+  publishHostChange({ kind: 'sessions', sessionId });
   return {
     deliveryReady,
     processingReady,

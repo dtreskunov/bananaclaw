@@ -4,6 +4,13 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Explicit-resolution interaction requests.** New questions and
+  approvals remain pending until resolved or cancelled; credential requests no
+  longer receive an automatic 24-hour deadline. Reads no longer expire workflows.
+  Legacy deadlines remain enforced without reviving old requests. Host mutation
+  transactions now publish through one commit-aware change feed. See
+  [upgrade, verification and rollback](docs/ui.md#request-lifetime-upgrade).
+
 - **Finished-turn working context.** Native canonical execution history keeps
   complete portable arguments/results; later model requests can replace only
   successful exchanges from finished turns with retrievable receipts. Active,

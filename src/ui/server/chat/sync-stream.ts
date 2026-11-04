@@ -2,10 +2,10 @@ import type { SyncFrame, GlobalSyncState } from '../../shared/sync.js';
 import { SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
 
 export interface SyncStreamOptions {
-  read: (groupId: string | null) => Promise<GlobalSyncState>;
-  authorize: () => void;
-  subscribe: (invalidate: (groupId?: string) => void) => () => void;
-  deadline: () => number | null;
+  read: (groupId: string | null, refreshThreads: boolean) => Promise<GlobalSyncState>;
+  authorize: () => number | null;
+  canPublish: () => boolean;
+  subscribe: (invalidate: (groupId?: string, refreshThreads?: boolean) => void) => () => void;
   send: (frame: SyncFrame) => void;
   fail: (error: unknown) => void;
   coalesceMs?: number;
@@ -16,6 +16,7 @@ export function startSyncStream(options: SyncStreamOptions) {
   let subscription: { id: number; groupId: string | null } | null = null;
   let previous: string | null = null;
   let dirty = false;
+  let threadsDirty = false;
   let running = false;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -28,9 +29,10 @@ export function startSyncStream(options: SyncStreamOptions) {
     clearTimeout(deadlineTimer);
     unsubscribe();
   };
-  const schedule = (groupId?: string) => {
+  const schedule = (groupId?: string, refreshThreads = true) => {
     if (stopped || (groupId !== undefined && groupId !== subscription?.groupId)) return;
     dirty = true;
+    threadsDirty ||= refreshThreads;
     if (running || timer || !subscription) return;
     timer = setTimeout(() => {
       void refresh();
@@ -41,14 +43,20 @@ export function startSyncStream(options: SyncStreamOptions) {
     timer = undefined;
     if (stopped || running || !subscription) return;
     running = true;
+    const refreshThreads = threadsDirty;
     dirty = false;
+    threadsDirty = false;
     const current = subscription;
     try {
       options.authorize();
-      const data = await options.read(current.groupId);
+      const data = await options.read(current.groupId, refreshThreads);
       if (stopped) return;
-      options.authorize();
+      const deadline = options.authorize();
       if (current !== subscription) return;
+      if (!options.canPublish()) {
+        schedule();
+        return;
+      }
       const encoded = JSON.stringify(data);
       if (previous !== encoded) {
         options.send({
@@ -61,7 +69,6 @@ export function startSyncStream(options: SyncStreamOptions) {
         previous = encoded;
       }
       clearTimeout(deadlineTimer);
-      const deadline = options.deadline();
       if (deadline !== null) {
         deadlineTimer = setTimeout(() => schedule(), Math.min(2_147_483_647, Math.max(1, deadline - Date.now())));
         deadlineTimer.unref?.();
@@ -73,7 +80,7 @@ export function startSyncStream(options: SyncStreamOptions) {
       }
     } finally {
       running = false;
-      if (dirty && !stopped) schedule();
+      if (dirty && !stopped) schedule(undefined, false);
     }
   };
   unsubscribe = options.subscribe(schedule);
