@@ -34,7 +34,7 @@ describe('global synchronization stream', () => {
     f.stream.subscribe(1, null);
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames).toHaveLength(1);
-    expect(f.frames[0]).toMatchObject({ subscriptionId: 1, groupId: null, revision: 0 });
+    expect(f.frames[0]).toMatchObject({ subscriptionId: 1, groupId: null });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(f.read).toHaveBeenCalledOnce();
     f.stream.stop();
@@ -56,7 +56,7 @@ describe('global synchronization stream', () => {
     f.stream.subscribe(2, 'g');
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames).toHaveLength(2);
-    expect(f.frames[1]).toMatchObject({ subscriptionId: 2, revision: 1 });
+    expect(f.frames[1]).toMatchObject({ subscriptionId: 2 });
     f.stream.stop();
   });
 

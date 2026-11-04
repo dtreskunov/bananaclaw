@@ -7,6 +7,7 @@ import { attentionError, attentionTargets } from './attention-state';
 import { activeTurn, channelType, chatReady, groupId, messagingGroupId, threadId, threads } from './state';
 import { applyTurnState } from './stop-turn';
 import { testThread } from './conversation-test-fixtures';
+import { SYNC_PROTOCOL_VERSION } from '../../../shared/sync';
 
 let dispose = () => {};
 afterEach(() => {
@@ -64,11 +65,9 @@ it('pushes metadata and resolves refreshes without HTTP polling or overwriting a
   sockets[0].onmessage?.({
     data: JSON.stringify({
       kind: 'sync',
-      protocolVersion: 1,
-      streamId: 's',
+      protocolVersion: SYNC_PROTOCOL_VERSION,
       subscriptionId: subscription.subscriptionId,
       groupId: 'g',
-      revision: 0,
       data,
     }),
   });

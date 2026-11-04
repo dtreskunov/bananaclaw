@@ -20312,7 +20312,7 @@ function isAttentionTargets(value) {
 }
 
 // ../../shared/sync.ts
-var SYNC_PROTOCOL_VERSION = 1;
+var SYNC_PROTOCOL_VERSION = 2;
 var object2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var integer2 = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 var text2 = (value) => typeof value === "string";
@@ -20340,7 +20340,7 @@ function thread(value) {
 function isSyncFrame(value) {
   if (!object2(value)) return false;
   const data = value.data;
-  if (value.kind !== "sync" || !text2(value.streamId) || !value.streamId || !integer2(value.subscriptionId) || !integer2(value.revision) || !(value.groupId === null || text2(value.groupId)) || !object2(data) || !Array.isArray(data.approvals) || !data.approvals.every(isConversationApproval) || !isAttentionTargets(data.attention) || !optional2(data.threads, (v5) => Array.isArray(v5) && v5.every(thread)) || !optional2(data.groupAccess, (v5) => typeof v5 === "boolean") || !optional2(
+  if (value.kind !== "sync" || !integer2(value.subscriptionId) || !(value.groupId === null || text2(value.groupId)) || !object2(data) || !Array.isArray(data.approvals) || !data.approvals.every(isConversationApproval) || !isAttentionTargets(data.attention) || !optional2(data.threads, (v5) => Array.isArray(v5) && v5.every(thread)) || !optional2(data.groupAccess, (v5) => typeof v5 === "boolean") || !optional2(
     data.voiceInput,
     (v5) => object2(v5) && (v5.backend === "disabled" || v5.backend === "elevenlabs") && typeof v5.ready === "boolean" && optional2(v5.reason, text2)
   ) || value.groupId !== null && (!Array.isArray(data.threads) || typeof data.groupAccess !== "boolean" || !data.voiceInput))
@@ -20366,8 +20366,6 @@ var SyncConnection = class {
   socket = null;
   groupId = null;
   subscriptionId = 0;
-  streamId = null;
-  revision = -1;
   attempt = 0;
   stopped = false;
   retryTimer;
@@ -20379,8 +20377,6 @@ var SyncConnection = class {
     this.retryTimer = void 0;
     const socket = this.options.socket();
     this.socket = socket;
-    this.streamId = null;
-    this.revision = -1;
     this.connectTimer = setTimeout(() => {
       if (this.socket === socket) socket.close();
     }, 1e4);
@@ -20395,11 +20391,7 @@ var SyncConnection = class {
         const value = JSON.parse(event.data);
         const frame = parseSyncFrame(value);
         if (frame.subscriptionId !== this.subscriptionId || frame.groupId !== this.groupId) return;
-        if (this.streamId !== null && this.streamId !== frame.streamId) throw new Error("Unknown global sync stream");
-        if (frame.revision <= this.revision) return;
         this.options.apply(frame.data, frame.groupId);
-        this.streamId = frame.streamId;
-        this.revision = frame.revision;
         this.attempt = 0;
         if (this.pending) {
           clearTimeout(this.pending.timer);

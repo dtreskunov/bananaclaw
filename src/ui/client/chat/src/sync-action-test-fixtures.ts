@@ -26,7 +26,6 @@ export async function installSyncFixture(
     onclose: ((event: { code: number }) => void) | null = null;
     onmessage: ((event: { data: string }) => void) | null = null;
     onerror: (() => void) | null = null;
-    revision = 0;
     request: { subscriptionId: number; groupId: string | null } | null = null;
     constructor(readonly url: string) {
       sockets.push(this);
@@ -49,8 +48,6 @@ export async function installSyncFixture(
             this.receive({
               kind: 'sync',
               protocolVersion: SYNC_PROTOCOL_VERSION,
-              streamId: 'test-stream',
-              revision: this.revision++,
               subscriptionId: request.subscriptionId,
               groupId: request.groupId,
               data: {

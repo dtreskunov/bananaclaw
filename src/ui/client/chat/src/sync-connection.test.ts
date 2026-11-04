@@ -17,15 +17,13 @@ class Socket {
     this.readyState = 1;
     this.onopen?.();
   }
-  frame(subscriptionId: number, groupId: string | null, revision = 0, streamId = 'stream') {
+  frame(subscriptionId: number, groupId: string | null) {
     this.onmessage?.({
       data: JSON.stringify({
         kind: 'sync',
         protocolVersion: SYNC_PROTOCOL_VERSION,
         subscriptionId,
         groupId,
-        revision,
-        streamId,
         data: {
           approvals: [],
           attention: [],
@@ -91,17 +89,26 @@ describe('global sync browser connection', () => {
     expect(f.apply).toHaveBeenCalledOnce();
   });
 
-  it('ignores obsolete subscriptions and duplicate snapshots after rapid navigation', () => {
+  it('ignores obsolete subscriptions after rapid navigation', () => {
     const f = fixture();
     f.connection.start();
     f.sockets[0].open();
     f.connection.setGroup('old');
     f.connection.setGroup('new');
     f.sockets[0].frame(1, 'old');
-    f.sockets[0].frame(2, 'new', 3);
-    f.sockets[0].frame(2, 'new', 3);
+    f.sockets[0].frame(2, 'new');
     expect(f.apply).toHaveBeenCalledOnce();
     expect(f.apply.mock.calls[0][1]).toBe('new');
+  });
+
+  it('applies successive complete snapshots without requiring revision tracking', () => {
+    const f = fixture();
+    f.connection.start();
+    f.sockets[0].open();
+    f.sockets[0].frame(0, null);
+    f.sockets[0].frame(0, null);
+    expect(f.apply).toHaveBeenCalledTimes(2);
+    expect(f.apply.mock.calls[0]).toEqual(f.apply.mock.calls[1]);
   });
 
   it('retains the selected group and takes a fresh snapshot after reconnect', async () => {
@@ -114,8 +121,8 @@ describe('global sync browser connection', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(f.sockets).toHaveLength(2);
     f.sockets[1].open();
-    f.sockets[0].frame(1, 'g', 4);
-    f.sockets[1].frame(1, 'g', 0, 'new-stream');
+    f.sockets[0].frame(1, 'g');
+    f.sockets[1].frame(1, 'g');
     expect(f.apply).toHaveBeenCalledTimes(2);
   });
 

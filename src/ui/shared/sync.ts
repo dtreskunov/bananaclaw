@@ -15,7 +15,7 @@ export interface SyncResponse {
   groupAccess?: boolean;
 }
 
-export const SYNC_PROTOCOL_VERSION = 1;
+export const SYNC_PROTOCOL_VERSION = 2;
 export interface SyncSubscription {
   kind: 'subscribe';
   protocolVersion: typeof SYNC_PROTOCOL_VERSION;
@@ -25,9 +25,7 @@ export interface SyncSubscription {
 export interface SyncFrame {
   kind: 'sync';
   protocolVersion: typeof SYNC_PROTOCOL_VERSION;
-  streamId: string;
   subscriptionId: number;
-  revision: number;
   groupId: string | null;
   data: Omit<SyncResponse, 'conversation'>;
 }
@@ -102,10 +100,7 @@ function isSyncFrame(value: unknown): value is SyncFrame {
   const data = value.data;
   if (
     value.kind !== 'sync' ||
-    !text(value.streamId) ||
-    !value.streamId ||
     !integer(value.subscriptionId) ||
-    !integer(value.revision) ||
     !(value.groupId === null || text(value.groupId)) ||
     !object(data) ||
     !Array.isArray(data.approvals) ||

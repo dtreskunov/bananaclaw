@@ -9,7 +9,7 @@ import { removeMember } from '../../../modules/permissions/db/agent-group-member
 import { updateContainerConfigScalars, ensureContainerConfig } from '../../../db/container-configs.js';
 import { authenticate, COOKIE_NAME } from '../auth.js';
 import { createSession, deleteSession } from '../db.js';
-import { parseSyncFrame, type SyncFrame } from '../../shared/sync.js';
+import { parseSyncFrame, SYNC_PROTOCOL_VERSION, type SyncFrame } from '../../shared/sync.js';
 import { attachSyncSocket } from './sync-socket.js';
 
 let server: WebSocketServer;
@@ -59,7 +59,9 @@ async function connect(groupId: string | null = null) {
   clients.push(client);
   client.on('message', (raw) => frames.push(parseSyncFrame(JSON.parse(raw.toString()))));
   await once(client, 'open');
-  client.send(JSON.stringify({ kind: 'subscribe', protocolVersion: 1, subscriptionId: 1, groupId }));
+  client.send(
+    JSON.stringify({ kind: 'subscribe', protocolVersion: SYNC_PROTOCOL_VERSION, subscriptionId: 1, groupId }),
+  );
   await vi.waitFor(() => expect(frames).toHaveLength(1));
   return client;
 }

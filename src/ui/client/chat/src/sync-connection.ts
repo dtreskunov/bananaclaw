@@ -12,8 +12,6 @@ export class SyncConnection {
   private socket: WebSocket | null = null;
   private groupId: string | null = null;
   private subscriptionId = 0;
-  private streamId: string | null = null;
-  private revision = -1;
   private attempt = 0;
   private stopped = false;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -33,8 +31,6 @@ export class SyncConnection {
     this.retryTimer = undefined;
     const socket = this.options.socket();
     this.socket = socket;
-    this.streamId = null;
-    this.revision = -1;
     this.connectTimer = setTimeout(() => {
       if (this.socket === socket) socket.close();
     }, 10_000);
@@ -49,11 +45,7 @@ export class SyncConnection {
         const value: unknown = JSON.parse(event.data);
         const frame = parseSyncFrame(value);
         if (frame.subscriptionId !== this.subscriptionId || frame.groupId !== this.groupId) return;
-        if (this.streamId !== null && this.streamId !== frame.streamId) throw new Error('Unknown global sync stream');
-        if (frame.revision <= this.revision) return;
         this.options.apply(frame.data, frame.groupId);
-        this.streamId = frame.streamId;
-        this.revision = frame.revision;
         this.attempt = 0;
         if (this.pending) {
           clearTimeout(this.pending.timer);

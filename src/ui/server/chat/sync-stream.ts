@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { SyncFrame, SyncResponse } from '../../shared/sync.js';
 import { SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
 
@@ -14,9 +13,7 @@ export interface SyncStreamOptions {
 
 /** Full authoritative snapshots; one in-flight build and one dirty bit, never a queue. */
 export function startSyncStream(options: SyncStreamOptions) {
-  const streamId = randomUUID();
   let subscription: { id: number; groupId: string | null } | null = null;
-  let revision = 0;
   let previous: string | null = null;
   let dirty = false;
   let running = false;
@@ -57,10 +54,8 @@ export function startSyncStream(options: SyncStreamOptions) {
         options.send({
           kind: 'sync',
           protocolVersion: SYNC_PROTOCOL_VERSION,
-          streamId,
           subscriptionId: current.id,
           groupId: current.groupId,
-          revision: revision++,
           data,
         });
         previous = encoded;

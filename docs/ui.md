@@ -1344,7 +1344,7 @@ response; metadata explicitly distinguishes provisional, partial, final and
 unavailable reports. Missing usage never becomes fabricated zero tokens.
 
 The app also keeps one authenticated, same-origin global socket at
-`/ui/chat/api/sync/ws`, independent of the selected conversation. Its version-1
+`/ui/chat/api/sync/ws`, independent of the selected conversation. Its version-2
 `subscribe` requests carry a monotonic `subscriptionId` and a nullable `groupId`.
 Global approvals and oldest-first attention are always included, even with no
 group selected. Selecting a group adds its authorized thread list and voice
@@ -1353,7 +1353,9 @@ Global and conversation upgrades both require the browser Origin to match
 `UI_BASE_URL`; configure that external URL when using a reverse proxy.
 
 The server sends complete authoritative `sync` snapshots carrying a protocol
-version, stream ID, revision and subscription ID. Unchanged background state
+version and subscription ID. The ordered socket and subscription identity are
+sufficient for full replacements; only conversation deltas need stream revisions.
+Unchanged background state
 sends nothing; an explicit refresh always acknowledges with a fresh snapshot.
 Snapshots replace metadata slices, not conversation state or client-only blank
 threads. They need no durable replay or contiguous-revision delta reduction.
