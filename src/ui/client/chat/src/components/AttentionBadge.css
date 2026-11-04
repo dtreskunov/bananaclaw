@@ -57,3 +57,15 @@
 .attention-navigation[data-stale="true"] .attention-badge { border-style: dashed; }
 [data-attention-target]:focus,
 [data-attention-target]:focus-within { outline: 2px solid var(--warning-border); outline-offset: 3px; }
+
+@media (max-width: 720px) {
+  .app-header:has(.attention-navigation) { gap: 4px; padding-left: 8px; padding-right: 8px; }
+  .app-header:has(.attention-navigation) .icon-btn { min-width: 32px; min-height: 36px; padding: 4px; font-size: 18px; }
+  .app-header:has(.attention-navigation) .tab-bar-dropdown { padding-inline: 6px; gap: 4px; }
+  .app-header:has(.attention-navigation) .tab-bar-dropdown .attention-badge { display: none; }
+  .attention-navigation { gap: 2px; }
+}
+@media (max-width: 360px) {
+  /* The thread panel retains the New thread action on narrow phones. */
+  .app-header:has(.attention-navigation) [aria-label="New thread"] { display: none; }
+}

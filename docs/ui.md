@@ -56,6 +56,10 @@ terminal and expired requests are not input requests. Failures retain the last
 known counts with a stale indication; unknown status is not shown as zero.
 This is independent of whether an agent is currently running or disconnected.
 Private credential selections and recovery state are never included.
+On phones, counts stay in the expanded agent picker rather than duplicating the
+header total in its collapsed button. At very narrow widths the New thread
+shortcut stays available in the Threads panel so the agent name and input
+navigator remain usable.
 
 ## Enable
 
