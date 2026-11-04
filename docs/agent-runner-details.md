@@ -448,6 +448,17 @@ completed, a nonzero exit is an error, a timeout or external signal is unknown,
 and explicit cancellation is interrupted. Unknown/interrupted results warn
 that side effects may have occurred. Stored legacy text results are unchanged.
 
+### Native Provider: Execution history and working context
+
+Portable canonical history is distinct from model working context. Successful
+tool exchanges from explicitly finished turns can be replaced with recoverable
+execution receipts, reusing the private result archive and 16 KiB retrieval
+machinery. Current-turn exchanges, failures/unknown outcomes, media and tool/skill
+discovery remain visible. Projection never rewrites the canonical transcript or
+changes checkpoint references. Finished boundaries are persisted only after
+the result consumer continues, copied only through a fork's anchor, and removed
+when rollback crosses them. Legacy turns without boundaries stay inline.
+
 ### Native Provider: Automatic and context-overflow compaction
 
 The native provider automatically compacts at **75% context utilization**,

@@ -20,6 +20,28 @@ afterEach(() => {
 });
 
 describe('NativeStore', () => {
+  it('marks only explicitly finished turns, persists them, and keeps fork/rollback boundaries exact', () => {
+    const conversation = store.createConversation();
+    const first = store.append(conversation, [{ role: 'user', content: 'first input' }]);
+    const middle = store.append(conversation, [{ role: 'assistant', content: 'working notes' }]);
+    const last = store.append(conversation, [{ role: 'assistant', content: 'final answer' }]);
+    expect(store.contextEntries(conversation).some(entry => entry.finished)).toBe(false);
+    store.finishTurn(conversation, first, last);
+    store.append(conversation, [{ role: 'user', content: 'active input' }]);
+    store.close();
+    store = new NativeStore(path.join(root, 'state.db'));
+    expect(store.contextEntries(conversation).map(entry => !!entry.finished)).toEqual([true, true, true, false]);
+    const early = store.fork(conversation, middle)!;
+    const late = store.fork(conversation, last)!;
+    expect(store.contextEntries(early).some(entry => entry.finished)).toBe(false);
+    expect(store.contextEntries(late).every(entry => entry.finished)).toBe(true);
+    store.replaceAfter(conversation, middle, [{ role: 'assistant', content: 'replaced final answer' }]);
+    expect(store.contextEntries(conversation).some(entry => entry.finished)).toBe(false);
+    for (const [start, end] of [['no', last], [last, first], [first, '99999']])
+      expect(() => store.finishTurn(conversation, start, end)).toThrow('Invalid finished-turn boundary');
+    expect(() => store.finishTurn(early, first, last)).toThrow('Invalid finished-turn boundary');
+  });
+
   it('persists model-scoped media quarantines without changing transcripts or leaking future confirmations into forks', () => {
     const conversation = store.createConversation();
     const media: ModelMessage = { role: 'user', content: [

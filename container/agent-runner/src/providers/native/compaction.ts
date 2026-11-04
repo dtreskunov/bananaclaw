@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import { NativeStore, type NativeContextEntry } from './store.js';
+import { boundToolResults } from './tool-results.js';
 
 export const MAX_COMPACTION_ATTEMPTS = 2;
 export const COMPACTION_THRESHOLD = 0.75;
@@ -232,7 +233,10 @@ export async function compactNativeContext(options: {
   const { store, conversation, protectedInputs, signal } = options;
   signal.throwIfAborted();
   const plan = planCompaction(store.contextEntries(conversation), protectedInputs, options.attempt === 1 ? 3 : 1);
-  const source = plan.prefix.map((entry) => transcript(entry.message)).join('\n');
+  const prefix = plan.prefix.map(entry => ({
+    ...entry, message: boundToolResults([entry.message], text => store.archiveResult(text))[0],
+  }));
+  const source = prefix.map((entry) => transcript(entry.message)).join('\n');
   const window = options.contextWindow ?? 32_768;
   const maxOutput = options.maxOutputTokens ?? 8192;
   if (!Number.isFinite(window) || window <= 0 || !Number.isFinite(maxOutput) || maxOutput < 1) {
@@ -240,7 +244,7 @@ export async function compactNativeContext(options: {
   }
   const leafBudget = summaryBudget(window, Math.floor(maxOutput), false, options.reasoning === true);
   const finalBudget = summaryBudget(window, Math.floor(maxOutput), true, options.reasoning === true);
-  const chunks = transcriptChunks(plan.prefix, leafBudget.sourceBytes);
+  const chunks = transcriptChunks(prefix, leafBudget.sourceBytes);
   let leafChunks = chunks.length;
   const sourceBytes = Buffer.byteLength(source);
   if (leafChunks > MAX_COMPACTION_LEAVES) {

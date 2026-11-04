@@ -1,4 +1,6 @@
 import type { ModelMessage } from 'ai';
+import type { NativeContextEntry } from './store.js';
+import { toolActivityFields } from '../tool-activity.js';
 
 type ModelToolOutput = Extract<Extract<ModelMessage, { role: 'tool' }>['content'][number], { type: 'tool-result' }>['output'];
 export const MAX_TOOL_TEXT_BYTES = 16 * 1024;
@@ -28,4 +30,59 @@ export function boundToolResults(messages: ModelMessage[], archive: (complete: s
       ...part, output: boundedOutput(part.output, archive),
     }),
   });
+}
+
+function successfulOutput(output: ModelToolOutput): boolean {
+  if (output.type === 'content') return output.value.every((part) => part.type === 'text');
+  if (output.type === 'json' && output.value && typeof output.value === 'object' && !Array.isArray(output.value)) {
+    if ('isError' in output.value && output.value.isError === true) return false;
+    if ('status' in output.value) return output.value.status === 'completed';
+  }
+  return output.type === 'text' || output.type === 'json';
+}
+
+function completedExchange(group: NativeContextEntry[]) {
+  const assistant = group[0].message;
+  if (!group.every(item => item.finished) || assistant.role !== 'assistant' || !Array.isArray(assistant.content) ||
+      assistant.content.some(part => part.type !== 'text' && part.type !== 'tool-call')) return null;
+  const calls = assistant.content.filter(part => part.type === 'tool-call');
+  const results = group.flatMap(({ message }) => message.role === 'tool' ? message.content : []);
+  if (!calls.length || results.length !== calls.length || new Set(calls.map(call => call.toolCallId)).size !== calls.length)
+    return null;
+  const safe = calls.every(call => {
+    const result = results.find(part => part.type === 'tool-result' && part.toolCallId === call.toolCallId);
+    return result?.type === 'tool-result' && result.toolName === call.toolName && successfulOutput(result.output) &&
+      call.toolName !== 'skill' && call.toolName !== 'tool_search' &&
+      !call.toolName.startsWith('mcp__nanoclaw__') &&
+      (call.toolName !== 'bash' || result.output.type === 'json');
+  });
+  return safe ? { assistant, calls, text: assistant.content.filter(part => part.type === 'text') } : null;
+}
+
+export function finishedToolReceipts(entries: NativeContextEntry[], archive: (complete: string) => string): ModelMessage[] {
+  const messages: ModelMessage[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const group = [entries[i]];
+    while (entries[i + group.length]?.message.role === 'tool') group.push(entries[i + group.length]);
+    const original = group.map(item => item.message);
+    const complete = completedExchange(group);
+    i += group.length - 1;
+    if (!complete) { messages.push(...original); continue; }
+    const details = complete.calls.map(call => {
+      const { detail } = toolActivityFields(call.toolName, call.input);
+      return `- ${call.toolName} (${call.toolCallId}): completed${detail ? `; ${detail.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`;
+    }).join('\n');
+    const serialized = JSON.stringify({ type: 'json', value: original }, null, 2);
+    if (Buffer.byteLength(serialized) <= Buffer.byteLength(details) + 512) {
+      messages.push(...original);
+    } else {
+      const filename = archive(serialized);
+      messages.push({ ...complete.assistant, content: [
+        ...complete.text,
+        { type: 'text', text: `[Finished-turn tool receipt; execution already completed. Do not repeat completed actions.]\n` +
+          `${details}\nFull arguments/results: ${filename}. Retrieve only the relevant lines or fields before relying on omitted details.` },
+      ] });
+    }
+  }
+  return messages;
 }

@@ -1,6 +1,6 @@
 import type { ModelMessage, ToolSet } from 'ai';
 import { NativeStore } from './store.js';
-import type { ActivityStep } from '../types.js';
+import type { ActivityStep, ProviderEvent } from '../types.js';
 import { nativeToolOutcome, toolActivityFields } from '../tool-activity.js';
 
 export const INTERRUPTED_TOOL =
@@ -25,6 +25,7 @@ export class NativeTurnJournal {
   private readonly completedActivity: ActivityStep[] = [];
   private text = '';
   private anchor: string;
+  private readonly firstInputRef: string;
   private readonly protectedInputs = new Set<string>();
   checkpoint: string;
 
@@ -33,7 +34,7 @@ export class NativeTurnJournal {
     private conversation: string,
     incoming: ModelMessage,
   ) {
-    this.anchor = this.checkpoint = store.append(conversation, [incoming]);
+    this.firstInputRef = this.anchor = this.checkpoint = store.append(conversation, [incoming]);
     this.protectedInputs.add(this.anchor);
   }
 
@@ -182,6 +183,11 @@ export class NativeTurnJournal {
 
   finish(messages: ModelMessage[]): string {
     return (this.checkpoint = this.store.replaceAfter(this.conversation, this.anchor, messages));
+  }
+
+  acknowledgeResult(result: Extract<ProviderEvent, { type: 'result' }>, signal: AbortSignal): void {
+    if (!signal.aborted && (result.replies?.length || result.silence !== undefined))
+      this.store.finishTurn(this.conversation, this.firstInputRef, this.checkpoint);
   }
 
   /** Seal a completed SDK segment before appending another input. */

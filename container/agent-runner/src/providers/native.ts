@@ -40,7 +40,7 @@ import {
   noReplyReason,
 } from './native/reply.js';
 import { DeferredMcpTools, mcpToolSearchMode } from './native/tool-search.js';
-import { boundToolResults } from './native/tool-results.js';
+import { boundToolResults, finishedToolReceipts } from './native/tool-results.js';
 
 function log(message: string): void {
   console.error(`[native-provider] ${message}`);
@@ -303,9 +303,11 @@ export class NativeProvider implements AgentProvider {
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
-    const project = (messages: ModelMessage[]) =>
-      boundToolResults(messages, (complete) => store.archiveResult(complete));
-    const history = (messages: ModelMessage[]) => project(portableHistory(messages));
+    const archive = (complete: string) => store.archiveResult(complete);
+    const project = (messages: ModelMessage[]) => boundToolResults(messages, archive);
+    const history = (conversation: string) => project(portableHistory(
+      finishedToolReceipts(store.contextEntries(conversation), archive),
+    ));
     const seenBrokerGuidance = new Set<string>();
     const pendingBrokerGuidance = new Set<string>();
     const mcpManager = lazyMcpManager(options.mcpServers, input.cwd, (guidance) => {
@@ -353,7 +355,7 @@ export class NativeProvider implements AgentProvider {
               const todoState = new NativeTodoState();
               const configuredModel = options.model ?? process.env.NATIVE_MODEL;
               if (!configuredModel) throw new Error('native requires a canonical model setting');
-              const prior = history(store.contextMessages(continuation));
+              const prior = history(continuation);
               const turnJournal = new NativeTurnJournal(store, continuation, { role: 'user', content: turn.text });
               journal = turnJournal;
               abortController.signal.throwIfAborted();
@@ -443,7 +445,7 @@ export class NativeProvider implements AgentProvider {
                         reasoningTokens: usage.outputTokenDetails?.reasoningTokens };
                     },
                   });
-                  messages.splice(0, messages.length, ...history(store.contextMessages(conversation)));
+                  messages.splice(0, messages.length, ...history(conversation));
                   compactionPolicy.compacted();
                   yield* flushCallUsage();
                   yield { type: 'progress', step: {
@@ -479,7 +481,7 @@ export class NativeProvider implements AgentProvider {
               const inputStarted = Date.now();
               const incoming = yield* prepareInput(turn.text, turn.files);
               journal.updateInput(incoming);
-              messages.splice(0, messages.length, ...history(store.contextMessages(continuation)));
+              messages.splice(0, messages.length, ...history(continuation));
               const inputPreparationMs = Date.now() - inputStarted;
               const discoveryStarted = Date.now();
               const lazyServers = !turn.toolsDisabled && toolSearchMode === 'always'
@@ -640,7 +642,7 @@ export class NativeProvider implements AgentProvider {
                   continue;
                 }
 
-                const responseMessages = project((await result.responseMessages) as ModelMessage[]);
+                const responseMessages = (await result.responseMessages) as ModelMessage[];
                 await journal.settle();
                 yield* flushCallUsage();
                 if (abortController.signal.aborted) throw new Error('Turn stopped');
@@ -656,7 +658,7 @@ export class NativeProvider implements AgentProvider {
                     detail: 'The original media is preserved. Repair or regenerate it before loading it again.',
                   } };
                 }
-                messages.push(...responseMessages);
+                messages.push(...project(responseMessages));
                 const steps = await result.steps;
                 firstStep = false;
                 if (!toolMediaPressure)
@@ -727,13 +729,15 @@ export class NativeProvider implements AgentProvider {
               // final result; guidance arriving after this belongs to a later turn.
               active = false;
               yield { type: 'checkpoint', ref: checkpoint };
-              yield {
+              const result: Extract<ProviderEvent, { type: 'result' }> = {
                 type: 'result',
                 text: null,
                 finishReason,
                 replies: reply ? [{ text: reply }] : [],
                 ...(!reply && silence !== null ? { silence } : {}),
               };
+              yield result;
+              turnJournal.acknowledgeResult(result, abortController.signal);
             } catch (error) {
               active = false;
               yield* flushCallUsage();
