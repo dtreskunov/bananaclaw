@@ -1,4 +1,4 @@
-import { APICallError, isStepCount, streamText, wrapLanguageModel, type LanguageModelCallEndEvent, type LanguageModelMiddleware, type ModelMessage, type ToolSet } from 'ai';
+import { APICallError, RetryError, isStepCount, streamText, wrapLanguageModel, type LanguageModelCallEndEvent, type LanguageModelMiddleware, type ModelMessage, type ToolSet } from 'ai';
 
 import { registerProvider } from './provider-registry.js';
 import { loadConfig } from '../config.js';
@@ -27,7 +27,7 @@ import { NativeSkillRegistry } from './native/skills.js';
 import { NativeStore } from './native/store.js';
 import { INTERRUPTED_TOOL, NativeTurnJournal } from './native/turn-journal.js';
 import {
-  compactNativeContext, COMPACTION_INSTRUCTIONS, CompactionSummaryError, createCompactionPolicy, isContextOverflow, type NativeCompactionPlan,
+  compactNativeContext, COMPACTION_INSTRUCTIONS, createCompactionPolicy, isContextOverflow, type NativeCompactionPlan,
 } from './native/compaction.js';
 import { createNativeTools } from './native/tools.js';
 import { openAiToolMedia } from './native/tool-media.js';
@@ -48,6 +48,34 @@ function log(message: string): void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseErrorBody(text: unknown): Record<string, unknown> {
+  if (typeof text !== 'string') return {};
+  try {
+    const body: unknown = JSON.parse(text);
+    if (body && typeof body === 'object' && 'error' in body &&
+        body.error && typeof body.error === 'object') return body.error as Record<string, unknown>;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+  }
+  return {};
+}
+
+function providerErrorMessage(error: unknown): string {
+  if (RetryError.isInstance(error) && APICallError.isInstance(error.lastError)) error = error.lastError;
+  const message = errorMessage(error);
+  if (!APICallError.isInstance(error) || message !== 'Provider returned error') return message;
+  const status = error.statusCode ? ` (HTTP ${error.statusCode})` : '';
+  const { metadata } = parseErrorBody(error.responseBody);
+  if (!metadata || typeof metadata !== 'object') return `${message}${status}`;
+  const provider = 'provider_name' in metadata && typeof metadata.provider_name === 'string'
+    ? `${metadata.provider_name}: ` : '';
+  const raw = parseErrorBody('raw' in metadata ? metadata.raw : undefined);
+  const detail = typeof raw.message === 'string' && raw.message.trim() ? raw.message : message;
+  const sharedPool = 'limit_source' in metadata && metadata.limit_source === 'upstream_provider_shared_pool'
+    ? '. The free endpoint shared upstream pool is rate-limited; retry later or select another model.' : '';
+  return `${provider}${detail}${status}${sharedPool}`;
 }
 
 function quotaExhausted(error: unknown): boolean {
@@ -750,9 +778,9 @@ export class NativeProvider implements AgentProvider {
               }
               yield {
                 type: 'error',
-                message: errorMessage(error),
-                retryable: !(error instanceof CompactionSummaryError) && !quotaExhausted(error) &&
-                  /timeout|429|5\d\d|network|fetch/i.test(errorMessage(error)),
+                message: providerErrorMessage(error),
+                // SDK retries are exhausted; no further attempt will follow this event.
+                retryable: false,
               };
             } finally {
               active = false;

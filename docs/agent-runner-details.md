@@ -320,6 +320,17 @@ class OpenCodeProvider implements AgentProvider {
 - System prompt injected via `<system>` prefix in prompt text
 - No resume support (sessions are always new or reused by ID)
 
+### Native Provider: Errors
+
+The AI SDK retries transient model-request failures before the native provider
+emits a terminal error. Terminal errors use `retryable: false` so the runner
+surfaces them rather than waiting for a retry that will never arrive.
+OpenRouter's generic `Provider returned error` includes the HTTP status,
+upstream provider name and structured upstream error message when available.
+Shared free-endpoint rate limits include guidance to retry later or select
+another model. Raw response bodies, request payloads and account IDs are not
+copied into the notice.
+
 ### Native Provider: File and Shell Tools
 
 The native provider's `read`, `write`, and `edit` tools accept absolute paths

@@ -65,7 +65,7 @@ let rejectedMediaData: string[];
 let mediaRejectionStatus: number;
 let rejectMediaRetry: boolean;
 let mediaRetryFailureStatus: number;
-let apiFailures: Array<{ status: number; message: string }>;
+let apiFailures: Array<{ status: number; message: string; body?: unknown }>;
 
 const haveAudioTools = ['ffmpeg', 'ffprobe'].every(
   (executable) => spawnSync(executable, ['-version'], { stdio: 'ignore' }).status === 0,
@@ -143,7 +143,7 @@ beforeEach(() => {
       requestHeaders.push(request.headers);
       requests.push((await request.json()) as Record<string, unknown>);
       const failure = apiFailures.shift();
-      if (failure) return Response.json({
+      if (failure) return Response.json(failure.body ?? {
         type: 'error', error: { type: 'rate_limit_error', message: failure.message },
       }, { status: failure.status });
       const isCompaction = JSON.stringify(requests.at(-1)).includes(COMPACTION_INSTRUCTIONS);
@@ -361,6 +361,64 @@ describe('NativeProvider', () => {
     expect(requests).toHaveLength(2);
     expect(events.some(event => event.type === 'error')).toBe(false);
     expect(replyTexts(events).flat()).toContain('hello from stub');
+  }, 15_000);
+
+  it('surfaces the structured upstream cause without dumping the response body', async () => {
+    apiFailures = [{
+      status: 400,
+      message: 'Provider returned error',
+      body: { error: { message: 'Provider returned error', code: 400, metadata: {
+        provider_name: 'Google AI Studio',
+        raw: JSON.stringify({ error: {
+          code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT',
+        }, request: 'PRIVATE_REQUEST' }),
+      } }, user_id: 'PRIVATE_USER' },
+    }];
+    const events = await collect(new NativeProvider({ model: 'local/stub' }));
+    expect(requests).toHaveLength(1);
+    expect(events).toContainEqual({
+      type: 'error', retryable: false,
+      message: 'Google AI Studio: Request contains an invalid argument. (HTTP 400)',
+    });
+    expect(JSON.stringify(events)).not.toContain('PRIVATE_');
+  });
+
+  it.each([
+    undefined,
+    {},
+    { raw: 'PRIVATE_RAW_RESPONSE', provider_name: 'Upstream' },
+    { raw: JSON.stringify({ request: 'PRIVATE_REQUEST' }), provider_name: 'Upstream' },
+    ...[null, [], { error: null }, { error: { message: 42 } }, { error: { message: ' ' } }].map(
+      raw => ({ raw: JSON.stringify(raw), provider_name: 'Upstream' }),
+    ),
+  ])('keeps generic errors actionable when metadata has no structured cause: %j', async metadata => {
+    apiFailures = [{
+      status: 400, message: 'Provider returned error',
+      body: { error: { message: 'Provider returned error', code: 400, metadata } },
+    }];
+    const events = await collect(new NativeProvider({ model: 'local/stub' }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error', retryable: false, message: expect.stringContaining('Provider returned error (HTTP 400)'),
+    }));
+    expect(JSON.stringify(events)).not.toContain('PRIVATE_');
+  });
+
+  it.each([429, 503])('surfaces a terminal HTTP %i after SDK retries are exhausted', async status => {
+    apiFailures = Array.from({ length: 3 }, () => ({
+      status, message: 'Provider returned error',
+      body: { error: { message: 'Provider returned error', code: status, metadata: {
+        provider_name: 'Google AI Studio',
+        ...(status === 429 ? { limit_source: 'upstream_provider_shared_pool', raw: 'PRIVATE_RAW_RESPONSE' } : {}),
+      } } },
+    }));
+    const events = await collect(new NativeProvider({ model: 'local/stub' }));
+    expect(requests).toHaveLength(3);
+    expect(events).toContainEqual({
+      type: 'error', retryable: false,
+      message: `Google AI Studio: Provider returned error (HTTP ${status})` +
+        (status === 429 ? '. The free endpoint shared upstream pool is rate-limited; retry later or select another model.' : ''),
+    });
+    expect(JSON.stringify(events)).not.toContain('PRIVATE_');
   }, 15_000);
 
   it('projects large results consistently on the wire and in history', async () => {
