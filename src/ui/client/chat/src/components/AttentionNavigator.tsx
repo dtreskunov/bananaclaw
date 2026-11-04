@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'preact/hooks';
 import {
   attentionError,
-  attentionPosition,
   attentionSelection,
   attentionTargets,
   matchesAttentionLocation,
@@ -10,11 +9,6 @@ import { groupId, threadId, channelType, messagingGroupId } from '../state';
 import { conversationState } from '../conversation-state';
 import { navigateAttention } from '../actions';
 import { AttentionBadge } from './AttentionBadge';
-
-const DIRECTIONS = [
-  { direction: -1, label: 'Previous input request', icon: '\u2039' },
-  { direction: 1, label: 'Next input request', icon: '\u203A' },
-] as const;
 
 export function AttentionNavigator() {
   const targets = attentionTargets.value;
@@ -56,54 +50,27 @@ export function AttentionNavigator() {
   ]);
   const count = targets?.length;
   if (!count && !error) return null;
-  const position = targets ? attentionPosition(targets, selection?.id ?? null, location) : -1;
-  const disabled = !!error || count === 1;
   const title = error
     ? `Input status unavailable: ${error}. Showing last known requests.`
-    : 'Requests needing your input';
+    : `${count} requests need your input. Open next newest request.`;
   return (
-    <div
+    <button
+      type="button"
       class="attention-navigation"
       data-stale={error ? 'true' : undefined}
-      role="group"
       aria-label={
         error
           ? `Input request status unavailable. ${count ?? 'Unknown'} last known requests.`
-          : 'Requests needing your input'
+          : `${count} requests need your input. Open next newest request.`
       }
       title={title}
+      disabled={!!error || !count}
+      onClick={() => { void navigateAttention(); }}
     >
-      <AttentionBadge value={position < 0 ? '\u2014' : position + 1} neutral label="Current request position" />
-      <span aria-hidden="true">of</span>
-      <button
-        type="button"
-        class="attention-open"
-        aria-label="Open input request"
-        title={title}
-        disabled={!!error || !count}
-        onClick={() => {
-          void navigateAttention(0);
-        }}
-      >
-        <AttentionBadge
-          value={count ?? '?'}
-          label={count === undefined ? 'Input request count unavailable' : `${count} requests need your input`}
-        />
-      </button>
-      {DIRECTIONS.map(({ direction, label, icon }) => (
-        <button
-          key={direction}
-          type="button"
-          aria-label={label}
-          title={label}
-          disabled={disabled}
-          onClick={() => {
-            void navigateAttention(direction);
-          }}
-        >
-          {icon}
-        </button>
-      ))}
-    </div>
+      <AttentionBadge
+        value={count ?? '?'}
+        label={count === undefined ? 'Input request count unavailable' : `${count} requests need your input`}
+      />
+    </button>
   );
 }

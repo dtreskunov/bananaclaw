@@ -311,11 +311,14 @@ The host/browser sync contract is shared, with no waiting-state table, copied
 lifecycle, persistent counters, new poller, runner change or storage migration.
 
 One shared amber badge counts requests on agent tabs, the mobile agent picker
-and thread rows. The compact header is a neutral position badge, plain `of`,
-an amber total and previous/next chevrons. The total opens the selected/first
-request, including the single-request case. Navigation uses existing routes and
-forms, preserves exact non-web context and focuses a request once without
-stealing focus on later snapshots. Manual request focus updates the position.
+and thread rows. A single clickable amber total floats over the transcript above
+the composer, with no position indicator or additional controls. It opens the
+newest request first, cycles through older requests and wraps. A thread badge
+always opens the newest request in that exact thread. Navigation uses existing
+routes and forms, preserves exact non-web context and focuses a request once
+without stealing focus on later snapshots. Manual request focus updates the
+navigation cursor. Newest-first presentation is client-only; the server's stable
+oldest-first contract is unchanged.
 
 Counts derive from the same authoritative list and do not clear when viewed or
 on HTTP acknowledgement. Refresh errors retain last-known information instead

@@ -5,7 +5,6 @@ import { startNewThread } from '../actions';
 import { BRAND } from '../brand';
 import { GroupStrip } from './GroupPicker';
 import { UserMenu } from './UserMenu';
-import { AttentionNavigator } from './AttentionNavigator';
 
 export function Header() {
   return (
@@ -26,7 +25,6 @@ export function Header() {
         onClick={startNewThread}
       ><span class="plus-glyph" aria-hidden="true">+</span></button> : null}
       <GroupStrip />
-      <AttentionNavigator />
       <UserMenu />
       {!credentialsOpen.value ? <button
         type="button"

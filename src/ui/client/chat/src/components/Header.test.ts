@@ -5,6 +5,7 @@ import { startNewThread } from '../actions';
 import { GroupStrip } from './GroupPicker';
 import { Header } from './Header';
 import { UserMenu } from './UserMenu';
+import { AttentionNavigator } from './AttentionNavigator';
 
 vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -28,6 +29,9 @@ afterEach(() => {
 });
 
 describe('mobile header new thread', () => {
+  it('leaves attention navigation in the transcript rather than the header', () => {
+    expect(Header().props.children.some((child: VNode) => child?.type === AttentionNavigator)).toBe(false);
+  });
   it.each([false, true])('keeps account navigation in the user menu when Credentials is open=%s', (open) => {
     credentialsOpen.value = open;
     const children = Header().props.children;

@@ -5,8 +5,9 @@ All notable changes to NanoClaw will be documented in this file.
 ## [Unreleased]
 
 - **Input attention.** Shared amber request counts on agent tabs, mobile picker
-  and thread rows; a compact neutral-position/amber-total header navigator opens
-  existing request controls across agents and threads. Counts are authorized
+  and thread rows; a single floating count badge cycles newest-first through
+  existing request controls across agents and threads. Clicking a thread badge
+  opens its newest request. Counts are authorized
   canonical projections, not unread flags or another agent lifecycle.
 
 - **Acyclic conversation reads and UI configuration.** Authorized context,

@@ -42,12 +42,12 @@ viewer can act on, not every request they can read.
 Read-only references without a requesting thread or available response controls
 remain visible in the existing UI but do not inflate these actionable counts.
 
-The compact header shows a neutral current-position badge, plain **of**, an
-amber total, and previous/next chevrons. Navigation wraps through the ordered
-requests and focuses the existing question or approval card. The total is also
-clickable so a single request remains reachable when both chevrons are disabled.
-With no requests the control is hidden. No dropdown or duplicate request form
-is introduced.
+A single amber total floats over the transcript, just above the composer. It
+has no position indicator or other controls. Clicking it starts at the newest
+request, then cycles through older requests and wraps. Clicking a thread's badge
+always opens its newest request. Navigation focuses the existing question or
+approval card, preserves the exact thread route, and does not steal focus on
+later refreshes. With no requests the floating control is hidden.
 
 Attention comes from the canonical pending interactions through the existing
 global metadata sync, including off-screen agents. Viewing a request does not
@@ -56,10 +56,8 @@ terminal and expired requests are not input requests. Failures retain the last
 known counts with a stale indication; unknown status is not shown as zero.
 This is independent of whether an agent is currently running or disconnected.
 Private credential selections and recovery state are never included.
-On phones, counts stay in the expanded agent picker rather than duplicating the
-header total in its collapsed button. At very narrow widths the New thread
-shortcut stays available in the Threads panel so the agent name and input
-navigator remain usable.
+The browser reverses the server's stable oldest-first attention references for
+newest-first navigation; no additional backend state or polling is needed.
 
 ## Enable
 

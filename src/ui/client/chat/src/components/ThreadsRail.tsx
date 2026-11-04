@@ -16,6 +16,7 @@ import {
   clearSearch,
   openTaskPanel,
   threadCtxOf,
+  navigateAttention,
 } from '../actions';
 import { requestChoice, requestConfirm } from './PromptModal';
 import { tsKey } from '../utils';
@@ -24,14 +25,24 @@ import { TrashIcon } from './ActionIcons';
 import { RelativeTime } from './RelativeTime';
 import type { Thread, SearchResult } from '../types';
 import { AttentionBadge } from './AttentionBadge';
-import { threadAttentionCount } from '../attention-state';
+import { attentionError, threadAttentionCount } from '../attention-state';
 
 function ThreadAttention({ thread }: { thread: Thread }) {
-  const count = threadAttentionCount({
+  const location = {
     agentGroupId: groupId.value, threadId: thread.threadId,
     channelType: thread.channelType || 'web', messagingGroupId: thread.messagingGroupId ?? null,
-  });
-  return count > 0 ? <AttentionBadge value={count} label={`${count} requests need your input`} /> : null;
+  };
+  const count = threadAttentionCount(location);
+  return count > 0 ? <button type="button" class="thread-attention"
+    disabled={!!attentionError.value}
+    aria-label={`${count} requests need your input. Open newest request in ${thread.title}`}
+    title="Open newest input request in this thread"
+    onClick={(event: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      void navigateAttention(location);
+    }}>
+    <AttentionBadge value={count} label={`${count} requests need your input`} />
+  </button> : null;
 }
 
 function ThreadRow({ t }: { t: Thread }) {

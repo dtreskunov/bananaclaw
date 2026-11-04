@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { toChildArray } from 'preact';
 import { useEffect } from 'preact/hooks';
 const hooks = vi.hoisted(() => ({ reference: undefined as { current: number | null } | undefined }));
 vi.hoisted(() => {
@@ -10,6 +9,11 @@ vi.mock('preact/hooks', async (original) => ({
   useRef: <T>(current: T) => hooks.reference ?? { current },
   useEffect: vi.fn(),
 }));
+vi.mock('../actions', async (original) => ({
+  ...(await original<typeof import('../actions')>()),
+  navigateAttention: vi.fn().mockResolvedValue(true),
+}));
+import { navigateAttention } from '../actions';
 import { attentionError, attentionSelection, attentionTargets } from '../attention-state';
 import { groupId, threadId, channelType, messagingGroupId } from '../state';
 import { AttentionBadge } from './AttentionBadge';
@@ -43,35 +47,35 @@ function seed(count: number) {
   }));
 }
 
-describe('compact shared input indicators', () => {
-  it('shows position five in a neutral badge and total six in the same amber badge component', () => {
+describe('floating shared input indicator', () => {
+  it('renders only the amber total, even when no request is selected', () => {
     seed(6);
-    attentionSelection.value = { id: 'q4', navigation: 1 };
     const node = AttentionNavigator()!;
-    const [position, of, total, previous, next] = toChildArray(node.props.children);
-    expect(position).toMatchObject({ type: AttentionBadge, props: { value: 5, neutral: true } });
-    expect(of).toMatchObject({ props: { children: 'of' } });
-    expect(total).toMatchObject({ props: { children: { type: AttentionBadge, props: { value: 6 } } } });
-    expect(previous).toMatchObject({ props: { 'aria-label': 'Previous input request', disabled: false } });
-    expect(next).toMatchObject({ props: { 'aria-label': 'Next input request', disabled: false } });
+    expect(node.type).toBe('button');
+    expect(node.props.children).toMatchObject({ type: AttentionBadge, props: { value: 6 } });
+    expect(node.props.disabled).toBe(false);
+    expect(node.props.children.props.neutral).toBeUndefined();
+    expect(Array.isArray(node.props.children)).toBe(false);
     expect(node.props['aria-haspopup']).toBeUndefined();
   });
-  it('hides an empty control and keeps a one-request total clickable with arrows disabled', () => {
+  it('hides an empty control and keeps a one-request total clickable', () => {
     seed(0);
     expect(AttentionNavigator()).toBeNull();
     seed(1);
-    const [, , total, previous, next] = toChildArray(AttentionNavigator()!.props.children);
-    expect(previous).toMatchObject({ props: { disabled: true } });
-    expect(next).toMatchObject({ props: { disabled: true } });
-    expect(total).toMatchObject({ props: { disabled: false } });
+    expect(AttentionNavigator()!.props.disabled).toBe(false);
+  });
+  it('advances to the next newest request through its only button', () => {
+    seed(2);
+    AttentionNavigator()!.props.onClick();
+    expect(navigateAttention).toHaveBeenCalledExactlyOnceWith();
   });
   it('retains counts visibly marked stale and uses unknown rather than a fabricated zero', () => {
     seed(6);
     attentionError.value = 'Offline';
     expect(AttentionNavigator()!.props['data-stale']).toBe('true');
-    expect(AttentionNavigator()!.props.children[2].props.children.props.value).toBe(6);
+    expect(AttentionNavigator()!.props.children.props.value).toBe(6);
     attentionTargets.value = null;
-    expect(AttentionNavigator()!.props.children[2].props.children.props.value).toBe('?');
+    expect(AttentionNavigator()!.props.children.props.value).toBe('?');
   });
   it('supplies the same badge to agent tabs and mobile picker items', () => {
     seed(2);

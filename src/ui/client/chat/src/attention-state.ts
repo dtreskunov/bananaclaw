@@ -29,17 +29,6 @@ export function matchesAttentionLocation(target: AttentionTarget, location: Atte
   );
 }
 
-export function attentionPosition(
-  targets: AttentionTarget[],
-  selectedId: string | null,
-  location: AttentionLocation,
-): number {
-  const selected = targets.findIndex(
-    (target) => target.id === selectedId && matchesAttentionLocation(target, location),
-  );
-  return selected >= 0 ? selected : targets.findIndex((target) => matchesAttentionLocation(target, location));
-}
-
 export function groupAttentionCount(groupId: string): number {
   return attentionTargets.value?.filter((target) => target.origin.agentGroupId === groupId).length ?? 0;
 }

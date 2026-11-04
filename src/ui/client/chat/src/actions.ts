@@ -64,7 +64,8 @@ import type { SyncResponse } from '../../../shared/sync';
 import { isAttentionTargets } from '../../../shared/attention';
 import {
   attentionError,
-  attentionPosition,
+  matchesAttentionLocation,
+  type AttentionLocation,
   attentionSelection,
   attentionTargets,
   selectAttention,
@@ -523,7 +524,7 @@ export async function runSync(
   }
   if (requestId !== refs.syncRequestId) return false;
   batch(() => {
-    attentionTargets.value = res.attention;
+    attentionTargets.value = [...res.attention].reverse();
     attentionError.value = null;
   });
   if (
@@ -1143,24 +1144,21 @@ export async function selectGroup(
   }
 }
 
-export async function navigateAttention(direction: -1 | 0 | 1): Promise<boolean> {
+export async function navigateAttention(thread?: AttentionLocation): Promise<boolean> {
   const targets = attentionTargets.value;
   if (!targets?.length || attentionError.value) return false;
-  const position = attentionPosition(targets, attentionSelection.value?.id ?? null, {
+  const location = {
     agentGroupId: groupId.value,
     threadId: threadId.value,
     channelType: channelType.value,
     messagingGroupId: messagingGroupId.value,
-  });
-  const index =
-    direction === 0
-      ? Math.max(position, 0)
-      : position < 0
-        ? direction < 0
-          ? targets.length - 1
-          : 0
-        : (position + direction + targets.length) % targets.length;
-  const target = targets[index];
+  };
+  const position = targets.findIndex(target =>
+    target.id === attentionSelection.value?.id && matchesAttentionLocation(target, location));
+  const target = thread
+    ? targets.find(target => matchesAttentionLocation(target, thread))
+    : targets[(position + 1) % targets.length];
+  if (!target) return false;
   selectAttention(target.id, true);
   try {
     if (credentialsOpen.value) openChatView();

@@ -42,6 +42,15 @@ describe('authoritative attention refresh', () => {
     expect(api).toHaveBeenCalledWith('api/sync', undefined);
     expect(attentionTargets.value).toEqual([]);
   });
+  it('presents the stable server order newest-first without mutating its snapshot', async () => {
+    const oldest = { ...target, id: 'oldest' };
+    const newest = { ...target, id: 'newest' };
+    const server = [oldest, newest];
+    vi.mocked(api).mockResolvedValue({ approvals: [], attention: server });
+    await runSync();
+    expect(attentionTargets.value).toEqual([newest, oldest]);
+    expect(server).toEqual([oldest, newest]);
+  });
   it.each(['missing', 'network'])('retains the last snapshot on %s failures', async (failure) => {
     if (failure === 'network') vi.mocked(api).mockRejectedValue(new Error('Offline'));
     else vi.mocked(api).mockResolvedValue({ approvals: [] });
@@ -83,18 +92,48 @@ describe('authoritative attention refresh', () => {
     threadId.value = 't';
     messagingGroupId.value = 'm';
     attentionTargets.value = [target, { ...target, id: 'second' }];
-    expect(await navigateAttention(0)).toBe(true);
+    expect(await navigateAttention()).toBe(true);
     expect(attentionSelection.value?.id).toBe('q');
-    expect(await navigateAttention(1)).toBe(true);
+    expect(await navigateAttention()).toBe(true);
     expect(attentionSelection.value?.id).toBe('second');
-    expect(await navigateAttention(1)).toBe(true);
+    expect(await navigateAttention()).toBe(true);
     expect(attentionSelection.value?.id).toBe('q');
-    expect(await navigateAttention(-1)).toBe(true);
+    expect(await navigateAttention()).toBe(true);
     expect(attentionSelection.value?.id).toBe('second');
     expect(postJson).not.toHaveBeenCalled();
     expect(api).not.toHaveBeenCalled();
     expect(attentionTargets.value).toHaveLength(2);
     expect(threadId.value).toBe('t');
+  });
+  it('opens the newest request in a thread regardless of the current selection', async () => {
+    groupId.value = 'g';
+    threadId.value = 't';
+    messagingGroupId.value = 'm';
+    const newest = { ...target, id: 'newest-in-thread' };
+    const older = { ...target, id: 'older-in-thread' };
+    attentionTargets.value = [
+      { ...target, id: 'newer-elsewhere', origin: { ...target.origin, threadId: 'elsewhere' } },
+      { ...target, id: 'other-channel', origin: { ...target.origin, channelType: 'slack' } },
+      { ...target, id: 'other-messaging-group', origin: { ...target.origin, messagingGroupId: 'other' } },
+      newest,
+      older,
+    ];
+    attentionSelection.value = { id: older.id, navigation: 0 };
+    expect(await navigateAttention({
+      agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm',
+    })).toBe(true);
+    expect(attentionSelection.value?.id).toBe(newest.id);
+    expect(api).not.toHaveBeenCalled();
+    expect(postJson).not.toHaveBeenCalled();
+  });
+  it('does not navigate a thread badge to a request in another route', async () => {
+    attentionTargets.value = [target];
+    expect(await navigateAttention({
+      agentGroupId: 'g', threadId: 'missing', channelType: 'web', messagingGroupId: 'm',
+    })).toBe(false);
+    expect(attentionSelection.value).toBeNull();
+    expect(api).not.toHaveBeenCalled();
+    expect(postJson).not.toHaveBeenCalled();
   });
   it('opens the exact cross-agent non-web thread instead of the latest or a new conversation', async () => {
     vi.stubGlobal('location', { hash: '' });
@@ -114,7 +153,7 @@ describe('authoritative attention refresh', () => {
         threads: [latest, wanted],
         conversation: testSnapshot({ threadId: 'wanted' }),
       });
-    expect(await navigateAttention(0)).toBe(true);
+    expect(await navigateAttention()).toBe(true);
     expect(groupId.value).toBe('other');
     expect(threadId.value).toBe('wanted');
     expect(channelType.value).toBe('resend');
