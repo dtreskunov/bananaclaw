@@ -310,13 +310,14 @@ eligibility before counting; private recovery/selection data is excluded.
 The host/browser sync contract is shared, with no waiting-state table, copied
 lifecycle, persistent counters, new poller, runner change or storage migration.
 
-Shared subtle count buttons appear on agent tabs, the mobile agent picker and
-thread cards. Each opens the oldest actionable request in its agent or exact
+Shared subtle `N attn` badges appear inline in agent-tab and thread-card status
+lines, and in the mobile agent picker. Each opens the oldest actionable request in its agent or exact
 thread, using the server's existing oldest-first order directly. Native sibling
 buttons keep attention navigation distinct from ordinary tab/thread selection.
 There is no floating attention control or cyclic pager. Counts reuse the shared
-inline-action styling; thread counts and delete controls have matching 32px hit
-targets centered vertically. Only delete retains hover/focus reveal.
+inline-action styling, a subtle existing warning-background token and the
+composer send button's corner-radius token. Delete controls retain their larger
+32px hit targets and vertical centering. Only delete retains hover/focus reveal.
 Navigation uses existing routes and forms, preserves exact non-web context and
 focuses a request once without stealing focus on later snapshots.
 

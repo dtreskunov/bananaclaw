@@ -58,7 +58,8 @@ interface TabBarProps {
 function tabBadge(item: TabItem) {
   if (item.badge == null || item.badge === false) return null;
   return item.onBadgeClick ? (
-    <button type="button" class="msg-action-btn tab-item-badge" disabled={item.badgeDisabled} onClick={item.onBadgeClick}>
+    <button type="button" class="msg-action-btn tab-item-badge" disabled={item.badgeDisabled}
+      onClick={(event) => { event.stopPropagation(); item.onBadgeClick?.(); }}>
       {item.badge}
     </button>
   ) : <span class="tab-item-badge">{item.badge}</span>;
@@ -104,23 +105,24 @@ export function TabBar(props: TabBarProps): JSX.Element {
         {items.map((it) => {
           const isActive = it.id === activeId;
           return (
-            <div class="tab-item-group" key={it.id}>
+            <div class={`tab-item-group${isActive ? ' active' : ''}`} key={it.id} onClick={() => onSelect(it.id)}>
               <button
                 type="button"
                 role="tab"
                 aria-selected={isActive}
                 title={it.title}
                 class={`tab-item${isActive ? ' active' : ''}${it.className ? ` ${it.className}` : ''}`}
-                onClick={() => onSelect(it.id)}
               >
                 <span class="tab-item-heading"><span class="tab-item-label">{it.label}</span></span>
-                {it.sublabel || it.reserveSublabel ? (
+              </button>
+              {it.sublabel || it.reserveSublabel || it.badge ? (
+                <div class="tab-item-status">
                   <span class="tab-item-sublabel" aria-hidden={it.sublabel ? undefined : 'true'}>
                     {it.sublabel}
                   </span>
-                ) : null}
-              </button>
-              {tabBadge(it)}
+                  {tabBadge(it)}
+                </div>
+              ) : null}
             </div>
           );
         })}

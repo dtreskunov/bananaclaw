@@ -9,7 +9,7 @@ export function AttentionBadge({
 }) {
   return (
     <span class="attention-badge" aria-label={label} title={label}>
-      {value}
+      {value} attn
     </span>
   );
 }

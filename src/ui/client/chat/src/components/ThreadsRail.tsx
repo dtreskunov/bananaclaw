@@ -145,9 +145,11 @@ function ThreadRow({ t }: { t: Thread }) {
           >{'\u23F0'}</button>
         ) : null}
       </div>
-      <div class="meta"><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</div>
-      <div class="thread-actions">
+      <div class="meta">
+        <span><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</span>
         <ThreadAttention thread={t} />
+      </div>
+      <div class="thread-actions">
         {isAdmin.value && (ct === 'web' || (t.sessionMode === 'per-thread' && !!t.messagingGroupId))
           ? <button type="button" class="msg-action-btn danger del" title="Delete thread" aria-label="Delete thread" onClick={onDel}><TrashIcon /></button>
           : null}
@@ -171,11 +173,13 @@ function DmRow({ t }: { t: Thread }) {
         <span class="title-text">{meta.label}</span>
       </div>
       <div class="meta">
-        <RelativeTime ts={t.lastActivityAt} />
-        {t.counterparty ? ' \u00b7 ' + t.counterparty : ''}
-        {t.messageCount ? ' \u00b7 ' + t.messageCount + ' msg' : ''}
+        <span>
+          <RelativeTime ts={t.lastActivityAt} />
+          {t.counterparty ? ' \u00b7 ' + t.counterparty : ''}
+          {t.messageCount ? ' \u00b7 ' + t.messageCount + ' msg' : ''}
+        </span>
+        <ThreadAttention thread={t} />
       </div>
-      <div class="thread-actions"><ThreadAttention thread={t} /></div>
     </div>
   );
 }

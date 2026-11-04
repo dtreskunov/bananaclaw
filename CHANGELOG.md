@@ -4,10 +4,11 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
-- **Input attention.** Subtle request count buttons on agent tabs, mobile picker
-  and thread cards open the oldest actionable request in their scope. No floating
-  pager. Thread attention and delete actions share larger, vertically centered
-  inline buttons; attention stays visible without hover. Counts are authorized
+- **Input attention.** Clickable `N attn` badges in agent-tab and thread-card status
+  lines open the oldest actionable request in their scope. Subtle theme-token
+  highlights and composer-style corners replace plain count controls. No floating
+  pager. Delete retains its larger centered target; attention stays visible
+  without hover. Counts are authorized
   canonical projections, not unread flags or another agent lifecycle.
 
 - **Acyclic conversation reads and UI configuration.** Authorized context,

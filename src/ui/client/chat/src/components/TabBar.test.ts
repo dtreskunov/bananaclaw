@@ -15,26 +15,33 @@ afterEach(() => {
 });
 
 describe('tab badge actions', () => {
-  it('keeps tab and dropdown actions separate from their count buttons', () => {
+  it('places the count alongside status text, outside the native tab selection button', () => {
     const select = vi.fn();
     const badge = vi.fn();
     const root = TabBar({
       ariaLabel: 'Agents', activeId: 'g', onSelect: select,
-      items: [{ id: 'g', label: 'Group', badge: '2', onBadgeClick: badge }],
+      items: [{ id: 'g', label: 'Group', sublabel: 'just now', badge: '2 attn', onBadgeClick: badge }],
     });
     const [nav, dropdown] = root.props.children;
     const group = nav.props.children[0][0];
     expect(group.props.children[0].props.role).toBe('tab');
-    expect(group.props.children[0].props.children[0].props.children).toBeTruthy();
-    const action = group.props.children[1];
+    expect(group.props.children[0].props.children.props.children.props.children).toBe('Group');
+    const status = group.props.children[1];
+    expect(status.props.class).toBe('tab-item-status');
+    expect(status.props.children[0].props.children).toBe('just now');
+    const action = status.props.children[1];
     expect(action.type).toBe('button');
     expect(action.props.class).toContain('msg-action-btn');
     expect(dropdown.type).toBe('div');
     expect(dropdown.props.children[0].type).toBe('button');
     expect(dropdown.props.children[1].type).toBe('button');
-    action.props.onClick();
+    const event = { stopPropagation: vi.fn() };
+    action.props.onClick(event);
     expect(badge).toHaveBeenCalledOnce();
+    expect(event.stopPropagation).toHaveBeenCalledOnce();
     expect(select).not.toHaveBeenCalled();
+    group.props.onClick();
+    expect(select).toHaveBeenCalledExactlyOnceWith('g');
   });
   it('closes the mobile sheet when its separate count button is activated', () => {
     hooks.sheetOpen = true;

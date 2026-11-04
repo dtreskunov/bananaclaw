@@ -3,6 +3,24 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  white-space: nowrap;
+}
+.msg-action-btn:has(> .attention-badge) {
+  width: auto;
+  height: auto;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
+  background: var(--warning-bg);
+  color: var(--surface-fg);
+  vertical-align: middle;
+}
+.msg-action-btn:has(> .attention-badge):hover:not(:disabled) {
+  background: var(--highlight);
+}
+.msg-action-btn:has(> .attention-badge):focus-visible {
+  border-color: var(--focus-ring);
 }
 [data-attention-target]:focus,
 [data-attention-target]:focus-within { outline: 2px solid var(--warning-border); outline-offset: 3px; }

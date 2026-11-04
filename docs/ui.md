@@ -48,10 +48,11 @@ are separate native buttons, not nested inside the agent/thread selection
 control. Navigation focuses the existing question or approval card and does not
 steal focus on later refreshes. There is no floating attention control.
 
-Counts reuse the shared muted inline-action button style rather than a filled
-amber badge. Thread count and delete buttons share 32px hit targets, centered
-vertically beside the card content. Counts remain visible without hover; delete
-keeps its existing hover/focus reveal and is always visible on touch devices.
+Counts read `2 attn` and sit inline with the status text in agent tabs and thread
+cards. Their native buttons use a subtle `--warning-bg` highlight and
+`--warning-border`, with the same `--radius-md` corners as the composer send
+button. Counts remain visible without hover. Thread delete buttons retain their
+larger 32px target, vertical centering, hover/focus reveal and touch visibility.
 
 Attention comes from the canonical pending interactions through the existing
 global metadata sync, including off-screen agents. Viewing a request does not
