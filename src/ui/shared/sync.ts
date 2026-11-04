@@ -26,6 +26,7 @@ export interface GlobalSyncState {
 }
 
 export const SYNC_PROTOCOL_VERSION = 3;
+export const SYNC_RELOAD_CLOSE_CODE = 4406;
 export interface SyncSubscription {
   kind: 'subscribe';
   protocolVersion: typeof SYNC_PROTOCOL_VERSION;
@@ -116,7 +117,8 @@ export class SyncProtocolError extends Error {
 }
 
 export function parseSyncFrame(value: unknown): SyncFrame {
-  if (!object(value) || value.protocolVersion !== SYNC_PROTOCOL_VERSION) throw new SyncProtocolError();
+  if (!object(value) || value.kind === 'protocol_mismatch' || value.protocolVersion !== SYNC_PROTOCOL_VERSION)
+    throw new SyncProtocolError();
   if (!isSyncFrame(value) || (value.groupId === null && value.data.group !== null))
     throw new Error('Invalid global sync snapshot. Reconnect or reload.');
   return value;

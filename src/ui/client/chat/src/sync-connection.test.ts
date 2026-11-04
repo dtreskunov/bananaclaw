@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncConnection } from './sync-connection';
-import { SYNC_PROTOCOL_VERSION } from '../../../shared/sync';
+import { SYNC_PROTOCOL_VERSION, SYNC_RELOAD_CLOSE_CODE } from '../../../shared/sync';
 
 class Socket {
   readyState = 0;
@@ -161,6 +161,17 @@ describe('global sync browser connection', () => {
     f.sockets[0].open();
     f.sockets[0].onclose?.({ code: 4401 });
     expect(f.unauthorized).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.sockets).toHaveLength(1);
+  });
+
+  it('requires a reload when the server rejects an outdated subscription protocol', async () => {
+    const f = fixture();
+    f.connection.start();
+    f.sockets[0].open();
+    f.sockets[0].onclose?.({ code: SYNC_RELOAD_CLOSE_CODE });
+    expect(f.reload).toHaveBeenCalledOnce();
+    expect(f.unavailable).toHaveBeenCalledWith(expect.stringContaining('protocol changed'));
     await vi.advanceTimersByTimeAsync(60_000);
     expect(f.sockets).toHaveLength(1);
   });

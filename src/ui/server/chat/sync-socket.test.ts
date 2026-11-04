@@ -9,7 +9,7 @@ import { removeMember } from '../../../modules/permissions/db/agent-group-member
 import { updateContainerConfigScalars, ensureContainerConfig } from '../../../db/container-configs.js';
 import { authenticate, COOKIE_NAME } from '../auth.js';
 import { createSession, deleteSession } from '../db.js';
-import { parseSyncFrame, SYNC_PROTOCOL_VERSION, type SyncFrame } from '../../shared/sync.js';
+import { parseSyncFrame, SYNC_PROTOCOL_VERSION, SYNC_RELOAD_CLOSE_CODE, type SyncFrame } from '../../shared/sync.js';
 import { attachSyncSocket } from './sync-socket.js';
 
 let server: WebSocketServer;
@@ -67,6 +67,30 @@ async function connect(groupId: string | null = null) {
 }
 
 describe('global sync WebSocket integration', () => {
+  it('explicitly requests a reload for an outdated subscription protocol', async () => {
+    const client = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`, {
+      headers: { Cookie: `${COOKIE_NAME}=${token}` },
+    });
+    clients.push(client);
+    await once(client, 'open');
+    const closed = once(client, 'close');
+    const mismatch = once(client, 'message');
+    client.send(
+      JSON.stringify({
+        kind: 'subscribe',
+        protocolVersion: SYNC_PROTOCOL_VERSION - 1,
+        subscriptionId: 1,
+        groupId: null,
+      }),
+    );
+    const [raw] = await mismatch;
+    const notice = JSON.parse(raw.toString());
+    expect(notice).toEqual({ kind: 'protocol_mismatch', protocolVersion: SYNC_PROTOCOL_VERSION });
+    expect(() => parseSyncFrame(notice)).toThrow('protocol changed');
+    expect((await closed)[0]).toBe(SYNC_RELOAD_CLOSE_CODE);
+    expect(frames).toEqual([]);
+  });
+
   it('pushes session-less approvals without a selected group and preserves viewer scope', async () => {
     await connect();
     createApproval({

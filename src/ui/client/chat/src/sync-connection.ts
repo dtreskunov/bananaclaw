@@ -1,4 +1,10 @@
-import { parseSyncFrame, SyncProtocolError, SYNC_PROTOCOL_VERSION, type GlobalSyncState } from '../../../shared/sync';
+import {
+  parseSyncFrame,
+  SyncProtocolError,
+  SYNC_PROTOCOL_VERSION,
+  SYNC_RELOAD_CLOSE_CODE,
+  type GlobalSyncState,
+} from '../../../shared/sync';
 
 export interface SyncConnectionOptions {
   socket: () => WebSocket;
@@ -74,6 +80,12 @@ export class SyncConnection {
       if (event.code === 4401) {
         this.stopped = true;
         this.options.unauthorized();
+        return;
+      }
+      if (event.code === SYNC_RELOAD_CLOSE_CODE) {
+        this.stopped = true;
+        this.options.unavailable(new SyncProtocolError().message);
+        this.options.reload();
         return;
       }
       this.options.unavailable('Global updates disconnected. Reconnecting...');

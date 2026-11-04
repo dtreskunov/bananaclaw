@@ -79,5 +79,8 @@ describe('global sync protocol', () => {
       }),
     ).toBe(false);
     expect(() => parseSyncFrame({ ...global, protocolVersion: 999 })).toThrow('protocol changed');
+    expect(() => parseSyncFrame({ kind: 'protocol_mismatch', protocolVersion: SYNC_PROTOCOL_VERSION })).toThrow(
+      'protocol changed',
+    );
   });
 });

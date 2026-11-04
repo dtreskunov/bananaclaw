@@ -1377,7 +1377,8 @@ host restart.
 There is no ten-second global ticker and no HTTP fallback after socket failure.
 The client reconnects with jittered backoff and takes a fresh snapshot, retaining
 old metadata with a stale indication while disconnected. Returning to a visible
-tab requests catch-up. Protocol mismatch requires a reload; slow clients are
+tab requests catch-up. Protocol mismatch requires a reload, including when the
+server rejects an outdated subscription before sending a snapshot; slow clients are
 disconnected rather than queued without bounds. WebSocket ping/pong and
 authorization-only checks remain; idle timers do not rebuild projections.
 `GET /api/sync` remains available for diagnostics/older clients. The browser

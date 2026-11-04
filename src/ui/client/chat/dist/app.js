@@ -20315,6 +20315,7 @@ function isAttentionTargets(value) {
 
 // ../../shared/sync.ts
 var SYNC_PROTOCOL_VERSION = 3;
+var SYNC_RELOAD_CLOSE_CODE = 4406;
 var thread = shape({
   threadId: id,
   sessionId: id,
@@ -20384,7 +20385,8 @@ var SyncProtocolError = class extends Error {
   }
 };
 function parseSyncFrame(value) {
-  if (!object(value) || value.protocolVersion !== SYNC_PROTOCOL_VERSION) throw new SyncProtocolError();
+  if (!object(value) || value.kind === "protocol_mismatch" || value.protocolVersion !== SYNC_PROTOCOL_VERSION)
+    throw new SyncProtocolError();
   if (!isSyncFrame(value) || value.groupId === null && value.data.group !== null)
     throw new Error("Invalid global sync snapshot. Reconnect or reload.");
   return value;
@@ -20451,6 +20453,12 @@ var SyncConnection = class {
       if (event.code === 4401) {
         this.stopped = true;
         this.options.unauthorized();
+        return;
+      }
+      if (event.code === SYNC_RELOAD_CLOSE_CODE) {
+        this.stopped = true;
+        this.options.unavailable(new SyncProtocolError().message);
+        this.options.reload();
         return;
       }
       this.options.unavailable("Global updates disconnected. Reconnecting...");

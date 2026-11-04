@@ -3,7 +3,8 @@ import { getSession } from '../../../db/sessions.js';
 import { onConversationChange } from '../../../conversation-events.js';
 import { onUiChange, invalidateUi } from '../../../ui-events.js';
 import { log } from '../../../log.js';
-import { isSyncSubscription } from '../../shared/sync.js';
+import { isSyncSubscription, SYNC_PROTOCOL_VERSION, SYNC_RELOAD_CLOSE_CODE } from '../../shared/sync.js';
+import { object } from '../../shared/validation.js';
 import { lookupSessionByHash } from '../db.js';
 import { readGlobalSync, nextSyncDeadline } from './sync-state.js';
 import { startSyncStream } from './sync-stream.js';
@@ -84,6 +85,13 @@ export function attachSyncSocket(
     try {
       if (binary) throw new Error('Sync messages must be JSON');
       const message: unknown = JSON.parse(raw.toString());
+      if (object(message) && message.protocolVersion !== SYNC_PROTOCOL_VERSION) {
+        log.warn('Global sync protocol version rejected', { userId });
+        ws.send(JSON.stringify({ kind: 'protocol_mismatch', protocolVersion: SYNC_PROTOCOL_VERSION }));
+        ws.close(SYNC_RELOAD_CLOSE_CODE, 'Global sync protocol changed; reload');
+        stream.stop();
+        return;
+      }
       if (!isSyncSubscription(message)) throw new Error('Invalid sync subscription');
       clearTimeout(subscriptionTimer);
       stream.subscribe(message.subscriptionId, message.groupId);
