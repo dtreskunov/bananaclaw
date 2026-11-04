@@ -19,7 +19,7 @@ function project(output: Output) {
   const messages: ModelMessage[] = [{ role: 'tool', content: [
     { type: 'tool-result', toolCallId: 'call', toolName: 'external', output },
   ] }];
-  const result = boundToolResults(messages, (complete) => store.archiveResult(complete))[0];
+  const result = boundToolResults(messages, store)[0];
   if (result.role !== 'tool' || result.content[0].type !== 'tool-result') throw new Error('Missing tool result');
   return { messages, output: result.content[0].output };
 }
@@ -100,7 +100,7 @@ it('projects finished successes into retrievable receipts while leaving active h
   const active = exchange('read');
   store.append(conversation, active);
   const original = store.messages(conversation);
-  const project = () => finishedToolReceipts(store.contextEntries(conversation), text => store.archiveResult(text));
+  const project = () => finishedToolReceipts(store.contextEntries(conversation), store);
   const visible = project();
   expect(JSON.stringify(visible)).toContain('Finished-turn tool receipt');
   expect(JSON.stringify(visible)).toContain('report.py');
@@ -127,13 +127,13 @@ it.each([
   ['view_image', { type: 'content', value: [{ type: 'file', mediaType: 'image/png', data: { type: 'data', data: 'AQID' } }] }],
 ] as Array<[string, Output]>)('retains failed, uncertain, legacy, instruction and media exchanges (%s)', (name, output) => {
   const original = exchange(name, output);
-  expect(finishedToolReceipts(entries(original), text => store.archiveResult(text))).toEqual(original);
+  expect(finishedToolReceipts(entries(original), store)).toEqual(original);
   expect(fs.existsSync(path.join(root, 'tool-results'))).toBe(false);
 });
 
 it('never projects an unfinished turn, partial pair, mixed-status parallel group, or orphan result', () => {
   const original = exchange();
-  const archive = (text: string) => store.archiveResult(text);
+  const archive = store;
   expect(finishedToolReceipts(entries(original, false), archive)).toEqual(original);
   expect(finishedToolReceipts(entries(original.slice(0, 1)), archive)).toEqual(original.slice(0, 1));
   expect(finishedToolReceipts(entries(original.slice(1)), archive)).toEqual(original.slice(1));
@@ -159,7 +159,7 @@ it('reduces completed-turn payload bytes without a summarizer, without altering 
     type: 'json', value: { status: 'completed', exitCode: 0, stdout: `result-${index} `.repeat(300), stderr: '', signal: null },
   }, `call-${index}`)).flat();
   const source = JSON.stringify(original);
-  const projected = finishedToolReceipts(entries(original), text => store.archiveResult(text));
+  const projected = finishedToolReceipts(entries(original), store);
   expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThan(Buffer.byteLength(source) / 10);
   expect(JSON.stringify(original)).toBe(source);
   expect(fs.readdirSync(path.join(root, 'tool-results'))).toHaveLength(60);
@@ -167,7 +167,7 @@ it('reduces completed-turn payload bytes without a summarizer, without altering 
     { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'tiny', toolName: 'read', input: { path: 'a' } }] },
     { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'tiny', toolName: 'read', output: { type: 'text', value: 'ok' } }] },
   ];
-  expect(finishedToolReceipts(entries(tiny), text => store.archiveResult(text))).toEqual(tiny);
+  expect(finishedToolReceipts(entries(tiny), store)).toEqual(tiny);
 });
 
 it('archives a complete parallel call/result group together, without orphaning calls or losing answer text', () => {
@@ -180,7 +180,7 @@ it('archives a complete parallel call/result group together, without orphaning c
     { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'a', toolName: 'write', output: { type: 'text', value: 'written' } }] },
     { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'b', toolName: 'read', output: { type: 'text', value: 'data' } }] },
   ];
-  const projected = finishedToolReceipts(entries(original), text => store.archiveResult(text));
+  const projected = finishedToolReceipts(entries(original), store);
   expect(projected).toHaveLength(1);
   expect(projected[0].role).toBe('assistant');
   if (!Array.isArray(projected[0].content)) throw new Error('Missing receipt content');
@@ -191,13 +191,40 @@ it('archives a complete parallel call/result group together, without orphaning c
   expect(JSON.parse(fs.readFileSync(path.join(root, 'tool-results', name), 'utf8'))).toEqual({ type: 'json', value: original });
 });
 
+it.each(['Retained explanation. ', '\u{1f642} explanation. '])(
+  'does not count retained narrative as savings or archive a larger replacement (%s)', (text) => {
+    const original: ModelMessage[] = [
+      { role: 'assistant', content: [
+        { type: 'text', text: text.repeat(1000) },
+        { type: 'tool-call', toolCallId: 'small-call', toolName: 'read', input: { path: 'note.txt' } },
+      ] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'small-call', toolName: 'read', output: { type: 'text', value: 'ok' } }] },
+    ];
+    const before = JSON.stringify(original);
+    const projected = finishedToolReceipts(entries(original), store);
+    expect(projected).toEqual(original);
+    expect(Buffer.byteLength(JSON.stringify(projected))).toBe(Buffer.byteLength(before));
+    expect(JSON.stringify(original)).toBe(before);
+    expect(fs.existsSync(path.join(root, 'tool-results'))).toBe(false);
+  },
+);
+
+it('measures the actual archive reference before writing a receipt', () => {
+  const original = exchange();
+  const projected = finishedToolReceipts(entries(original), {
+    resultPath: () => '/private/tool-results/' + 'long-parent/'.repeat(4000) + 'result.json',
+    archiveResult: () => { throw new Error('Unprofitable receipt must not be archived'); },
+  });
+  expect(projected).toEqual(original);
+});
+
 it('rebuilds finished-turn receipts and complete retrieval in a database-only native fork', () => {
   const conversation = store.createConversation();
   const first = store.append(conversation, [{ role: 'user', content: 'request' }]);
   store.append(conversation, exchange());
   const last = store.append(conversation, [{ role: 'assistant', content: 'answer' }]);
   store.finishTurn(conversation, first, last);
-  finishedToolReceipts(store.contextEntries(conversation), text => store.archiveResult(text));
+  finishedToolReceipts(store.contextEntries(conversation), store);
   const child = store.fork(conversation, last)!;
   expect(store.messages(child)).toEqual(store.messages(conversation));
   store.close();
@@ -205,7 +232,7 @@ it('rebuilds finished-turn receipts and complete retrieval in a database-only na
   fs.mkdirSync(directory);
   fs.copyFileSync(path.join(root, 'state.db'), path.join(directory, 'state.db'));
   store = new NativeStore(path.join(directory, 'state.db'));
-  const projected = finishedToolReceipts(store.contextEntries(child), text => store.archiveResult(text));
+  const projected = finishedToolReceipts(store.contextEntries(child), store);
   expect(JSON.stringify(projected)).not.toContain('OLD_CODE ');
   expect(JSON.stringify(projected)).toContain(path.join(directory, 'tool-results'));
   const [filename] = fs.readdirSync(path.join(directory, 'tool-results'));

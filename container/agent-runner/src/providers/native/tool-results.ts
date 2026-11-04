@@ -1,17 +1,18 @@
 import type { ModelMessage } from 'ai';
-import type { NativeContextEntry } from './store.js';
+import type { NativeContextEntry, NativeStore } from './store.js';
 import { toolActivityFields } from '../tool-activity.js';
 
 type ModelToolOutput = Extract<Extract<ModelMessage, { role: 'tool' }>['content'][number], { type: 'tool-result' }>['output'];
+type ResultArchive = Pick<NativeStore, 'archiveResult' | 'resultPath'>;
 export const MAX_TOOL_TEXT_BYTES = 16 * 1024;
 
-function boundedOutput(output: ModelToolOutput, archive: (complete: string) => string): ModelToolOutput {
+function boundedOutput(output: ModelToolOutput, archive: ResultArchive): ModelToolOutput {
   const text = output.type === 'content'
     ? output.value.filter((part) => part.type === 'text').map((part) => part.text).join('\n')
     : output.type === 'text' || output.type === 'error-text' ? output.value
       : output.type === 'json' || output.type === 'error-json' ? JSON.stringify(output.value) : null;
   if (text === null || Buffer.byteLength(text) <= MAX_TOOL_TEXT_BYTES) return output;
-  const filename = archive(JSON.stringify(output, null, 2));
+  const filename = archive.archiveResult(JSON.stringify(output, null, 2));
   const notice = `\n[Abbreviated ${Buffer.byteLength(text)} UTF-8 bytes. Complete typed result: ${filename}. ` +
     'Use ranged read or bash to extract only the needed fields; do not load the complete result.]';
   const preview = new TextDecoder().decode(
@@ -23,7 +24,7 @@ function boundedOutput(output: ModelToolOutput, archive: (complete: string) => s
   return { type: output.type === 'error-text' || output.type === 'error-json' ? 'error-text' : 'text', value: preview };
 }
 
-export function boundToolResults(messages: ModelMessage[], archive: (complete: string) => string): ModelMessage[] {
+export function boundToolResults(messages: ModelMessage[], archive: ResultArchive): ModelMessage[] {
   return messages.map((message) => message.role !== 'tool' ? message : {
     ...message,
     content: message.content.map((part) => part.type !== 'tool-result' ? part : {
@@ -59,7 +60,7 @@ function completedExchange(group: NativeContextEntry[]) {
   return safe ? { assistant, calls, text: assistant.content.filter(part => part.type === 'text') } : null;
 }
 
-export function finishedToolReceipts(entries: NativeContextEntry[], archive: (complete: string) => string): ModelMessage[] {
+export function finishedToolReceipts(entries: NativeContextEntry[], archive: ResultArchive): ModelMessage[] {
   const messages: ModelMessage[] = [];
   for (let i = 0; i < entries.length; i++) {
     const group = [entries[i]];
@@ -73,16 +74,17 @@ export function finishedToolReceipts(entries: NativeContextEntry[], archive: (co
       return `- ${call.toolName} (${call.toolCallId}): completed${detail ? `; ${detail.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`;
     }).join('\n');
     const serialized = JSON.stringify({ type: 'json', value: original }, null, 2);
-    if (Buffer.byteLength(serialized) <= Buffer.byteLength(details) + 512) {
-      messages.push(...original);
-    } else {
-      const filename = archive(serialized);
-      messages.push({ ...complete.assistant, content: [
+    const receipt: ModelMessage = { ...complete.assistant, content: [
         ...complete.text,
         { type: 'text', text: `[Finished-turn tool receipt; execution already completed. Do not repeat completed actions.]\n` +
-          `${details}\nFull arguments/results: ${filename}. Retrieve only the relevant lines or fields before relying on omitted details.` },
-      ] });
+          `${details}\nFull arguments/results: ${archive.resultPath(serialized)}. Retrieve only the relevant lines or fields before relying on omitted details.` },
+      ] };
+    if (Buffer.byteLength(JSON.stringify([receipt])) >= Buffer.byteLength(JSON.stringify(original))) {
+      messages.push(...original);
+      continue;
     }
+    archive.archiveResult(serialized);
+    messages.push(receipt);
   }
   return messages;
 }

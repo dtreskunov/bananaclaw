@@ -27,7 +27,9 @@ turn is never receipted; its existing 16 KiB per-result preview still applies.
 
 The receipt reuses `native-state/tool-results/` and the same ranged-read/JSON
 retrieval as large results. No summarizer, extra retrieval tool or setting is
-introduced. Tiny exchanges stay inline when a receipt would not save space.
+introduced. A receipt is used only when its actual serialized JSON is smaller
+than the original exchange, including retained narrative and the real archive
+reference. Unprofitable replacements are not archived.
 Errors, interrupted/unknown outcomes, incomplete tool-call/result groups, media,
 skill instructions and tool discovery remain intact. Legacy unstructured shell
 results are not guessed to be successful. Built-in MCP exchanges remain inline

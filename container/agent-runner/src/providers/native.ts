@@ -303,10 +303,9 @@ export class NativeProvider implements AgentProvider {
     const abortController = new AbortController();
     const options = this.options;
     const store = this.store;
-    const archive = (complete: string) => store.archiveResult(complete);
-    const project = (messages: ModelMessage[]) => boundToolResults(messages, archive);
+    const project = (messages: ModelMessage[]) => boundToolResults(messages, store);
     const history = (conversation: string) => project(portableHistory(
-      finishedToolReceipts(store.contextEntries(conversation), archive),
+      finishedToolReceipts(store.contextEntries(conversation), store),
     ));
     const seenBrokerGuidance = new Set<string>();
     const pendingBrokerGuidance = new Set<string>();

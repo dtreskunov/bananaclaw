@@ -234,7 +234,7 @@ export async function compactNativeContext(options: {
   signal.throwIfAborted();
   const plan = planCompaction(store.contextEntries(conversation), protectedInputs, options.attempt === 1 ? 3 : 1);
   const prefix = plan.prefix.map(entry => ({
-    ...entry, message: boundToolResults([entry.message], text => store.archiveResult(text))[0],
+    ...entry, message: boundToolResults([entry.message], store)[0],
   }));
   const source = prefix.map((entry) => transcript(entry.message)).join('\n');
   const window = options.contextWindow ?? 32_768;

@@ -88,9 +88,13 @@ export class NativeStore {
   }
 
   archiveResult(complete: string): string {
-    const id = createHash('sha256').update(complete).digest('hex');
+    const id = path.basename(this.resultPath(complete), '.json');
     this.db.prepare('INSERT OR IGNORE INTO tool_results (id,content_json) VALUES (?,?)').run(id, complete);
     return this.materializeResult(id, complete);
+  }
+
+  resultPath(complete: string): string {
+    return path.join(this.directory, 'tool-results', `${createHash('sha256').update(complete).digest('hex')}.json`);
   }
 
   private materializeResult(id: string, complete: string): string {
