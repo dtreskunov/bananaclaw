@@ -2,6 +2,21 @@ import type { Conversation, ConversationMessage, ConversationInteraction, Conver
 import { isQuestionInteraction } from './conversation.js';
 import { accessRequestInput, ConnectionInputError } from './connection-input.js';
 import type { QuestionInput, QuestionResponse } from './question.js';
+import {
+  object,
+  text,
+  id,
+  bool,
+  number,
+  integer,
+  position,
+  optional,
+  nullable,
+  array,
+  oneOf,
+  shape,
+  type Check,
+} from './validation.js';
 
 export const CONVERSATION_PROTOCOL_VERSION = 10;
 export interface EntityChanges<T> {
@@ -44,34 +59,6 @@ export class ConversationProtocolError extends Error {
   }
 }
 
-type Check = (v: unknown) => boolean;
-const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const text: Check = (v) => typeof v === 'string';
-const id: Check = (v) => typeof v === 'string' && v.length > 0;
-const bool: Check = (v) => typeof v === 'boolean';
-const number: Check = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
-const integer: Check = (v) => number(v) && Number.isSafeInteger(v);
-const position: Check = (v) => integer(v) && Number(v) > 0;
-const optional =
-  (check: Check): Check =>
-  (v) =>
-    v === undefined || check(v);
-const nullable =
-  (check: Check): Check =>
-  (v) =>
-    v === null || check(v);
-const array =
-  (check: Check): Check =>
-  (v) =>
-    Array.isArray(v) && v.every(check);
-const oneOf =
-  (...values: string[]): Check =>
-  (v) =>
-    typeof v === 'string' && values.includes(v);
-const shape =
-  (fields: Record<string, Check>): Check =>
-  (v) =>
-    object(v) && Object.entries(fields).every(([key, check]) => check(v[key]));
 const strings = array(id);
 const questionInput = shape({
   question: text,
@@ -246,6 +233,9 @@ const account = shape({
   resolvedAt: nullable(text),
 });
 const interaction: Check = (value) => question(value) || approval(value) || account(value);
+export function isConversationApproval(value: unknown): value is import('./approval.js').ConversationApproval {
+  return approval(value) || account(value);
+}
 const tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
 const timelineRow: Check = (v) =>
   shape({ kind: oneOf('message'), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v) ||

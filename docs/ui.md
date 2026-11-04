@@ -1325,7 +1325,9 @@ restore the backup over newer accepted messages.
 
 ### Authoritative conversation synchronization
 
-An active web conversation uses one versioned WebSocket subscription. Its first
+An active conversation, including non-web channels, uses one versioned WebSocket
+subscription. Non-web sockets specify the same `channel` and `mg` context as
+HTTP reads and retain the same viewer/ownership checks. Its first
 snapshot includes messages, durable input dispositions, turns, current activity,
 usage metadata, questions, runner connection state and permitted actions.
 Subsequent envelopes update that view atomically. A final response is not rendered
@@ -1341,11 +1343,50 @@ Usage retains its accounting IDs and is displayed once per record, not once per
 response; metadata explicitly distinguishes provisional, partial, final and
 unavailable reports. Missing usage never becomes fabricated zero tokens.
 
-Non-web conversations poll the same projector and replace their store using the
-same validated snapshot reducer. Sidebar lists and global approvals keep their
-existing ten-second polling. Web conversation questions are never overwritten by
-that poll. Local composer drafts, uploads and command request IDs are separate
-from the server store; HTTP acceptance does not prove a command took effect.
+The app also keeps one authenticated, same-origin global socket at
+`/ui/chat/api/sync/ws`, independent of the selected conversation. Its version-3
+`subscribe` requests carry a monotonic `subscriptionId` and a nullable `groupId`.
+Global approvals and oldest-first attention are always included, even with no
+group selected. The required `group` field is null with no selected group or
+after access is revoked; otherwise it contains the authorized thread list and
+voice capability. Losing access explicitly clears group state.
+Global and conversation upgrades both require the browser Origin to match
+`UI_BASE_URL`; configure that external URL when using a reverse proxy.
+
+The server sends complete authoritative `sync` snapshots carrying a protocol
+version and subscription ID. The ordered socket and subscription identity are
+sufficient for full replacements; only conversation deltas need stream revisions.
+Unchanged background state
+sends nothing; an explicit refresh always acknowledges with a fresh snapshot.
+Snapshots replace metadata slices, not conversation state or client-only blank
+threads. They need no durable replay or contiguous-revision delta reduction.
+Refresh callers wait until their matching snapshot has been applied.
+
+Committed mutation helpers invalidate metadata, including CLI operations,
+session-less approvals, session/fork changes, configuration and access changes.
+Session projection events refresh the selected group's summaries. Reads are
+coalesced for 100 ms with one in-flight async build and a bounded dirty flag.
+Changes during a scan schedule a further read without starving publication of
+completed, authorized snapshots. Obsolete subscriptions are never published.
+Interaction metadata is read once after the thread scan, using current approval
+permissions. Authorization is checked again before publication. Expiry uses the next
+interaction/session deadline, not a recurring
+scan. Host `.env` replacements/edits trigger a filesystem notification. Manual
+SQL edits outside normal host mutation helpers require an explicit refresh or
+host restart.
+
+There is no ten-second global ticker and no HTTP fallback after socket failure.
+The client reconnects with jittered backoff and takes a fresh snapshot, retaining
+old metadata with a stale indication while disconnected. Returning to a visible
+tab requests catch-up. Protocol mismatch requires a reload, including when the
+server rejects an outdated subscription before sending a snapshot; slow clients are
+disconnected rather than queued without bounds. WebSocket ping/pong and
+authorization-only checks remain; idle timers do not rebuild projections.
+`GET /api/sync` remains available for diagnostics/older clients. The browser
+requires global synchronization to be initialized and never uses a REST fallback.
+
+Local composer drafts, uploads and command request IDs remain separate from
+the server store; HTTP acceptance does not prove a command took effect.
 
 The host publishes an explicit `timeline` of message references, question
 references, and typed turn trace/status rows. The host selects the final response
@@ -1377,7 +1418,7 @@ Messages, interactions, and turns are separate normalized collections.
 Interactions share one `id` and have `question`, `confirmation`, `account_setup`,
 or `access_grant` kinds; timeline rows reference them by `interactionId`.
 Questions retain their input specification, including placeholder and multiline
-hints. Approvals use the same authorized projection in polling and transcripts,
+hints. Approvals use the same authorized projection in metadata sync and transcripts,
 with one required status rather than optional status/stage fallbacks.
 The browser reuses these shared types and keeps rendering/submission metadata
 local. Account setup still grants no agent access.

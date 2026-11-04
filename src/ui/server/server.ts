@@ -34,7 +34,7 @@ import { handleOidcRoute, renderLoginPage } from './oidc-routes.js';
 import { CLIENT_METADATA_PATH, handleClientMetadata, handleOAuthCallback } from './oauth-callback.js';
 import { handleOnboarding } from './onboarding.js';
 import { handleSettings } from './settings.js';
-import { handle as chatHandle, CHAT_MOUNT_PREFIX, handleChatUpgrade } from './chat/routes.js';
+import { handle as chatHandle, CHAT_MOUNT_PREFIX, handleChatUpgrade, closeChatSockets } from './chat/routes.js';
 import { readUiConfig, UI_MOUNT_PREFIX } from './config.js';
 
 /** Where a successful magic-link redeem redirects when no `next` is given. */
@@ -210,6 +210,7 @@ async function handlePrivateWebView(req: http.IncomingMessage, res: http.ServerR
 }
 
 export async function stopUi(): Promise<void> {
+  closeChatSockets();
   if (purgeTimer) {
     clearInterval(purgeTimer);
     purgeTimer = null;

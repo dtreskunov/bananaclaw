@@ -6,6 +6,7 @@ import { chatReady, drawerOpen, groupId, groups, refs, threadId, threads, toastM
 import { dismissToast } from './components/Toast';
 import type { Thread } from './types';
 import { testThread } from './conversation-test-fixtures';
+import { installSyncFixture, type SyncFixtureData } from './sync-action-test-fixtures';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 
@@ -21,16 +22,15 @@ const latest = testThread({
 const blank: Thread = {
   ...latest,
   threadId: 'blank',
-  sessionId: null,
+  sessionId: 'blank-session',
   title: '(new thread)',
   messageCount: 0,
 };
 let serverThreads: Thread[];
-const socketUrls: string[] = [];
+let sync: Awaited<ReturnType<typeof installSyncFixture>>;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.useFakeTimers();
-  socketUrls.length = 0;
   vi.stubGlobal('location', { hash: '', protocol: 'https:', host: 'example.test' });
   const browserHistory = {
     state: null as unknown,
@@ -40,15 +40,6 @@ beforeEach(() => {
     }),
   };
   vi.stubGlobal('history', browserHistory);
-  vi.stubGlobal(
-    'WebSocket',
-    class {
-      constructor(url: string) {
-        socketUrls.push(url);
-      }
-      close() {}
-    },
-  );
   vi.stubGlobal('requestAnimationFrame', vi.fn());
   groups.value = [{ id: 'agent', name: 'Agent' }];
   serverThreads = [latest];
@@ -61,15 +52,16 @@ beforeEach(() => {
           messagingGroupId: 'web-context',
           platformId: 'group:agent',
         });
-      if (url.startsWith('api/sync?')) return Response.json({ attention: [], approvals: [], threads: serverThreads });
       if (url === 'api/groups/agent/dirs/') return Response.json({ entries: [] });
       throw new Error(`Unexpected request: ${url}`);
     }),
   );
+  sync = await installSyncFixture(vi.fn(async () => ({ attention: [], approvals: [], threads: serverThreads })));
 });
 
 afterEach(() => {
   clearChat();
+  sync.dispose();
   groupId.value = null;
   groups.value = [];
   threads.value = [];
@@ -92,7 +84,7 @@ describe('new conversation on startup', () => {
 
       await vi.waitFor(() => expect(threadId.value).toBe(newConversation ? 'created' : 'latest'));
       expect(threads.value.some((thread) => thread.messagingGroupId === 'other-web-context')).toBe(false);
-      expect(socketUrls).toEqual([
+      expect(sync.conversationUrls()).toEqual([
         `wss://example.test/ui/chat/api/groups/agent/chat/${newConversation ? 'created' : 'latest'}/ws?mg=web-context`,
       ]);
     },
@@ -113,12 +105,14 @@ describe('new conversation on startup', () => {
   });
 
   it('clears the old chat immediately while a hash navigation waits for its thread list', async () => {
-    let finishSync!: (response: Response) => void;
-    vi.mocked(fetch).mockImplementation(async (url) => {
-      if (String(url).startsWith('api/sync?'))
-        return new Promise<Response>((resolve) => {
+    let finishSync!: (response: SyncFixtureData) => void;
+    sync.read.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
           finishSync = resolve;
-        });
+        }),
+    );
+    vi.mocked(fetch).mockImplementation(async (url) => {
       if (url === 'api/groups/agent/dirs/') return Response.json({ entries: [] });
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -133,49 +127,54 @@ describe('new conversation on startup', () => {
     expect(threadId.value).toBeNull();
     expect(chatReady.value).toBe(false);
     expect(threads.value).toEqual([]);
-    finishSync(Response.json({ attention: [], approvals: [], threads: [latest] }));
+    await Promise.resolve();
+    finishSync({ attention: [], approvals: [], threads: [latest] });
     await navigation;
     expect(threadId.value).toBe('latest');
   });
 
   it('ignores a hash navigation that finishes after a newer group selection', async () => {
-    let finishSync!: (response: Response) => void;
+    let finishSync!: (response: SyncFixtureData) => void;
+    sync.read
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishSync = resolve;
+          }),
+      )
+      .mockResolvedValue({ attention: [], approvals: [], threads: [{ ...latest, threadId: 'new-latest' }] });
     vi.mocked(fetch).mockImplementation(async (url) => {
-      if (url === 'api/sync?gid=agent')
-        return new Promise<Response>((resolve) => {
-          finishSync = resolve;
-        });
       if (url === 'api/groups/other-agent/dirs/') return Response.json({ entries: [] });
-      if (String(url).startsWith('api/sync?'))
-        return Response.json({ attention: [], approvals: [], threads: [{ ...latest, threadId: 'new-latest' }] });
       throw new Error(`Unexpected request: ${url}`);
     });
     location.hash = '#g/agent';
     const navigation = applyHash(router);
 
+    await Promise.resolve();
     await selectGroup('other-agent');
-    finishSync(Response.json({ attention: [], approvals: [], threads: [latest] }));
+    finishSync({ attention: [], approvals: [], threads: [latest] });
     await navigation;
 
     expect(groupId.value).toBe('other-agent');
     expect(threadId.value).toBe('new-latest');
-    expect(socketUrls).toEqual(['wss://example.test/ui/chat/api/groups/other-agent/chat/new-latest/ws?mg=web-context']);
+    expect(sync.conversationUrls()).toEqual([
+      'wss://example.test/ui/chat/api/groups/other-agent/chat/new-latest/ws?mg=web-context',
+    ]);
   });
 
   it('ignores a group selection that finishes after a newer selection', async () => {
     let finishOldTree!: (response: Response) => void;
+    sync.read.mockImplementation(async () => ({
+      attention: [],
+      approvals: [],
+      threads: [{ ...latest, threadId: groupId.value === 'agent' ? 'old-latest' : 'new-latest' }],
+    }));
     vi.mocked(fetch).mockImplementation(async (url) => {
       if (url === 'api/groups/agent/dirs/')
         return new Promise<Response>((resolve) => {
           finishOldTree = resolve;
         });
       if (url === 'api/groups/other-agent/dirs/') return Response.json({ entries: [] });
-      if (String(url).startsWith('api/sync?'))
-        return Response.json({
-          attention: [],
-          approvals: [],
-          threads: [{ ...latest, threadId: groupId.value === 'agent' ? 'old-latest' : 'new-latest' }],
-        });
       throw new Error(`Unexpected request: ${url}`);
     });
     const oldSelection = selectGroup('agent');
@@ -327,8 +326,9 @@ describe('new conversation on startup', () => {
 
   it('does not start a conversation using a stale list after a failed refresh', async () => {
     threads.value = [latest];
+    sync.read.mockRejectedValue(new Error('unavailable'));
     vi.mocked(fetch).mockImplementation(async (url) => {
-      if (String(url).startsWith('api/sync?')) return Response.json({ error: 'unavailable' }, { status: 503 });
+      if (String(url).endsWith('/chat/start')) throw new Error('Unexpected chat creation');
       return Response.json({ entries: [] });
     });
 

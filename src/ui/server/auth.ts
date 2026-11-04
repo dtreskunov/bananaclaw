@@ -50,10 +50,13 @@ export function redeemAndCreateSession(token: string): { token: string; userId: 
   return { ...createUiSessionForUser(userId), userId };
 }
 
-export function authenticate(req: http.IncomingMessage): { userId: string; sessionHash: string } | null {
+export function authenticate(
+  req: http.IncomingMessage,
+  options: { touch?: boolean } = {},
+): { userId: string; sessionHash: string } | null {
   const token = readCookie(req, COOKIE_NAME);
   if (!token) return null;
-  const session = lookupSession(token);
+  const session = lookupSession(token, options);
   if (!session) return null;
   return { userId: session.userId, sessionHash: session.tokenHash };
 }

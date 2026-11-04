@@ -15479,11 +15479,14 @@ var UnauthorizedError = class extends Error {
     this.name = "UnauthorizedError";
   }
 };
+function redirectToLogin() {
+  const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
+  window.location.replace(`/ui/login?next=${next}`);
+}
 async function api(url, opts) {
   const r4 = await fetch(url, { credentials: "same-origin", ...opts });
   if (r4.status === 401) {
-    const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
-    window.location.replace(`/ui/login?next=${next}`);
+    redirectToLogin();
     throw new UnauthorizedError();
   }
   if (!r4.ok) throw new Error("HTTP " + r4.status);
@@ -15727,10 +15730,8 @@ var pendingQuestions = y3([]);
 var refs = {
   ws: null,
   chatGeneration: 0,
-  syncRequestId: 0,
   reconnectCancel: null,
   reconnectAttempt: 0,
-  syncTimer: null,
   wsConnectCancel: null,
   wsPingTimer: null,
   seenIds: /* @__PURE__ */ new Set(),
@@ -15738,7 +15739,6 @@ var refs = {
   uploadDragDepth: 0,
   newChatInFlight: false
 };
-var SYNC_INTERVAL_MS = 1e4;
 var UPLOAD_MAX_FILE_SIZE = 25 * 1024 * 1024;
 var UPLOAD_MAX_TOTAL_SIZE = 50 * 1024 * 1024;
 var UPLOAD_MAX_FILES = 10;
@@ -15974,9 +15974,9 @@ var VoiceController = class {
       return;
     }
     for (let offset = 0; offset < chunk.byteLength; offset += VOICE_MAX_FRAME_BYTES) {
-      const frame = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
-      this.audioQueue.push(frame);
-      this.queuedBytes += frame.byteLength;
+      const frame2 = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
+      this.audioQueue.push(frame2);
+      this.queuedBytes += frame2.byteLength;
     }
     if (this.diagnostics)
       this.diagnostics.peakQueuedBytes = Math.max(this.diagnostics.peakQueuedBytes, this.queuedBytes);
@@ -15995,15 +15995,15 @@ var VoiceController = class {
     this.allowanceAt = now;
     try {
       while (this.audioQueue.length) {
-        const frame = this.audioQueue[0];
-        if (frame.byteLength > this.uploadAllowance || socket.bufferedAmount + frame.byteLength > VOICE_MAX_BUFFER_BYTES) {
+        const frame2 = this.audioQueue[0];
+        if (frame2.byteLength > this.uploadAllowance || socket.bufferedAmount + frame2.byteLength > VOICE_MAX_BUFFER_BYTES) {
           this.drainTimer = setTimeout(() => this.drainAudio(generation2), 25);
           return;
         }
-        socket.send(frame);
-        this.uploadAllowance -= frame.byteLength;
+        socket.send(frame2);
+        this.uploadAllowance -= frame2.byteLength;
         this.audioQueue.shift();
-        this.queuedBytes -= frame.byteLength;
+        this.queuedBytes -= frame2.byteLength;
       }
       if (this.captureFlushed) {
         socket.send(JSON.stringify({ type: "finish" }));
@@ -16229,9 +16229,9 @@ async function captureVoice(onChunk, onError, signal) {
     throw error;
   }
 }
-async function reportVoiceDiagnostic(groupId2, diagnostic) {
+async function reportVoiceDiagnostic(groupId3, diagnostic) {
   try {
-    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/voice/diagnostics`, {
+    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/voice/diagnostics`, {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
@@ -17962,22 +17962,22 @@ function decodeFileRef(ref) {
 function normalizeFileRef(ref) {
   return String(ref || "").replace(/^\.?\/+/, "").replace(/^workspace\/+/, "");
 }
-function toGroupFileUrl(groupId2, rel) {
-  const gid = encodeURIComponent(groupId2);
+function toGroupFileUrl(groupId3, rel) {
+  const gid = encodeURIComponent(groupId3);
   const segs = rel.split("/").filter(Boolean).map(encodeURIComponent);
   return `api/groups/${gid}/files/${segs.join("/")}`;
 }
-function renderMarkdown(text2, groupId2) {
+function renderMarkdown(text2, groupId3) {
   try {
     const html = g5.parse(normalizeFileLinks(text2 || ""), { breaks: true, gfm: true });
-    if (!groupId2 || typeof document === "undefined") return html;
+    if (!groupId3 || typeof document === "undefined") return html;
     const template = document.createElement("template");
     template.innerHTML = html;
     template.content.querySelectorAll("img[src]").forEach((img) => {
       const src = img.getAttribute("src") || "";
       if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
       const rel = normalizeFileRef(decodeFileRef(src));
-      if (rel) img.setAttribute("src", toGroupFileUrl(groupId2, rel));
+      if (rel) img.setAttribute("src", toGroupFileUrl(groupId3, rel));
     });
     return template.innerHTML;
   } catch {
@@ -18018,8 +18018,8 @@ function highlightTextNodes(root, query) {
     textNode.parentNode.replaceChild(frag, textNode);
   }
 }
-function rewriteFileLinks(root, groupId2, onNavFile) {
-  if (!groupId2 || !root) return;
+function rewriteFileLinks(root, groupId3, onNavFile) {
+  if (!groupId3 || !root) return;
   const attachPreviewClick = (a4, rel) => {
     a4.addEventListener("click", (ev) => {
       if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
@@ -18032,7 +18032,7 @@ function rewriteFileLinks(root, groupId2, onNavFile) {
     if (!href || isExternalFileRef(href) || isGroupFileRef(href)) return;
     const rel = normalizeFileRef(decodeFileRef(href));
     if (!rel) return;
-    a4.setAttribute("href", toGroupFileUrl(groupId2, rel));
+    a4.setAttribute("href", toGroupFileUrl(groupId3, rel));
     a4.setAttribute("target", "_blank");
     a4.setAttribute("rel", "noopener");
     attachPreviewClick(a4, rel);
@@ -18042,7 +18042,7 @@ function rewriteFileLinks(root, groupId2, onNavFile) {
     if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
     const rel = normalizeFileRef(decodeFileRef(src));
     if (!rel) return;
-    img.setAttribute("src", toGroupFileUrl(groupId2, rel));
+    img.setAttribute("src", toGroupFileUrl(groupId3, rel));
   });
   const fileLikeRe = /^[\w.\-/ ]+\.[A-Za-z0-9]{1,8}$/;
   root.querySelectorAll("code").forEach((c4) => {
@@ -18053,7 +18053,7 @@ function rewriteFileLinks(root, groupId2, onNavFile) {
     const rel = normalizeFileRef(txt);
     if (!rel) return;
     const a4 = document.createElement("a");
-    a4.href = toGroupFileUrl(groupId2, rel);
+    a4.href = toGroupFileUrl(groupId3, rel);
     a4.target = "_blank";
     a4.rel = "noopener";
     a4.textContent = txt;
@@ -18143,11 +18143,11 @@ function writeHash(replace = false) {
   rememberBlankConversation(h5);
 }
 function rememberBlankConversation(hash) {
-  const thread = threads.value.find(
+  const thread2 = threads.value.find(
     (t4) => t4.threadId === threadId.value && t4.channelType === "web" && t4.title === "(new thread)" && !t4.messageCount
   );
-  if (thread)
-    history.replaceState({ ...history.state, blankConversation: { groupId: groupId.value, thread } }, "", hash);
+  if (thread2)
+    history.replaceState({ ...history.state, blankConversation: { groupId: groupId.value, thread: thread2 } }, "", hash);
 }
 function threadCtx(t4) {
   if (!t4) return null;
@@ -18877,6 +18877,20 @@ function accessRequestInput(raw) {
   };
 }
 
+// ../../shared/validation.ts
+var object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var text = (value) => typeof value === "string";
+var id = (value) => text(value) && value.length > 0;
+var bool = (value) => typeof value === "boolean";
+var number = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+var integer = (value) => number(value) && Number.isSafeInteger(value);
+var position = (value) => integer(value) && Number(value) > 0;
+var optional = (check) => (value) => value === void 0 || check(value);
+var nullable = (check) => (value) => value === null || check(value);
+var array = (check) => (value) => Array.isArray(value) && value.every(check);
+var oneOf = (...values) => (value) => typeof value === "string" && values.includes(value);
+var shape = (fields) => (value) => object(value) && Object.entries(fields).every(([key, check]) => check(value[key]));
+
 // ../../shared/conversation-protocol.ts
 var CONVERSATION_PROTOCOL_VERSION = 10;
 var ConversationProtocolError = class extends Error {
@@ -18887,18 +18901,6 @@ var ConversationProtocolError = class extends Error {
     this.code = code;
   }
 };
-var object = (v5) => !!v5 && typeof v5 === "object" && !Array.isArray(v5);
-var text = (v5) => typeof v5 === "string";
-var id = (v5) => typeof v5 === "string" && v5.length > 0;
-var bool = (v5) => typeof v5 === "boolean";
-var number = (v5) => typeof v5 === "number" && Number.isFinite(v5) && v5 >= 0;
-var integer = (v5) => number(v5) && Number.isSafeInteger(v5);
-var position = (v5) => integer(v5) && Number(v5) > 0;
-var optional = (check) => (v5) => v5 === void 0 || check(v5);
-var nullable = (check) => (v5) => v5 === null || check(v5);
-var array = (check) => (v5) => Array.isArray(v5) && v5.every(check);
-var oneOf = (...values) => (v5) => typeof v5 === "string" && values.includes(v5);
-var shape = (fields) => (v5) => object(v5) && Object.entries(fields).every(([key, check]) => check(v5[key]));
 var strings = array(id);
 var questionInput = shape({
   question: text,
@@ -19071,6 +19073,9 @@ var account = shape({
   resolvedAt: nullable(text)
 });
 var interaction = (value) => question(value) || approval(value) || account(value);
+function isConversationApproval(value) {
+  return approval(value) || account(value);
+}
 var tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
 var timelineRow = (v5) => shape({ kind: oneOf("message"), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v5) || shape({ kind: oneOf("interaction"), interactionId: id, trace: optional(tracePlacement) })(v5) || shape({ kind: oneOf("turn"), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v5);
 var connection = shape({ connected: bool, activeTurnId: nullable(id) });
@@ -19170,24 +19175,24 @@ function validateTimeline(view) {
   if (messages.size || interactions.size || view.turns.some((turn2) => turn2.activity.some((line) => !seenActivity.has(`${turn2.id}:${line.ordinal}`))))
     throw new ConversationProtocolError("invalid_frame");
 }
-function reduceConversation(state, frame) {
-  if (frame.kind === "snapshot") {
-    if (state?.streamId === frame.streamId && frame.revision <= state.revision) return state;
-    unique(frame.conversation.messages);
-    unique(frame.conversation.turns);
-    unique(frame.conversation.interactions);
-    validateTimeline(frame.conversation);
-    return frame;
+function reduceConversation(state, frame2) {
+  if (frame2.kind === "snapshot") {
+    if (state?.streamId === frame2.streamId && frame2.revision <= state.revision) return state;
+    unique(frame2.conversation.messages);
+    unique(frame2.conversation.turns);
+    unique(frame2.conversation.interactions);
+    validateTimeline(frame2.conversation);
+    return frame2;
   }
-  if (!state || state.streamId !== frame.streamId) throw new ConversationProtocolError("unknown_stream");
-  if (frame.revision <= state.revision) return state;
-  if (frame.baseRevision !== state.revision) throw new ConversationProtocolError("revision_gap");
-  const changes2 = frame.changes;
+  if (!state || state.streamId !== frame2.streamId) throw new ConversationProtocolError("unknown_stream");
+  if (frame2.revision <= state.revision) return state;
+  if (frame2.baseRevision !== state.revision) throw new ConversationProtocolError("revision_gap");
+  const changes2 = frame2.changes;
   const next = {
     kind: "snapshot",
     protocolVersion: CONVERSATION_PROTOCOL_VERSION,
     streamId: state.streamId,
-    revision: frame.revision,
+    revision: frame2.revision,
     conversation: {
       threadId: state.conversation.threadId,
       messages: applyEntities(state.conversation.messages, changes2.messages),
@@ -19210,9 +19215,9 @@ var TOOL_STOP_ERRORS = {
   disconnected: "Runner disconnected. Reconnect to check this tool.",
   timeout: "The runner did not confirm the tool stop request. Try again."
 };
-async function sendStopRequest(groupId2, threadId2, target, signal) {
+async function sendStopRequest(groupId3, threadId2, target, signal) {
   const tool = target.toolCallId !== void 0;
-  let url = `api/groups/${encodeURIComponent(groupId2)}/chat/${encodeURIComponent(threadId2)}/${tool ? "stop-tool" : "stop"}`;
+  let url = `api/groups/${encodeURIComponent(groupId3)}/chat/${encodeURIComponent(threadId2)}/${tool ? "stop-tool" : "stop"}`;
   if (channelType.value !== "web" && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
   }
@@ -19389,12 +19394,12 @@ async function stopActiveTurn(turnId) {
 // src/pending-edit.ts
 var pendingEditorSessions = y3(/* @__PURE__ */ new Map());
 var composerSendInFlight = y3(false);
-function pendingEditorKey(gid, thread, messageId) {
+function pendingEditorKey(gid, thread2, messageId) {
   return JSON.stringify([
     gid,
-    thread?.channelType || "web",
-    thread?.messagingGroupId ?? null,
-    thread?.threadId,
+    thread2?.channelType || "web",
+    thread2?.messagingGroupId ?? null,
+    thread2?.threadId,
     messageId
   ]);
 }
@@ -19409,14 +19414,14 @@ function currentPendingEditor() {
     ([, session]) => session.open && isCurrentConversation(session.gid, session.thread)
   );
 }
-function isCurrentConversation(gid, thread) {
-  return groupId.value === gid && threadId.value === thread.threadId && channelType.value === (thread.channelType || "web") && messagingGroupId.value === (thread.messagingGroupId ?? null);
+function isCurrentConversation(gid, thread2) {
+  return groupId.value === gid && threadId.value === thread2.threadId && channelType.value === (thread2.channelType || "web") && messagingGroupId.value === (thread2.messagingGroupId ?? null);
 }
-function openPendingEditor(gid, thread, message2) {
+function openPendingEditor(gid, thread2, message2) {
   if (composerSendInFlight.value) return;
-  const key = pendingEditorKey(gid, thread, message2.id);
+  const key = pendingEditorKey(gid, thread2, message2.id);
   const previous = pendingEditorSessions.value.get(key);
-  if (!previous && !canEditPendingMessage(message2, thread, activeTurn.value, turnConnected.value)) return;
+  if (!previous && !canEditPendingMessage(message2, thread2, activeTurn.value, turnConnected.value)) return;
   const next = new Map(pendingEditorSessions.value);
   for (const [otherKey, session] of next) {
     if (isCurrentConversation(session.gid, session.thread)) next.set(otherKey, { ...session, open: false });
@@ -19425,10 +19430,10 @@ function openPendingEditor(gid, thread, message2) {
     key,
     previous ? { ...previous, open: true } : {
       gid,
-      thread: { ...thread },
+      thread: { ...thread2 },
       messageId: message2.id,
       open: true,
-      draft: new PendingEditDraft(message2.text, (body) => savePendingMessage(gid, thread, message2.id, body))
+      draft: new PendingEditDraft(message2.text, (body) => savePendingMessage(gid, thread2, message2.id, body))
     }
   );
   pendingEditorSessions.value = next;
@@ -19437,25 +19442,25 @@ function exitPendingEditor(key) {
   const session = pendingEditorSessions.value.get(key);
   if (session) setPendingEditorSession(key, { ...session, open: false });
 }
-function canEditPendingMessage(message2, thread, turn2, connected) {
-  return !!thread && (thread.channelType || "web") === "web" && message2.direction === "in" && !!message2.id && message2.canEditPending === true && (message2.inputState?.status === "queued" || message2.inputState?.status === "steering") && connected && turn2?.status === "running" && turn2?.supportsInputEditing === true;
+function canEditPendingMessage(message2, thread2, turn2, connected) {
+  return !!thread2 && (thread2.channelType || "web") === "web" && message2.direction === "in" && !!message2.id && message2.canEditPending === true && (message2.inputState?.status === "queued" || message2.inputState?.status === "steering") && connected && turn2?.status === "running" && turn2?.supportsInputEditing === true;
 }
 function canEditMessageInBranch(message2) {
   return message2.direction === "in" && !!message2.id && !!message2.text.trim() && !message2.inputState;
 }
-async function savePendingMessage(gid, thread, messageId, body) {
-  const result = await patchJson(pendingMessageUrl(gid, thread, messageId), body);
+async function savePendingMessage(gid, thread2, messageId, body) {
+  const result = await patchJson(pendingMessageUrl(gid, thread2, messageId), body);
   if (result.ok && (result.data.ok !== true || result.data.id !== messageId || typeof result.data.text !== "string")) {
     return { ok: false, status: 502, data: { error: "invalid_confirmation" } };
   }
   return result;
 }
-function pendingMessageUrl(gid, thread, messageId) {
-  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/messages/${encodeURIComponent(messageId)}`;
+function pendingMessageUrl(gid, thread2, messageId) {
+  let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread2.threadId)}/messages/${encodeURIComponent(messageId)}`;
   const params = new URLSearchParams();
-  if (thread.messagingGroupId) {
-    params.set("channel", thread.channelType || "web");
-    params.set("mg", thread.messagingGroupId);
+  if (thread2.messagingGroupId) {
+    params.set("channel", thread2.channelType || "web");
+    params.set("mg", thread2.messagingGroupId);
   }
   if (params.size) url += `?${params}`;
   return url;
@@ -19518,8 +19523,8 @@ var PendingEditDraft = class {
 };
 
 // src/pending-cancel.ts
-function canCancelPendingMessage(message2, thread, turn2, connected) {
-  return turn2?.supportsInputCancellation === true && canEditPendingMessage(message2, thread, { ...turn2, supportsInputEditing: true }, connected);
+function canCancelPendingMessage(message2, thread2, turn2, connected) {
+  return turn2?.supportsInputCancellation === true && canEditPendingMessage(message2, thread2, { ...turn2, supportsInputEditing: true }, connected);
 }
 var pendingCancellations = y3(/* @__PURE__ */ new Map());
 var cancelledInputs = /* @__PURE__ */ new Set();
@@ -19554,9 +19559,9 @@ function cancellationOutstanding(key) {
   return !!(state?.busy || state?.unresolved);
 }
 var PendingCancellation = class {
-  constructor(gid, thread, messageId) {
+  constructor(gid, thread2, messageId) {
     this.gid = gid;
-    this.thread = thread;
+    this.thread = thread2;
     this.messageId = messageId;
   }
   state = y3({ busy: false, unresolved: false, error: "", confirmed: false });
@@ -20095,17 +20100,17 @@ function classifySubmission(send, context) {
     starting: awaitingTurn && send.status !== "failed"
   };
 }
-function reconcileWebSubmissions(submissions, view, groupId2) {
+function reconcileWebSubmissions(submissions, view, groupId3) {
   const context = submissionContext(view);
   return submissions.flatMap((submission) => {
-    if (submission.groupId !== groupId2 || submission.threadId !== view.threadId) return [submission];
+    if (submission.groupId !== groupId3 || submission.threadId !== view.threadId) return [submission];
     const disposition = classifySubmission(submission, context);
     if (!disposition.retain) return [];
     return [disposition.echoed ? withWebSendState(submission, { status: "accepted" }) : submission];
   });
 }
-function submissionPresentation(transcript, submissions, view, groupId2, threadId2) {
-  const local = submissions.filter((send) => send.groupId === groupId2 && send.threadId === threadId2);
+function submissionPresentation(transcript, submissions, view, groupId3, threadId2) {
+  const local = submissions.filter((send) => send.groupId === groupId3 && send.threadId === threadId2);
   const context = submissionContext(view);
   const starts = local.filter((send) => classifySubmission(send, context).starting);
   const startingIds = new Set(starts.map((send) => send.messageId));
@@ -20234,16 +20239,16 @@ function conversationPresentation(view) {
   };
 }
 function applyConversationFrame(raw, expectedThreadId) {
-  const frame = parseConversationFrame(raw);
+  const frame2 = parseConversationFrame(raw);
   const previous = conversationState.value;
-  const next = reduceConversation(previous, frame);
+  const next = reduceConversation(previous, frame2);
   if (next.conversation.threadId !== expectedThreadId) throw new ConversationProtocolError("invalid_frame");
   if (next === previous) return;
   const view = next.conversation;
   const current = view.turns.find((turn2) => turn2.id === view.connection.activeTurnId);
   const caps = view.capabilities;
   const { messages, transcript } = conversationPresentation(view);
-  const changedConversation = frame.kind === "snapshot" && previous?.conversation.threadId !== view.threadId;
+  const changedConversation = frame2.kind === "snapshot" && previous?.conversation.threadId !== view.threadId;
   n2(() => {
     conversationState.value = next;
     for (const message2 of view.messages) {
@@ -20255,7 +20260,7 @@ function applyConversationFrame(raw, expectedThreadId) {
       inheritActivityPanels(`turn:${current.id}`);
     chatMessages.value = messages;
     chatTranscript.value = transcript;
-    if (frame.kind === "update") {
+    if (frame2.kind === "update") {
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
     }
@@ -20280,7 +20285,7 @@ function applyConversationFrame(raw, expectedThreadId) {
     chatReloadRequired.value = false;
     chatStatus.value = "connected";
   });
-  if (frame.kind !== "update" || !previous) return;
+  if (frame2.kind !== "update" || !previous) return;
   const oldTurns = new Map(previous.conversation.turns.map((turn2) => [turn2.id, turn2]));
   for (const turn2 of view.turns) {
     if (turn2.phase === "settled" && oldTurns.get(turn2.id)?.phase !== "settled") playCompletionChime();
@@ -20308,6 +20313,219 @@ function isAttentionTargets(value) {
   });
 }
 
+// ../../shared/sync.ts
+var SYNC_PROTOCOL_VERSION = 3;
+var SYNC_RELOAD_CLOSE_CODE = 4406;
+var thread = shape({
+  threadId: id,
+  sessionId: id,
+  channelType: id,
+  messagingGroupId: id,
+  platformId: text,
+  title: text,
+  lastActivityAt: text,
+  sessionMode: oneOf("per-thread", "shared", "agent-shared"),
+  messageCount: integer,
+  canSend: optional(bool),
+  kind: optional(oneOf("thread", "dm")),
+  counterparty: optional(text),
+  totalCost: optional(number),
+  totalTokens: optional(number),
+  turnCount: optional(number),
+  liveTasks: optional(
+    array(
+      shape({
+        seriesId: id,
+        nextRunAt: nullable(text),
+        recurrence: nullable(text),
+        summary: text,
+        paused: bool
+      })
+    )
+  ),
+  forkedFrom: optional(
+    shape({
+      threadId: id,
+      messageId: id,
+      title: nullable(text),
+      fidelity: oneOf("native", "transcript"),
+      deleted: bool
+    })
+  ),
+  forkChildren: optional(array(shape({ threadId: id, messageId: id, title: text })))
+});
+var groupId2 = (value) => text(value) && value.length > 0 && value.length <= 512;
+var subscription = shape({
+  kind: oneOf("subscribe"),
+  protocolVersion: (value) => value === SYNC_PROTOCOL_VERSION,
+  subscriptionId: integer,
+  groupId: nullable(groupId2)
+});
+var frame = shape({
+  kind: oneOf("sync"),
+  subscriptionId: integer,
+  groupId: nullable(groupId2),
+  data: shape({
+    approvals: array(isConversationApproval),
+    attention: isAttentionTargets,
+    group: nullable(
+      shape({
+        threads: array(thread),
+        voiceInput: shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) })
+      })
+    )
+  })
+});
+function isSyncFrame(value) {
+  return frame(value);
+}
+var SyncProtocolError = class extends Error {
+  constructor() {
+    super("Sync protocol changed. Reload this page to load the current client.");
+  }
+};
+function parseSyncFrame(value) {
+  if (!object(value) || value.kind === "protocol_mismatch" || value.protocolVersion !== SYNC_PROTOCOL_VERSION)
+    throw new SyncProtocolError();
+  if (!isSyncFrame(value) || value.groupId === null && value.data.group !== null)
+    throw new Error("Invalid global sync snapshot. Reconnect or reload.");
+  return value;
+}
+
+// src/sync-connection.ts
+var SyncConnection = class {
+  constructor(options) {
+    this.options = options;
+  }
+  socket = null;
+  groupId = null;
+  subscriptionId = 0;
+  attempt = 0;
+  stopped = false;
+  retryTimer;
+  connectTimer;
+  pending = null;
+  start() {
+    if (this.socket || this.stopped) return;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = void 0;
+    const socket = this.options.socket();
+    this.socket = socket;
+    this.connectTimer = setTimeout(() => {
+      if (this.socket === socket) socket.close();
+    }, 1e4);
+    socket.onopen = () => {
+      if (this.socket !== socket) return;
+      clearTimeout(this.connectTimer);
+      this.sendSubscription();
+    };
+    socket.onmessage = (event) => {
+      if (this.socket !== socket) return;
+      try {
+        const value = JSON.parse(event.data);
+        const frame2 = parseSyncFrame(value);
+        if (frame2.subscriptionId !== this.subscriptionId || frame2.groupId !== this.groupId) return;
+        this.options.apply(frame2.data, frame2.groupId);
+        this.attempt = 0;
+        if (this.pending) {
+          clearTimeout(this.pending.timer);
+          this.pending.resolve(frame2.data);
+          this.pending = null;
+        }
+      } catch (error) {
+        const message2 = error instanceof Error ? error.message : "Global synchronization failed";
+        this.options.unavailable(message2);
+        if (error instanceof SyncProtocolError) {
+          this.options.reload();
+          this.stop();
+        } else socket.close(1008, "Invalid global sync snapshot");
+      }
+    };
+    socket.onerror = () => {
+      if (this.socket === socket) this.options.unavailable("Global updates unavailable. Reconnecting...");
+    };
+    socket.onclose = (event) => {
+      if (this.socket !== socket) return;
+      this.socket = null;
+      clearTimeout(this.connectTimer);
+      this.rejectPending(new Error("Global updates disconnected. Reconnecting..."));
+      if (this.stopped) return;
+      if (event.code === 4401) {
+        this.stopped = true;
+        this.options.unauthorized();
+        return;
+      }
+      if (event.code === SYNC_RELOAD_CLOSE_CODE) {
+        this.stopped = true;
+        this.options.unavailable(new SyncProtocolError().message);
+        this.options.reload();
+        return;
+      }
+      this.options.unavailable("Global updates disconnected. Reconnecting...");
+      const delay = Math.min(15e3, 500 * 2 ** Math.min(this.attempt++, 5));
+      this.retryTimer = setTimeout(() => this.start(), delay * (0.75 + Math.random() * 0.5));
+    };
+  }
+  setGroup(groupId3) {
+    if (this.groupId === groupId3) return;
+    this.groupId = groupId3;
+    this.rejectPending(new Error("Global sync selection changed"));
+    ++this.subscriptionId;
+    this.sendSubscription();
+  }
+  refresh(groupId3) {
+    if (this.stopped) return Promise.reject(new Error("Global synchronization is stopped. Reload this page."));
+    this.setGroup(groupId3);
+    if (this.pending) return this.pending.promise;
+    let resolve;
+    let reject;
+    const promise = new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    const timer2 = setTimeout(() => {
+      this.rejectPending(new Error("Global synchronization timed out. Reconnect or reload."));
+      this.socket?.close();
+    }, 15e3);
+    this.pending = { promise, resolve, reject, timer: timer2 };
+    ++this.subscriptionId;
+    this.start();
+    this.sendSubscription();
+    return promise;
+  }
+  catchUp() {
+    if (this.stopped) return;
+    ++this.subscriptionId;
+    this.start();
+    this.sendSubscription();
+  }
+  stop() {
+    this.stopped = true;
+    clearTimeout(this.retryTimer);
+    clearTimeout(this.connectTimer);
+    this.rejectPending(new Error("Global synchronization stopped"));
+    this.socket?.close();
+    this.socket = null;
+  }
+  sendSubscription() {
+    if (this.socket?.readyState !== 1) return;
+    this.socket.send(
+      JSON.stringify({
+        kind: "subscribe",
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        subscriptionId: this.subscriptionId,
+        groupId: this.groupId
+      })
+    );
+  }
+  rejectPending(error) {
+    if (!this.pending) return;
+    clearTimeout(this.pending.timer);
+    this.pending.reject(error);
+    this.pending = null;
+  }
+};
+
 // src/attention-state.ts
 var attentionTargets = y3(null);
 var attentionError = y3(null);
@@ -20321,8 +20539,8 @@ function matchesAttentionLocation(target, location2) {
   const origin = target.origin;
   return origin.agentGroupId === location2.agentGroupId && origin.threadId === location2.threadId && origin.channelType === (location2.channelType || "web") && (origin.messagingGroupId === location2.messagingGroupId || origin.channelType === "web" && location2.messagingGroupId === null);
 }
-function groupAttentionCount(groupId2) {
-  return attentionTargets.value?.filter((target) => target.origin.agentGroupId === groupId2).length ?? 0;
+function groupAttentionCount(groupId3) {
+  return attentionTargets.value?.filter((target) => target.origin.agentGroupId === groupId3).length ?? 0;
 }
 function threadAttentionCount(location2) {
   return attentionTargets.value?.filter((target) => matchesAttentionLocation(target, location2)).length ?? 0;
@@ -20674,8 +20892,8 @@ var chatWarmups = /* @__PURE__ */ new Map();
 function warmChat() {
   const gid = groupId.value;
   const tid = threadId.value;
-  const thread = threads.value.find((entry) => entry.threadId === tid);
-  if (!gid || !tid || !canSend.value || !chatReady.value || chatReloadRequired.value || channelType.value && channelType.value !== "web" || thread?.messageCount !== 0)
+  const thread2 = threads.value.find((entry) => entry.threadId === tid);
+  if (!gid || !tid || !canSend.value || !chatReady.value || chatReloadRequired.value || channelType.value && channelType.value !== "web" || thread2?.messageCount !== 0)
     return Promise.resolve();
   const key = `${gid}:${tid}`;
   const existing = chatWarmups.get(key);
@@ -20696,21 +20914,21 @@ function warmChat() {
   return request;
 }
 async function loadThreads(_gid) {
-  return runSync({ forceRefresh: true });
+  return runSync();
 }
-async function deleteThread(thread, cascade = false) {
+async function deleteThread(thread2, cascade = false) {
   const gid = groupId.value;
   if (!gid) return;
-  const tid = thread.threadId;
+  const tid = thread2.threadId;
   const warmupKey = `${gid}:${tid}`;
   const warmup = chatWarmups.get(warmupKey);
   if (warmup) await warmup;
   if (groupId.value !== gid) return;
-  if (thread.sessionId != null || warmup) {
+  if (thread2.sessionId != null || warmup) {
     const params = new URLSearchParams();
-    if (thread.channelType && thread.channelType !== "web" && thread.messagingGroupId) {
-      params.set("channel", thread.channelType);
-      params.set("mg", thread.messagingGroupId);
+    if (thread2.channelType && thread2.channelType !== "web" && thread2.messagingGroupId) {
+      params.set("channel", thread2.channelType);
+      params.set("mg", thread2.messagingGroupId);
     }
     if (cascade) params.set("cascade", "1");
     params.set("cancelApprovals", "1");
@@ -20776,19 +20994,19 @@ async function deleteThread(thread, cascade = false) {
     else clearChat();
   }
 }
-async function forkThreadAt(thread, atMessageId, options = {}) {
+async function forkThreadAt(thread2, atMessageId, options = {}) {
   if (!groupId.value) return false;
   const params = new URLSearchParams();
-  if (thread.channelType && thread.channelType !== "web" && thread.messagingGroupId) {
-    params.set("channel", thread.channelType);
-    params.set("mg", thread.messagingGroupId);
+  if (thread2.channelType && thread2.channelType !== "web" && thread2.messagingGroupId) {
+    params.set("channel", thread2.channelType);
+    params.set("mg", thread2.messagingGroupId);
   }
   const query = params.toString();
   const gid = groupId.value;
   let created = null;
   try {
     const r4 = await fetch(
-      `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/fork${query ? `?${query}` : ""}`,
+      `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread2.threadId)}/fork${query ? `?${query}` : ""}`,
       {
         method: "POST",
         credentials: "same-origin",
@@ -20813,13 +21031,13 @@ async function forkThreadAt(thread, atMessageId, options = {}) {
   focusBranchComposerSoon({ groupId: gid, threadId: created.threadId }, options.composerDraft);
   return true;
 }
-async function editMessageInBranch(thread, previousMessageId, draft) {
-  if (previousMessageId) return forkThreadAt(thread, previousMessageId, { composerDraft: draft });
+async function editMessageInBranch(thread2, previousMessageId, draft) {
+  if (previousMessageId) return forkThreadAt(thread2, previousMessageId, { composerDraft: draft });
   const gid = groupId.value;
   if (!gid) return false;
   await openChat2(gid, null, null);
   const targetThreadId = threadId.value;
-  if (!targetThreadId || targetThreadId === thread.threadId) return false;
+  if (!targetThreadId || targetThreadId === thread2.threadId) return false;
   focusBranchComposerSoon({ groupId: gid, threadId: targetThreadId }, draft);
   return true;
 }
@@ -20914,85 +21132,65 @@ function clearChat() {
   }
   refs.seenIds.clear();
 }
-function startSyncPoll() {
-  if (refs.syncTimer) return;
-  runSync().catch(() => {
+var syncConnection = null;
+function startGlobalSync() {
+  if (syncConnection) return () => {
+  };
+  const connection2 = new SyncConnection({
+    socket: () => new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ui/chat/api/sync/ws`),
+    apply: (data, gid) => {
+      applyGlobalSync(data, gid);
+    },
+    unavailable: (message2) => {
+      attentionError.value = message2;
+    },
+    reload: () => showClientReloadPrompt("Global sync protocol changed"),
+    unauthorized: redirectToLogin
   });
-  refs.syncTimer = setInterval(() => {
-    if (document.hidden) return;
-    runSync().catch((err) => console.error("sync failed", err));
-  }, SYNC_INTERVAL_MS);
+  syncConnection = connection2;
+  const unsubscribe = j3(() => connection2.setGroup(groupId.value));
+  connection2.start();
+  return () => {
+    unsubscribe();
+    connection2.stop();
+    if (syncConnection === connection2) syncConnection = null;
+  };
 }
-async function runSync(options = {}) {
-  const requestId = ++refs.syncRequestId;
-  const generation2 = refs.chatGeneration;
+async function runSync() {
   const gid = groupId.value;
-  const tid = threadId.value;
-  const ct = channelType.value;
-  const mg = messagingGroupId.value;
-  const params = new URLSearchParams();
-  if (gid) {
-    params.set("gid", gid);
-    if (tid) params.set("tid", tid);
-    if (tid && ct && ct !== "web" && mg) {
-      params.set("channel", ct);
-      params.set("mg", mg);
-    }
-  }
-  let res;
+  const connection2 = syncConnection;
+  if (!connection2) throw new Error("Global synchronization must be started before refreshing.");
   try {
-    res = await api(
-      "api/sync" + (params.toString() ? "?" + params.toString() : ""),
-      options.forceRefresh ? { cache: "no-store" } : void 0
-    );
-    if (!isAttentionTargets(res.attention)) throw new Error("Invalid input request status. Reload and retry.");
+    const data = await connection2.refresh(gid);
+    return connection2 === syncConnection && gid === groupId.value && data.group !== null;
   } catch (error) {
-    if (requestId !== refs.syncRequestId) return false;
-    const message2 = error instanceof Error ? error.message : "Could not refresh input requests.";
-    if (attentionError.value !== message2) console.error("Input request sync failed", error);
-    attentionError.value = message2;
-    if (generation2 === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct !== "web") {
-      applyTurnState(activeTurn.value, false);
-      console.error("Conversation sync failed", error);
-      chatReady.value = false;
-      chatStatus.value = "Conversation unavailable. Reconnect to retry.";
-    }
+    if (connection2 === syncConnection && gid === groupId.value) console.error("Global sync refresh failed", error);
     return false;
   }
-  if (requestId !== refs.syncRequestId) return false;
+}
+function applyGlobalSync(res, gid) {
   n2(() => {
     attentionTargets.value = res.attention;
     attentionError.value = null;
+    pendingApprovals.value = res.approvals;
   });
-  if (generation2 === refs.chatGeneration && tid && gid === groupId.value && tid === threadId.value && ct === channelType.value && mg === messagingGroupId.value && ct !== "web") {
-    {
-      try {
-        applyConversationFrame(res.conversation, tid);
-      } catch (error) {
-        console.error("Conversation snapshot rejected", error);
-        chatStatus.value = error instanceof Error ? error.message : "Invalid chat snapshot. Reload this page.";
-        chatReady.value = false;
-        handleProtocolMismatch(error);
-        return false;
-      }
-    }
+  if (!gid || groupId.value !== gid) return;
+  if (res.group === null) {
+    clearChat();
+    threads.value = [];
+    voiceInput.value = { backend: "disabled", ready: false, reason: "Agent access is no longer available." };
+    attentionError.value = "Agent access is no longer available.";
+    return;
   }
-  if (gid && groupId.value === gid && tid === threadId.value && res.voiceInput) {
-    voiceInput.value = res.voiceInput;
-    if (!res.voiceInput.ready)
-      voice.interrupt(res.voiceInput.reason || "Live voice input is no longer available. Current text has been kept.");
-  }
-  if (Array.isArray(res.approvals)) pendingApprovals.value = res.approvals;
-  let threadsApplied = false;
-  if (gid && groupId.value === gid && Array.isArray(res.threads)) {
-    threadsApplied = true;
-    const serverIds = new Set(res.threads.map((t4) => t4.threadId));
-    const ephemeral = threads.value.filter(
-      (t4) => !serverIds.has(t4.threadId) && (t4.channelType || "web") === "web" && t4.title === "(new thread)" && !t4.messageCount
-    );
-    threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
-  }
-  return threadsApplied;
+  const { voiceInput: capability, threads: serverThreads } = res.group;
+  voiceInput.value = capability;
+  if (!capability.ready)
+    voice.interrupt(capability.reason || "Live voice input is no longer available. Current text has been kept.");
+  const serverIds = new Set(serverThreads.map((t4) => t4.threadId));
+  const ephemeral = threads.value.filter(
+    (t4) => !serverIds.has(t4.threadId) && (t4.channelType || "web") === "web" && t4.title === "(new thread)" && !t4.messageCount
+  );
+  threads.value = ephemeral.length > 0 ? [...ephemeral, ...serverThreads] : serverThreads;
 }
 function taskUrl(gid, tid, suffix = "") {
   let u5 = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/tasks${suffix}`;
@@ -21073,14 +21271,8 @@ async function openChat2(gid, resumeTid, opts, options = {}) {
   refs.seenIds.clear();
   if (resumeTid) {
     writeHash();
-    if (ct === "web") {
-      connectChatWs({ gid, tid: resumeTid, mg, generation: generation2 });
-      void runSync();
-    } else {
-      await runSync({ replaceThreadMessages: true });
-      if (generation2 !== refs.chatGeneration) return;
-      chatLoading.value = false;
-    }
+    connectChatWs({ gid, tid: resumeTid, mg, generation: generation2, channel: ct });
+    void runSync();
     if (!highlightMessageId.value && options.focusComposer !== false) focusComposerSoon();
     return;
   }
@@ -21172,11 +21364,14 @@ function handleProtocolMismatch(error) {
   return true;
 }
 function connectChatWs(ctx2) {
-  const { gid, tid, mg, generation: generation2 } = ctx2;
+  const { gid, tid, mg, generation: generation2, channel = "web" } = ctx2;
   if (generation2 !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   let wsUrl = `${proto}//${location.host}/ui/chat/api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/ws`;
-  if (mg) wsUrl += `?mg=${encodeURIComponent(mg)}`;
+  const params = new URLSearchParams();
+  if (mg) params.set("mg", mg);
+  if (channel !== "web") params.set("channel", channel);
+  if (params.size) wsUrl += `?${params}`;
   const ws = new WebSocket(wsUrl);
   refs.ws = ws;
   refs.wsConnectCancel = startConnectionTimeout(WS_CONNECT_TIMEOUT_MS, () => {
@@ -21395,7 +21590,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
     } else if (!isWeb) {
       if (!contextCurrent()) return false;
       try {
-        await runSync({ replaceThreadMessages: true });
+        await runSync();
       } catch {
       }
     }
@@ -21445,7 +21640,9 @@ async function selectGroup(gid, options = {}) {
 async function navigateAttention(scope) {
   const targets = attentionTargets.value;
   if (!targets?.length || attentionError.value) return false;
-  const target = targets.find((target2) => typeof scope === "string" ? target2.origin.agentGroupId === scope : matchesAttentionLocation(target2, scope));
+  const target = targets.find(
+    (target2) => typeof scope === "string" ? target2.origin.agentGroupId === scope : matchesAttentionLocation(target2, scope)
+  );
   if (!target) return false;
   selectAttention(target.id, true);
   try {
@@ -21814,7 +22011,7 @@ function clearPinnedContext() {
 function reconnectChatNow() {
   const gid = groupId.value;
   const tid = threadId.value;
-  if (!refs.reconnectCancel || channelType.value !== "web" || !gid || !tid) return;
+  if (!refs.reconnectCancel || !gid || !tid) return;
   runReconnectImmediately(refs.reconnectCancel, () => {
     refs.reconnectCancel = null;
     chatStatus.value = "disconnected \xB7 reconnecting\u2026";
@@ -21822,7 +22019,8 @@ function reconnectChatNow() {
       gid,
       tid,
       mg: messagingGroupId.value,
-      generation: refs.chatGeneration
+      generation: refs.chatGeneration,
+      channel: channelType.value || "web"
     });
   });
 }
@@ -21865,12 +22063,11 @@ function installLivenessHandlers() {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) return;
     nowTick.value = Date.now();
-    runSync().catch(() => {
-    });
+    syncConnection?.catchUp();
     if (!threadId.value) return;
     const ws = refs.ws;
     const open = !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
-    if (channelType.value === "web" && !open) {
+    if (!open) {
       if (refs.reconnectCancel) {
         refs.reconnectCancel();
         refs.reconnectCancel = null;
@@ -21880,7 +22077,8 @@ function installLivenessHandlers() {
           gid: groupId.value,
           tid: threadId.value,
           mg: messagingGroupId.value,
-          generation: refs.chatGeneration
+          generation: refs.chatGeneration,
+          channel: channelType.value || "web"
         });
       }
     }
@@ -21906,7 +22104,7 @@ async function respondInteraction(id2, response) {
     showToast("Response failed: " + (err instanceof Error ? err.message : String(err)), "err");
   }
   try {
-    await runSync({ forceRefresh: true });
+    await runSync();
   } finally {
     const cleared = new Set(respondingInteractionIds.value);
     cleared.delete(id2);
@@ -22572,12 +22770,12 @@ function RelativeTime({ ts, className }) {
 }
 
 // src/components/ThreadsRail.tsx
-function ThreadAttention({ thread }) {
+function ThreadAttention({ thread: thread2 }) {
   const location2 = {
     agentGroupId: groupId.value,
-    threadId: thread.threadId,
-    channelType: thread.channelType || "web",
-    messagingGroupId: thread.messagingGroupId ?? null
+    threadId: thread2.threadId,
+    channelType: thread2.channelType || "web",
+    messagingGroupId: thread2.messagingGroupId ?? null
   };
   const count = threadAttentionCount(location2);
   return count > 0 ? /* @__PURE__ */ u4(k, { children: [
@@ -22588,7 +22786,7 @@ function ThreadAttention({ thread }) {
         type: "button",
         class: "msg-action-btn thread-attention",
         disabled: !!attentionError.value,
-        "aria-label": attentionError.value ? `Input status unavailable. ${count} last known requests in ${thread.title}` : `${count} requests need your input. Open oldest request in ${thread.title}`,
+        "aria-label": attentionError.value ? `Input status unavailable. ${count} last known requests in ${thread2.title}` : `${count} requests need your input. Open oldest request in ${thread2.title}`,
         title: attentionError.value || "Open oldest input request in this thread",
         onClick: (event) => {
           event.stopPropagation();
@@ -23375,15 +23573,15 @@ function ToolStopButton({ turnId, toolCallId }) {
 }
 
 // src/components/PendingMessageActions.tsx
-function PendingMessageActions({ message: message2, thread, gid, children }) {
-  if (!gid || !thread || !message2.id || message2.direction !== "in")
+function PendingMessageActions({ message: message2, thread: thread2, gid, children }) {
+  if (!gid || !thread2 || !message2.id || message2.direction !== "in")
     return children ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children }) : null;
-  const key = pendingEditorKey(gid, thread, message2.id);
+  const key = pendingEditorKey(gid, thread2, message2.id);
   const editor = pendingEditorSessions.value.get(key);
   const cancellation = pendingCancellations.value.get(key);
   const cancelState = cancellation?.state.value;
-  const showEdit = canEditPendingMessage(message2, thread, activeTurn.value, turnConnected.value) || !!editor;
-  const showCancel = canCancelPendingMessage(message2, thread, activeTurn.value, turnConnected.value) || !!cancelState?.unresolved;
+  const showEdit = canEditPendingMessage(message2, thread2, activeTurn.value, turnConnected.value) || !!editor;
+  const showCancel = canCancelPendingMessage(message2, thread2, activeTurn.value, turnConnected.value) || !!cancelState?.unresolved;
   const hasPendingActions = showEdit || showCancel;
   const recording = isRecording.value || !["idle", "error"].includes(voice.state.value.phase) || voice.state.value.sending;
   let cancelLabel = "Cancel pending message";
@@ -23398,7 +23596,7 @@ function PendingMessageActions({ message: message2, thread, gid, children }) {
           class: "msg-action-btn msg-edit-btn",
           disabled: cancellationOutstanding(key) || recording || composerSendInFlight.value,
           onClick: () => {
-            if (!cancellationOutstanding(key) && !recording) openPendingEditor(gid, thread, message2);
+            if (!cancellationOutstanding(key) && !recording) openPendingEditor(gid, thread2, message2);
           },
           title: "Edit pending message",
           "aria-label": "Edit pending message",
@@ -23415,7 +23613,7 @@ function PendingMessageActions({ message: message2, thread, gid, children }) {
           title: cancelLabel,
           "aria-label": cancelLabel,
           onClick: () => {
-            const request = cancellation ?? new PendingCancellation(gid, { ...thread }, message2.id);
+            const request = cancellation ?? new PendingCancellation(gid, { ...thread2 }, message2.id);
             if (!cancellation) pendingCancellations.value = new Map(pendingCancellations.value).set(key, request);
             void request.cancel();
           },
@@ -24161,14 +24359,14 @@ function AttentionFocus() {
   y2(() => {
     if (!selection?.navigation || !selected || handled.current === selection.navigation || !matchesAttentionLocation(selected, location2))
       return;
-    const frame = requestAnimationFrame(() => {
+    const frame2 = requestAnimationFrame(() => {
       const target = document.getElementById(`attention-${selection.id}`);
       if (!target) return;
       handled.current = selection.navigation;
       target.scrollIntoView({ block: "center", behavior: "auto" });
       target.focus({ preventScroll: true });
     });
-    return () => cancelAnimationFrame(frame);
+    return () => cancelAnimationFrame(frame2);
   }, [
     selection,
     selected,
@@ -27106,12 +27304,12 @@ function QuestionAnswerBubble({ question: question2, answer }) {
 }
 
 // src/question-dock.ts
-function dockQuestions(questions, messages, groupId2, threadId2) {
+function dockQuestions(questions, messages, groupId3, threadId2) {
   const answered = new Set(
     messages.filter((message2) => message2.direction === "in" && message2.inputState?.status !== "cancelled").map((message2) => message2.questionId)
   );
   return questions.filter(
-    (question2) => question2.kind === "question" && question2.agentGroupId === groupId2 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.id)
+    (question2) => question2.kind === "question" && question2.agentGroupId === groupId3 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.id)
   ).sort(
     (a4, b5) => timelineSortKey(a4.createdAt, a4.timelinePosition) - timelineSortKey(b5.createdAt, b5.timelinePosition)
   );
@@ -27306,11 +27504,11 @@ function captureReadingPosition(viewport, followingBottom) {
   };
 }
 function attachDensityReflow(controller, viewport, options) {
-  let frame = null;
+  let frame2 = null;
   const finish = () => {
-    if (frame === null) return;
-    cancelAnimationFrame(frame);
-    frame = null;
+    if (frame2 === null) return;
+    cancelAnimationFrame(frame2);
+    frame2 = null;
     options.afterReflow();
   };
   const unsubscribe = controller.beforeDensityChange(() => {
@@ -27319,9 +27517,9 @@ function attachDensityReflow(controller, viewport, options) {
     options.beforeReflow();
     return () => {
       restore();
-      frame = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
         restore();
-        frame = null;
+        frame2 = null;
         options.afterReflow();
       });
     };
@@ -27839,10 +28037,10 @@ function ForkButton({ m: m6, isLatest }) {
 }
 function EditMessageButton({ m: m6 }) {
   const [busy, setBusy] = h2(false);
-  const thread = activeThread();
-  if (!thread || !canEditMessageInBranch(m6)) return null;
+  const thread2 = activeThread();
+  if (!thread2 || !canEditMessageInBranch(m6)) return null;
   const anchorId = findEditBranchAnchorId(chatMessages.value, m6.id);
-  if (anchorId && (!canFork(thread) || !canSend.value)) return null;
+  if (anchorId && (!canFork(thread2) || !canSend.value)) return null;
   const onEdit = async () => {
     if (busy) return;
     const ok = await requestConfirm({
@@ -27853,7 +28051,7 @@ function EditMessageButton({ m: m6 }) {
     if (!ok) return;
     setBusy(true);
     try {
-      await editMessageInBranch(thread, anchorId, m6.text);
+      await editMessageInBranch(thread2, anchorId, m6.text);
     } finally {
       setBusy(false);
     }
@@ -28713,11 +28911,11 @@ function MessageLog({ dockRef }) {
   const list = transcript;
   const groups2 = groupMessages(list);
   const responseTurnId = list.some((row) => row.kind === "starting") ? null : activeTurnId ?? list.reduce((id2, row) => row.kind === "turn" && row.status && row.turn.phase !== "settled" ? row.turn.id : id2, null);
-  const thread = activeThread();
-  const forkOrigin = thread?.forkedFrom;
+  const thread2 = activeThread();
+  const forkOrigin = thread2?.forkedFrom;
   const inheritedUntil = forkOrigin && list.some((row) => row.kind === "message" && row.message.id === forkOrigin.messageId) ? forkOrigin.messageId : null;
   const branchesAt = /* @__PURE__ */ new Map();
-  for (const child of thread?.forkChildren ?? []) {
+  for (const child of thread2?.forkChildren ?? []) {
     const at = branchesAt.get(child.messageId) ?? [];
     at.push(child);
     branchesAt.set(child.messageId, at);
@@ -29782,7 +29980,7 @@ function forwardedFragment(hash) {
 }
 
 // src/components/PrivateWebView.tsx
-function PrivateWebView({ groupId: groupId2, path, title, fragment }) {
+function PrivateWebView({ groupId: groupId3, path, title, fragment }) {
   const [url, setUrl] = h2(null);
   const [error, setError] = h2(null);
   const [revision, setRevision] = h2(0);
@@ -29792,7 +29990,7 @@ function PrivateWebView({ groupId: groupId2, path, title, fragment }) {
     const controller = new AbortController();
     setUrl(null);
     setError(null);
-    fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/private-web-session`, {
+    fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/private-web-session`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -29817,7 +30015,7 @@ function PrivateWebView({ groupId: groupId2, path, title, fragment }) {
       setError(reason instanceof Error ? reason.message : "Unable to open page.");
     });
     return () => controller.abort();
-  }, [groupId2, path, fragment, revision]);
+  }, [groupId3, path, fragment, revision]);
   y2(() => {
     if (!url) return void 0;
     const expectedOrigin = new URL(url).origin;
@@ -31519,7 +31717,7 @@ function ShareLinkModal() {
     return () => window.removeEventListener("keydown", onKey);
   }, [req]);
   if (!req) return null;
-  const { groupId: groupId2, entry } = req;
+  const { groupId: groupId3, entry } = req;
   const title = entry?.name || (entry?.path || "").slice((entry?.path || "").lastIndexOf("/") + 1);
   function close() {
     shareModalRequest.value = null;
@@ -31528,7 +31726,7 @@ function ShareLinkModal() {
     setBusy(true);
     setError(null);
     try {
-      const r4 = await postJson(`api/groups/${encodeURIComponent(groupId2)}/share-token`, {
+      const r4 = await postJson(`api/groups/${encodeURIComponent(groupId3)}/share-token`, {
         path: entry.path,
         ttlMinutes: ttl,
         uses
@@ -36442,8 +36640,8 @@ async function init() {
   if (parsed && parsed.groupId) chatLoading.value = true;
   D(/* @__PURE__ */ u4(App, {}), app);
   observeTableScrollEdges(app);
+  startGlobalSync();
   await applyHash(router, { newConversation: true }).catch((err) => console.error("initial route failed", err));
-  startSyncPoll();
   try {
     const sp = new URLSearchParams(window.location.search);
     if (sp.get("settings") === "1") {

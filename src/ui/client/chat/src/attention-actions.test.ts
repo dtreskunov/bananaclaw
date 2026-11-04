@@ -8,26 +8,30 @@ vi.mock('./api', async (original) => ({
   postJson: vi.fn(),
 }));
 import { api, postJson } from './api';
-import { runSync, respondInteraction, navigateAttention } from './actions';
+import { clearChat, runSync, respondInteraction, navigateAttention } from './actions';
 import { attentionError, attentionSelection, attentionTargets } from './attention-state';
-import { groupId, threadId, channelType, messagingGroupId, refs } from './state';
-import { testSnapshot, testThread } from './conversation-test-fixtures';
+import { groupId, threadId, channelType, messagingGroupId } from './state';
+import { testThread } from './conversation-test-fixtures';
+import { installSyncFixture } from './sync-action-test-fixtures';
 
 const target = { id: 'q', origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm' } };
-beforeEach(() => {
+let sync: Awaited<ReturnType<typeof installSyncFixture>>;
+beforeEach(async () => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
   vi.clearAllMocks();
   groupId.value = null;
   threadId.value = null;
   channelType.value = 'web';
   messagingGroupId.value = null;
+  sync = await installSyncFixture();
   attentionTargets.value = [target];
   attentionSelection.value = null;
   attentionError.value = null;
-  refs.syncRequestId = 0;
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => {
+  clearChat();
+  sync.dispose();
   attentionTargets.value = null;
   attentionSelection.value = null;
   attentionError.value = null;
@@ -37,35 +41,36 @@ afterEach(() => {
 
 describe('authoritative attention refresh', () => {
   it('refreshes globally even when no agent is selected', async () => {
-    vi.mocked(api).mockResolvedValue({ approvals: [], attention: [] });
+    sync.read.mockResolvedValue({ approvals: [], attention: [] });
     await runSync();
-    expect(api).toHaveBeenCalledWith('api/sync', undefined);
+    expect(sync.read).toHaveBeenCalledWith(null);
+    expect(api).not.toHaveBeenCalled();
     expect(attentionTargets.value).toEqual([]);
   });
   it('preserves the authoritative oldest-first order without mutating its snapshot', async () => {
     const oldest = { ...target, id: 'oldest' };
     const newest = { ...target, id: 'newest' };
     const server = [oldest, newest];
-    vi.mocked(api).mockResolvedValue({ approvals: [], attention: server });
+    sync.read.mockResolvedValue({ approvals: [], attention: server });
     await runSync();
     expect(attentionTargets.value).toEqual([oldest, newest]);
     expect(server).toEqual([oldest, newest]);
   });
   it.each(['missing', 'network'])('retains the last snapshot on %s failures', async (failure) => {
-    if (failure === 'network') vi.mocked(api).mockRejectedValue(new Error('Offline'));
-    else vi.mocked(api).mockResolvedValue({ approvals: [] });
+    if (failure === 'network') sync.read.mockRejectedValue(new Error('Offline'));
+    else sync.read.mockResolvedValue({ approvals: [] });
     expect(await runSync()).toBe(false);
     expect(attentionTargets.value).toEqual([target]);
     expect(attentionError.value).toBeTruthy();
     expect(console.error).toHaveBeenCalled();
-    vi.mocked(api).mockResolvedValue({ approvals: [], attention: [] });
+    sync.read.mockResolvedValue({ approvals: [], attention: [] });
     await runSync();
     expect(attentionError.value).toBeNull();
     expect(attentionTargets.value).toEqual([]);
   });
   it('does not remove attention on HTTP acceptance while canonical state remains pending', async () => {
     vi.mocked(postJson).mockResolvedValue({ ok: true, status: 200, data: { ok: true } });
-    vi.mocked(api).mockResolvedValue({ approvals: [], attention: [target] });
+    sync.read.mockResolvedValue({ approvals: [], attention: [target] });
     expect(await respondInteraction('q', { responseType: 'text', value: 'Answer' })).toBe(true);
     expect(attentionTargets.value).toEqual([target]);
   });
@@ -73,14 +78,16 @@ describe('authoritative attention refresh', () => {
     let rejectOld: (error: Error) => void = () => {
       throw new Error('Old request not started');
     };
-    vi.mocked(api).mockImplementationOnce(
+    sync.read.mockImplementationOnce(
       () =>
         new Promise((_resolve, reject) => {
           rejectOld = reject;
         }),
     );
     const old = runSync();
-    vi.mocked(api).mockResolvedValue({ approvals: [], attention: [] });
+    await Promise.resolve();
+    sync.sockets[0].close();
+    sync.read.mockResolvedValue({ approvals: [], attention: [] });
     await runSync();
     rejectOld(new Error('Outdated failure'));
     await old;
@@ -120,24 +127,33 @@ describe('authoritative attention refresh', () => {
       newest,
     ];
     attentionSelection.value = { id: newest.id, navigation: 0 };
-    expect(await navigateAttention({
-      agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm',
-    })).toBe(true);
+    expect(
+      await navigateAttention({
+        agentGroupId: 'g',
+        threadId: 't',
+        channelType: 'web',
+        messagingGroupId: 'm',
+      }),
+    ).toBe(true);
     expect(attentionSelection.value?.id).toBe(older.id);
     expect(api).not.toHaveBeenCalled();
     expect(postJson).not.toHaveBeenCalled();
   });
   it('does not navigate a thread badge to a request in another route', async () => {
     attentionTargets.value = [target];
-    expect(await navigateAttention({
-      agentGroupId: 'g', threadId: 'missing', channelType: 'web', messagingGroupId: 'm',
-    })).toBe(false);
+    expect(
+      await navigateAttention({
+        agentGroupId: 'g',
+        threadId: 'missing',
+        channelType: 'web',
+        messagingGroupId: 'm',
+      }),
+    ).toBe(false);
     expect(attentionSelection.value).toBeNull();
     expect(api).not.toHaveBeenCalled();
     expect(postJson).not.toHaveBeenCalled();
   });
   it('opens the exact cross-agent non-web thread instead of the latest or a new conversation', async () => {
-    vi.stubGlobal('location', { hash: '' });
     const destination = {
       id: 'mail-question',
       origin: { agentGroupId: 'other', threadId: 'wanted', channelType: 'resend', messagingGroupId: 'mailbox' },
@@ -145,21 +161,15 @@ describe('authoritative attention refresh', () => {
     const wanted = testThread({ threadId: 'wanted', channelType: 'resend', messagingGroupId: 'mailbox' });
     const latest = testThread({ threadId: 'latest' });
     attentionTargets.value = [destination];
-    vi.mocked(api)
-      .mockResolvedValueOnce({ approvals: [], attention: [destination], threads: [latest, wanted] })
-      .mockResolvedValueOnce({ entries: [] })
-      .mockResolvedValueOnce({
-        approvals: [],
-        attention: [destination],
-        threads: [latest, wanted],
-        conversation: testSnapshot({ threadId: 'wanted' }),
-      });
+    sync.read.mockResolvedValue({ approvals: [], attention: [destination], threads: [latest, wanted] });
+    vi.mocked(api).mockResolvedValue({ entries: [] });
     expect(await navigateAttention(destination.origin)).toBe(true);
     expect(groupId.value).toBe('other');
     expect(threadId.value).toBe('wanted');
     expect(channelType.value).toBe('resend');
     expect(messagingGroupId.value).toBe('mailbox');
-    expect(vi.mocked(api).mock.calls.at(-1)?.[0]).toContain('channel=resend&mg=mailbox');
+    expect(sync.conversationUrls().at(-1)).toContain('channel=resend');
+    expect(sync.conversationUrls().at(-1)).toContain('mg=mailbox');
     expect(postJson).not.toHaveBeenCalled();
   });
   it.each([null, []])('does not navigate without known pending requests: %s', async (targets) => {

@@ -1,15 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat, runSync, sendChat } from './actions';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
 import { testSnapshot, testTurn } from './conversation-test-fixtures';
+import { installSyncFixture } from './sync-action-test-fixtures';
 import {
   activeTurn,
   canSend,
-  channelType,
-  chatMessages,
   chatReady,
   groupId,
-  messagingGroupId,
   pendingQuestions,
   pendingWebSends,
   stopRequest,
@@ -21,8 +19,13 @@ vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
 });
 
+let sync: Awaited<ReturnType<typeof installSyncFixture>>;
+beforeEach(async () => {
+  sync = await installSyncFixture();
+});
 afterEach(() => {
   clearChat();
+  sync.dispose();
   groupId.value = null;
   pendingWebSends.value = [];
   vi.restoreAllMocks();
@@ -59,80 +62,47 @@ describe('Stop integration with chat actions', () => {
     expect(stopRequest.value).toBeNull();
   });
 
-  it('loads authoritative turn state for external channels through sync', async () => {
-    groupId.value = 'group';
-    threadId.value = 'thread';
-    channelType.value = 'telegram';
-    messagingGroupId.value = 'chat';
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          attention: [],
-          approvals: [],
-          conversation: testSnapshot({
-            turns: [{ ...testTurn, id: 'external-turn' }],
-            connection: { connected: true, activeTurnId: 'external-turn' },
-          }),
-        }),
+  it('loads authoritative turn state for external channels through their conversation socket', async () => {
+    await openChat('group', 'thread', { channelType: 'telegram', messagingGroupId: 'chat', canSend: true });
+    sync.sockets.at(-1)!.receive(
+      testSnapshot({
+        turns: [{ ...testTurn, id: 'external-turn' }],
+        connection: { connected: true, activeTurnId: 'external-turn' },
       }),
     );
-    await runSync();
     expect(activeTurn.value).toMatchObject({ id: 'external-turn', status: 'running' });
     expect(turnConnected.value).toBe(true);
-    expect(fetch).toHaveBeenCalledWith('api/sync?gid=group&tid=thread&channel=telegram&mg=chat', expect.anything());
+    expect(sync.conversationUrls()[0]).toContain('channel=telegram');
+    expect(sync.conversationUrls()[0]).toContain('mg=chat');
   });
 
   it('does not let a web sync snapshot overwrite newer WebSocket turn state', async () => {
     groupId.value = 'group';
     threadId.value = 'thread';
     applyTurnState({ id: 'live-turn', status: 'running' }, true);
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          attention: [],
-          approvals: [],
-          conversation: testSnapshot({
-            turns: [{ ...testTurn, id: 'stale-turn', phase: 'stopping' }],
-            connection: { connected: false, activeTurnId: 'stale-turn' },
-          }),
-        }),
+    sync.read.mockResolvedValue({
+      attention: [],
+      approvals: [],
+      conversation: testSnapshot({
+        turns: [{ ...testTurn, id: 'stale-turn', phase: 'stopping' }],
+        connection: { connected: false, activeTurnId: 'stale-turn' },
       }),
-    );
+    });
     await runSync();
     expect(activeTurn.value?.id).toBe('live-turn');
     expect(turnConnected.value).toBe(true);
   });
 
   it('does not restore an old external turn after navigation', async () => {
-    groupId.value = 'group';
-    threadId.value = 'thread';
-    channelType.value = 'telegram';
-    let resolve!: (value: object) => void;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        () =>
-          new Promise((r) => {
-            resolve = r;
-          }),
-      ),
-    );
-    const syncing = runSync();
+    await openChat('group', 'thread', { channelType: 'telegram', messagingGroupId: 'chat', canSend: true });
+    const socket = sync.sockets.at(-1)!;
     clearChat();
-    resolve({
-      ok: true,
-      json: async () => ({
-        attention: [],
-        approvals: [],
-        activeTurn: { id: 'old-turn', status: 'running' },
-        connected: true,
+    socket.receive(
+      testSnapshot({
+        turns: [{ ...testTurn, id: 'old-turn' }],
+        connection: { connected: true, activeTurnId: 'old-turn' },
       }),
-    });
-    await syncing;
+    );
     expect(activeTurn.value).toBeNull();
     expect(turnConnected.value).toBe(false);
   });
@@ -156,11 +126,12 @@ describe('Stop integration with chat actions', () => {
       response: null,
     };
     pendingQuestions.value = [question];
+    sync.read.mockResolvedValue({ attention: [], approvals: [] });
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ attention: [], approvals: [], questions: [question] }),
+        json: async () => ({ accepted: true }),
       }),
     );
     await stopActiveTurn('turn-1');

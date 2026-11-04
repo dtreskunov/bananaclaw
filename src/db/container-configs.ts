@@ -1,5 +1,6 @@
 import type { ContainerConfigRow } from '../types.js';
 import { getDb } from './connection.js';
+import { invalidateUi } from '../ui-events.js';
 
 const SCALAR_COLUMNS = new Set([
   'provider',
@@ -57,6 +58,7 @@ export function createContainerConfig(config: ContainerConfigRow): void {
       voice_input_enabled: config.voice_input_enabled ?? 1,
       credential_backend: config.credential_backend ?? 'agent-vault',
     });
+  invalidateUi({ kind: 'group', groupId: config.agent_group_id });
 }
 
 /** Create an empty config row with sensible defaults. Idempotent — no-ops if row exists. */
@@ -67,6 +69,7 @@ export function ensureContainerConfig(agentGroupId: string): void {
        VALUES (?, ?)`,
     )
     .run(agentGroupId, new Date().toISOString());
+  invalidateUi({ kind: 'group', groupId: agentGroupId });
 }
 
 /** Update scalar fields on a config row. Only touches fields present in `updates`. */
@@ -107,6 +110,7 @@ export function updateContainerConfigScalars(
   getDb()
     .prepare(`UPDATE container_configs SET ${fields.join(', ')} WHERE agent_group_id = @agent_group_id`)
     .run(values);
+  invalidateUi({ kind: 'group', groupId: agentGroupId });
 }
 
 /** Overwrite a JSON column wholesale. Used for skills, mcp_servers, packages_*, additional_mounts, model_params. */
@@ -128,10 +132,12 @@ export function updateContainerConfigJson(
   getDb()
     .prepare(`UPDATE container_configs SET ${column} = ?, updated_at = ? WHERE agent_group_id = ?`)
     .run(JSON.stringify(value), now, agentGroupId);
+  invalidateUi({ kind: 'group', groupId: agentGroupId });
 }
 
 export function deleteContainerConfig(agentGroupId: string): void {
   getDb().prepare('DELETE FROM container_configs WHERE agent_group_id = ?').run(agentGroupId);
+  invalidateUi({ kind: 'group', groupId: agentGroupId });
 }
 
 /** AgentVault is also the default while a newly created group's config is initialized. */

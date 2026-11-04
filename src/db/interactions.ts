@@ -1,6 +1,7 @@
 import type { Interaction } from '../types.js';
 import { invalidateConversation } from '../conversation-events.js';
 import { getDb } from './connection.js';
+import { invalidateUi } from '../ui-events.js';
 
 export function queryInteractions<T extends Interaction>(sql: string, ...params: unknown[]): T[] {
   return (
@@ -22,6 +23,7 @@ export function getInteraction(id: string): Interaction | undefined {
 }
 
 export function interactionChanged(id: string): void {
+  invalidateUi({ kind: 'interactions' });
   const sessionId = getInteraction(id)?.session_id;
   if (sessionId) queueMicrotask(() => invalidateConversation(sessionId));
 }

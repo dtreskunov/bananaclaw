@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deleteThread, loadThreads } from './actions';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearChat, deleteThread, loadThreads } from './actions';
 import { groupId, threadId, threads, toastMessage } from './state';
 import { dismissToast } from './components/Toast';
 import { testThread } from './conversation-test-fixtures';
+import { installSyncFixture } from './sync-action-test-fixtures';
 
 vi.hoisted(() => {
   vi.stubGlobal('window', {
@@ -10,7 +11,13 @@ vi.hoisted(() => {
   });
 });
 
+let sync: Awaited<ReturnType<typeof installSyncFixture>>;
+beforeEach(async () => {
+  sync = await installSyncFixture();
+});
 afterEach(() => {
+  clearChat();
+  sync.dispose();
   groupId.value = null;
   threadId.value = null;
   threads.value = [];
@@ -19,25 +26,15 @@ afterEach(() => {
 });
 
 describe('loadThreads', () => {
-  it('bypasses caches and replaces the visible thread list', async () => {
+  it('requests a fresh socket snapshot and replaces the visible thread list', async () => {
     const freshThread = testThread({ threadId: 'fresh', title: 'Fresh thread', channelType: 'web' });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ attention: [], approvals: [], threads: [freshThread] }),
-      } as Response),
-    );
+    sync.read.mockResolvedValue({ attention: [], approvals: [], threads: [freshThread] });
     groupId.value = 'agent';
     threads.value = [testThread({ threadId: 'stale', title: 'Stale thread', channelType: 'web' })];
 
     await loadThreads('agent');
 
-    expect(fetch).toHaveBeenCalledWith(
-      'api/sync?gid=agent',
-      expect.objectContaining({ cache: 'no-store', credentials: 'same-origin' }),
-    );
+    expect(sync.read).toHaveBeenCalledWith('agent');
     expect(threads.value).toEqual([freshThread]);
   });
 });

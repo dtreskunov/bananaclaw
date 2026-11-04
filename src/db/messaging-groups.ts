@@ -15,6 +15,7 @@ import {
   normalizeName,
 } from '../modules/agent-to-agent/db/agent-destinations.js';
 import { getDb, hasTable } from './connection.js';
+import { invalidateUi } from '../ui-events.js';
 
 // ── Messaging Groups ──
 
@@ -25,6 +26,7 @@ export function createMessagingGroup(group: MessagingGroup): void {
        VALUES (@id, @channel_type, @platform_id, @instance, @name, @is_group, @unknown_sender_policy, @created_at)`,
     )
     .run({ ...group, instance: group.instance ?? group.channel_type });
+  invalidateUi({ kind: 'access' });
 }
 
 export function getMessagingGroup(id: string): MessagingGroup | undefined {
@@ -132,10 +134,12 @@ export function updateMessagingGroup(
   getDb()
     .prepare(`UPDATE messaging_groups SET ${fields.join(', ')} WHERE id = @id`)
     .run(values);
+  invalidateUi({ kind: 'access' });
 }
 
 export function deleteMessagingGroup(id: string): void {
   getDb().prepare('DELETE FROM messaging_groups WHERE id = ?').run(id);
+  invalidateUi({ kind: 'access' });
 }
 
 /**
@@ -182,6 +186,7 @@ export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
        )`,
     )
     .run(mga);
+  invalidateUi({ kind: 'access' });
 
   // Auto-create an agent_destinations row so delivery's ACL doesn't block
   // outbound messages that target this chat. Guarded: when the agent-to-agent
@@ -273,10 +278,12 @@ export function updateMessagingGroupAgent(
   getDb()
     .prepare(`UPDATE messaging_group_agents SET ${fields.join(', ')} WHERE id = @id`)
     .run(values);
+  invalidateUi({ kind: 'access' });
 }
 
 export function deleteMessagingGroupAgent(id: string): void {
   getDb().prepare('DELETE FROM messaging_group_agents WHERE id = ?').run(id);
+  invalidateUi({ kind: 'access' });
 }
 
 /** Get all messaging groups wired to an agent group (reverse lookup). */

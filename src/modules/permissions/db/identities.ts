@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { getDb } from '../../../db/connection.js';
+import { invalidateUi } from '../../../ui-events.js';
 
 export interface Identity {
   user_id: string;
@@ -68,10 +69,12 @@ export function insertIdentity(args: {
       (args.primary ?? false) ? 1 : 0,
       args.metadata ? JSON.stringify(args.metadata) : null,
     );
+  invalidateUi({ kind: 'access' });
 }
 
 export function deleteIdentity(channel: string, handle: string): void {
   getDb().prepare('DELETE FROM identities WHERE channel = ? AND handle = ?').run(channel, handle);
+  invalidateUi({ kind: 'access' });
 }
 
 /**
@@ -97,6 +100,7 @@ export function getOrCreateUserByIdentity(args: {
         args.displayName,
         existing.user_id,
       );
+      invalidateUi({ kind: 'interactions' });
     }
     return existing.user_id;
   }
@@ -117,5 +121,6 @@ export function getOrCreateUserByIdentity(args: {
     ).run(userId, args.channel, args.handle, now, args.metadata ? JSON.stringify(args.metadata) : null);
   })();
 
+  invalidateUi({ kind: 'access' });
   return userId;
 }

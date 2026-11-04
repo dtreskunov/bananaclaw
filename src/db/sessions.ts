@@ -2,6 +2,8 @@ import type { Approval, Question, Session } from '../types.js';
 import type { QuestionResponse } from '../ui/shared/question.js';
 import { getDb, hasTable } from './connection.js';
 import { createInteraction, getInteraction, interactionChanged } from './interactions.js';
+import { invalidateUi } from '../ui-events.js';
+import { invalidateConversation } from '../conversation-events.js';
 
 // ── Sessions ──
 
@@ -12,6 +14,7 @@ export function createSession(session: Session): void {
        VALUES (@id, @agent_group_id, @messaging_group_id, @thread_id, @agent_provider, @status, @container_status, @last_active, @created_at)`,
     )
     .run(session);
+  invalidateUi({ kind: 'group', groupId: session.agent_group_id });
 }
 
 export function getSession(id: string): Session | undefined {
@@ -91,6 +94,8 @@ export function updateSession(
   getDb()
     .prepare(`UPDATE sessions SET ${fields.join(', ')} WHERE id = @id`)
     .run(values);
+  const session = getSession(id);
+  if (session) invalidateUi({ kind: 'group', groupId: session.agent_group_id });
 }
 
 export class SessionApprovalCancellationRequiredError extends Error {
@@ -138,6 +143,10 @@ export function assertGroupApprovalsIdle(groupId: string): void {
 export function deleteSession(id: string, cancelApprovals = false): number {
   if ([...executingApprovals.values()].includes(id)) throw new SessionApprovalInProgressError();
   const db = getDb();
+  const session = getSession(id);
+  invalidateUi({ kind: 'interactions' });
+  if (session) invalidateUi({ kind: 'group', groupId: session.agent_group_id });
+  queueMicrotask(() => invalidateConversation(id));
   return db.transaction(() => {
     if (db.prepare("SELECT 1 FROM interactions WHERE session_id=? AND status='applying'").get(id))
       throw new SessionApprovalInProgressError();
