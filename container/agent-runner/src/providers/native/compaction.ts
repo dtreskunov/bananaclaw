@@ -1,4 +1,4 @@
-import type { ModelMessage } from 'ai';
+import type { LanguageModelMiddleware, ModelMessage } from 'ai';
 import { NativeStore, type NativeContextEntry } from './store.js';
 
 export const MAX_COMPACTION_ATTEMPTS = 2;
@@ -28,15 +28,56 @@ export interface NativeCompactionPlan {
   detail: string;
 }
 
+export class NativeContextBudgetError extends Error {}
+
 export function createCompactionPolicy(window: number | undefined) {
   let emergencyAttempts = 0;
   let ordinal = 0;
   let tokens: number | undefined;
+  let requestBytes: number | undefined;
+  let measured: { bytes: number; inputTokens: number } | undefined;
   const plan = (attempt: number, detail: string): NativeCompactionPlan =>
     ({ attempt, ordinal: ++ordinal, detail });
+  const preflight: LanguageModelMiddleware = {
+    transformParams: async ({ params }) => {
+      if (window === undefined || !Number.isFinite(window) || window <= 0) return params;
+      // Opaque media has its own payload budget; text attachments must still count.
+      const budgetPart = (part: { type: string; mediaType?: string }) =>
+        part.type === 'file' && /^(?:image\/|audio\/|video\/|application\/pdf$)/.test(part.mediaType ?? '')
+          ? { ...part, data: undefined } : part;
+      const prompt = params.prompt.map(message => message.role === 'system' ? message : {
+        ...message,
+        content: message.content.map(part => {
+          if (part.type === 'tool-result' && part.output.type === 'content') return {
+            ...part, output: { ...part.output, value: part.output.value.map(budgetPart) },
+          };
+          return budgetPart(part);
+        }),
+      });
+      requestBytes = Buffer.byteLength(JSON.stringify({
+        prompt, tools: params.tools, toolChoice: params.toolChoice, responseFormat: params.responseFormat,
+      }));
+      // Without a measurement for this model, one UTF-8 byte per token is conservative.
+      const inputTokens = measured
+        ? measured.inputTokens + Math.max(0, requestBytes - measured.bytes) : requestBytes;
+      const outputTokens = params.maxOutputTokens ?? 0;
+      const overhead = Math.min(1024, Math.floor(window / 8));
+      if (inputTokens + outputTokens + overhead > window) throw new NativeContextBudgetError(
+        `Native request exceeds context budget before generation: ${inputTokens} estimated input + ` +
+        `${outputTokens} reserved output + ${overhead} framing > ${window} tokens`,
+      );
+      return params;
+    },
+  };
   return {
-    observe(value: number | undefined) { tokens = value; emergencyAttempts = 0; },
-    compacted() { tokens = undefined; },
+    preflight,
+    observe(value: number | undefined, inputTokens?: number) {
+      tokens = value;
+      emergencyAttempts = 0;
+      measured = requestBytes !== undefined && inputTokens !== undefined && Number.isFinite(inputTokens) && inputTokens >= 0
+        ? { bytes: requestBytes, inputTokens } : undefined;
+    },
+    compacted() { tokens = undefined; measured = undefined; requestBytes = undefined; },
     canRecover() { return emergencyAttempts < MAX_COMPACTION_ATTEMPTS; },
     proactive(): NativeCompactionPlan | undefined {
       if (tokens === undefined || window === undefined || !shouldCompactContext(tokens, window))
@@ -55,6 +96,7 @@ export function createCompactionPolicy(window: number | undefined) {
 }
 
 export function isContextOverflow(error: unknown): boolean {
+  if (error instanceof NativeContextBudgetError) return true;
   const seen = new Set<object>();
   function matches(value: unknown, depth: number): boolean {
     if (depth > 4) return false;

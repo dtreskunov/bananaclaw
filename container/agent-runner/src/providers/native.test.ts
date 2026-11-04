@@ -1161,6 +1161,178 @@ describe('NativeProvider', () => {
       event.step.status === status);
   }
 
+  function preflightContext() {
+    catalogModels = { local: { models: {
+      large: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 1_000_000, output: 32768 } },
+      small: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 262_144, output: 32768 } },
+    } } };
+    const continuation = history();
+    const store = new NativeStore();
+    try {
+      store.updateMessage(continuation, store.contextEntries(continuation)[0].ref!, {
+        role: 'user', content: 'Earlier requirements '.repeat(16_000),
+      });
+    } finally { store.close(); }
+    return continuation;
+  }
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'preflights a 1M-to-262K model switch before sending the long history through %s', async protocol => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      const continuation = preflightContext();
+      const large = await collect(new NativeProvider({ model: 'local/large' }), continuation);
+      expect(compactions(large, 'running')).toHaveLength(0);
+      expect(requests).toHaveLength(1);
+      requests.length = 0;
+      const small = new NativeProvider({ model: 'local/small' });
+      const events = await collect(small, continuation);
+      expect(events.some(event => event.type === 'error')).toBe(false);
+      expect(compactions(events, 'completed')).toHaveLength(1);
+      expect(JSON.stringify(requests[0])).toContain(COMPACTION_INSTRUCTIONS);
+      const normal = requests.filter(request => !JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+      expect(normal).toHaveLength(1);
+      expect(Buffer.byteLength(JSON.stringify(normal[0])) + 32768 + 1024).toBeLessThan(262_144);
+      expect(JSON.stringify(normal[0].messages)).toContain('follow up');
+      expect(replyTexts(events)).toEqual([[protocol === 'anthropic-messages' ? 'hello from direct minimax' : 'hello from stub']]);
+      expect(events.filter(event => event.type === 'usage_call')).toHaveLength(requests.length);
+      const store = new NativeStore();
+      try {
+        expect(JSON.stringify(store.messages(continuation))).toContain('Earlier requirements '.repeat(16_000));
+        expect(JSON.stringify(store.contextMessages(continuation))).not.toContain('Earlier requirements '.repeat(16_000));
+      } finally { store.close(); }
+      const resumed = await collect(new NativeProvider({ model: 'local/small' }), continuation);
+      expect(resumed.some(event => event.type === 'error')).toBe(false);
+      expect(compactions(resumed, 'running')).toHaveLength(0);
+    },
+  );
+
+  it('preflights existing history after a same-model container restart without prior usage', async () => {
+    const continuation = preflightContext();
+    const events = await collect(new NativeProvider({ model: 'local/small' }), continuation);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(compactions(events, 'completed')).toHaveLength(1);
+    expect(JSON.stringify(requests[0])).toContain(COMPACTION_INSTRUCTIONS);
+  });
+
+  it.each(['input', 'instructions', 'schema', 'output'] as const)(
+    'fails an irreducible oversized %s without sending a normal request or losing input', async component => {
+      preflightContext();
+      const huge = 'x'.repeat(300_000);
+      const fixture = component === 'schema' ? spyOn(nativeTools, 'createNativeTools').mockImplementation(() => ({
+        huge: tool({ description: huge, inputSchema: jsonSchema({ type: 'object', properties: {} }) }),
+      })) : undefined;
+      try {
+        const prompt = component === 'input' ? huge : 'Keep this pending request';
+        const provider = new NativeProvider({
+          model: 'local/small', ...(component === 'output' ? { modelParams: { max_tokens: 262_144 } } : {}),
+        });
+        const query = provider.query({
+          prompt, cwd: root,
+          ...(component === 'instructions' ? { systemContext: { instructions: huge } } : {}),
+        });
+        query.end();
+        const events: ProviderEvent[] = [];
+        for await (const event of query.events) events.push(event);
+        expect(requests).toHaveLength(0);
+        expect(events.filter(event => event.type === 'usage_call')).toHaveLength(0);
+        expect(events).toContainEqual(expect.objectContaining({
+          type: 'error', retryable: false, message: expect.stringContaining('cannot be compacted'),
+        }));
+        const init = events.find(event => event.type === 'init');
+        if (init?.type !== 'init') throw new Error('Missing continuation');
+        const store = new NativeStore();
+        try { expect(store.messages(init.continuation)).toEqual([{ role: 'user', content: prompt }]); }
+        finally { store.close(); }
+      } finally { fixture?.mockRestore(); }
+    },
+  );
+
+  it('preserves the transcript when preflight summarization fails instead of sending the oversized request', async () => {
+    const continuation = preflightContext();
+    const store = new NativeStore();
+    const original = store.contextMessages(continuation);
+    store.close();
+    rejectCompaction = true;
+    const events = await collect(new NativeProvider({ model: 'local/small' }), continuation);
+    expect(compactions(events, 'error')).toHaveLength(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error', message: expect.stringContaining('Summary service rejected'),
+    }));
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.every(request => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS))).toBe(true);
+    const reopened = new NativeStore();
+    try { expect(reopened.contextMessages(continuation).slice(0, original.length)).toEqual(original); }
+    finally { reopened.close(); }
+  });
+
+  it('does not compact an unrelated generic HTTP 400 when preflight fits', async () => {
+    const provider = knownContext();
+    apiFailures = [{
+      status: 400, message: 'Provider returned error',
+      body: { error: { message: 'Provider returned error', metadata: { provider_name: 'Google AI Studio',
+        raw: '{"error":{"message":"Request contains an invalid argument."}}' } } },
+    }];
+    const events = await collect(provider, history());
+    expect(compactions(events, 'running')).toHaveLength(0);
+    expect(requests).toHaveLength(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error', message: 'Google AI Studio: Request contains an invalid argument. (HTTP 400)',
+    }));
+  });
+
+  it('does not replay a completed tool when the next request schema exceeds the context budget', async () => {
+    preflightContext();
+    let executions = 0;
+    const fixture = spyOn(nativeTools, 'createNativeTools').mockImplementation(() => ({
+      once: tool({
+        description: executions ? 'd'.repeat(300_000) : 'Perform the action once',
+        inputSchema: jsonSchema({ type: 'object', properties: {} }),
+        execute: async () => {
+          executions++;
+          fs.appendFileSync(path.join(root, 'once.txt'), 'once\n');
+          return 'Action completed';
+        },
+      }),
+    }));
+    try {
+      scriptedToolCalls = [['once', '{}']];
+      const continuation = history();
+      const events = await collect(new NativeProvider({ model: 'local/small' }), continuation);
+      expect(executions).toBe(1);
+      expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+      expect(requests.filter(request => !JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS))).toHaveLength(1);
+      expect(compactions(events, 'running').length).toBeLessThanOrEqual(2);
+      expect(events.some(event => event.type === 'error')).toBe(true);
+      const store = new NativeStore();
+      try {
+        expect(JSON.stringify(store.messages(continuation))).toContain('Action completed');
+        expect(JSON.stringify(store.contextMessages(continuation))).toContain('follow up');
+      } finally { store.close(); }
+    } finally { fixture.mockRestore(); }
+  });
+
+  it('can stop preflight compaction before any provider call while preserving the original transcript', async () => {
+    const continuation = preflightContext();
+    const query = new NativeProvider({ model: 'local/small' }).query({
+      prompt: 'Current protected input', continuation, cwd: root,
+    });
+    query.end();
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) {
+      events.push(event);
+      if (event.type === 'progress' && event.step.kind === 'compaction' && event.step.status === 'running')
+        query.abort('user');
+    }
+    expect(requests).toHaveLength(0);
+    expect(events.some(event => event.type === 'progress' && event.step.kind === 'compaction' &&
+      event.step.status === 'interrupted')).toBe(true);
+    const store = new NativeStore();
+    try {
+      expect(JSON.stringify(store.contextMessages(continuation))).toContain('Earlier requirements '.repeat(16_000));
+      expect(JSON.stringify(store.contextMessages(continuation))).toContain('Current protected input');
+    } finally { store.close(); }
+  });
+
   function miniMaxFlash(maxOutputTokens = 512_000, modelId = 'MiniMax-M3.1-Flash-Preview') {
     catalogModels = { local: { models: { [modelId]: {
       modalities: { input: ['text'], output: ['text'] },

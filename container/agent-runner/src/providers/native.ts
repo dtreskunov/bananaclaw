@@ -414,10 +414,13 @@ export class NativeProvider implements AgentProvider {
                   : resolved.maxOutputTokens;
               const adapter = await languageModel(resolved);
               const modelSetupMs = Date.now() - startedAt;
-              const model = wrapLanguageModel({ model: adapter, middleware: [
-                    ...(resolved.protocol === 'openai-chat' ? [openAiToolMedia] : []),
-                    stopExhaustedQuota,
-                  ] });
+              const compactionPolicy = createCompactionPolicy(resolved.contextWindow);
+              const middleware: LanguageModelMiddleware[] = [
+                ...(resolved.protocol === 'openai-chat' ? [openAiToolMedia] : []),
+                stopExhaustedQuota,
+              ];
+              const model = wrapLanguageModel({ model: adapter, middleware });
+              const requestModel = wrapLanguageModel({ model: adapter, middleware: [...middleware, compactionPolicy.preflight] });
               let firstStep = true;
               let finishReason = '';
               let reply: string | null = null;
@@ -437,7 +440,6 @@ export class NativeProvider implements AgentProvider {
               let nudge: string | null = null;
               // Text written alongside tool calls, which is never delivered.
               let undeliveredChars = 0;
-              const compactionPolicy = createCompactionPolicy(resolved.contextWindow);
               async function* compactContext(plan: NativeCompactionPlan): AsyncGenerator<ProviderEvent> {
                 abortController.signal.throwIfAborted();
                 const compactStartedAt = Date.now();
@@ -568,7 +570,7 @@ export class NativeProvider implements AgentProvider {
                   ? [...requestContext, { role: 'user', content: stepNudge }] : requestContext;
                 yield { type: 'model_request' };
                 const result = streamText({
-                  model, system,
+                  model: requestModel, system,
                   messages: requestMessages,
                   tools: journal.wrap(tools, abortController.signal),
                   ...(deferredMcp ? { repairToolCall: deferredMcp.repairToolCall } : {}),
@@ -685,13 +687,13 @@ export class NativeProvider implements AgentProvider {
                   } };
                 }
                 messages.push(...responseMessages);
-                const steps = await result.steps;
+                const step = (await result.steps).at(-1);
+                const usage = step?.usage;
                 firstStep = false;
                 if (!toolMediaPressure)
-                  compactionPolicy.observe(callUsageFor(resolved, steps.at(-1)?.usage).context_tokens);
+                  compactionPolicy.observe(callUsageFor(resolved, usage).context_tokens, usage?.inputTokens);
                 const stepText = (await result.text).trim() || null;
                 finishReason = String(await result.finishReason);
-                const step = steps.at(-1);
                 // A step without tool calls is the final message; text written
                 // alongside tool calls is working notes and is never delivered.
                 const finalStep = !step || step.toolCalls.length === 0;

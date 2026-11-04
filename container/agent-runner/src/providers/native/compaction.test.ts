@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { wrapLanguageModel } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import {
   compactNativeContext, COMPACTION_INSTRUCTIONS, createCompactionPolicy, isContextOverflow, planCompaction, shouldCompactContext,
-  MAX_COMPACTION_LEAVES, MAX_COMPACTION_REQUESTS,
+  MAX_COMPACTION_LEAVES, MAX_COMPACTION_REQUESTS, NativeContextBudgetError,
 } from './compaction.js';
 import { NativeStore } from './store.js';
 
@@ -31,6 +33,7 @@ describe('context overflow detection', () => {
     expect(policy.proactive()).toMatchObject({ attempt: 1 });
   });
   it.each([
+    new NativeContextBudgetError('Request is too large before generation'),
     new Error('invalid params, context window exceeds limit (2013)'),
     { responseBody: '{"error":{"message":"context window exceeds limit (2013)"}}' },
     { cause: { error: { code: 'context_length_exceeded' } } },
@@ -45,7 +48,107 @@ describe('context overflow detection', () => {
     new Error('Unsupported audio format'),
     { statusCode: 401, message: 'maximum context length' },
     { responseBody: '{"error":{"message":"Unauthorized"},"echo":"context window exceeds limit (2013)"}' },
+    { statusCode: 400, responseBody: '{"error":{"message":"Provider returned error","metadata":{"raw":"Request contains an invalid argument."}}}' },
   ])('does not compact unrelated errors', (error) => expect(isContextOverflow(error)).toBe(false));
+});
+
+describe('request preflight', () => {
+  function guarded(policy: ReturnType<typeof createCompactionPolicy>) {
+    const upstream = new MockLanguageModelV4({
+      doStream: async () => ({ warnings: [], stream: new ReadableStream({ start(controller) { controller.close(); } }) }),
+    });
+    return { upstream, model: wrapLanguageModel({ model: upstream, middleware: policy.preflight }) };
+  }
+
+  function request(text: string, maxOutputTokens = 1024) {
+    return { prompt: [{ role: 'user' as const, content: [{ type: 'text' as const, text }] }], maxOutputTokens };
+  }
+
+  it('accepts the exact context budget and rejects one additional UTF-8 byte before calling the model', async () => {
+    const params = request('x'.repeat(10_000), 2048);
+    const bytes = Buffer.byteLength(JSON.stringify({ prompt: params.prompt }));
+    const window = bytes + params.maxOutputTokens + 1024;
+    const { model, upstream } = guarded(createCompactionPolicy(window));
+    await model.doStream(params);
+    expect(upstream.doStreamCalls).toHaveLength(1);
+    await expect(model.doStream(request(`${'x'.repeat(10_000)}x`, 2048))).rejects.toThrow(
+      `${bytes + 1} estimated input + 2048 reserved output + 1024 framing > ${window} tokens`,
+    );
+    expect(upstream.doStreamCalls).toHaveLength(1);
+  });
+
+  const baseRequest = request('hello');
+  it.each([
+    { name: 'system', params: { ...baseRequest, prompt: [
+      { role: 'system' as const, content: 's'.repeat(20_000) }, ...baseRequest.prompt,
+    ] } },
+    { name: 'schema', params: { ...baseRequest, tools: [{
+      type: 'function' as const, name: 'query', description: 'd'.repeat(20_000),
+      inputSchema: { type: 'object', properties: {} },
+    }] } },
+    { name: 'output', params: request('hello', 20_000) },
+    { name: 'tool result', params: { ...baseRequest, prompt: [
+      { role: 'tool' as const, content: [{
+        type: 'tool-result' as const, toolName: 'query', toolCallId: 'call-1',
+        output: { type: 'json' as const, value: {
+          type: 'file', mediaType: 'image/png', data: 'r'.repeat(20_000),
+        } },
+      }] }, ...baseRequest.prompt,
+    ] } },
+    { name: 'text attachment', params: { ...baseRequest, prompt: [
+      { role: 'user' as const, content: [{
+        type: 'file' as const, mediaType: 'text/plain', data: new Uint8Array(20_000),
+      }] },
+    ] } },
+    { name: 'multibyte text', params: request('\u20ac'.repeat(10_000)) },
+  ])(
+    'budgets $name rather than only conversation text', async ({ params }) => {
+      const { model, upstream } = guarded(createCompactionPolicy(20_000));
+      await expect(model.doStream(params)).rejects.toBeInstanceOf(NativeContextBudgetError);
+      expect(upstream.doStreamCalls).toHaveLength(0);
+    },
+  );
+
+  it('uses only this model measurement plus request growth and clears it after compaction', async () => {
+    const policy = createCompactionPolicy(20_000);
+    const { model, upstream } = guarded(policy);
+    await model.doStream(request('x'.repeat(12_000)));
+    policy.observe(1000, 900);
+    await model.doStream(request('x'.repeat(18_000)));
+    expect(upstream.doStreamCalls).toHaveLength(2);
+    policy.compacted();
+    await expect(model.doStream(request('x'.repeat(18_000)))).rejects.toBeInstanceOf(NativeContextBudgetError);
+    const restarted = guarded(createCompactionPolicy(20_000));
+    await expect(restarted.model.doStream(request('x'.repeat(18_000)))).rejects.toBeInstanceOf(NativeContextBudgetError);
+    expect(restarted.upstream.doStreamCalls).toHaveLength(0);
+  });
+
+  it.each([undefined, NaN, -1])('does not calibrate against invalid input usage %s', async inputTokens => {
+    const policy = createCompactionPolicy(20_000);
+    const { model, upstream } = guarded(policy);
+    await model.doStream(request('x'.repeat(12_000)));
+    policy.observe(undefined, inputTokens);
+    await expect(model.doStream(request('x'.repeat(18_000)))).rejects.toBeInstanceOf(NativeContextBudgetError);
+    expect(upstream.doStreamCalls).toHaveLength(1);
+  });
+
+  it('does not count opaque media bytes as text or mutate the actual request', async () => {
+    const { model, upstream } = guarded(createCompactionPolicy(20_000));
+    const media = { type: 'file' as const, mediaType: 'image/png', data: new Uint8Array(100_000) };
+    await model.doStream({ prompt: [
+      { role: 'user', content: [{ type: 'text', text: 'Inspect this' }, media] },
+      { role: 'tool', content: [{ type: 'tool-result', toolName: 'view_image', toolCallId: 'image-1',
+        output: { type: 'content', value: [media] } }] },
+    ] });
+    expect(upstream.doStreamCalls[0].prompt[0]).toMatchObject({ content: [{ type: 'text' }, media] });
+    expect(media.data.byteLength).toBe(100_000);
+  });
+
+  it('leaves unknown model windows to provider validation and existing emergency recovery', async () => {
+    const { model, upstream } = guarded(createCompactionPolicy(undefined));
+    await model.doStream(request('x'.repeat(100_000)));
+    expect(upstream.doStreamCalls).toHaveLength(1);
+  });
 });
 
 function seed(): { conversation: string; protectedRef: string } {

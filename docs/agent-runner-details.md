@@ -456,9 +456,26 @@ using the latest successful normal model step's prompt (including cached
 input) plus output, not cumulative billing tokens or the rounded UI percentage.
 The check runs between completed model/tool steps, after journaling their
 results, only when another generation is needed. A final answer is delivered
-without trailing compaction. Missing usage or an unknown model window disables
-this proactive trigger, not emergency recovery. Utilization is not persisted:
-the first successful step after a resume establishes a new measurement.
+without trailing compaction. Missing usage disables this utilization trigger,
+not the request preflight check or emergency recovery.
+
+Before every normal generation, including the first after a resume or model
+switch, a preflight checks the normalized text prompt, system instructions,
+tool schemas and protocol options, plus the requested output allowance and
+framing reserve, against the selected model's context window. Without a
+current-model measurement it conservatively counts UTF-8 bytes as tokens;
+after a successful step it uses that model's input usage plus request growth.
+Measurements are local to the turn, never borrowed from another model.
+Opaque media bytes are excluded from the text estimate and retain their
+existing inline-payload budget and media recovery.
+
+A rejected preflight enters the existing two-attempt context recovery before
+any normal request reaches the provider. Each compaction clears the measurement
+and rechecks the rebuilt request; instructions, tools or protected input that
+still cannot fit fail explicitly. Summary requests keep their separate bounded
+chunk budgets. Unknown model windows disable both preflight and utilization
+checks, not emergency recovery. Generic HTTP 400 errors are not classified as
+context overflow.
 
 Successful compactions can repeat throughout a task, retaining the latest three
 exchange groups. Compaction invalidates its triggering measurement; summary
