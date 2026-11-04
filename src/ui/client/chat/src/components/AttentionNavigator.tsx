@@ -6,10 +6,15 @@ import {
   attentionTargets,
   matchesAttentionLocation,
 } from '../attention-state';
-import { groupId, threadId, channelType, messagingGroupId, pendingApprovals, pendingQuestions } from '../state';
+import { groupId, threadId, channelType, messagingGroupId } from '../state';
 import { conversationState } from '../conversation-state';
 import { navigateAttention } from '../actions';
 import { AttentionBadge } from './AttentionBadge';
+
+const DIRECTIONS = [
+  { direction: -1, label: 'Previous input request', icon: '\u2039' },
+  { direction: 1, label: 'Next input request', icon: '\u203A' },
+] as const;
 
 export function AttentionNavigator() {
   const targets = attentionTargets.value;
@@ -23,9 +28,7 @@ export function AttentionNavigator() {
     messagingGroupId: messagingGroupId.value,
   };
   const selected = targets?.find((target) => target.id === selection?.id);
-  const revision = conversationState.value?.revision;
-  const approvals = pendingApprovals.value;
-  const questions = pendingQuestions.value;
+  const snapshot = conversationState.value;
   useEffect(() => {
     if (
       !selection?.navigation ||
@@ -49,14 +52,12 @@ export function AttentionNavigator() {
     location.threadId,
     location.channelType,
     location.messagingGroupId,
-    revision,
-    approvals,
-    questions,
+    snapshot,
   ]);
-  if ((!targets || targets.length === 0) && !error) return null;
   const count = targets?.length;
+  if (!count && !error) return null;
   const position = targets ? attentionPosition(targets, selection?.id ?? null, location) : -1;
-  const disabled = !!error || count === undefined || count < 2;
+  const disabled = !!error || count === 1;
   const title = error
     ? `Input status unavailable: ${error}. Showing last known requests.`
     : 'Requests needing your input';
@@ -89,28 +90,20 @@ export function AttentionNavigator() {
           label={count === undefined ? 'Input request count unavailable' : `${count} requests need your input`}
         />
       </button>
-      <button
-        type="button"
-        aria-label="Previous input request"
-        title="Previous input request"
-        disabled={disabled}
-        onClick={() => {
-          void navigateAttention(-1);
-        }}
-      >
-        {'\u2039'}
-      </button>
-      <button
-        type="button"
-        aria-label="Next input request"
-        title="Next input request"
-        disabled={disabled}
-        onClick={() => {
-          void navigateAttention(1);
-        }}
-      >
-        {'\u203A'}
-      </button>
+      {DIRECTIONS.map(({ direction, label, icon }) => (
+        <button
+          key={direction}
+          type="button"
+          aria-label={label}
+          title={label}
+          disabled={disabled}
+          onClick={() => {
+            void navigateAttention(direction);
+          }}
+        >
+          {icon}
+        </button>
+      ))}
     </div>
   );
 }

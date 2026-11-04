@@ -1166,12 +1166,10 @@ export async function navigateAttention(direction: -1 | 0 | 1): Promise<boolean>
     if (credentialsOpen.value) openChatView();
     drawerOpen.threads.value = false;
     drawerOpen.files.value = false;
-    if (target.origin) {
-      const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
-      const context: ThreadCtx = { channelType: channel, messagingGroupId: mg, canSend: false };
-      if (groupId.value !== gid) await selectGroup(gid, { resume: { threadId: tid, context }, focusComposer: false });
-      else await openChat(gid, tid, context, { focusComposer: false });
-    }
+    const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
+    const context: ThreadCtx = { channelType: channel, messagingGroupId: mg, canSend: false };
+    if (groupId.value !== gid) await selectGroup(gid, { resume: { threadId: tid, context }, focusComposer: false });
+    else await openChat(gid, tid, context, { focusComposer: false });
     return true;
   } catch (error) {
     console.error('Input request navigation failed', error);

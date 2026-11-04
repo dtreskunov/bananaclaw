@@ -322,3 +322,19 @@ on HTTP acknowledgement. Refresh errors retain last-known information instead
 of reporting a fabricated zero. Stable canonical IDs handle pending queues and
 cross-client resolution. Browser push and a separate inbox are not part of this
 phase.
+
+### Attention LOC and complexity review
+
+Against pre-feature `eb52f19b0`, the original `8fa9460ef` implementation adds
+419 production LOC, 497 test LOC, 349 generated LOC and 51 documentation LOC.
+Across the same changed-production TypeScript/TSX module set, classic cyclomatic
+complexity increases by 132: 103 branch increments and 29 functions. This is a
+new user-facing capability, not a net code-reduction claim.
+
+A follow-up removes redundant focus subscriptions, nullable authorization
+plumbing and an impossible nullable-navigation branch, and shares previous/next
+control rendering. It removes 13 production LOC and seven branch/complexity
+points without changing production function count, permissions or wire behavior.
+The feature's resulting production delta is +406 LOC, classic cyclomatic +125
+and branch increments +96; runtime imports remain acyclic. A replacement-stream
+focus regression is retained, and targeted tests/builds/typechecks pass.

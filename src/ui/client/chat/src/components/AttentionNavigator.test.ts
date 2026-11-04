@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { toChildArray } from 'preact';
+import { useEffect } from 'preact/hooks';
+const hooks = vi.hoisted(() => ({ reference: undefined as { current: number | null } | undefined }));
 vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
 });
 vi.mock('preact/hooks', async (original) => ({
   ...(await original<typeof import('preact/hooks')>()),
-  useRef: <T>(current: T) => ({ current }),
+  useRef: <T>(current: T) => hooks.reference ?? { current },
   useEffect: vi.fn(),
 }));
 import { attentionError, attentionSelection, attentionTargets } from '../attention-state';
@@ -13,6 +16,8 @@ import { AttentionBadge } from './AttentionBadge';
 import { AttentionNavigator } from './AttentionNavigator';
 import { GroupStrip } from './GroupPicker';
 import { groups } from '../state';
+import { conversationState } from '../conversation-state';
+import { testSnapshot } from '../conversation-test-fixtures';
 
 afterEach(() => {
   attentionTargets.value = null;
@@ -21,6 +26,10 @@ afterEach(() => {
   groups.value = [];
   groupId.value = null;
   threadId.value = null;
+  conversationState.value = null;
+  hooks.reference = undefined;
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function seed(count: number) {
@@ -39,24 +48,22 @@ describe('compact shared input indicators', () => {
     seed(6);
     attentionSelection.value = { id: 'q4', navigation: 1 };
     const node = AttentionNavigator()!;
-    const [position, of, total, previous, next] = node.props.children;
-    expect(position.type).toBe(AttentionBadge);
-    expect(position.props).toMatchObject({ value: 5, neutral: true });
-    expect(of.props.children).toBe('of');
-    expect(total.props.children.type).toBe(AttentionBadge);
-    expect(total.props.children.props).toMatchObject({ value: 6 });
-    expect(previous.props['aria-label']).toBe('Previous input request');
-    expect(next.props['aria-label']).toBe('Next input request');
+    const [position, of, total, previous, next] = toChildArray(node.props.children);
+    expect(position).toMatchObject({ type: AttentionBadge, props: { value: 5, neutral: true } });
+    expect(of).toMatchObject({ props: { children: 'of' } });
+    expect(total).toMatchObject({ props: { children: { type: AttentionBadge, props: { value: 6 } } } });
+    expect(previous).toMatchObject({ props: { 'aria-label': 'Previous input request', disabled: false } });
+    expect(next).toMatchObject({ props: { 'aria-label': 'Next input request', disabled: false } });
     expect(node.props['aria-haspopup']).toBeUndefined();
   });
   it('hides an empty control and keeps a one-request total clickable with arrows disabled', () => {
     seed(0);
     expect(AttentionNavigator()).toBeNull();
     seed(1);
-    const [, , total, previous, next] = AttentionNavigator()!.props.children;
-    expect(previous.props.disabled).toBe(true);
-    expect(next.props.disabled).toBe(true);
-    expect(total.props.disabled).toBe(false);
+    const [, , total, previous, next] = toChildArray(AttentionNavigator()!.props.children);
+    expect(previous).toMatchObject({ props: { disabled: true } });
+    expect(next).toMatchObject({ props: { disabled: true } });
+    expect(total).toMatchObject({ props: { disabled: false } });
   });
   it('retains counts visibly marked stale and uses unknown rather than a fabricated zero', () => {
     seed(6);
@@ -73,5 +80,37 @@ describe('compact shared input indicators', () => {
     const badge = strip?.props.items[0].badge;
     expect(badge.type).toBe(AttentionBadge);
     expect(badge.props.value).toBe(2);
+  });
+  it('waits for a replacement snapshot to reveal the request and focuses only once per navigation', () => {
+    seed(2);
+    attentionSelection.value = { id: 'q1', navigation: 1 };
+    hooks.reference = { current: null };
+    const target = { scrollIntoView: vi.fn(), focus: vi.fn() };
+    const find = vi.fn().mockReturnValue(null);
+    vi.stubGlobal('document', { getElementById: find });
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    conversationState.value = testSnapshot({}, 'old-stream');
+    AttentionNavigator();
+    const first = vi.mocked(useEffect).mock.lastCall!;
+    first[0]();
+    expect(hooks.reference.current).toBeNull();
+
+    conversationState.value = testSnapshot({}, 'replacement-stream');
+    find.mockReturnValue(target);
+    AttentionNavigator();
+    const replacement = vi.mocked(useEffect).mock.lastCall!;
+    expect(replacement[1]).toContain(conversationState.value);
+    expect(replacement[1]).not.toEqual(first[1]);
+    replacement[0]();
+    expect(find).toHaveBeenLastCalledWith('attention-q1');
+    expect(target.scrollIntoView).toHaveBeenCalledOnce();
+    expect(target.focus).toHaveBeenCalledWith({ preventScroll: true });
+    AttentionNavigator();
+    vi.mocked(useEffect).mock.lastCall![0]();
+    expect(target.focus).toHaveBeenCalledOnce();
   });
 });

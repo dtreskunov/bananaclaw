@@ -21463,12 +21463,10 @@ async function navigateAttention(direction) {
     if (credentialsOpen.value) openChat();
     drawerOpen.threads.value = false;
     drawerOpen.files.value = false;
-    if (target.origin) {
-      const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
-      const context = { channelType: channel, messagingGroupId: mg, canSend: false };
-      if (groupId.value !== gid) await selectGroup(gid, { resume: { threadId: tid, context }, focusComposer: false });
-      else await openChat2(gid, tid, context, { focusComposer: false });
-    }
+    const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
+    const context = { channelType: channel, messagingGroupId: mg, canSend: false };
+    if (groupId.value !== gid) await selectGroup(gid, { resume: { threadId: tid, context }, focusComposer: false });
+    else await openChat2(gid, tid, context, { focusComposer: false });
     return true;
   } catch (error) {
     console.error("Input request navigation failed", error);
@@ -22407,6 +22405,10 @@ function UserMenu() {
 }
 
 // src/components/AttentionNavigator.tsx
+var DIRECTIONS = [
+  { direction: -1, label: "Previous input request", icon: "\u2039" },
+  { direction: 1, label: "Next input request", icon: "\u203A" }
+];
 function AttentionNavigator() {
   const targets = attentionTargets.value;
   const error = attentionError.value;
@@ -22419,9 +22421,7 @@ function AttentionNavigator() {
     messagingGroupId: messagingGroupId.value
   };
   const selected = targets?.find((target) => target.id === selection?.id);
-  const revision = conversationState.value?.revision;
-  const approvals = pendingApprovals.value;
-  const questions = pendingQuestions.value;
+  const snapshot = conversationState.value;
   y2(() => {
     if (!selection?.navigation || !selected || handled.current === selection.navigation || !matchesAttentionLocation(selected, location2))
       return;
@@ -22440,14 +22440,12 @@ function AttentionNavigator() {
     location2.threadId,
     location2.channelType,
     location2.messagingGroupId,
-    revision,
-    approvals,
-    questions
+    snapshot
   ]);
-  if ((!targets || targets.length === 0) && !error) return null;
   const count = targets?.length;
+  if (!count && !error) return null;
   const position2 = targets ? attentionPosition(targets, selection?.id ?? null, location2) : -1;
-  const disabled = !!error || count === void 0 || count < 2;
+  const disabled = !!error || count === 1;
   const title = error ? `Input status unavailable: ${error}. Showing last known requests.` : "Requests needing your input";
   return /* @__PURE__ */ u4(
     "div",
@@ -22480,32 +22478,20 @@ function AttentionNavigator() {
             )
           }
         ),
-        /* @__PURE__ */ u4(
+        DIRECTIONS.map(({ direction, label, icon }) => /* @__PURE__ */ u4(
           "button",
           {
             type: "button",
-            "aria-label": "Previous input request",
-            title: "Previous input request",
+            "aria-label": label,
+            title: label,
             disabled,
             onClick: () => {
-              void navigateAttention(-1);
+              void navigateAttention(direction);
             },
-            children: "\u2039"
-          }
-        ),
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            "aria-label": "Next input request",
-            title: "Next input request",
-            disabled,
-            onClick: () => {
-              void navigateAttention(1);
-            },
-            children: "\u203A"
-          }
-        )
+            children: icon
+          },
+          direction
+        ))
       ]
     }
   );

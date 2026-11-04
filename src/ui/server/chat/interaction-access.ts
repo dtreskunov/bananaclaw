@@ -20,17 +20,13 @@ export function questionResponseOrigin(userId: string, question: Question): Appr
     question.channel_type && question.platform_id
       ? getMessagingGroupByPlatform(question.channel_type, question.platform_id)
       : undefined;
-  const threadId = question.thread_id ?? (mg ? `__dm:${mg.id}` : '');
-  const context =
-    session && mg
-      ? resolveTurnContext(userId, session.agent_group_id, threadId, {
-          channelType: mg.channel_type,
-          messagingGroupId: mg.id,
-        })
-      : null;
+  if (!session || !mg) return null;
+  const threadId = question.thread_id ?? `__dm:${mg.id}`;
+  const context = resolveTurnContext(userId, session.agent_group_id, threadId, {
+    channelType: mg.channel_type,
+    messagingGroupId: mg.id,
+  });
   if (
-    !session ||
-    !mg ||
     !context ||
     context.sessionId !== question.session_id ||
     !routeMatches(context, question.channel_type, question.platform_id, question.thread_id)
