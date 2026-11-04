@@ -34,6 +34,7 @@ Errors, interrupted/unknown outcomes, incomplete tool-call/result groups, media,
 skill instructions and tool discovery remain intact. Legacy unstructured shell
 results are not guessed to be successful. Built-in MCP exchanges remain inline
 because legacy text representations do not reliably expose their outcome.
+Receipts and compaction use the same assistant/tool exchange grouping.
 
 Private `finished_turns` boundaries are recorded only after the result consumer
 advances past a completed reply/silence. Cancellation or an unacknowledged

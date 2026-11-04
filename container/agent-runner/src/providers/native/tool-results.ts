@@ -33,6 +33,15 @@ export function boundToolResults(messages: ModelMessage[], archive: ResultArchiv
   });
 }
 
+export function exchangeGroups(entries: NativeContextEntry[]): NativeContextEntry[][] {
+  const groups: NativeContextEntry[][] = [];
+  for (const entry of entries) {
+    if (entry.message.role === 'tool' && groups.length > 0) groups[groups.length - 1].push(entry);
+    else groups.push([entry]);
+  }
+  return groups;
+}
+
 function successfulOutput(output: ModelToolOutput): boolean {
   if (output.type === 'content') return output.value.every((part) => part.type === 'text');
   if (output.type === 'json' && output.value && typeof output.value === 'object' && !Array.isArray(output.value)) {
@@ -62,12 +71,9 @@ function completedExchange(group: NativeContextEntry[]) {
 
 export function finishedToolReceipts(entries: NativeContextEntry[], archive: ResultArchive): ModelMessage[] {
   const messages: ModelMessage[] = [];
-  for (let i = 0; i < entries.length; i++) {
-    const group = [entries[i]];
-    while (entries[i + group.length]?.message.role === 'tool') group.push(entries[i + group.length]);
+  for (const group of exchangeGroups(entries)) {
     const original = group.map(item => item.message);
     const complete = completedExchange(group);
-    i += group.length - 1;
     if (!complete) { messages.push(...original); continue; }
     const details = complete.calls.map(call => {
       const { detail } = toolActivityFields(call.toolName, call.input);

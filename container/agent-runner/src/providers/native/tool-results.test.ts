@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ModelMessage } from 'ai';
-import { boundToolResults, finishedToolReceipts, MAX_TOOL_TEXT_BYTES } from './tool-results.js';
+import { boundToolResults, exchangeGroups, finishedToolReceipts, MAX_TOOL_TEXT_BYTES } from './tool-results.js';
 import { NativeStore } from './store.js';
 import type { NativeContextEntry } from './store.js';
 
@@ -89,6 +89,20 @@ function exchange(name = 'write', output: Output = { type: 'text', value: 'File 
 function entries(messages: ModelMessage[], finished = true): NativeContextEntry[] {
   return messages.map((message, index) => ({ ref: String(index + 1), finished, message }));
 }
+
+it('shares non-mutating grouping across leading orphan tools, user boundaries and parallel results', () => {
+  const original = entries([
+    { role: 'tool', content: [] }, { role: 'tool', content: [] },
+    { role: 'user', content: 'request' },
+    { role: 'assistant', content: 'work' },
+    { role: 'tool', content: [] }, { role: 'tool', content: [] },
+    { role: 'assistant', content: 'answer' },
+  ]);
+  const groups = exchangeGroups(original);
+  expect(groups.map(group => group.map(entry => entry.ref))).toEqual([['1', '2'], ['3'], ['4', '5', '6'], ['7']]);
+  expect(groups.flat().every((entry, index) => entry === original[index])).toBe(true);
+  expect(exchangeGroups([])).toEqual([]);
+});
 
 it('projects finished successes into retrievable receipts while leaving active history and answers intact', () => {
   const conversation = store.createConversation();

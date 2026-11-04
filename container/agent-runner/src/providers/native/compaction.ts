@@ -1,6 +1,6 @@
 import type { ModelMessage } from 'ai';
 import { NativeStore, type NativeContextEntry } from './store.js';
-import { boundToolResults } from './tool-results.js';
+import { boundToolResults, exchangeGroups } from './tool-results.js';
 
 export const MAX_COMPACTION_ATTEMPTS = 2;
 export const COMPACTION_THRESHOLD = 0.75;
@@ -91,15 +91,6 @@ function transcript(message: ModelMessage): string {
     if (key === 'providerOptions') return undefined;
     return value;
   });
-}
-
-function exchangeGroups(entries: NativeContextEntry[]): NativeContextEntry[][] {
-  const groups: NativeContextEntry[][] = [];
-  for (const entry of entries) {
-    if (entry.message.role === 'tool' && groups.length > 0) groups[groups.length - 1].push(entry);
-    else groups.push([entry]);
-  }
-  return groups;
 }
 
 export function planCompaction(
