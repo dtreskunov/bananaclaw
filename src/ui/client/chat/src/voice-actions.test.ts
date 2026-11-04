@@ -1,15 +1,21 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat, runSync } from './actions';
 import { channelType, groupId, threadId, voiceInput } from './state';
 import { voice } from './voice-audio';
-import { testSnapshot } from './conversation-test-fixtures';
+import { installSyncFixture } from './sync-action-test-fixtures';
+import type { SyncResponse } from '../../../shared/sync';
 
 vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
 });
 
+let sync: Awaited<ReturnType<typeof installSyncFixture>>;
+beforeEach(async () => {
+  sync = await installSyncFixture();
+});
 afterEach(() => {
   clearChat();
+  sync.dispose();
   groupId.value = null;
   vi.restoreAllMocks();
 });
@@ -19,18 +25,11 @@ describe('voice capability integration', () => {
     groupId.value = 'g';
     threadId.value = 't';
     channelType.value = 'telegram';
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          attention: [],
-          approvals: [],
-          voiceInput: { backend: 'elevenlabs', ready: true },
-          conversation: testSnapshot({ threadId: 't' }),
-        }),
-      }),
-    );
+    sync.read.mockResolvedValue({
+      attention: [],
+      approvals: [],
+      voiceInput: { backend: 'elevenlabs', ready: true },
+    });
     await runSync();
     expect(voiceInput.value).toEqual({ backend: 'elevenlabs', ready: true });
   });
@@ -38,22 +37,18 @@ describe('voice capability integration', () => {
   it('ignores a stale sync capability after navigation', async () => {
     groupId.value = 'g';
     threadId.value = 't';
-    let resolve!: (response: object) => void;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        () =>
-          new Promise((r) => {
-            resolve = r;
-          }),
-      ),
+    let resolve!: (response: Partial<SyncResponse>) => void;
+    sync.read.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
     );
     const syncing = runSync();
+    await Promise.resolve();
     clearChat();
-    resolve({
-      ok: true,
-      json: async () => ({ attention: [], approvals: [], voiceInput: { backend: 'elevenlabs', ready: true } }),
-    });
+    groupId.value = 'other';
+    resolve({ attention: [], approvals: [], voiceInput: { backend: 'elevenlabs', ready: true } });
     await syncing;
     expect(voiceInput.value.ready).toBe(false);
   });
@@ -75,17 +70,11 @@ describe('voice capability integration', () => {
     groupId.value = 'g';
     threadId.value = 't';
     const interrupt = vi.spyOn(voice, 'interrupt');
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          attention: [],
-          approvals: [],
-          voiceInput: { backend: 'elevenlabs', ready: false, reason: 'API key missing' },
-        }),
-      }),
-    );
+    sync.read.mockResolvedValue({
+      attention: [],
+      approvals: [],
+      voiceInput: { backend: 'elevenlabs', ready: false, reason: 'API key missing' },
+    });
     await runSync();
     expect(voiceInput.value.reason).toBe('API key missing');
     expect(interrupt).toHaveBeenCalledWith('API key missing');

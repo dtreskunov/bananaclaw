@@ -51,8 +51,8 @@ it('pushes metadata and resolves refreshes without HTTP polling or overwriting a
   expect(sockets[0].url).toBe('wss://chat.example/ui/chat/api/sync/ws');
   sockets[0].readyState = 1;
   sockets[0].onopen?.();
-  const refreshed = runSync({ forceRefresh: true });
-  const secondRefresh = runSync({ forceRefresh: true });
+  const refreshed = runSync();
+  const secondRefresh = runSync();
   const subscription = JSON.parse(sockets[0].send.mock.calls.at(-1)![0]);
   const data = {
     approvals: [],

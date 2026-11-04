@@ -15730,7 +15730,6 @@ var pendingQuestions = y3([]);
 var refs = {
   ws: null,
   chatGeneration: 0,
-  syncRequestId: 0,
   reconnectCancel: null,
   reconnectAttempt: 0,
   wsConnectCancel: null,
@@ -20883,7 +20882,7 @@ function warmChat() {
   return request;
 }
 async function loadThreads(_gid) {
-  return runSync({ forceRefresh: true });
+  return runSync();
 }
 async function deleteThread(thread2, cascade = false) {
   const gid = groupId.value;
@@ -21121,68 +21120,23 @@ function startGlobalSync() {
   connection2.start();
   return () => {
     unsubscribe();
-    ++refs.syncRequestId;
     connection2.stop();
     if (syncConnection === connection2) syncConnection = null;
   };
 }
-async function runSync(options = {}) {
-  const requestId = ++refs.syncRequestId;
-  const generation2 = refs.chatGeneration;
+async function runSync() {
   const gid = groupId.value;
-  const tid = threadId.value;
-  const ct = channelType.value;
-  const mg = messagingGroupId.value;
   const connection2 = syncConnection;
-  const params = new URLSearchParams();
-  if (gid) {
-    params.set("gid", gid);
-    if (tid) params.set("tid", tid);
-    if (tid && ct && ct !== "web" && mg) {
-      params.set("channel", ct);
-      params.set("mg", mg);
-    }
-  }
-  let res;
+  if (!connection2) throw new Error("Global synchronization must be started before refreshing.");
   try {
-    res = connection2 ? await connection2.refresh(gid) : await api(
-      "api/sync" + (params.toString() ? "?" + params.toString() : ""),
-      options.forceRefresh ? { cache: "no-store" } : void 0
-    );
-    if (!isAttentionTargets(res.attention)) throw new Error("Invalid input request status. Reload and retry.");
+    const data = await connection2.refresh(gid);
+    return connection2 === syncConnection && gid === groupId.value && data.groupAccess === true;
   } catch (error) {
-    if (requestId !== refs.syncRequestId) return false;
-    const message2 = error instanceof Error ? error.message : "Could not refresh input requests.";
-    if (attentionError.value !== message2) console.error("Input request sync failed", error);
-    attentionError.value = message2;
-    if (!syncConnection && !refs.ws && generation2 === refs.chatGeneration && gid === groupId.value && tid === threadId.value && ct !== "web") {
-      applyTurnState(activeTurn.value, false);
-      console.error("Conversation sync failed", error);
-      chatReady.value = false;
-      chatStatus.value = "Conversation unavailable. Reconnect to retry.";
-    }
+    if (connection2 === syncConnection && gid === groupId.value) console.error("Global sync refresh failed", error);
     return false;
   }
-  if (connection2)
-    return connection2 === syncConnection && !!gid && gid === groupId.value && res.groupAccess !== false && Array.isArray(res.threads);
-  if (requestId !== refs.syncRequestId) return false;
-  const threadsApplied = applyGlobalSync(res, gid, generation2 === refs.chatGeneration && tid === threadId.value);
-  if (generation2 === refs.chatGeneration && tid && gid === groupId.value && tid === threadId.value && ct === channelType.value && mg === messagingGroupId.value && ct !== "web" && !syncConnection && !refs.ws) {
-    {
-      try {
-        applyConversationFrame(res.conversation, tid);
-      } catch (error) {
-        console.error("Conversation snapshot rejected", error);
-        chatStatus.value = error instanceof Error ? error.message : "Invalid chat snapshot. Reload this page.";
-        chatReady.value = false;
-        handleProtocolMismatch(error);
-        return false;
-      }
-    }
-  }
-  return threadsApplied;
 }
-function applyGlobalSync(res, gid, updateVoice = true) {
+function applyGlobalSync(res, gid) {
   n2(() => {
     attentionTargets.value = res.attention;
     attentionError.value = null;
@@ -21193,23 +21147,20 @@ function applyGlobalSync(res, gid, updateVoice = true) {
     threads.value = [];
     voiceInput.value = { backend: "disabled", ready: false, reason: "Agent access is no longer available." };
     attentionError.value = "Agent access is no longer available.";
-    return false;
+    return;
   }
-  if (updateVoice && gid && groupId.value === gid && res.voiceInput) {
+  if (gid && groupId.value === gid && res.voiceInput) {
     voiceInput.value = res.voiceInput;
     if (!res.voiceInput.ready)
       voice.interrupt(res.voiceInput.reason || "Live voice input is no longer available. Current text has been kept.");
   }
-  let threadsApplied = false;
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
-    threadsApplied = true;
     const serverIds = new Set(res.threads.map((t4) => t4.threadId));
     const ephemeral = threads.value.filter(
       (t4) => !serverIds.has(t4.threadId) && (t4.channelType || "web") === "web" && t4.title === "(new thread)" && !t4.messageCount
     );
     threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
   }
-  return threadsApplied;
 }
 function taskUrl(gid, tid, suffix = "") {
   let u5 = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/tasks${suffix}`;
@@ -21609,7 +21560,7 @@ async function submitChatPacket({ clientMessageId, text: text3, files, timestamp
     } else if (!isWeb) {
       if (!contextCurrent()) return false;
       try {
-        await runSync({ replaceThreadMessages: true });
+        await runSync();
       } catch {
       }
     }
@@ -22123,7 +22074,7 @@ async function respondInteraction(id2, response) {
     showToast("Response failed: " + (err instanceof Error ? err.message : String(err)), "err");
   }
   try {
-    await runSync({ forceRefresh: true });
+    await runSync();
   } finally {
     const cleared = new Set(respondingInteractionIds.value);
     cleared.delete(id2);

@@ -1377,8 +1377,8 @@ old metadata with a stale indication while disconnected. Returning to a visible
 tab requests catch-up. Protocol mismatch requires a reload; slow clients are
 disconnected rather than queued without bounds. WebSocket ping/pong and
 authorization-only checks remain; idle timers do not rebuild projections.
-`GET /api/sync` remains available for diagnostics/older clients and explicit
-reads before the app's global socket is initialized.
+`GET /api/sync` remains available for diagnostics/older clients. The browser
+requires global synchronization to be initialized and never uses a REST fallback.
 
 Local composer drafts, uploads and command request IDs remain separate from
 the server store; HTTP acceptance does not prove a command took effect.

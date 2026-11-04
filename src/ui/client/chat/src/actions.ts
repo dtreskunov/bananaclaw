@@ -61,7 +61,6 @@ import { applyConversationFrame, conversationState, resetConversation } from './
 import { ConversationProtocolError } from '../../../shared/conversation-protocol';
 import type { SyncResponse } from '../../../shared/sync';
 import { SyncConnection } from './sync-connection';
-import { isAttentionTargets } from '../../../shared/attention';
 import {
   attentionError,
   matchesAttentionLocation,
@@ -203,7 +202,7 @@ export function warmChat(): Promise<void> {
 // Explicit refreshes are freshness barriers; background updates arrive on the global socket.
 /** Resolves false when the list could not be refreshed, so callers don't trust stale entries. */
 export async function loadThreads(_gid: string): Promise<boolean> {
-  return runSync({ forceRefresh: true });
+  return runSync();
 }
 
 export async function deleteThread(
@@ -485,98 +484,26 @@ export function startGlobalSync(): () => void {
   connection.start();
   return () => {
     unsubscribe();
-    ++refs.syncRequestId;
     connection.stop();
     if (syncConnection === connection) syncConnection = null;
   };
 }
 
 /** Returns whether `threads` now holds a fresh server list for the current group. */
-export async function runSync(
-  options: { replaceThreadMessages?: boolean; forceRefresh?: boolean } = {},
-): Promise<boolean> {
-  const requestId = ++refs.syncRequestId;
-  const generation = refs.chatGeneration;
+export async function runSync(): Promise<boolean> {
   const gid = groupId.value;
-  const tid = threadId.value;
-  const ct = channelType.value;
-  const mg = messagingGroupId.value;
   const connection = syncConnection;
-  const params = new URLSearchParams();
-  if (gid) {
-    params.set('gid', gid);
-    if (tid) params.set('tid', tid);
-    if (tid && ct && ct !== 'web' && mg) {
-      params.set('channel', ct);
-      params.set('mg', mg);
-    }
-  }
-  let res: SyncResponse;
+  if (!connection) throw new Error('Global synchronization must be started before refreshing.');
   try {
-    res = connection
-      ? await connection.refresh(gid)
-      : await api<SyncResponse>(
-          'api/sync' + (params.toString() ? '?' + params.toString() : ''),
-          options.forceRefresh ? { cache: 'no-store' } : undefined,
-        );
-    if (!isAttentionTargets(res.attention)) throw new Error('Invalid input request status. Reload and retry.');
+    const data = await connection.refresh(gid);
+    return connection === syncConnection && gid === groupId.value && data.groupAccess === true;
   } catch (error) {
-    if (requestId !== refs.syncRequestId) return false;
-    const message = error instanceof Error ? error.message : 'Could not refresh input requests.';
-    if (attentionError.value !== message) console.error('Input request sync failed', error);
-    attentionError.value = message;
-    if (
-      !syncConnection &&
-      !refs.ws &&
-      generation === refs.chatGeneration &&
-      gid === groupId.value &&
-      tid === threadId.value &&
-      ct !== 'web'
-    ) {
-      applyTurnState(activeTurn.value, false);
-      console.error('Conversation sync failed', error);
-      chatReady.value = false;
-      chatStatus.value = 'Conversation unavailable. Reconnect to retry.';
-    }
+    if (connection === syncConnection && gid === groupId.value) console.error('Global sync refresh failed', error);
     return false;
   }
-  if (connection)
-    return (
-      connection === syncConnection &&
-      !!gid &&
-      gid === groupId.value &&
-      res.groupAccess !== false &&
-      Array.isArray(res.threads)
-    );
-  if (requestId !== refs.syncRequestId) return false;
-  const threadsApplied = applyGlobalSync(res, gid, generation === refs.chatGeneration && tid === threadId.value);
-  if (
-    generation === refs.chatGeneration &&
-    tid &&
-    gid === groupId.value &&
-    tid === threadId.value &&
-    ct === channelType.value &&
-    mg === messagingGroupId.value &&
-    ct !== 'web' &&
-    !syncConnection &&
-    !refs.ws
-  ) {
-    {
-      try {
-        applyConversationFrame(res.conversation, tid);
-      } catch (error) {
-        console.error('Conversation snapshot rejected', error);
-        chatStatus.value = error instanceof Error ? error.message : 'Invalid chat snapshot. Reload this page.';
-        chatReady.value = false;
-        handleProtocolMismatch(error);
-        return false;
-      }
-    }
-  }
-  return threadsApplied;
 }
 
-function applyGlobalSync(res: SyncResponse, gid: string | null, updateVoice = true): boolean {
+function applyGlobalSync(res: SyncResponse, gid: string | null): void {
   batch(() => {
     attentionTargets.value = res.attention;
     attentionError.value = null;
@@ -587,16 +514,14 @@ function applyGlobalSync(res: SyncResponse, gid: string | null, updateVoice = tr
     threads.value = [];
     voiceInput.value = { backend: 'disabled', ready: false, reason: 'Agent access is no longer available.' };
     attentionError.value = 'Agent access is no longer available.';
-    return false;
+    return;
   }
-  if (updateVoice && gid && groupId.value === gid && res.voiceInput) {
+  if (gid && groupId.value === gid && res.voiceInput) {
     voiceInput.value = res.voiceInput;
     if (!res.voiceInput.ready)
       voice.interrupt(res.voiceInput.reason || 'Live voice input is no longer available. Current text has been kept.');
   }
-  let threadsApplied = false;
   if (gid && groupId.value === gid && Array.isArray(res.threads)) {
-    threadsApplied = true;
     // Preserve any client-only "(new thread)" entries — they have no
     // server session yet (neither warmup nor a send has created one), so they
     // won't appear in res.threads. Without this, sync would silently
@@ -613,7 +538,6 @@ function applyGlobalSync(res: SyncResponse, gid: string | null, updateVoice = tr
     );
     threads.value = ephemeral.length > 0 ? [...ephemeral, ...res.threads] : res.threads;
   }
-  return threadsApplied;
 }
 
 /**
@@ -1110,7 +1034,7 @@ async function submitChatPacket(
     } else if (!isWeb) {
       if (!contextCurrent()) return false;
       try {
-        await runSync({ replaceThreadMessages: true });
+        await runSync();
       } catch {
         /* ignore */
       }
@@ -1719,7 +1643,7 @@ export async function respondInteraction(id: string, response: InteractionRespon
     showToast('Response failed: ' + (err instanceof Error ? err.message : String(err)), 'err');
   }
   try {
-    await runSync({ forceRefresh: true });
+    await runSync();
   } finally {
     const cleared = new Set(respondingInteractionIds.value);
     cleared.delete(id);

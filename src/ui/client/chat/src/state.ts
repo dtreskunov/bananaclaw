@@ -135,7 +135,6 @@ export const pendingQuestions: Signal<PendingQuestionDto[]> = signal<PendingQues
 export interface Refs {
   ws: WebSocket | null;
   chatGeneration: number;
-  syncRequestId: number;
   reconnectCancel: (() => void) | null;
   reconnectAttempt: number;
   wsConnectCancel: (() => void) | null;
@@ -149,7 +148,6 @@ export interface Refs {
 export const refs: Refs = {
   ws: null,
   chatGeneration: 0,
-  syncRequestId: 0,
   reconnectCancel: null,
   reconnectAttempt: 0,
   wsConnectCancel: null,
