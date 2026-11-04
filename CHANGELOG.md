@@ -4,6 +4,19 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **Finished-turn working context.** Native canonical execution history keeps
+  complete portable arguments/results; later model requests can replace only
+  successful exchanges from finished turns with retrievable receipts. Active,
+  failed, uncertain and media/instruction-bearing exchanges remain visible.
+  Reuses the existing private archive and 16 KiB retrieval machinery, with no
+  settings or change to 75% compaction. See [verification and rollback](docs/usage-efficiency.md#detect--why--fix--verify--rollback).
+
+- **[BREAKING] Structured native shell outcomes.** Shell stdout/stderr, exit
+  status and signal remain structured through model output, history and
+  activity. Nonzero exits are errors; cancellation and unknown side effects
+  are not reported as successful execution. Existing transcripts remain
+  readable. See [migration and rollback](docs/usage-efficiency.md#detect--why--fix--verify--rollback).
+
 - **Input attention.** Clickable `N attn` text in agent-tab and thread-card status
   lines opens the oldest actionable request in its scope. Dot-separated status
   text shares one font; attention alone is bold and warning-colored. No floating

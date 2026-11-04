@@ -16,6 +16,47 @@ database-only fork snapshot, whose existing size ceiling covers the archives.
 Errors remain errors; media is not truncated. The model-visible history uses
 the same bounded projection as subsequent requests.
 
+## Execution history versus working context
+
+The native database keeps full portable tool arguments and results. Model
+requests use a separate projection. **Only successful exchanges from finished
+turns** can become compact receipts: tool name/call identity, completion status,
+bounded operation/path detail, and a private reference to the complete exchange.
+User messages, answer text and working explanations remain in order. The active
+turn is never receipted; its existing 16 KiB per-result preview still applies.
+
+The receipt reuses `native-state/tool-results/` and the same ranged-read/JSON
+retrieval as large results. No summarizer, extra retrieval tool or setting is
+introduced. A receipt is used only when its actual serialized JSON is smaller
+than the original exchange, including retained narrative and the real archive
+reference. Unprofitable replacements are not archived.
+Errors, interrupted/unknown outcomes, incomplete tool-call/result groups, media,
+skill instructions and tool discovery remain intact. Legacy unstructured shell
+results are not guessed to be successful. Built-in MCP exchanges remain inline
+because legacy text representations do not reliably expose their outcome.
+Receipts and compaction use the same assistant/tool exchange grouping.
+
+Private `finished_turns` boundaries are recorded only after the result consumer
+advances past a completed reply/silence. Cancellation or an unacknowledged
+result cannot turn active work into a finished-turn receipt. These boundaries
+follow checkpoint-bounded forks, survive reopen, and are invalidated on rollback.
+Older databases without boundaries keep their old exchanges inline; no heuristic
+backfill or history rewrite occurs. A failed/interrupted turn is not marked
+finished, even if some of its tools completed.
+At the unchanged 75% threshold, summary requests also use the existing bounded
+tool-output projection rather than inadvertently loading full archived results.
+
+Native shell results carry `status`, `exitCode`, `signal`, `stdout`, `stderr`
+and an optional diagnostic. Nonzero exits remain failures even if stdout
+contains success-looking text. Timeout outcomes are unknown; explicit
+cancellation is interrupted and warns that effects may already have occurred.
+These fields reach model results, the native journal and activity consistently.
+Tool-specific model converters remain authoritative. Tools without one use
+the same default text rendering for both model output and canonical history,
+instead of separate fallback paths.
+The existing shell capture limit still applies before the 16 KiB model preview.
+Oversized results use the same private archive and ranged-read retrieval.
+
 Use `read({path, startLine, lineCount})` for up to 200 lines, or query a saved
 JSON result with `bash` and return only relevant fields. Whole-file reads keep
 their existing 256 KiB limit. Ranges support files up to 16 MiB and reject
@@ -66,9 +107,11 @@ Do this offline first, inside a private copy of the group's workspace:
 
 ## Detect / why / fix / verify / rollback
 
-This branch's earlier economy flag and reservation ledger were never deployed;
-their migration, configuration, UI and accounting code have been removed rather
-than introducing a runtime conversion. Do not deploy the superseded commits.
+Native shell output is now structured instead of a formatted text value. If
+custom native tools/wrappers consume the old result, update them to use explicit
+status and stdout/stderr fields. Saved legacy transcripts remain readable.
+The native database adds finished-turn boundaries to support safe projection;
+there is no central database, external component or credential migration.
 
 Native tasks no longer stop at 100 steps or a cumulative token allowance.
 Detect a dependency on the old ceiling in operator workflows before deployment.
@@ -78,7 +121,11 @@ host/container paths. No live memory or service is changed by the worktree.
 
 Verify a task beyond 100 model steps, steering, cancellation, large-result
 retrieval across restart/fork, fresh signals on an old claim versus genuinely
-stale signals, and memory recall. Use bounded live canaries:
+stale signals, structured failures, finished-turn receipts and memory recall.
+Verify that active/failed/unacknowledged turns stay full and that a receipt
+retrieves the original arguments/results. Use bounded live canaries:
 removing a step cap does not guarantee account quota will last. Actual
 token savings and recall quality require provider-backed verification.
-Rollback is a code deployment plus restoring the original memory file.
+Rollback is a code deployment plus restoring the original memory file if it
+was migrated. The additive native metadata is ignored by the previous runner;
+do not delete private history/archive rows to roll back the projection.

@@ -6,6 +6,46 @@ import { INTERRUPTED_TOOL, NativeTurnJournal } from './turn-journal.js';
 const options = (toolCallId: string): ToolExecutionOptions => ({ toolCallId, messages: [] });
 
 describe('incremental native turn journal', () => {
+  it.each(['plain text', { rows: ['one'], count: 1 }, null, undefined])(
+    'uses one default rendering for model output and durable history (%j)', async (output) => {
+      const store = new NativeStore(':memory:');
+      try {
+        const conversation = store.createConversation();
+        const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'read data' });
+        const tools = journal.wrap({
+          read: tool({ inputSchema: jsonSchema({ type: 'object' }), execute: async () => output }),
+        }, new AbortController().signal);
+        const actual = await tools.read.execute!({}, options('read'));
+        const rendered = await tools.read.toModelOutput!({ toolCallId: 'read', input: {}, output: actual });
+        expect(rendered).toEqual({ type: 'text', value: typeof output === 'string' ? output : JSON.stringify(output) ?? 'null' });
+        expect(store.messages(conversation).at(-1)).toMatchObject({
+          role: 'tool', content: [{ output: rendered }],
+        });
+        journal.save();
+        expect(store.messages(conversation).at(-1)).toMatchObject({
+          role: 'tool', content: [{ output: rendered }],
+        });
+      } finally { store.close(); }
+    },
+  );
+
+  it('marks a turn finished only for an acknowledged non-aborted reply or silence', () => {
+    const store = new NativeStore(':memory:');
+    try {
+      const conversation = store.createConversation();
+      const journal = new NativeTurnJournal(store, conversation, { role: 'user', content: 'request' });
+      journal.finishSegment([{ role: 'assistant', content: 'final answer' }]);
+      const signal = new AbortController();
+      journal.acknowledgeResult({ type: 'result', text: null, replies: [] }, signal.signal);
+      expect(store.contextEntries(conversation).some(entry => entry.finished)).toBe(false);
+      signal.abort();
+      journal.acknowledgeResult({ type: 'result', text: null, replies: [{ text: 'final answer' }] }, signal.signal);
+      expect(store.contextEntries(conversation).some(entry => entry.finished)).toBe(false);
+      journal.acknowledgeResult({ type: 'result', text: null, replies: [], silence: 'nothing new' }, new AbortController().signal);
+      expect(store.contextEntries(conversation).every(entry => entry.finished)).toBe(true);
+    } finally { store.close(); }
+  });
+
   it('cancels only one of two parallel calls, journals its result, and leaves the query usable', async () => {
     const store = new NativeStore(':memory:');
     const turnController = new AbortController();

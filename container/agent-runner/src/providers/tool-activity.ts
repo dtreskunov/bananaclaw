@@ -32,6 +32,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+export interface NativeToolOutcome {
+  status: 'completed' | 'error' | 'interrupted' | 'unknown';
+  error?: string;
+}
+
+export function nativeToolOutcome(tool: string, output: unknown): NativeToolOutcome | undefined {
+  if (tool === 'bash' && isRecord(output) && 'exitCode' in output) {
+    const status = output.status;
+    if (status !== 'completed' && status !== 'error' && status !== 'interrupted' && status !== 'unknown')
+      throw new Error('Invalid native shell outcome');
+    return { status, ...(typeof output.error === 'string' ? { error: output.error } : {}) };
+  }
+  const error = builtinToolResultError(tool, output);
+  return error ? { status: 'error', error } : undefined;
+}
+
 function builtinName(tool: string): string | undefined {
   const name = tool.toLowerCase();
   if (name.startsWith('mcp__nanoclaw__')) return name.slice('mcp__nanoclaw__'.length);

@@ -435,12 +435,18 @@ it('compacts a synthetic two-million-character transcript with oversized tool re
       return 'Completed file reads. Preserve current requirements and continue remaining work.';
     },
   });
-  expect(result.sourceBytes).toBeGreaterThan(1_950_000);
+  expect(result.sourceBytes).toBeGreaterThan(1_300_000);
+  expect(result.sourceBytes).toBeLessThan(Buffer.byteLength(JSON.stringify(original)) - 500_000);
   expect(result.leafChunks).toBeLessThanOrEqual(MAX_COMPACTION_LEAVES);
   expect(result.requests).toBeLessThanOrEqual(MAX_COMPACTION_REQUESTS);
   expect(result.requests).toBe(prompts.length);
   expect(maxActive).toBe(2);
-  expect(prompts.some((prompt) => prompt.includes('read/read-one') && prompt.includes('fragment'))).toBe(true);
+  expect(prompts.some((prompt) => prompt.includes('read/read-one') && prompt.includes('[Abbreviated '))).toBe(true);
+  expect(prompts.every(prompt => !prompt.includes('a'.repeat(309_000)) && !prompt.includes('b'.repeat(309_000)))).toBe(true);
+  const archived = fs.readdirSync(path.join(root, 'tool-results')).map(name =>
+    JSON.parse(fs.readFileSync(path.join(root, 'tool-results', name), 'utf8')));
+  expect(archived).toContainEqual({ type: 'text', value: 'a'.repeat(309_000) });
+  expect(archived).toContainEqual({ type: 'text', value: 'b'.repeat(309_000) });
   expect(prompts.at(-1)).toContain('Chronological summary 1/');
   expect(store.messages(conversation)).toEqual(original);
   expect(JSON.stringify(store.contextMessages(conversation))).toContain('Current request');

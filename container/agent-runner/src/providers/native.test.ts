@@ -342,6 +342,46 @@ afterEach(() => {
 
 describe('NativeProvider', () => {
   it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'uses the same default tool text on the %s wire and in canonical history', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      const text = 'literal "quoted" tool text\nsecond line';
+      fs.writeFileSync(path.join(root, 'value.txt'), text);
+      scriptedToolCalls = [['read', '{"path":"value.txt"}']];
+      const events = await collect(new NativeProvider({ model: 'local/stub' }));
+      const messages = requests[1].messages as Array<{
+        role: string; content: string | Array<{ type: string; content?: unknown }>;
+      }>;
+      const wire = protocol === 'openai-chat' ? messages.find(message => message.role === 'tool')?.content :
+        messages.flatMap(message => Array.isArray(message.content) ? message.content : [])
+          .find(part => part.type === 'tool_result')?.content;
+      expect(wire).toBe(text);
+      const init = events.find(event => event.type === 'init');
+      if (init?.type !== 'init') throw new Error('Missing continuation');
+      const store = new NativeStore();
+      try {
+        const result = store.messages(init.continuation).find(message => message.role === 'tool');
+        expect(result).toMatchObject({ content: [{ output: { type: 'text', value: text } }] });
+      } finally { store.close(); }
+    },
+  );
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'reports a native shell failure consistently through %s and preserves partial output', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      scriptedToolCalls = [['bash', '{"command":"printf partial; printf diagnostic >&2; exit 7"}']];
+      const events = await collect(new NativeProvider({ model: 'local/stub' }));
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'progress', step: expect.objectContaining({ tool: 'bash', status: 'error', error: 'Command exited with 7' }),
+      }));
+      const history = JSON.stringify(requests[1].messages);
+      expect(history).toContain('Command exited with 7');
+      expect(history).toContain('partial');
+      expect(history).toContain('diagnostic');
+      expect(events.some(event => event.type === 'error')).toBe(false);
+    },
+  );
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
     'does not retry confirmed plan exhaustion through %s', async (protocol) => {
       process.env.NATIVE_PROTOCOL = protocol;
       apiFailures = Array.from({ length: 3 }, () => ({
@@ -421,7 +461,7 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(events)).not.toContain('PRIVATE_');
   }, 15_000);
 
-  it('projects large results consistently on the wire and in history', async () => {
+  it('bounds working results while preserving the complete canonical execution history', async () => {
     const complete = `start\n${'detail '.repeat(8000)}\nUNIQUE_END_OF_LARGE_RESULT`;
     fs.writeFileSync(path.join(root, 'large-result.txt'), complete);
     scriptedToolCalls = [['read', '{"path":"large-result.txt"}']];
@@ -438,8 +478,75 @@ describe('NativeProvider', () => {
     if (init?.type !== 'init') throw new Error('Missing continuation');
     const store = new NativeStore();
     try {
-      expect(JSON.stringify(store.messages(init.continuation))).not.toContain('UNIQUE_END_OF_LARGE_RESULT');
+      expect(JSON.stringify(store.messages(init.continuation))).toContain('UNIQUE_END_OF_LARGE_RESULT');
     } finally { store.close(); }
+  });
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'uses finished-turn receipts only on a later turn through %s, retaining full canonical execution', async (protocol) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      const marker = 'PREVIOUS_TURN_COMMAND '.repeat(200);
+      scriptedToolCalls = [
+        ['bash', JSON.stringify({ command: `printf completed # ${marker}` })],
+        ['bash', '{"command":"printf diagnostic >&2; exit 7"}'],
+      ];
+      const first = await collect(new NativeProvider({ model: 'local/stub' }));
+      const init = first.find(event => event.type === 'init');
+      if (init?.type !== 'init') throw new Error('Missing continuation');
+      expect(JSON.stringify(requests[2].messages)).toContain(marker);
+      expect(JSON.stringify(requests[2].messages)).not.toContain('Finished-turn tool receipt');
+      const answer = protocol === 'anthropic-messages' ? 'hello from direct minimax' : 'hello from stub';
+      expect(replyTexts(first).flat()).toContain(answer);
+      const store = new NativeStore();
+      const original = store.messages(init.continuation);
+      expect(JSON.stringify(original)).toContain(marker);
+      try {
+        await collect(new NativeProvider({ model: 'local/stub' }), init.continuation);
+        const next = JSON.stringify(requests.at(-1)?.messages);
+        expect(next).toContain('Finished-turn tool receipt');
+        expect(next).not.toContain(marker);
+        expect(next).toContain('Command exited with 7');
+        expect(next).toContain(answer);
+        expect(next).toContain('follow up');
+        expect(store.messages(init.continuation).slice(0, original.length)).toEqual(original);
+        expect(JSON.stringify(original)).not.toContain('Finished-turn tool receipt');
+      } finally { store.close(); }
+    },
+  );
+
+  it('projects only after a result boundary in a warm query without repeating the completed command', async () => {
+    const marker = 'WARM_QUERY_COMMAND '.repeat(200);
+    scriptedToolCalls = [['bash', JSON.stringify({ command: `echo once >> ran.txt # ${marker}` })]];
+    const query = new NativeProvider({ model: 'local/stub' }).query({ prompt: 'first input', cwd: root });
+    expect(query.push('next input')).toBe(true);
+    query.end();
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) events.push(event);
+    expect(requests).toHaveLength(3);
+    expect(JSON.stringify(requests[1].messages)).toContain(marker);
+    expect(JSON.stringify(requests[2].messages)).not.toContain(marker);
+    expect(JSON.stringify(requests[2].messages)).toContain('Finished-turn tool receipt');
+    expect(events.filter(event => event.type === 'result')).toHaveLength(2);
+    expect(fs.readFileSync(path.join(root, 'ran.txt'), 'utf8')).toBe('once\n');
+  });
+
+  it('keeps canonical details when the consumer closes at an unacknowledged result', async () => {
+    const marker = 'UNACKNOWLEDGED_COMMAND '.repeat(200);
+    scriptedToolCalls = [['bash', JSON.stringify({ command: `printf completed # ${marker}` })]];
+    const query = new NativeProvider({ model: 'local/stub' }).query({ prompt: 'first input', cwd: root });
+    query.end();
+    let continuation: string | undefined;
+    for await (const event of query.events) {
+      if (event.type === 'init') continuation = event.continuation;
+      if (event.type === 'result') break;
+    }
+    if (!continuation) throw new Error('Missing continuation');
+    const store = new NativeStore();
+    try { expect(store.contextEntries(continuation).some(entry => entry.finished)).toBe(false); }
+    finally { store.close(); }
+    await collect(new NativeProvider({ model: 'local/stub' }), continuation);
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain(marker);
+    expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain('Finished-turn tool receipt');
   });
 
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jv1sAAAAASUVORK5CYII=';

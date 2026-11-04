@@ -9,12 +9,14 @@ const DEFAULT_PATH = '/workspace/native-state/native-state.db';
 interface StoredMessageRow {
   id: number;
   content_json: string;
+  finished?: number;
 }
 
 export interface NativeContextEntry {
   ref: string | null;
   coveredThrough?: string;
   message: ModelMessage;
+  finished?: boolean;
 }
 
 interface CompactionRow {
@@ -59,6 +61,12 @@ export class NativeStore {
         summary TEXT NOT NULL,
         retained_ids TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS finished_turns (
+        conversation_id TEXT NOT NULL,
+        first_id INTEGER NOT NULL,
+        last_id INTEGER NOT NULL,
+        PRIMARY KEY (conversation_id, first_id)
+      );
       CREATE TABLE IF NOT EXISTS media_quarantines (
         conversation_id TEXT NOT NULL,
         provider_scope TEXT NOT NULL,
@@ -80,9 +88,13 @@ export class NativeStore {
   }
 
   archiveResult(complete: string): string {
-    const id = createHash('sha256').update(complete).digest('hex');
+    const id = path.basename(this.resultPath(complete), '.json');
     this.db.prepare('INSERT OR IGNORE INTO tool_results (id,content_json) VALUES (?,?)').run(id, complete);
     return this.materializeResult(id, complete);
+  }
+
+  resultPath(complete: string): string {
+    return path.join(this.directory, 'tool-results', `${createHash('sha256').update(complete).digest('hex')}.json`);
   }
 
   private materializeResult(id: string, complete: string): string {
@@ -116,11 +128,15 @@ export class NativeStore {
     const compacted = this.db.prepare('SELECT * FROM context_compactions WHERE conversation_id = ?')
       .get(conversationId) as CompactionRow | undefined;
     const rows = this.db.prepare(`
-      SELECT id, content_json FROM messages WHERE conversation_id = ?
+      SELECT id, content_json, EXISTS (
+        SELECT 1 FROM finished_turns f WHERE f.conversation_id=messages.conversation_id
+        AND messages.id BETWEEN f.first_id AND f.last_id
+      ) AS finished FROM messages WHERE conversation_id = ?
       AND (id > ? OR id IN (SELECT value FROM json_each(?))) ORDER BY id
     `).all(conversationId, compacted?.through_id ?? 0, compacted?.retained_ids ?? '[]') as StoredMessageRow[];
     const entries: NativeContextEntry[] = rows.map((row) => ({
       ref: String(row.id), message: JSON.parse(row.content_json) as ModelMessage,
+      ...(row.finished === 1 ? { finished: true } : {}),
     }));
     if (compacted) entries.unshift({
       ref: null,
@@ -135,6 +151,17 @@ export class NativeStore {
 
   contextMessages(conversationId: string): ModelMessage[] {
     return this.contextEntries(conversationId).map((entry) => entry.message);
+  }
+
+  finishTurn(conversation: string, first: string, last: string): void {
+    const start = Number(first), end = Number(last);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start)
+      throw new Error('Invalid finished-turn boundary');
+    const count = this.db.prepare('SELECT COUNT(*) AS n FROM messages WHERE conversation_id=? AND id IN (?,?)')
+      .get(conversation, start, end) as { n: number };
+    if (count.n !== (start === end ? 1 : 2)) throw new Error('Invalid finished-turn boundary');
+    this.db.prepare('INSERT OR REPLACE INTO finished_turns (conversation_id,first_id,last_id) VALUES (?,?,?)')
+      .run(conversation, start, end);
   }
 
   mediaQuarantines(conversationId: string, providerScope: string): Map<string, string> {
@@ -211,8 +238,10 @@ export class NativeStore {
       const rows = this.db.prepare(
         'SELECT id, content_json FROM messages WHERE conversation_id = ? AND id <= ? ORDER BY id',
       ).all(conversationId, anchor) as StoredMessageRow[];
+      const refs = new Map<number, string>();
       for (const row of rows) {
         const copiedId = this.append(child, [JSON.parse(row.content_json) as ModelMessage]);
+        refs.set(row.id, copiedId);
         this.db.prepare(
           `INSERT INTO applied_steering (conversation_id, steering_id, message_id)
            SELECT ?, steering_id, ? FROM applied_steering
@@ -223,6 +252,13 @@ export class NativeStore {
            SELECT ?, provider_scope, media_key, ?, reason FROM media_quarantines
            WHERE conversation_id = ? AND confirmed_ref = ?`,
         ).run(child, Number(copiedId), conversationId, row.id);
+      }
+      const finished = this.db.prepare('SELECT first_id,last_id FROM finished_turns WHERE conversation_id=? AND last_id<=?')
+        .all(conversationId, anchor) as Array<{ first_id: number; last_id: number }>;
+      for (const turn of finished) {
+        const first = refs.get(turn.first_id), last = refs.get(turn.last_id);
+        if (first === undefined || last === undefined) throw new Error('Missing finished-turn fork boundary');
+        this.finishTurn(child, first, last);
       }
       return child;
     })();
@@ -255,6 +291,8 @@ export class NativeStore {
       this.db.prepare('DELETE FROM applied_steering WHERE conversation_id = ? AND message_id > ?')
         .run(conversationId, Number(anchorRef));
       this.db.prepare('DELETE FROM media_quarantines WHERE conversation_id = ? AND confirmed_ref > ?')
+        .run(conversationId, Number(anchorRef));
+      this.db.prepare('DELETE FROM finished_turns WHERE conversation_id = ? AND last_id > ?')
         .run(conversationId, Number(anchorRef));
       this.db.prepare('DELETE FROM messages WHERE conversation_id = ? AND id > ?')
         .run(conversationId, Number(anchorRef));
