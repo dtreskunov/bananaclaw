@@ -11,20 +11,13 @@ export async function readGlobalSync(
   groupId: string | null,
   listThreads: (userId: string, groupId: string) => Promise<ThreadSummary[]>,
 ): Promise<GlobalSyncState> {
-  const data: GlobalSyncState = { ...readInteractionSync(userId), group: null };
-  if (!groupId) return data;
-  const accessible = () => !!getAgentGroup(groupId) && canAccessAgentGroup(userId, groupId).allowed;
-  const denied = () => ({
-    ...readInteractionSync(userId),
-    group: null,
-  });
-  if (!accessible()) return denied();
-  const threads = await listThreads(userId, groupId);
-  if (!accessible()) return denied();
-  return {
-    ...readInteractionSync(userId),
-    group: { threads, voiceInput: resolveVoiceInputConfig(groupId) },
-  };
+  let group: GlobalSyncState['group'] = null;
+  if (groupId && getAgentGroup(groupId) && canAccessAgentGroup(userId, groupId).allowed) {
+    const threads = await listThreads(userId, groupId);
+    if (getAgentGroup(groupId) && canAccessAgentGroup(userId, groupId).allowed)
+      group = { threads, voiceInput: resolveVoiceInputConfig(groupId) };
+  }
+  return { ...readInteractionSync(userId), group };
 }
 
 export function nextSyncDeadline(sessionHash: string): number | null {

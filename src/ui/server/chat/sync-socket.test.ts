@@ -11,6 +11,9 @@ import { authenticate, COOKIE_NAME } from '../auth.js';
 import { createSession, deleteSession } from '../db.js';
 import { parseSyncFrame, SYNC_PROTOCOL_VERSION, SYNC_RELOAD_CLOSE_CODE, type SyncFrame } from '../../shared/sync.js';
 import { attachSyncSocket } from './sync-socket.js';
+import { readGlobalSync } from './sync-state.js';
+import * as attention from './attention.js';
+import { revokeRole } from '../../../modules/permissions/db/user-roles.js';
 
 let server: WebSocketServer;
 let token: string;
@@ -49,6 +52,7 @@ afterEach(async () => {
   for (const socket of server.clients) socket.terminate();
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   await Promise.resolve();
+  vi.restoreAllMocks();
   closeDb();
 });
 
@@ -67,6 +71,59 @@ async function connect(groupId: string | null = null) {
 }
 
 describe('global sync WebSocket integration', () => {
+  it('reads interaction metadata once after the asynchronous thread scan', async () => {
+    let finish!: (value: never[]) => void;
+    listThreads.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const readInteractions = vi.spyOn(attention, 'readInteractionSync');
+    const snapshot = readGlobalSync('viewer', 'g', listThreads);
+    expect(readInteractions).not.toHaveBeenCalled();
+    createApproval({
+      id: 'during-scan',
+      request_id: 'during-scan',
+      agent_group_id: 'g',
+      created_at: now(),
+      input: { action: 'test', title: 'Review', payload: {}, options: [] },
+    });
+    finish([]);
+    expect((await snapshot).approvals.map((row) => row.id)).toEqual(['during-scan']);
+    expect(readInteractions).toHaveBeenCalledOnce();
+  });
+
+  it('uses the current approval permissions after the asynchronous scan', async () => {
+    let finish!: (value: never[]) => void;
+    listThreads.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    createApproval({
+      id: 'private',
+      request_id: 'private',
+      agent_group_id: 'g',
+      created_at: now(),
+      input: { action: 'test', title: 'Review', payload: {}, options: [] },
+    });
+    const snapshot = readGlobalSync('viewer', 'g', listThreads);
+    revokeRole('viewer', 'admin', 'g');
+    finish([]);
+    const result = await snapshot;
+    expect(result.approvals).toEqual([]);
+    expect(result.group).not.toBeNull();
+  });
+
+  it.each([null, 'missing'])('reads metadata once without scanning an inaccessible group: %s', async (groupId) => {
+    const readInteractions = vi.spyOn(attention, 'readInteractionSync');
+    expect((await readGlobalSync('viewer', groupId, listThreads)).group).toBeNull();
+    expect(readInteractions).toHaveBeenCalledOnce();
+    expect(listThreads).not.toHaveBeenCalled();
+  });
+
   it('explicitly requests a reload for an outdated subscription protocol', async () => {
     const client = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`, {
       headers: { Cookie: `${COOKIE_NAME}=${token}` },

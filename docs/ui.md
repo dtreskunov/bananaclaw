@@ -1368,7 +1368,8 @@ Session projection events refresh the selected group's summaries. Reads are
 coalesced for 100 ms with one in-flight async build and a bounded dirty flag.
 Changes during a scan schedule a further read without starving publication of
 completed, authorized snapshots. Obsolete subscriptions are never published.
-Authorization is checked again before publication. Expiry uses the next
+Interaction metadata is read once after the thread scan, using current approval
+permissions. Authorization is checked again before publication. Expiry uses the next
 interaction/session deadline, not a recurring
 scan. Host `.env` replacements/edits trigger a filesystem notification. Manual
 SQL edits outside normal host mutation helpers require an explicit refresh or
