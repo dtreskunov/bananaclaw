@@ -275,6 +275,43 @@ Global disconnection likewise makes indicators stale and disables waiting action
 Stale state is muted and explained in accessible names/tooltips. A current
 authorized request remains actionable when only its execution signal is stale.
 
+#### Message search index
+
+`data/search.db` is a rebuildable, host-only FTS5 index. Each message occurrence
+is unique by `(session_id, direction, id)`, with a stable `INTEGER PRIMARY KEY`
+rowid shared by the content table and FTS. Public message IDs are unchanged,
+including removal of the inbound agent suffix. Repeated IDs in different agents,
+sessions, forks or directions no longer suppress one another. Edits and
+cancellations affect only the selected occurrence.
+
+On opening an existing index, the host detects the unversioned legacy
+`id TEXT PRIMARY KEY` schema and rebuilds it transactionally as
+`PRAGMA user_version = 1`, preserving every existing entry and rebuilding FTS
+from those entries. A failed rebuild rolls back; unknown versions or
+unrecognized unversioned schemas fail without replacing their data.
+The upgrade logs the preserved count and the backfill command.
+
+The legacy global ID constraint already suppressed some occurrences, so those
+cannot be recovered from the search index alone. To restore occurrences still
+present in the authoritative session DBs, stop the host and run:
+
+```bash
+pnpm exec tsx scripts/backfill-search-index.ts
+```
+
+Backfill clears and repopulates the index using current central session
+metadata. Keep a stopped-host backup of `search.db` before upgrading/backfilling
+if you need rollback; restore it only with the host stopped and compatible host
+code. Verify the version with
+`pnpm exec tsx scripts/q.ts data/search.db "PRAGMA user_version"` and verify that
+search finds the repeated text in each visible conversation.
+
+New forks immediately index each inherited chat message under the new session
+and thread, using the exact rows copied by the route and transcript cutoff.
+They do not depend on the parent's index being complete. Deleting a parent,
+fork or sibling removes only that session's occurrences; no single-branch
+handoff is needed. Older forks may still need the backfill described above.
+
 #### Startup recovery
 
 The chat shell displays a loading screen before JavaScript or account data

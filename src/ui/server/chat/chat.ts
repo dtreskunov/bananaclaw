@@ -78,15 +78,10 @@ import { listThreadsForViewer } from './threads.js';
 export { listThreadsForViewer, viewerHasContent } from './threads.js';
 import { readThreadTitle } from '../../../modules/thread-titles/db.js';
 import { ForkError, forkThread, type ForkThreadResult } from '../../../fork-session.js';
-import { deleteThreadFork, getThreadForkChildren, getThreadForkDescendants } from '../../../db/thread-forks.js';
+import { deleteThreadFork, getThreadForkDescendants } from '../../../db/thread-forks.js';
 import { TIMEZONE } from '../../../config.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
-import {
-  deleteSessionFromIndex,
-  reassignIndexedMessages,
-  searchMessages,
-  type SearchConversationScope,
-} from '../../../search-index.js';
+import { deleteSessionFromIndex, searchMessages, type SearchConversationScope } from '../../../search-index.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
@@ -1572,9 +1567,9 @@ function forkChatThread(
  * file` until the host sweeper noticed — and even then the sweeper only
  * acts on heartbeat staleness, not on missing files).
  *
- * A fork shares no mutable state with its parent, so deleting either side
- * alone is safe. Without `cascade` the branches survive and render as
- * orphans; with it, the whole subtree goes.
+ * A fork has its own messages and search occurrences, so deleting either side
+ * alone is safe and requires no search handoff. Without `cascade` the branches
+ * survive and render as orphans; with it, the whole subtree goes.
  */
 function deleteChatThread(
   userId: string,
@@ -1613,11 +1608,9 @@ function deleteChatThread(
       cancelledApprovals,
     });
   }
-  const doomed = new Set(targets);
-  for (const { threadId: id, session: s } of sessions) {
+  for (const { session: s } of sessions) {
     const dir = sessionDir(groupId, s.id);
     killContainer(s.id, 'thread-deleted');
-    handoffIndexedMessages(groupId, target.messagingGroupId, id, s.id, doomed);
     deleteSessionFromIndex(s.id);
     try {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -1626,32 +1619,6 @@ function deleteChatThread(
     }
   }
   return { removed: sessions.length, cancelledApprovals };
-}
-
-/**
- * Move a dying thread's still-live messages to a branch before the purge.
- *
- * Every surviving branch holds the parent's messages up to its own cut, so the
- * branch that cut deepest covers a superset of what the others do — and since
- * the index is keyed by message id there is only one destination to give.
- */
-function handoffIndexedMessages(
-  agentGroupId: string,
-  messagingGroupId: string,
-  threadId: string,
-  sessionId: string,
-  doomed: Set<string>,
-): void {
-  let heir: { sessionId: string; threadId: string; ts: string } | null = null;
-  for (const child of getThreadForkChildren(agentGroupId, messagingGroupId, threadId)) {
-    if (doomed.has(child.thread_id)) continue;
-    if (heir && child.parent_message_ts <= heir.ts) continue;
-    const childSession = findSessionForAgent(agentGroupId, messagingGroupId, child.thread_id);
-    if (!childSession) continue;
-    heir = { sessionId: childSession.id, threadId: child.thread_id, ts: child.parent_message_ts };
-  }
-  if (!heir) return;
-  reassignIndexedMessages(sessionId, heir.sessionId, heir.threadId, heir.ts);
 }
 
 // ── WebSocket upgrade ──

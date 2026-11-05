@@ -17,9 +17,24 @@ import { log } from './log.js';
 // Schema
 // ---------------------------------------------------------------------------
 
+const SEARCH_SCHEMA_VERSION = 1;
+const MESSAGE_COLUMNS = [
+  'id',
+  'session_id',
+  'agent_group_id',
+  'messaging_group_id',
+  'channel_type',
+  'thread_id',
+  'direction',
+  'timestamp',
+  'text',
+  'sender_user_id',
+];
+
 const SEARCH_SCHEMA = `
-  CREATE TABLE IF NOT EXISTS message_index (
-    id                 TEXT PRIMARY KEY,
+  CREATE TABLE message_index (
+    rowid              INTEGER PRIMARY KEY,
+    id                 TEXT NOT NULL,
     session_id         TEXT NOT NULL,
     agent_group_id     TEXT NOT NULL,
     messaging_group_id TEXT,
@@ -28,14 +43,14 @@ const SEARCH_SCHEMA = `
     direction          TEXT NOT NULL,  -- 'in' | 'out'
     timestamp          TEXT NOT NULL,
     text               TEXT NOT NULL,
-    sender_user_id     TEXT
+    sender_user_id     TEXT,
+    UNIQUE(session_id, direction, id)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_mi_agent_group ON message_index(agent_group_id);
-  CREATE INDEX IF NOT EXISTS idx_mi_messaging_group ON message_index(messaging_group_id);
-  CREATE INDEX IF NOT EXISTS idx_mi_session ON message_index(session_id);
+  CREATE INDEX idx_mi_agent_group ON message_index(agent_group_id);
+  CREATE INDEX idx_mi_messaging_group ON message_index(messaging_group_id);
 
-  CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+  CREATE VIRTUAL TABLE message_fts USING fts5(
     text,
     content = message_index,
     content_rowid = rowid
@@ -43,15 +58,15 @@ const SEARCH_SCHEMA = `
 
   -- Triggers to keep the FTS index in sync with message_index.
   -- These fire on INSERT/DELETE/UPDATE so the FTS table stays consistent.
-  CREATE TRIGGER IF NOT EXISTS mi_ai AFTER INSERT ON message_index BEGIN
+  CREATE TRIGGER mi_ai AFTER INSERT ON message_index BEGIN
     INSERT INTO message_fts(rowid, text) VALUES (new.rowid, new.text);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS mi_ad AFTER DELETE ON message_index BEGIN
+  CREATE TRIGGER mi_ad AFTER DELETE ON message_index BEGIN
     INSERT INTO message_fts(message_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS mi_au AFTER UPDATE ON message_index BEGIN
+  CREATE TRIGGER mi_au AFTER UPDATE ON message_index BEGIN
     INSERT INTO message_fts(message_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
     INSERT INTO message_fts(rowid, text) VALUES (new.rowid, new.text);
   END;
@@ -116,16 +131,85 @@ function getSearchDb(): Database.Database {
   return db;
 }
 
+function initializeSearchSchema(connection: Database.Database): number | null {
+  return connection
+    .transaction(() => {
+      const version = connection.pragma('user_version', { simple: true }) as number;
+      if (version === SEARCH_SCHEMA_VERSION) return null;
+      if (version !== 0) throw new Error(`Unsupported search index schema version: ${version}`);
+
+      const columns = connection.pragma('table_info(message_index)') as Array<{
+        name: string;
+        type: string;
+        pk: number;
+      }>;
+      let migratedRows: number | null = null;
+      if (columns.length > 0) {
+        // Only the deployed, unversioned TEXT-primary-key schema is migratable.
+        // Never replace an unfamiliar schema or rely on its potentially stale FTS rowids.
+        if (
+          columns.length !== MESSAGE_COLUMNS.length ||
+          columns.some(
+            (column, i) =>
+              column.name !== MESSAGE_COLUMNS[i] ||
+              column.type.toUpperCase() !== 'TEXT' ||
+              column.pk !== (i === 0 ? 1 : 0),
+          )
+        ) {
+          throw new Error('Unrecognized unversioned search index schema; existing data left intact');
+        }
+        migratedRows = (connection.prepare('SELECT count(*) AS count FROM message_index').get() as { count: number })
+          .count;
+        connection.exec(`
+          DROP TRIGGER IF EXISTS mi_ai;
+          DROP TRIGGER IF EXISTS mi_ad;
+          DROP TRIGGER IF EXISTS mi_au;
+          DROP TABLE IF EXISTS message_fts;
+          DROP INDEX IF EXISTS idx_mi_agent_group;
+          DROP INDEX IF EXISTS idx_mi_messaging_group;
+          DROP INDEX IF EXISTS idx_mi_session;
+          ALTER TABLE message_index RENAME TO message_index_legacy;
+        `);
+      }
+
+      connection.exec(SEARCH_SCHEMA);
+      if (migratedRows !== null) {
+        const names = MESSAGE_COLUMNS.join(', ');
+        connection.exec(`
+          INSERT INTO message_index (rowid, ${names})
+          SELECT rowid, ${names} FROM message_index_legacy;
+          DROP TABLE message_index_legacy;
+        `);
+      }
+      connection.pragma(`user_version = ${SEARCH_SCHEMA_VERSION}`);
+      return migratedRows;
+    })
+    .immediate();
+}
+
 /**
  * Open (or create) the search index. Called once during host startup.
  */
 export function initSearchDb(): void {
   if (db) return;
   const dbPath = searchDbPath();
-  db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('busy_timeout = 5000');
-  db.exec(SEARCH_SCHEMA);
+  const connection = new Database(dbPath);
+  try {
+    connection.pragma('busy_timeout = 5000');
+    connection.pragma('journal_mode = WAL');
+    const migratedRows = initializeSearchSchema(connection);
+    if (migratedRows !== null) {
+      log.warn('Search index schema rebuilt; existing entries preserved', {
+        migratedRows,
+        note: 'Previously suppressed duplicate occurrences require backfill from session DBs.',
+        backfill: 'pnpm exec tsx scripts/backfill-search-index.ts',
+      });
+    }
+    db = connection;
+  } catch (err) {
+    connection.close();
+    throw err;
+  }
   log.info('Search index ready', { path: dbPath });
 }
 
@@ -144,13 +228,19 @@ export function clearSearchIndex(): void {
   getSearchDb().exec('DELETE FROM message_index');
 }
 
-export function deleteMessageFromIndex(messageId: string, agentGroupId: string, sessionId: string): void {
+/** Cancellation callers omit direction because only inbound messages can be cancelled. */
+export function deleteMessageFromIndex(
+  messageId: string,
+  agentGroupId: string,
+  sessionId: string,
+  direction: 'in' | 'out' = 'in',
+): void {
   if (!db) return;
   const suffix = `:${agentGroupId}`;
   const id = messageId.endsWith(suffix) ? messageId.slice(0, -suffix.length) : messageId;
-  getSearchDb().prepare(
-    'DELETE FROM message_index WHERE id = ? AND agent_group_id = ? AND session_id = ?',
-  ).run(id, agentGroupId, sessionId);
+  getSearchDb()
+    .prepare('DELETE FROM message_index WHERE id = ? AND agent_group_id = ? AND session_id = ? AND direction = ?')
+    .run(id, agentGroupId, sessionId, direction);
 }
 
 /**
@@ -180,45 +270,12 @@ function normalizeIndexTimestamp(ts: string): string {
     .replace(/Z$/, '');
 }
 
-/**
- * Hand a session's older messages over to a forked branch that also holds them.
- *
- * A fork copies its parent's messages verbatim, ids included, and `indexMessage`
- * is keyed on that id — so the copies never get rows of their own and the
- * parent's rows are the only index entry for text both threads display.
- * Deleting the parent outright would therefore make messages that are still on
- * screen in the branch unsearchable. Re-pointing the rows at or before the cut
- * keeps them findable, at their surviving location.
- *
- * Called before `deleteSessionFromIndex`, which then clears whatever was left
- * behind the cut.
- */
-export function reassignIndexedMessages(
-  fromSessionId: string,
-  toSessionId: string,
-  toThreadId: string | null,
-  throughTimestamp: string,
-): number {
-  if (!db) return 0;
-  try {
-    return getSearchDb()
-      .prepare(
-        `UPDATE message_index SET session_id = ?, thread_id = ?
-          WHERE session_id = ? AND timestamp <= ?`,
-      )
-      .run(toSessionId, toThreadId, fromSessionId, normalizeIndexTimestamp(throughTimestamp)).changes;
-  } catch (err) {
-    log.warn('Search index: failed to reassign session messages', { fromSessionId, toSessionId, err });
-    return 0;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Indexing
 // ---------------------------------------------------------------------------
 
 /**
- * Index a single message. Idempotent (INSERT OR IGNORE).
+ * Index a single message occurrence. Idempotent per session, direction and public id.
  * Designed to be called fire-and-forget from the routing/delivery hot path.
  */
 export function indexMessage(msg: IndexableMessage, options: { replaceText?: boolean } = {}): void {
@@ -237,9 +294,14 @@ export function indexMessage(msg: IndexableMessage, options: { replaceText?: boo
   try {
     getSearchDb()
       .prepare(
-        `INSERT OR IGNORE INTO message_index
+        `INSERT INTO message_index
          (id, session_id, agent_group_id, messaging_group_id, channel_type, thread_id, direction, timestamp, text, sender_user_id)
-         VALUES (@id, @sessionId, @agentGroupId, @messagingGroupId, @channelType, @threadId, @direction, @timestamp, @text, @senderUserId)`,
+         VALUES (@id, @sessionId, @agentGroupId, @messagingGroupId, @channelType, @threadId, @direction, @timestamp, @text, @senderUserId)
+         ON CONFLICT(session_id, direction, id) ${
+           options.replaceText
+             ? 'DO UPDATE SET text = excluded.text WHERE message_index.agent_group_id = excluded.agent_group_id'
+             : 'DO NOTHING'
+         }`,
       )
       .run({
         id,
@@ -253,11 +315,6 @@ export function indexMessage(msg: IndexableMessage, options: { replaceText?: boo
         text: msg.text,
         senderUserId: msg.senderUserId ?? null,
       });
-    if (options.replaceText) {
-      getSearchDb().prepare(
-        'UPDATE message_index SET text = ? WHERE id = ? AND session_id = ? AND agent_group_id = ? AND direction = ?',
-      ).run(msg.text, id, msg.sessionId, msg.agentGroupId, msg.direction);
-    }
   } catch (err) {
     log.warn('Search index: failed to index message', { messageId: msg.id, err });
   }

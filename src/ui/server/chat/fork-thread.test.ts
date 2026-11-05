@@ -13,11 +13,13 @@ import path from 'path';
 import { Readable, Writable } from 'stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-ui-fork-thread';
+const { TEST_ROOT } = vi.hoisted(() => ({
+  TEST_ROOT: `${process.cwd()}/.test-ui-fork-thread-${process.pid}`,
+}));
 
 vi.mock('../../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../../config.js')>('../../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-ui-fork-thread/data' };
+  return { ...actual, DATA_DIR: `${TEST_ROOT}/data` };
 });
 
 vi.mock('../../../container-runner.js', () => ({
@@ -31,7 +33,7 @@ import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { insertTask, pauseTask } from '../../../modules/scheduling/db.js';
 import { upsertThreadTitle } from '../../../modules/thread-titles/db.js';
-import { closeSearchDb, indexMessage, initSearchDb } from '../../../search-index.js';
+import { clearSearchIndex, closeSearchDb, indexMessage, initSearchDb, searchMessages } from '../../../search-index.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath } from '../../../session-manager.js';
 import { handleChatRequest, listThreadsForViewer } from './chat.js';
 import * as threadSummaries from '../../../thread-summaries.js';
@@ -184,17 +186,6 @@ const INDEXED = [
 function findSession(threadId: string): string {
   const row = getDb().prepare(`SELECT id FROM sessions WHERE thread_id = ?`).get(threadId) as { id: string };
   return row.id;
-}
-
-function indexedAt(messageId: string): { session_id: string; thread_id: string } | undefined {
-  const search = new Database(path.join(TEST_DATA_DIR, 'search.db'), { readonly: true });
-  try {
-    return search.prepare(`SELECT session_id, thread_id FROM message_index WHERE id = ?`).get(messageId) as
-      | { session_id: string; thread_id: string }
-      | undefined;
-  } finally {
-    search.close();
-  }
 }
 
 beforeEach(() => {
@@ -488,7 +479,7 @@ describe('fork lineage in the threads list', () => {
   });
 });
 
-describe('search index handoff on delete', () => {
+describe('fork search occurrences', () => {
   beforeEach(() => {
     seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
     seedThread();
@@ -500,34 +491,110 @@ describe('search index handoff on delete', () => {
     closeSearchDb();
   });
 
-  it('hands messages the branch still shows over to the branch', async () => {
+  it('immediately indexes inherited messages and retains them after parent deletion', async () => {
     const { json } = await postFork({ atMessageId: 'a1' });
     const branchId = json.threadId as string;
     const branchSession = findSession(branchId);
+    expect(searchMessages('hell*', { agentGroupId: GROUP_ID })).toHaveLength(2);
+    expect(searchMessages('back', { agentGroupId: GROUP_ID })).toHaveLength(2);
 
     const del = await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, { userId: ADMIN_ID });
     expect(del.status).toBe(200);
 
-    // u1/a1 are on screen in the branch, so they stay searchable there.
-    expect(indexedAt('u1')).toEqual({ session_id: branchSession, thread_id: branchId });
-    expect(indexedAt('a1')).toEqual({ session_id: branchSession, thread_id: branchId });
-    // a2 came after the cut and exists nowhere now.
-    expect(indexedAt('a2')).toBeUndefined();
+    expect(searchMessages('hell*', { agentGroupId: GROUP_ID })).toMatchObject([
+      { messageId: 'u1', sessionId: branchSession, threadId: branchId, snippet: '>>>hello<<<' },
+    ]);
+    expect(searchMessages('back', { agentGroupId: GROUP_ID })).toMatchObject([
+      { messageId: 'a1', sessionId: branchSession, threadId: branchId },
+    ]);
+    expect(searchMessages('more', { agentGroupId: GROUP_ID })).toEqual([]);
   });
 
-  it('hands them to the branch that cut deepest', async () => {
+  it('independently indexes shallow and deep cuts without altering the parent', async () => {
     const shallow = await postFork({ atMessageId: 'u1' });
     const deep = await postFork({ atMessageId: 'a1' });
+    const shallowId = shallow.json.threadId as string;
+    const shallowSession = findSession(shallowId);
     const deepId = deep.json.threadId as string;
     const deepSession = findSession(deepId);
+    expect(
+      searchMessages('hell*', { agentGroupId: GROUP_ID })
+        .map((row) => row.sessionId)
+        .sort(),
+    ).toEqual([SESSION, shallowSession, deepSession].sort());
+    expect(
+      searchMessages('back', { agentGroupId: GROUP_ID })
+        .map((row) => row.sessionId)
+        .sort(),
+    ).toEqual([SESSION, deepSession].sort());
+    expect(searchMessages('more', { agentGroupId: GROUP_ID }).map((row) => row.sessionId)).toEqual([SESSION]);
 
     await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, { userId: ADMIN_ID });
 
-    // The shallow branch holds u1 too, but the deep one holds a superset and
-    // the index has only one slot per message.
-    expect(indexedAt('u1')).toEqual({ session_id: deepSession, thread_id: deepId });
-    expect(indexedAt('a1')).toEqual({ session_id: deepSession, thread_id: deepId });
-    expect(shallow.json.threadId).not.toBe(deepId);
+    expect(
+      searchMessages('hell*', { agentGroupId: GROUP_ID })
+        .map((row) => row.sessionId)
+        .sort(),
+    ).toEqual([shallowSession, deepSession].sort());
+    expect(searchMessages('back', { agentGroupId: GROUP_ID }).map((row) => row.sessionId)).toEqual([deepSession]);
+    expect(searchMessages('more', { agentGroupId: GROUP_ID })).toEqual([]);
+  });
+
+  it('preserves edits to existing fork occurrences and sibling copies through deletion', async () => {
+    const first = await postFork({ atMessageId: 'a1' });
+    const second = await postFork({ atMessageId: 'a1' });
+    const branchIds = [first.json.threadId as string, second.json.threadId as string];
+    const branchSessions = branchIds.map(findSession);
+    expect(searchMessages('hell*', { agentGroupId: GROUP_ID })).toHaveLength(3);
+    indexMessage(
+      { ...INDEXED[0], sessionId: branchSessions[0], threadId: branchIds[0], text: 'branchword hello' },
+      { replaceText: true },
+    );
+    expect((await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, { userId: ADMIN_ID })).status).toBe(200);
+    expect(
+      searchMessages('hell*', { agentGroupId: GROUP_ID })
+        .map((row) => row.sessionId)
+        .sort(),
+    ).toEqual([...branchSessions].sort());
+    expect(searchMessages('branchword', { agentGroupId: GROUP_ID }).map((row) => row.sessionId)).toEqual([
+      branchSessions[0],
+    ]);
+    expect(searchMessages('back', { agentGroupId: GROUP_ID })).toHaveLength(2);
+    expect(searchMessages('more', { agentGroupId: GROUP_ID })).toEqual([]);
+
+    await call('DELETE', `/api/groups/${GROUP_ID}/chat/${branchIds[0]}`, { userId: ADMIN_ID });
+    const results = searchMessages('hell*', { agentGroupId: GROUP_ID });
+    expect(results).toMatchObject([{ sessionId: branchSessions[1], messageId: 'u1', snippet: '>>>hello<<<' }]);
+  });
+
+  it('indexes copied source rows even when the parent search index is empty', async () => {
+    clearSearchIndex();
+    const { json } = await postFork({ atMessageId: 'a1' });
+    const branchSession = findSession(json.threadId as string);
+    const results = searchMessages('hell* OR back', { agentGroupId: GROUP_ID });
+    expect(results).toHaveLength(2);
+    expect(results.every((row) => row.sessionId === branchSession && row.threadId === json.threadId)).toBe(true);
+    expect(results.every((row) => row.snippet.includes('>>>'))).toBe(true);
+  });
+
+  it('deletes a fork without removing its parent or sibling search occurrences', async () => {
+    const first = await postFork({ atMessageId: 'a1' });
+    const second = await postFork({ atMessageId: 'a1' });
+    const siblingSession = findSession(second.json.threadId as string);
+
+    await call('DELETE', `/api/groups/${GROUP_ID}/chat/${first.json.threadId}`, { userId: ADMIN_ID });
+
+    expect(
+      searchMessages('hell*', { agentGroupId: GROUP_ID })
+        .map((row) => row.sessionId)
+        .sort(),
+    ).toEqual([SESSION, siblingSession].sort());
+    expect(
+      searchMessages('back', { agentGroupId: GROUP_ID })
+        .map((row) => row.sessionId)
+        .sort(),
+    ).toEqual([SESSION, siblingSession].sort());
+    expect(searchMessages('more', { agentGroupId: GROUP_ID }).map((row) => row.sessionId)).toEqual([SESSION]);
   });
 
   it('purges outright when the cascade takes every branch too', async () => {
@@ -535,8 +602,6 @@ describe('search index handoff on delete', () => {
 
     await call('DELETE', `/api/groups/${GROUP_ID}/chat/${THREAD}`, { query: '?cascade=1', userId: ADMIN_ID });
 
-    expect(indexedAt('u1')).toBeUndefined();
-    expect(indexedAt('a1')).toBeUndefined();
-    expect(indexedAt('a2')).toBeUndefined();
+    expect(searchMessages('hello OR back OR more', { agentGroupId: GROUP_ID })).toEqual([]);
   });
 });

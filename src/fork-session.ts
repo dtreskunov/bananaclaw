@@ -32,7 +32,7 @@ import {
 } from './input-timeline.js';
 import { timelineSortKey } from './ui/shared/timeline.js';
 import { getProviderForkSessionState } from './providers/provider-container-registry.js';
-import { extractInboundText, extractOutboundText } from './search-index.js';
+import { extractInboundText, extractOutboundText, indexMessage, type IndexableMessage } from './search-index.js';
 import {
   initSessionFolder,
   openInboundDb,
@@ -50,6 +50,7 @@ const EXCLUDED_INBOUND_KINDS = new Set(['task']);
 
 /** Outbound kinds that carry displayable conversation text. */
 const CHAT_OUT_KINDS = new Set(['chat', 'text', 'chat-sdk']);
+const CHAT_IN_KINDS = new Set(['chat', 'chat-sdk']);
 
 /** Character budget for the digest handed to a cold provider session. */
 const DIGEST_MAX_CHARS = 24_000;
@@ -224,7 +225,10 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
   let parentContinuation: string | null = null;
   let anchorRef: string | null = null;
   let cutTs = '';
-  const digestParts: { direction: 'in' | 'out'; timestamp: string; text: string; timelinePosition?: number }[] = [];
+  const transcript: (Pick<IndexableMessage, 'id' | 'direction' | 'timestamp' | 'text' | 'senderUserId'> & {
+    timelinePosition?: number;
+    searchable: boolean;
+  })[] = [];
 
   const srcIn = openInboundDb(agentGroupId, parentSession.id);
   const srcOut = openOutboundDb(agentGroupId, parentSession.id);
@@ -275,23 +279,28 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
     if (inRows.length === 0 && outRows.length === 0) throw new ForkError('nothing_to_fork');
 
     for (const r of inRows) {
-      digestParts.push({
+      transcript.push({
+        id: String(r.id),
         direction: 'in',
         timestamp: String(r.timestamp),
         text: extractInboundText(String(r.content)),
+        senderUserId: typeof r.sender_user_id === 'string' ? r.sender_user_id : null,
         timelinePosition: readInputTimeline(srcOut, String(r.id))?.timelinePosition,
+        searchable: CHAT_IN_KINDS.has(String(r.kind)),
       });
     }
     for (const r of outRows) {
       if (!CHAT_OUT_KINDS.has(String(r.kind))) continue;
-      digestParts.push({
+      transcript.push({
+        id: String(r.id),
         direction: 'out',
         timestamp: String(r.timestamp),
         text: extractOutboundText(String(r.content)),
         timelinePosition: outboundTimelinePosition(String(r.content)),
+        searchable: true,
       });
     }
-    digestParts.sort(
+    transcript.sort(
       (a, b) => timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition),
     );
 
@@ -350,7 +359,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
   }
 
   const fidelity: 'native' | 'transcript' = parentContinuation && anchorRef ? 'native' : 'transcript';
-  const digest = buildDigest(digestParts, parentTitle);
+  const digest = buildDigest(transcript, parentTitle);
   const now = new Date().toISOString();
 
   try {
@@ -402,6 +411,20 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
     fidelity,
     created_at: now,
   });
+
+  // Use the exact copied rows, not a timestamp scan of the parent's index:
+  // timeline cutoffs can exclude messages whose original send time was earlier.
+  for (const message of transcript) {
+    if (!message.searchable) continue;
+    indexMessage({
+      ...message,
+      sessionId,
+      agentGroupId,
+      messagingGroupId,
+      channelType,
+      threadId: newThreadId,
+    });
+  }
 
   log.info('Thread forked', {
     agentGroupId,

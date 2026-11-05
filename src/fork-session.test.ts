@@ -32,6 +32,7 @@ import { getThreadFork } from './db/thread-forks.js';
 import { getTurn, getTurnInputs, linkTurnInput, putTurn } from './db/turns.js';
 import { ForkError, forkThread } from './fork-session.js';
 import { inputStateKey, readInputTimeline } from './input-timeline.js';
+import { closeSearchDb, initSearchDb, searchMessages } from './search-index.js';
 // container-runner is mocked above, so the provider barrel it normally pulls
 // in never loads — import it directly for the registrations forking consults.
 import './providers/index.js';
@@ -193,6 +194,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  closeSearchDb();
   closeDb();
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
 });
@@ -201,11 +203,18 @@ describe('forkThread', () => {
   function seedTurnHistory(phase: 'running' | 'settled' = 'settled') {
     const db = new Database(outboundDbPath(AG, PARENT_SESSION));
     putTurn(db, {
-      id: 'turn-parent', origin_channel_type: 'discord', origin_platform_id: 'chan-1',
-      origin_thread_id: PARENT_THREAD, origin_source_session_id: null,
-      started_at: ts(1), ended_at: phase === 'settled' ? ts(4) : null, phase,
-      outcome: phase === 'settled' ? 'replied' : 'pending', provenance: 'native',
-      imported_from_session_id: null, imported_from_turn_id: null,
+      id: 'turn-parent',
+      origin_channel_type: 'discord',
+      origin_platform_id: 'chan-1',
+      origin_thread_id: PARENT_THREAD,
+      origin_source_session_id: null,
+      started_at: ts(1),
+      ended_at: phase === 'settled' ? ts(4) : null,
+      phase,
+      outcome: phase === 'settled' ? 'replied' : 'pending',
+      provenance: 'native',
+      imported_from_session_id: null,
+      imported_from_turn_id: null,
     });
     for (const id of ['u1', 'u2']) {
       linkTurnInput(db, { turn_id: 'turn-parent', message_in_id: id, association: 'consumed' });
@@ -232,33 +241,54 @@ describe('forkThread', () => {
       try {
         expect(db.prepare('SELECT id FROM turns').all()).toEqual([{ id: 'turn-parent' }]);
         expect(getTurn(db, 'turn-parent')).toMatchObject({
-          phase: 'settled', outcome: 'unknown', started_at: null, ended_at: null, provenance: 'fork',
-          origin_thread_id: NEW_THREAD, origin_channel_type: 'discord', origin_platform_id: 'chan-1',
-          imported_from_session_id: PARENT_SESSION, imported_from_turn_id: 'turn-parent',
+          phase: 'settled',
+          outcome: 'unknown',
+          started_at: null,
+          ended_at: null,
+          provenance: 'fork',
+          origin_thread_id: NEW_THREAD,
+          origin_channel_type: 'discord',
+          origin_platform_id: 'chan-1',
+          imported_from_session_id: PARENT_SESSION,
+          imported_from_turn_id: 'turn-parent',
         });
         expect(getTurnInputs(db, 'turn-parent').map((r) => r.message_in_id)).toEqual(['u1']);
-        expect(db.prepare('SELECT id, turn_id FROM messages_out').all()).toEqual([{ id: 'a1', turn_id: 'turn-parent' }]);
+        expect(db.prepare('SELECT id, turn_id FROM messages_out').all()).toEqual([
+          { id: 'a1', turn_id: 'turn-parent' },
+        ]);
         expect(db.prepare('SELECT id, cost_usd FROM turn_usage').all()).toEqual([{ id: 'first', cost_usd: 1 }]);
         expect(db.prepare('SELECT text FROM turn_activity').all()).toEqual([{ text: 'first' }]);
         expect(db.pragma('foreign_key_check')).toEqual([]);
-      } finally { db.close(); }
+      } finally {
+        db.close();
+      }
     }
   });
 
-  it.each(['running', 'settled'] as const)('inherits no active lifecycle from a %s source and includes turn-only totals only when complete', (phase) => {
-    seedTurnHistory(phase);
-    const result = fork('a2');
-    const db = new Database(outboundDbPath(AG, result.sessionId));
-    try {
-      expect(getTurn(db, 'turn-parent')).toMatchObject({
-        phase: 'settled', outcome: phase === 'settled' ? 'replied' : 'unknown',
-      });
-      expect(db.prepare('SELECT sum(cost_usd) AS cost FROM turn_usage').get()).toEqual({ cost: phase === 'settled' ? 6 : 3 });
-      expect(db.prepare('SELECT count(*) AS count FROM turn_activity').get()).toEqual({ count: phase === 'settled' ? 3 : 2 });
-      expect(getTurn(db, 'unrelated')).toBeUndefined();
-      expect(db.pragma('foreign_key_check')).toEqual([]);
-    } finally { db.close(); }
-  });
+  it.each(['running', 'settled'] as const)(
+    'inherits no active lifecycle from a %s source and includes turn-only totals only when complete',
+    (phase) => {
+      seedTurnHistory(phase);
+      const result = fork('a2');
+      const db = new Database(outboundDbPath(AG, result.sessionId));
+      try {
+        expect(getTurn(db, 'turn-parent')).toMatchObject({
+          phase: 'settled',
+          outcome: phase === 'settled' ? 'replied' : 'unknown',
+        });
+        expect(db.prepare('SELECT sum(cost_usd) AS cost FROM turn_usage').get()).toEqual({
+          cost: phase === 'settled' ? 6 : 3,
+        });
+        expect(db.prepare('SELECT count(*) AS count FROM turn_activity').get()).toEqual({
+          count: phase === 'settled' ? 3 : 2,
+        });
+        expect(getTurn(db, 'unrelated')).toBeUndefined();
+        expect(db.pragma('foreign_key_check')).toEqual([]);
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it('drops dangling turn links from copied records instead of inheriting an invalid reference', () => {
     const source = new Database(outboundDbPath(AG, PARENT_SESSION));
@@ -272,7 +302,9 @@ describe('forkThread', () => {
       expect(db.prepare('SELECT turn_id FROM messages_out').all()).toEqual([{ turn_id: null }]);
       expect(db.prepare('SELECT turn_id FROM turn_usage').all()).toEqual([{ turn_id: null }]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
-    } finally { db.close(); }
+    } finally {
+      db.close();
+    }
   });
 
   it('keeps an input-only fork inert without copying later output or turn-only accounting', () => {
@@ -285,28 +317,39 @@ describe('forkThread', () => {
       for (const table of ['messages_out', 'turn_usage', 'turn_activity']) {
         expect(db.prepare(`SELECT * FROM ${table}`).all()).toEqual([]);
       }
-    } finally { db.close(); }
-  });
-
-  it.each(['content', 'receipt'] as const)('excludes %s cancellation tombstones and refuses them as branch anchors', (source) => {
-    if (source === 'content') {
-      const db = new Database(inboundDbPath(AG, PARENT_SESSION));
-      db.prepare("UPDATE messages_in SET content = ? WHERE id = 'u2'")
-        .run(JSON.stringify({ text: 'second', cancelled: true }));
-      db.close();
-    } else {
-      const db = new Database(outboundDbPath(AG, PARENT_SESSION));
-      db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
-        inputStateKey('u2'), JSON.stringify({ messageId: 'u2', status: 'cancelled' }), ts(4),
-      );
+    } finally {
       db.close();
     }
-    expect(() => fork('u2')).toThrow('anchor_not_found');
-    const result = fork('a2');
-    const db = new Database(inboundDbPath(AG, result.sessionId));
-    expect(db.prepare('SELECT id FROM messages_in').all()).toEqual([{ id: 'u1' }]);
-    db.close();
   });
+
+  it.each(['content', 'receipt'] as const)(
+    'excludes %s cancellation tombstones and refuses them as branch anchors',
+    (source) => {
+      initSearchDb();
+      if (source === 'content') {
+        const db = new Database(inboundDbPath(AG, PARENT_SESSION));
+        db.prepare("UPDATE messages_in SET content = ? WHERE id = 'u2'").run(
+          JSON.stringify({ text: 'second', cancelled: true }),
+        );
+        db.close();
+      } else {
+        const db = new Database(outboundDbPath(AG, PARENT_SESSION));
+        db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+          inputStateKey('u2'),
+          JSON.stringify({ messageId: 'u2', status: 'cancelled' }),
+          ts(4),
+        );
+        db.close();
+      }
+      expect(() => fork('u2')).toThrow('anchor_not_found');
+      const result = fork('a2');
+      const db = new Database(inboundDbPath(AG, result.sessionId));
+      expect(db.prepare('SELECT id FROM messages_in').all()).toEqual([{ id: 'u1' }]);
+      db.close();
+      expect(searchMessages('second', { agentGroupId: AG })).toEqual([]);
+      expect(searchMessages('first', { agentGroupId: AG }).map((row) => row.sessionId)).toEqual([result.sessionId]);
+    },
+  );
 
   function seedTimeline(queued = false) {
     const base = Date.parse(ts(2)) * 1000;
@@ -335,12 +378,19 @@ describe('forkThread', () => {
   }
 
   it('cuts at visible consumption order instead of a queued input original send time', () => {
+    initSearchDb();
     seedTimeline();
     const result = fork('a1');
     expect(result.copiedIn).toBe(1);
     const db = new Database(inboundDbPath(AG, result.sessionId));
     expect(db.prepare('SELECT id FROM messages_in').all()).toEqual([{ id: 'u1' }]);
     db.close();
+    expect(searchMessages('second', { agentGroupId: AG })).toEqual([]);
+    expect(
+      searchMessages('first OR answer', { agentGroupId: AG })
+        .map((row) => row.messageId)
+        .sort(),
+    ).toEqual(['a1', 'u1']);
   });
 
   it('retains predecessor responses and placements when branching at a consumed follow-up', () => {
@@ -359,12 +409,62 @@ describe('forkThread', () => {
   });
 
   it('never inherits a still-queued input or allows it as a branch anchor', () => {
+    initSearchDb();
     seedTimeline(true);
     expect(() => fork('u2')).toThrow('anchor_pending');
     const result = fork('a2');
     const input = new Database(inboundDbPath(AG, result.sessionId));
     expect(input.prepare('SELECT id FROM messages_in').all()).toEqual([{ id: 'u1' }]);
     input.close();
+    expect(searchMessages('second', { agentGroupId: AG })).toEqual([]);
+  });
+
+  it('immediately searches only copied chat occurrences on the exact source route', () => {
+    initSearchDb();
+    const input = new Database(inboundDbPath(AG, PARENT_SESSION));
+    try {
+      input.exec(`
+        INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, thread_id, content) VALUES
+          ('other-channel', 10, 'chat', '${ts(1)}', 'web', '${PARENT_THREAD}', '{"text":"channelword"}'),
+          ('system', 12, 'system', '${ts(1)}', 'discord', '${PARENT_THREAD}', '{"text":"systemword"}');
+      `);
+    } finally {
+      input.close();
+    }
+    const output = new Database(outboundDbPath(AG, PARENT_SESSION));
+    try {
+      output.exec(`
+        INSERT INTO messages_out (id, seq, kind, timestamp, channel_type, thread_id, content) VALUES
+          ('u1', 5, 'chat-sdk', '${ts(1)}', 'discord', '${PARENT_THREAD}', '{"markdown":"echoedword"}'),
+          ('other-output-channel', 7, 'chat', '${ts(1)}', 'web', '${PARENT_THREAD}', '{"text":"outputchannelword"}');
+      `);
+    } finally {
+      output.close();
+    }
+
+    const result = fork('a1');
+    const results = searchMessages('first OR answer OR echoedword', {
+      agentGroupId: AG,
+      conversations: [{ sessionId: result.sessionId, threadId: NEW_THREAD, channelType: 'discord' }],
+    });
+    expect(results).toHaveLength(3);
+    expect(results.map((row) => [row.messageId, row.direction]).sort()).toEqual([
+      ['a1', 'out'],
+      ['u1', 'in'],
+      ['u1', 'out'],
+    ]);
+    expect(results.every((row) => row.snippet.includes('>>>'))).toBe(true);
+    expect(
+      searchMessages('second OR two OR nope OR cron OR channelword OR systemword OR outputchannelword', {
+        agentGroupId: AG,
+      }),
+    ).toEqual([]);
+    const forkInput = new Database(inboundDbPath(AG, result.sessionId));
+    try {
+      expect(forkInput.prepare('SELECT digest FROM fork_origin').pluck().get()).toContain('systemword');
+    } finally {
+      forkInput.close();
+    }
   });
 
   it('copies history up to the anchor and stops there', () => {
