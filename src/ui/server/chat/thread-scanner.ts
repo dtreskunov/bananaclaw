@@ -118,5 +118,6 @@ export class ThreadScanner {
 export const threadScanner = new ThreadScanner();
 onHostChange((change) => {
   if (change.kind === 'sessions') threadScanner.invalidate(change.sessionId ?? null);
+  else if (change.kind === 'access') threadScanner.invalidate(null);
 });
 onShutdown(() => threadScanner.close());

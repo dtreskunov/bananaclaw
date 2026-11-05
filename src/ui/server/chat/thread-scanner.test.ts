@@ -2,13 +2,13 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from '../../../db/schema.js';
-import { onHostChange } from '../../../host-changes.js';
+import { onHostChange, publishHostChange } from '../../../host-changes.js';
 import { upsertThreadTitle } from '../../../modules/thread-titles/db.js';
 import { scanThreadSession, type ThreadScanSpec } from './thread-scan.js';
-import { ThreadScanner } from './thread-scanner.js';
+import { ThreadScanner, threadScanner } from './thread-scanner.js';
 
 let dataDir: string;
 let scanner: ThreadScanner;
@@ -153,6 +153,33 @@ describe('thread scanner', () => {
     await scanner.scan([other]);
     expect((await scanner.scan([spec]))[0].threads[0].messageCount).toBe(2);
   });
+
+  it.each(['access-first', 'session-first'])(
+    'clears the worker cache when access supersedes session changes (%s)',
+    async (order) => {
+      const { inbound } = session();
+      message(inbound, 'one');
+      expect((await scanner.scan([spec]))[0].threads[0].messageCount).toBe(1);
+      const invalidate = vi
+        .spyOn(threadScanner, 'invalidate')
+        .mockImplementation((sessionId) => scanner.invalidate(sessionId));
+      const notices: string[] = [];
+      const unsubscribe = onHostChange((change) => notices.push(change.kind));
+      try {
+        message(inbound, 'two');
+        if (order === 'access-first') publishHostChange({ kind: 'access' });
+        publishHostChange({ kind: 'sessions', sessionId: spec.sessionId });
+        if (order === 'session-first') publishHostChange({ kind: 'access' });
+        await Promise.resolve();
+        expect(notices).toEqual(['access']);
+        expect((await scanner.scan([spec]))[0].threads[0].messageCount).toBe(2);
+        expect(invalidate).toHaveBeenCalledWith(null);
+      } finally {
+        unsubscribe();
+        invalidate.mockRestore();
+      }
+    },
+  );
 
   it('groups shared threads and DMs without mixing routing scopes', async () => {
     const shared = { ...spec, thread: undefined };

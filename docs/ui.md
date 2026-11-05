@@ -1391,6 +1391,8 @@ group; configuration changes refresh voice capability without rescanning threads
 Access changes invalidate cached visibility. An internal access generation also
 prevents a cached snapshot from being published if authority changes across an
 asynchronous read.
+Access changes also clear the worker scan cache because they can subsume queued
+session changes during coalescing.
 
 Changes during a scan schedule a further read without starving publication of
 completed, authorized snapshots. Obsolete subscriptions are never published.
