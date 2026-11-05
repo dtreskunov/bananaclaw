@@ -379,7 +379,8 @@ export function readSessionThreadSummary(spec: ThreadSummarySpec): SessionThread
     .map((row) => ({ ...row, data: JSON.parse(row.value) as InboundSummary }));
   const outbound = rows
     .filter((row) => row.kind === 'route' && row.source === 'outbound')
-    .map((row) => ({ ...row, data: JSON.parse(row.value) as OutboundSummary }));
+    .map((row) => ({ ...row, data: JSON.parse(row.value) as OutboundSummary }))
+    .filter((row) => row.data.count > 0);
   const usage = rows.find((row) => row.kind === 'usage');
   const result: SessionThreadSummary = {
     threads: [],

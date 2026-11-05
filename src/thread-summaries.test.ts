@@ -93,6 +93,22 @@ describe('maintained thread summaries', () => {
     const shared = { ...spec, thread: undefined };
     expect(readSessionThreadSummary(shared)).toEqual(scanThreadSession(ROOT, shared));
   });
+  it('does not invent DM reply groups for non-chat output or deleted replies', () => {
+    message('one');
+    outbound.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,content)
+      VALUES('internal',1,'state','2026-11-05T00:00:00Z','{}');`);
+    refreshThreadSummaries('s');
+    expect(readSessionThreadSummary(spec)).toEqual(scanThreadSession(ROOT, spec));
+    expect(readSessionThreadSummary(spec).dmReplies).toEqual([]);
+    outbound.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,content)
+      VALUES('dm-reply',3,'chat','2026-11-05T00:01:00Z','telegram','person','{"text":"Reply"}');`);
+    refreshThreadSummaries('s');
+    expect(readSessionThreadSummary(spec).dmReplies).toHaveLength(1);
+    outbound.exec(`DELETE FROM messages_out WHERE id='dm-reply'`);
+    refreshThreadSummaries('s');
+    expect(readSessionThreadSummary(spec)).toEqual(scanThreadSession(ROOT, spec));
+    expect(readSessionThreadSummary(spec).dmReplies).toEqual([]);
+  });
   it.each(['plain unparsed text', '"A JSON string"', '{"cancelled":true,"text":"Hidden"}', '{"text":"Visible"}'])(
     'preserves historical fallback-title semantics for %s',
     (content) => {
