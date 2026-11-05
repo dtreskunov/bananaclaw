@@ -26,6 +26,7 @@ import type { ReadCursor } from '../../shared/read-state.js';
 import { handle } from './routes.js';
 import { createSession as createUiSession } from '../db.js';
 import { COOKIE_NAME } from '../auth.js';
+import { claimIdentity } from '../../../modules/permissions/identity-claim.js';
 
 const root = path.resolve('.test-read-state');
 let input: Database.Database, output: Database.Database;
@@ -72,6 +73,19 @@ function unread(user = 'viewer', thread = 'a') {
 }
 
 describe('durable viewer unread state', () => {
+  it('merges explicit read positions without broadly copying another account baseline', () => {
+    insertIdentity({ userId: 'other', channel: 'resend', handle: 'other@example.com' });
+    message('one');
+    acknowledgeRead('other', 'g', 'a', cursor('other'));
+    message('two');
+    getDb().prepare('UPDATE users SET unread_baseline=(SELECT MAX(position) FROM conversation_publications) WHERE id=?').run('other');
+    expect(claimIdentity({ targetUserId: 'viewer', channel: 'resend', handle: 'other@example.com' }).donorDeleted).toBe(true);
+    expect(getUser('other')).toBeUndefined();
+    expect(getDb().prepare("SELECT position FROM conversation_reads WHERE user_id='viewer'").pluck().get()).toBe(1);
+    expect(unread()).toBe(true);
+    acknowledgeRead('viewer', 'g', 'a', cursor());
+    expect(unread()).toBe(false);
+  });
   it('authenticates and validates the read HTTP operation without affecting other viewers', async () => {
     message('one');
     const token = createUiSession('viewer', 60_000).token;

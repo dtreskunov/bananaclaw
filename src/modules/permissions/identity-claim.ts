@@ -111,6 +111,12 @@ export function claimIdentity(args: { targetUserId: string; channel: string; han
     ).run(targetUserId, donorUserId);
     db.prepare('DELETE FROM user_dms WHERE user_id = ?').run(donorUserId);
 
+    db.prepare(`INSERT INTO conversation_reads(user_id,session_id,channel_type,platform_id,thread_id,position)
+      SELECT ?,session_id,channel_type,platform_id,thread_id,position FROM conversation_reads WHERE user_id=?
+      ON CONFLICT(user_id,session_id,channel_type,platform_id,thread_id)
+      DO UPDATE SET position=MAX(conversation_reads.position,excluded.position)`)
+      .run(targetUserId, donorUserId);
+
     db.prepare('UPDATE ui_sessions SET user_id = ? WHERE user_id = ?').run(targetUserId, donorUserId);
     db.prepare('UPDATE ui_magic_links SET user_id = ? WHERE user_id = ?').run(targetUserId, donorUserId);
     db.prepare('UPDATE ui_private_web_sessions SET user_id = ? WHERE user_id = ?').run(targetUserId, donorUserId);

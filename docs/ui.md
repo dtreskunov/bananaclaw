@@ -131,6 +131,8 @@ never enable unsupported native worker badging.
 
 Existing history is read at rollout. New users receive a baseline at account
 creation. Subsequent summary repairs do not reset either baseline or watermarks.
+Identity merges preserve the maximum explicit read position for each source
+route, without copying a broader account baseline onto unrelated conversations.
 Thread delete buttons retain their
 larger 32px target, vertical centering, hover/focus reveal and touch visibility.
 
