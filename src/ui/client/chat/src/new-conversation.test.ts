@@ -84,9 +84,12 @@ describe('new conversation on startup', () => {
 
       await vi.waitFor(() => expect(threadId.value).toBe(newConversation ? 'created' : 'latest'));
       expect(threads.value.some((thread) => thread.messagingGroupId === 'other-web-context')).toBe(false);
-      expect(sync.conversationUrls()).toEqual([
-        `wss://example.test/ui/chat/api/groups/agent/chat/${newConversation ? 'created' : 'latest'}/ws?mg=web-context`,
-      ]);
+      expect(sync.sockets).toHaveLength(1);
+      expect(sync.subscriptions.at(-1)?.conversation).toEqual({
+        threadId: newConversation ? 'created' : 'latest',
+        channelType: 'web',
+        messagingGroupId: 'web-context',
+      });
     },
   );
 
@@ -157,9 +160,11 @@ describe('new conversation on startup', () => {
 
     expect(groupId.value).toBe('other-agent');
     expect(threadId.value).toBe('new-latest');
-    expect(sync.conversationUrls()).toEqual([
-      'wss://example.test/ui/chat/api/groups/other-agent/chat/new-latest/ws?mg=web-context',
-    ]);
+    expect(sync.sockets).toHaveLength(1);
+    expect(sync.subscriptions.at(-1)).toMatchObject({
+      groupId: 'other-agent',
+      conversation: { threadId: 'new-latest', channelType: 'web', messagingGroupId: 'web-context' },
+    });
   });
 
   it('ignores a group selection that finishes after a newer selection', async () => {

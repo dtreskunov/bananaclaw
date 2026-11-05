@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,14 +11,28 @@ import { removeMember } from '../../../modules/permissions/db/agent-group-member
 import { updateContainerConfigScalars, ensureContainerConfig } from '../../../db/container-configs.js';
 import { authenticate, COOKIE_NAME } from '../auth.js';
 import { createSession, deleteSession } from '../db.js';
-import { parseSyncFrame, SYNC_PROTOCOL_VERSION, SYNC_RELOAD_CLOSE_CODE, type SyncFrame } from '../../shared/sync.js';
+import {
+  parseSyncFrame,
+  SYNC_PROTOCOL_VERSION,
+  SYNC_RELOAD_CLOSE_CODE,
+  type SyncFrame,
+  type SyncConversation,
+} from '../../shared/sync.js';
+import { initSessionFolder } from '../../../session-manager.js';
+import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
 import { attachSyncSocket } from './sync-socket.js';
 import { readGlobalSync, createGlobalProjection } from './sync-state.js';
 import * as attention from './attention.js';
 import { revokeRole, grantRole } from '../../../modules/permissions/db/user-roles.js';
 vi.mock('./threads.js', () => ({ listThreadsForViewer: vi.fn(async () => []) }));
+vi.mock('../../../config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../config.js')>()),
+  DATA_DIR: '.test-sync-socket',
+}));
 import { listThreadsForViewer } from './threads.js';
 import { publishHostChange } from '../../../host-changes.js';
+import { readConversation } from './conversation.js';
+import { reduceConversation, type ConversationSnapshot } from '../../shared/conversation-protocol.js';
 
 let server: WebSocketServer;
 let token: string;
@@ -25,8 +40,60 @@ const clients: WebSocket[] = [];
 const frames: SyncFrame[] = [];
 const listThreads = vi.mocked(listThreadsForViewer);
 const now = () => new Date().toISOString();
+const conversation = { threadId: 'thread', channelType: 'web', messagingGroupId: 'mg' };
+function startTurn() {
+  applyDurableRunnerEvent('g', 'session', {
+    eventId: 'turn',
+    sequence: 1,
+    event: {
+      type: 'turn.upsert',
+      payload: {
+        id: 'turn',
+        origin_channel_type: 'web',
+        origin_platform_id: 'group:g',
+        origin_thread_id: 'thread',
+        origin_source_session_id: null,
+        started_at: now(),
+        ended_at: null,
+        phase: 'running',
+        outcome: 'pending',
+        provenance: 'native',
+        imported_from_session_id: null,
+        imported_from_turn_id: null,
+      },
+    },
+  });
+}
+function trace(sequence = 2) {
+  applyDurableRunnerEvent('g', 'session', {
+    eventId: `trace-${sequence}`,
+    sequence,
+    event: {
+      type: 'activity.persist',
+      payload: {
+        turn_id: 'turn',
+        message_out_id: null,
+        ordinal: sequence - 2,
+        timeline_position: (sequence - 1) * 100,
+        ts: String((sequence - 1) * 1000),
+        text: JSON.stringify({
+          kind: 'tool',
+          id: 'tool',
+          tool: 'read',
+          status: sequence === 2 ? 'running' : 'completed',
+        }),
+      },
+    },
+  });
+}
+function conversationView() {
+  let state: ConversationSnapshot | null = null;
+  for (const frame of frames) if (frame.conversation) state = reduceConversation(state, frame.conversation);
+  return state?.conversation;
+}
 
 beforeEach(async () => {
+  fs.rmSync('.test-sync-socket', { recursive: true, force: true });
   runMigrations(initTestDb());
   getDb().exec(`
     INSERT INTO users(id,kind,created_at) VALUES('viewer','web','now'),('other','web','now');
@@ -41,6 +108,7 @@ beforeEach(async () => {
       VALUES('session','g','mg','thread','now');
   `);
   token = createSession('viewer', 60_000).token;
+  initSessionFolder('g', 'session');
   frames.length = 0;
   listThreads.mockClear();
   server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -58,9 +126,14 @@ afterEach(async () => {
   await Promise.resolve();
   vi.restoreAllMocks();
   closeDb();
+  fs.rmSync('.test-sync-socket', { recursive: true, force: true });
 });
 
-async function connect(groupId: string | null = null) {
+async function connect(
+  groupId: string | null = null,
+  conversation: SyncConversation | null = null,
+  waitForSnapshot = true,
+) {
   const client = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`, {
     headers: { Cookie: `${COOKIE_NAME}=${token}` },
   });
@@ -68,13 +141,128 @@ async function connect(groupId: string | null = null) {
   client.on('message', (raw) => frames.push(parseSyncFrame(JSON.parse(raw.toString()))));
   await once(client, 'open');
   client.send(
-    JSON.stringify({ kind: 'subscribe', protocolVersion: SYNC_PROTOCOL_VERSION, subscriptionId: 1, groupId }),
+    JSON.stringify({
+      kind: 'subscribe',
+      protocolVersion: SYNC_PROTOCOL_VERSION,
+      subscriptionId: 1,
+      groupId,
+      conversation,
+    }),
   );
-  await vi.waitFor(() => expect(frames).toHaveLength(1));
+  if (waitForSnapshot) await vi.waitFor(() => expect(frames.some((frame) => frame.global)).toBe(true));
   return client;
 }
 
-describe('global sync WebSocket integration', () => {
+describe('unified sync WebSocket integration', () => {
+  it('streams turn activity while a metadata scan is blocked, without rescanning threads', async () => {
+    startTurn();
+    let finish!: (value: never[]) => void;
+    listThreads.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await connect('g', conversation, false);
+    await vi.waitFor(() => expect(conversationView()?.turns[0].id).toBe('turn'));
+    await vi.waitFor(() => expect(listThreads).toHaveBeenCalledOnce());
+    expect(frames.some((frame) => frame.global)).toBe(false);
+    const committedAt = Date.now();
+    trace();
+    await vi.waitFor(() => expect(conversationView()?.turns[0].activity).toHaveLength(1));
+    expect(Date.now() - committedAt).toBeLessThanOrEqual(250);
+    expect(listThreads).toHaveBeenCalledOnce();
+    finish([]);
+    await vi.waitFor(() => expect(frames.some((frame) => frame.global)).toBe(true));
+    expect(conversationView()).toEqual(readConversation('viewer', 'g', 'thread', conversation));
+  });
+
+  it('reduces trace lifecycle updates once and restores the same activity on reconnect', async () => {
+    startTurn();
+    const client = await connect('g', conversation);
+    const readInteractions = vi.spyOn(attention, 'readInteractionSync');
+    trace();
+    trace(3);
+    await vi.waitFor(() => expect(conversationView()?.turns[0].activity[0].text).toContain('"completed"'));
+    expect(conversationView()?.turns[0].activity).toHaveLength(1);
+    expect(readInteractions).not.toHaveBeenCalled();
+    expect(listThreads).toHaveBeenCalledOnce();
+    const current = conversationView();
+    const count = frames.length;
+    trace(3);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(frames).toHaveLength(count);
+    const closed = once(client, 'close');
+    client.close();
+    await closed;
+    frames.length = 0;
+    await connect('g', conversation);
+    expect(conversationView()).toEqual(current);
+    expect(frames.find((frame) => frame.conversation)?.conversation?.revision).toBe(0);
+  });
+
+  it('switches threads on one socket, cancels stale trace work and reuses the group scan', async () => {
+    startTurn();
+    const client = await connect('g', conversation);
+    const count = frames.length;
+    trace();
+    client.send(
+      JSON.stringify({
+        kind: 'subscribe',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        subscriptionId: 2,
+        groupId: 'g',
+        conversation: { ...conversation, threadId: 'other-thread' },
+      }),
+    );
+    await vi.waitFor(() => expect(frames.some((frame) => frame.subscriptionId === 2 && frame.global)).toBe(true));
+    expect(frames.slice(count).every((frame) => frame.subscriptionId === 2)).toBe(true);
+    const snapshot = frames.slice(count).find((frame) => frame.conversation)?.conversation;
+    expect(snapshot?.kind).toBe('snapshot');
+    if (snapshot?.kind !== 'snapshot') throw new Error('Expected selected conversation snapshot');
+    expect(snapshot.conversation).toMatchObject({ threadId: 'other-thread', turns: [] });
+    expect(clients).toHaveLength(1);
+    expect(listThreads).toHaveBeenCalledOnce();
+  });
+
+  it('clears revoked conversation and group state while retaining the global subscription', async () => {
+    startTurn();
+    const client = await connect('g', conversation);
+    revokeRole('viewer', 'admin', 'g');
+    removeMember('viewer', 'g');
+    await vi.waitFor(() => expect(frames.some((frame) => frame.conversation === null)).toBe(true));
+    await vi.waitFor(() => expect(frames.at(-1)?.global?.group).toBeNull());
+    expect(client.readyState).toBe(WebSocket.OPEN);
+    expect(frames.at(-1)?.global?.approvals).toEqual([]);
+  });
+
+  it('does not expose a forged non-web messaging context despite group access', async () => {
+    const client = await connect('g', { ...conversation, channelType: 'telegram' });
+    expect(frames.find((frame) => frame.conversation !== undefined)?.conversation).toBeNull();
+    expect(frames.find((frame) => frame.global)?.global?.group).not.toBeNull();
+    expect(client.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it('expires authentication even when the first metadata scan has not completed', async () => {
+    getDb()
+      .prepare('UPDATE ui_sessions SET expires_at=?')
+      .run(new Date(Date.now() + 500).toISOString());
+    let finish!: (value: never[]) => void;
+    listThreads.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const client = await connect('g', conversation, false);
+    await vi.waitFor(() => expect(listThreads).toHaveBeenCalledOnce());
+    const [code] = await once(client, 'close');
+    expect(code).toBe(4401);
+    finish([]);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(frames.some((frame) => frame.global)).toBe(false);
+  });
+
   it('does not rebuild metadata or scan threads for activity-only bursts', async () => {
     await connect('g');
     const readInteractions = vi.spyOn(attention, 'readInteractionSync');
@@ -108,7 +296,7 @@ describe('global sync WebSocket integration', () => {
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     await vi.waitFor(() =>
-      expect(frames.at(-1)?.data.attention).toEqual([
+      expect(frames.at(-1)?.global!.attention).toEqual([
         {
           id: 'off-screen-question',
           origin: { agentGroupId: 'other', threadId: 'other-thread', channelType: 'web', messagingGroupId: 'other-mg' },
@@ -129,7 +317,7 @@ describe('global sync WebSocket integration', () => {
       created_at: now(),
       input: { action: 'test', title: 'Review', payload: {}, options: [] },
     });
-    await vi.waitFor(() => expect(frames.at(-1)?.data.approvals.map((row) => row.id)).toEqual(['off-screen']));
+    await vi.waitFor(() => expect(frames.at(-1)?.global!.approvals.map((row) => row.id)).toEqual(['off-screen']));
     expect(listThreads).toHaveBeenCalledOnce();
   });
 
@@ -246,9 +434,9 @@ describe('global sync WebSocket integration', () => {
       created_at: now(),
       input: { action: 'test', title: 'Review', payload: {}, options: [] },
     });
-    await vi.waitFor(() => expect(frames.at(-1)?.data.approvals.map((row) => row.id)).toEqual(['visible']));
+    await vi.waitFor(() => expect(frames.at(-1)?.global!.approvals.map((row) => row.id)).toEqual(['visible']));
     updateApprovalStatus('visible', 'cancelled');
-    await vi.waitFor(() => expect(frames.at(-1)?.data.approvals).toEqual([]));
+    await vi.waitFor(() => expect(frames.at(-1)?.global!.approvals).toEqual([]));
     expect(listThreads).not.toHaveBeenCalled();
   });
 
@@ -268,13 +456,19 @@ describe('global sync WebSocket integration', () => {
       input: { question: 'Continue?', responseMode: 'text', options: [] },
     });
     const client = await connect();
-    expect(frames[0].data.attention.map((row) => row.id)).toEqual(['q']);
+    expect(frames[0].global!.attention.map((row) => row.id)).toEqual(['q']);
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(frames).toHaveLength(1);
     client.send(
-      JSON.stringify({ kind: 'subscribe', protocolVersion: SYNC_PROTOCOL_VERSION, subscriptionId: 2, groupId: null }),
+      JSON.stringify({
+        kind: 'subscribe',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        subscriptionId: 2,
+        groupId: null,
+        conversation: null,
+      }),
     );
-    await vi.waitFor(() => expect(frames.at(-1)?.data.attention).toEqual([]), { timeout: 2000 });
+    await vi.waitFor(() => expect(frames.at(-1)?.global!.attention).toEqual([]), { timeout: 2000 });
     expect(getDb().prepare("SELECT status FROM interactions WHERE id='q'").get()).toEqual({ status: 'pending' });
   });
 
@@ -283,11 +477,11 @@ describe('global sync WebSocket integration', () => {
     const scans = listThreads.mock.calls.length;
     ensureContainerConfig('g');
     updateContainerConfigScalars('g', { voice_input_enabled: 0 });
-    await vi.waitFor(() => expect(frames.at(-1)?.data.group?.voiceInput.reason).toBe('Voice input is disabled.'));
+    await vi.waitFor(() => expect(frames.at(-1)?.global!.group?.voiceInput.reason).toBe('Voice input is disabled.'));
     expect(listThreads).toHaveBeenCalledTimes(scans);
     getDb().prepare("DELETE FROM user_roles WHERE user_id='viewer'").run();
     removeMember('viewer', 'g');
-    await vi.waitFor(() => expect(frames.at(-1)?.data.group).toBeNull());
+    await vi.waitFor(() => expect(frames.at(-1)?.global!.group).toBeNull());
   });
 
   it('closes a revoked UI session without waiting for another projection mutation', async () => {
@@ -324,6 +518,6 @@ describe('global sync WebSocket integration', () => {
     finish([]);
     await connecting;
     expect(frames).toHaveLength(1);
-    expect(frames[0].data.group).toBeNull();
+    expect(frames[0].global!.group).toBeNull();
   });
 });

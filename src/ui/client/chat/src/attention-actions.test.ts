@@ -168,8 +168,12 @@ describe('authoritative attention refresh', () => {
     expect(threadId.value).toBe('wanted');
     expect(channelType.value).toBe('resend');
     expect(messagingGroupId.value).toBe('mailbox');
-    expect(sync.conversationUrls().at(-1)).toContain('channel=resend');
-    expect(sync.conversationUrls().at(-1)).toContain('mg=mailbox');
+    expect(sync.sockets).toHaveLength(1);
+    expect(sync.subscriptions.at(-1)?.conversation).toEqual({
+      threadId: 'wanted',
+      channelType: 'resend',
+      messagingGroupId: 'mailbox',
+    });
     expect(postJson).not.toHaveBeenCalled();
   });
   it.each([null, []])('does not navigate without known pending requests: %s', async (targets) => {

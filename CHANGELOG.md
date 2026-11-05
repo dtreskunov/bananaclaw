@@ -4,6 +4,12 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] One chat synchronization socket.** Global metadata, the selected
+  transcript and activity traces share one authenticated socket and subscription
+  lifecycle. Conversation deltas remain independently scheduled; activity-only
+  updates do not rescan threads. Reload matching host/UI deployments for sync
+  protocol 10. See [upgrade, verification and rollback](docs/ui.md#unified-socket-upgrade).
+
 - **[BREAKING] Explicit-resolution interaction requests.** New questions and
   approvals remain pending until resolved or cancelled; credential requests no
   longer receive an automatic 24-hour deadline. Reads no longer expire workflows.

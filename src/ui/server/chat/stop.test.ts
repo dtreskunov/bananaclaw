@@ -89,6 +89,50 @@ import {
   reduceConversation,
   type ConversationSnapshot,
 } from '../../shared/conversation-protocol.js';
+import { parseSyncFrame, SYNC_PROTOCOL_VERSION, type SyncConversation } from '../../shared/sync.js';
+
+function connectConversation(
+  frames: Record<string, unknown>[],
+  conversation: SyncConversation = {
+    threadId: 'thread-1',
+    channelType: 'web',
+    messagingGroupId: 'web-mg',
+  },
+) {
+  const cleared = vi.fn();
+  const ws = Object.assign(new EventEmitter(), {
+    readyState: 1,
+    bufferedAmount: 0,
+    send: (encoded: string) => {
+      const frame = parseSyncFrame(JSON.parse(encoded));
+      if (frame.conversation) frames.push({ ...frame.conversation });
+      else if (frame.conversation === null) cleared();
+    },
+    close: vi.fn(),
+    cleared,
+  });
+  vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
+    callback(ws as unknown as WebSocket, _req);
+  });
+  const req = Readable.from([]) as unknown as http.IncomingMessage;
+  req.url = '/ui/chat/api/sync/ws';
+  req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
+  handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+  ws.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        kind: 'subscribe',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        subscriptionId: 1,
+        groupId: 'agent',
+        conversation,
+      }),
+    ),
+    false,
+  );
+  return ws;
+}
 
 function socketView(frames: Record<string, unknown>[]) {
   return frames.reduce<ConversationSnapshot | null>(
@@ -117,6 +161,10 @@ beforeEach(() => {
   for (const id of ['web:member', 'web:other', 'web:owner']) {
     db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(id, NOW);
   }
+  db.prepare(
+    `INSERT INTO ui_sessions (token_hash, user_id, created_at, expires_at, last_used)
+    VALUES ('test', 'web:member', ?, ?, ?)`,
+  ).run(NOW, new Date(Date.now() + 60_000).toISOString(), NOW);
   for (const id of ['agent', 'other']) {
     db.prepare('INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)').run(id, id, id, NOW);
   }
@@ -478,19 +526,7 @@ describe('durable input state history', () => {
     ).run(NOW, JSON.stringify(content));
     db.close();
     const frames: Record<string, unknown>[] = [];
-    const ws = Object.assign(new EventEmitter(), {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: (frame: string) => frames.push(JSON.parse(frame)),
-      close: vi.fn(),
-    });
-    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
-      callback(ws as unknown as WebSocket, _req);
-    });
-    const req = Readable.from([]) as unknown as http.IncomingMessage;
-    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
-    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    const ws = connectConversation(frames);
     try {
       expect(socketView(frames).messages[0].timelinePosition).toBe(timelinePosition);
       await createWebAdapter().deliver('group:agent', 'thread-1', { id: 'out-test', kind: 'chat', content });
@@ -645,19 +681,7 @@ describe('durable input state history', () => {
     receipt('visible', 'queued');
     receipt('hidden', 'applied');
     const frames: Record<string, unknown>[] = [];
-    const ws = Object.assign(new EventEmitter(), {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: (frame: string) => frames.push(JSON.parse(frame)),
-      close: vi.fn(),
-    });
-    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
-      callback(ws as unknown as WebSocket, _req);
-    });
-    const req = Readable.from([]) as unknown as http.IncomingMessage;
-    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
-    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    const ws = connectConversation(frames);
     expect(socketView(frames).messages[0].inputState?.status).toBe('queued');
     const count = frames.length;
     publishHostChange({ kind: 'sessions', sessionId: 'unrelated-session' });
@@ -686,25 +710,22 @@ describe('durable input state history', () => {
   });
 });
 
-describe('global and non-web WebSocket upgrades', () => {
-  it.each(['/ui/chat/api/sync/ws', '/ui/chat/api/groups/agent/chat/thread-1/ws'])(
-    'rejects unauthenticated upgrades for %s before attaching a socket',
-    (url) => {
-      vi.spyOn(auth, 'authenticate').mockReturnValueOnce(null);
-      const upgrade = vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation(() => {});
-      const req = Readable.from([]) as unknown as http.IncomingMessage;
-      req.url = url;
-      req.headers = { origin: new URL(uiBaseUrl()).origin };
-      const rejected = new PassThrough();
-      let response = '';
-      rejected.on('data', (data) => {
-        response += data.toString();
-      });
-      handleChatUpgrade(req, rejected, Buffer.alloc(0));
-      expect(response).toContain('401 Unauthorized');
-      expect(upgrade).not.toHaveBeenCalled();
-    },
-  );
+describe('unified WebSocket upgrades', () => {
+  it.each(['/ui/chat/api/sync/ws'])('rejects unauthenticated upgrades for %s before attaching a socket', (url) => {
+    vi.spyOn(auth, 'authenticate').mockReturnValueOnce(null);
+    const upgrade = vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation(() => {});
+    const req = Readable.from([]) as unknown as http.IncomingMessage;
+    req.url = url;
+    req.headers = { origin: new URL(uiBaseUrl()).origin };
+    const rejected = new PassThrough();
+    let response = '';
+    rejected.on('data', (data) => {
+      response += data.toString();
+    });
+    handleChatUpgrade(req, rejected, Buffer.alloc(0));
+    expect(response).toContain('401 Unauthorized');
+    expect(upgrade).not.toHaveBeenCalled();
+  });
 
   it('closes upgraded global sockets before shared HTTP shutdown', async () => {
     const server = http.createServer();
@@ -726,65 +747,53 @@ describe('global and non-web WebSocket upgrades', () => {
     }
   });
 
-  it.each(['/ui/chat/api/sync/ws', '/ui/chat/api/groups/agent/chat/thread-1/ws'])(
-    'requires the configured Origin for %s',
-    (url) => {
-      const upgrade = vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation(() => {});
-      const req = Readable.from([]) as unknown as http.IncomingMessage;
-      req.url = url;
-      req.headers = { cookie: `${COOKIE_NAME}=test`, origin: 'https://other.example' };
-      const rejected = new PassThrough();
-      let response = '';
-      rejected.on('data', (data) => {
-        response += data.toString();
-      });
-      handleChatUpgrade(req, rejected, Buffer.alloc(0));
-      expect(response).toContain('403 Forbidden');
-      expect(upgrade).not.toHaveBeenCalled();
-      req.headers.origin = new URL(uiBaseUrl()).origin;
-      handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
-      expect(upgrade).toHaveBeenCalledOnce();
+  it.each(['/ui/chat/api/sync/ws'])('requires the configured Origin for %s', (url) => {
+    const upgrade = vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation(() => {});
+    const req = Readable.from([]) as unknown as http.IncomingMessage;
+    req.url = url;
+    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: 'https://other.example' };
+    const rejected = new PassThrough();
+    let response = '';
+    rejected.on('data', (data) => {
+      response += data.toString();
+    });
+    handleChatUpgrade(req, rejected, Buffer.alloc(0));
+    expect(response).toContain('403 Forbidden');
+    expect(upgrade).not.toHaveBeenCalled();
+    req.headers.origin = new URL(uiBaseUrl()).origin;
+    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    expect(upgrade).toHaveBeenCalledOnce();
+  });
+
+  it.each(['thread-1', '__dm:mail-mg'])(
+    'streams a non-web conversation through its selected context %s',
+    async (threadId) => {
+      insertIdentity({ userId: 'web:member', channel: 'resend', handle: 'bot@example.com' });
+      const thread = threadId.startsWith('__dm:') ? null : threadId;
+      const write = (id: string) =>
+        writeSessionMessage('agent', 'session-1', {
+          id,
+          kind: 'chat',
+          timestamp: NOW,
+          platformId: 'bot@example.com',
+          channelType: 'resend',
+          threadId: thread,
+          content: JSON.stringify({ text: id }),
+        });
+      write('first');
+      const frames: Record<string, unknown>[] = [];
+      const ws = connectConversation(frames, { threadId, channelType: 'resend', messagingGroupId: 'mail-mg' });
+      try {
+        expect(socketView(frames).messages.map((row) => row.text)).toEqual(['first']);
+        expect(socketView(frames).capabilities.canSend).toBe(true);
+        write('second');
+        await vi.waitFor(() => expect(socketView(frames).messages.map((row) => row.text)).toEqual(['first', 'second']));
+        expect(ws.close).not.toHaveBeenCalled();
+      } finally {
+        ws.emit('close');
+      }
     },
   );
-
-  it.each(['thread-1', '__dm:mail-mg'])('streams a non-web conversation at encoded route %s', async (threadId) => {
-    insertIdentity({ userId: 'web:member', channel: 'resend', handle: 'bot@example.com' });
-    const thread = threadId.startsWith('__dm:') ? null : threadId;
-    const write = (id: string) =>
-      writeSessionMessage('agent', 'session-1', {
-        id,
-        kind: 'chat',
-        timestamp: NOW,
-        platformId: 'bot@example.com',
-        channelType: 'resend',
-        threadId: thread,
-        content: JSON.stringify({ text: id }),
-      });
-    write('first');
-    const frames: Record<string, unknown>[] = [];
-    const ws = Object.assign(new EventEmitter(), {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: (frame: string) => frames.push(JSON.parse(frame)),
-      close: vi.fn(),
-    });
-    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
-      callback(ws as unknown as WebSocket, _req);
-    });
-    const req = Readable.from([]) as unknown as http.IncomingMessage;
-    req.url = `/ui/chat/api/groups/agent/chat/${encodeURIComponent(threadId)}/ws?channel=resend&mg=mail-mg`;
-    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
-    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
-    try {
-      expect(socketView(frames).messages.map((row) => row.text)).toEqual(['first']);
-      expect(socketView(frames).capabilities.canSend).toBe(true);
-      write('second');
-      await vi.waitFor(() => expect(socketView(frames).messages.map((row) => row.text)).toEqual(['first', 'second']));
-      expect(ws.close).not.toHaveBeenCalled();
-    } finally {
-      ws.emit('close');
-    }
-  });
 });
 
 describe('pending web input editing', () => {
@@ -937,19 +946,7 @@ describe('pending web input editing', () => {
 
   it('broadcasts only scoped empty cancellation tombstones to other connected tabs', async () => {
     const frames: Record<string, unknown>[] = [];
-    const ws = Object.assign(new EventEmitter(), {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: (frame: string) => frames.push(JSON.parse(frame)),
-      close: vi.fn(),
-    });
-    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
-      callback(ws as unknown as WebSocket, _req);
-    });
-    const req = Readable.from([]) as unknown as http.IncomingMessage;
-    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
-    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    const ws = connectConversation(frames);
     try {
       const pending = cancel();
       await vi.waitFor(() => expect(signal.listeners.size).toBe(1));
@@ -965,10 +962,11 @@ describe('pending web input editing', () => {
       ]);
       ws.emit('close');
       frames.length = 0;
-      handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+      const reconnected = connectConversation(frames);
       expect(socketView(frames).messages).toEqual([
         expect.objectContaining({ id: 'pending', text: '', inputState: { messageId: 'pending', status: 'cancelled' } }),
       ]);
+      reconnected.emit('close');
     } finally {
       ws.emit('close');
     }
@@ -1138,19 +1136,7 @@ describe('chat stop authorization', () => {
 describe('chat turn snapshots and events', () => {
   it('publishes committed host inputs, outputs, reactions and questions without adapter callbacks', async () => {
     const frames: Record<string, unknown>[] = [];
-    const ws = Object.assign(new EventEmitter(), {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: (frame: string) => frames.push(JSON.parse(frame)),
-      close: vi.fn(),
-    });
-    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
-      callback(ws as unknown as WebSocket, _req);
-    });
-    const req = Readable.from([]) as unknown as http.IncomingMessage;
-    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
-    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    const ws = connectConversation(frames);
     try {
       writeSessionMessage('agent', 'session-1', {
         id: 'commit-input:agent',
@@ -1240,7 +1226,8 @@ describe('chat turn snapshots and events', () => {
         threadId: 'thread-1',
         content: '{"text":"No longer visible"}',
       });
-      await vi.waitFor(() => expect(ws.close).toHaveBeenCalledWith(1011, expect.any(String)));
+      await vi.waitFor(() => expect(ws.cleared).toHaveBeenCalledOnce());
+      expect(ws.close).not.toHaveBeenCalled();
       expect(frames).toHaveLength(count);
     } finally {
       ws.emit('close');
@@ -1280,19 +1267,7 @@ describe('chat turn snapshots and events', () => {
 
   it('bootstraps a snapshot, isolates turn switches and reports authoritative disconnects', async () => {
     const frames: Record<string, unknown>[] = [];
-    const ws = Object.assign(new EventEmitter(), {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: (frame: string) => frames.push(JSON.parse(frame)),
-      close: vi.fn(),
-    });
-    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_req, _socket, _head, callback) => {
-      callback(ws as unknown as WebSocket, _req);
-    });
-    const req = Readable.from([]) as unknown as http.IncomingMessage;
-    req.url = '/ui/chat/api/groups/agent/chat/thread-1/ws';
-    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
-    handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
+    const ws = connectConversation(frames);
     expect(frames).toHaveLength(1);
     expect(frames[0].kind).toBe('snapshot');
     expect(socketView(frames).connection).toEqual({ activeTurnId: TURN.id, connected: true });

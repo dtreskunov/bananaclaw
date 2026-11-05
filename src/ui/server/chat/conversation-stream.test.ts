@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Conversation } from '../../shared/conversation.js';
 import type { ConversationFrame } from '../../shared/conversation-protocol.js';
-import { conversationSnapshot, sendConversationFrame, startConversationStream } from './conversation-stream.js';
+import { startConversationStream } from './conversation-stream.js';
 
 const view: Conversation = {
   threadId: 't',
@@ -14,11 +14,35 @@ const view: Conversation = {
 };
 afterEach(() => vi.useRealTimers());
 describe('conversation stream boundary', () => {
-  it('closes a slow transport without adding another frame to its buffer', () => {
-    const socket = { bufferedAmount: 1024 * 1024 + 1, readyState: 1, close: vi.fn(), send: vi.fn() };
-    expect(() => sendConversationFrame(socket, conversationSnapshot(view))).toThrow('buffer limit');
-    expect(socket.close).toHaveBeenCalledWith(1013, expect.any(String));
-    expect(socket.send).not.toHaveBeenCalled();
+  it('explicitly clears revoked state and resnapshots it when access returns', () => {
+    vi.useFakeTimers();
+    let current: Conversation | null = view;
+    let invalidate = () => {};
+    const frames: Array<ConversationFrame | null> = [];
+    const stop = startConversationStream({
+      read: () => current,
+      subscribe: (fn) => {
+        invalidate = fn;
+        return () => {};
+      },
+      send: (frame) => frames.push(frame),
+      fail: (error) => {
+        throw error;
+      },
+    });
+    current = null;
+    invalidate();
+    vi.advanceTimersByTime(40);
+    expect(frames[1]).toBeNull();
+    invalidate();
+    vi.advanceTimersByTime(40);
+    expect(frames).toHaveLength(2);
+    current = view;
+    invalidate();
+    vi.advanceTimersByTime(40);
+    expect(frames[2]).toMatchObject({ kind: 'snapshot', revision: 0, conversation: view });
+    expect(frames[2]?.streamId).not.toBe(frames[0]?.streamId);
+    stop();
   });
   it('subscribes before reading and coalesces invalidation at the snapshot boundary', () => {
     vi.useFakeTimers();
@@ -36,6 +60,8 @@ describe('conversation stream boundary', () => {
         return current;
       },
       send: (frame) => {
+        expect(frame).not.toBeNull();
+        if (!frame) throw new Error('Expected conversation');
         frames.push(frame);
       },
       fail,

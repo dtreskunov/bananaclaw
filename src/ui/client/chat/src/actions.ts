@@ -58,7 +58,6 @@ import { clearApprovalMessage } from './approval-messages';
 import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
-import { ConversationProtocolError } from '../../../shared/conversation-protocol';
 import type { GlobalSyncState } from '../../../shared/sync';
 import { SyncConnection } from './sync-connection';
 import {
@@ -72,7 +71,6 @@ import { openChat as openChatView } from './credentials-navigation';
 import type { InteractionResponse } from '../../../shared/conversation';
 import type { ChatStartResponse } from '../../../shared/thread';
 import { applyTurnState, resetTurnState } from './stop-turn';
-import { runReconnectImmediately, startConnectionTimeout, startReconnectCountdown } from './reconnect-countdown';
 import { parentPath } from './utils';
 import { showToast } from './components/Toast';
 import { showClientReloadPrompt } from './notify';
@@ -440,47 +438,65 @@ export function clearChat(): void {
     canSend.value = true;
     highlightMessageId.value = null;
   });
-  if (refs.ws) {
-    try {
-      refs.ws.close();
-    } catch {
-      /* ignore */
-    }
-    refs.ws = null;
-  }
-  if (refs.reconnectCancel) {
-    refs.reconnectCancel();
-    refs.reconnectCancel = null;
-  }
-  if (refs.wsConnectCancel) {
-    refs.wsConnectCancel();
-    refs.wsConnectCancel = null;
-  }
-  if (refs.wsPingTimer) {
-    clearInterval(refs.wsPingTimer);
-    refs.wsPingTimer = null;
-  }
   refs.seenIds.clear();
 }
 
 let syncConnection: SyncConnection | null = null;
 
-export function startGlobalSync(): () => void {
+export function startSync(): () => void {
   if (syncConnection) return () => {};
   const connection = new SyncConnection({
     socket: () =>
       new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ui/chat/api/sync/ws`),
-    apply: (data, gid) => {
-      applyGlobalSync(data, gid);
+    apply: (frame) => {
+      batch(() => {
+        if (frame.conversation === null && threadId.value) {
+          resetConversation();
+          resetTurnState();
+          voice.detach();
+          cancelRecording();
+          pendingQuestions.value = [];
+          chatMessages.value = [];
+          canSend.value = false;
+          chatReady.value = false;
+          chatLoading.value = false;
+          chatStatus.value = 'Conversation access is no longer available.';
+        } else if (frame.conversation && threadId.value) {
+          applyConversationFrame(frame.conversation, threadId.value);
+        }
+        if (frame.global) applyGlobalSync(frame.global, frame.groupId);
+      });
+    },
+    connecting: () => {
+      if (threadId.value) chatStatus.value = 'syncing\u2026';
     },
     unavailable: (message) => {
       attentionError.value = message;
+      if (threadId.value) {
+        chatReady.value = false;
+        applyTurnState(activeTurn.value, false);
+        chatStatus.value = message;
+      }
     },
-    reload: () => showClientReloadPrompt('Global sync protocol changed'),
+    reload: () => {
+      chatReloadRequired.value = true;
+      showClientReloadPrompt('Synchronization protocol changed');
+    },
     unauthorized: redirectToLogin,
   });
   syncConnection = connection;
-  const unsubscribe = effect(() => connection.setGroup(groupId.value));
+  const unsubscribe = effect(() =>
+    connection.select(
+      groupId.value,
+      threadId.value
+        ? {
+            threadId: threadId.value,
+            channelType: channelType.value,
+            messagingGroupId: messagingGroupId.value,
+          }
+        : null,
+    ),
+  );
   connection.start();
   return () => {
     unsubscribe();
@@ -580,27 +596,6 @@ export async function openChat(
   cancelRecording();
   voiceInput.value = { backend: 'disabled', ready: false, reason: 'Waiting for chat configuration.' };
   const generation = ++refs.chatGeneration;
-  if (refs.ws) {
-    try {
-      refs.ws.close();
-    } catch {
-      /* ignore */
-    }
-    refs.ws = null;
-  }
-  if (refs.reconnectCancel) {
-    refs.reconnectCancel();
-    refs.reconnectCancel = null;
-  }
-  if (refs.wsConnectCancel) {
-    refs.wsConnectCancel();
-    refs.wsConnectCancel = null;
-  }
-  if (refs.wsPingTimer) {
-    clearInterval(refs.wsPingTimer);
-    refs.wsPingTimer = null;
-  }
-  refs.reconnectAttempt = 0;
 
   let ct: string = 'web';
   let mg: string | null = null;
@@ -636,8 +631,6 @@ export async function openChat(
 
   if (resumeTid) {
     writeHash();
-    connectChatWs({ gid, tid: resumeTid, mg, generation, channel: ct });
-    void runSync();
     // Don't steal focus from the search view when navigating via search result.
     if (!highlightMessageId.value && options.focusComposer !== false) focusComposerSoon();
     return;
@@ -656,8 +649,6 @@ export async function openChat(
     chatLoading.value = true;
     chatStatus.value = 'syncing\u2026';
     writeHash();
-    connectChatWs({ gid, tid: empty.threadId, mg: empty.messagingGroupId || null, generation });
-    void runSync();
     focusComposerSoon({ mobile: true });
     return;
   }
@@ -711,13 +702,6 @@ export async function openChat(
     ...threads.value,
   ];
   writeHash();
-  connectChatWs({
-    gid,
-    tid: started.threadId,
-    mg: started.messagingGroupId,
-    generation,
-  });
-  void runSync();
   focusComposerSoon({ mobile: true });
   refs.newChatInFlight = false;
 }
@@ -731,124 +715,6 @@ export function startNewThread(): void {
       drawerOpen.files.value = false;
     })
     .catch(console.error);
-}
-
-interface ChatSocketContext {
-  gid: string;
-  tid: string;
-  mg: string | null;
-  generation: number;
-  channel?: string;
-}
-
-const WS_CONNECT_TIMEOUT_MS = 10000;
-
-function handleProtocolMismatch(error: unknown): boolean {
-  if (!(error instanceof ConversationProtocolError) || error.code !== 'protocol_mismatch') return false;
-  chatReloadRequired.value = true;
-  applyTurnState(activeTurn.value, false);
-  showClientReloadPrompt('Chat protocol changed');
-  return true;
-}
-
-function connectChatWs(ctx: ChatSocketContext): void {
-  const { gid, tid, mg, generation, channel = 'web' } = ctx;
-  if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  let wsUrl = `${proto}//${location.host}/ui/chat/api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/ws`;
-  const params = new URLSearchParams();
-  if (mg) params.set('mg', mg);
-  if (channel !== 'web') params.set('channel', channel);
-  if (params.size) wsUrl += `?${params}`;
-  const ws = new WebSocket(wsUrl);
-  refs.ws = ws;
-  refs.wsConnectCancel = startConnectionTimeout(WS_CONNECT_TIMEOUT_MS, () => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
-    refs.wsConnectCancel = null;
-    chatReady.value = false;
-    chatStatus.value = 'connection timed out';
-    try {
-      ws.close();
-    } catch {
-      // onclose schedules the reconnect when the browser aborts the handshake
-    }
-  });
-  ws.onopen = () => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
-    if (refs.wsConnectCancel) {
-      refs.wsConnectCancel();
-      refs.wsConnectCancel = null;
-    }
-    chatStatus.value = 'syncing\u2026';
-    // App-level keepalive: any frame keeps an intermediary's idle timer
-    // from closing the socket. Server also sends ws pings, but the
-    // browser doesn't expose ws.ping(), so push a tiny JSON frame.
-    if (refs.wsPingTimer) clearInterval(refs.wsPingTimer);
-    refs.wsPingTimer = setInterval(() => {
-      if (refs.ws !== ws) return;
-      if (ws.readyState !== WebSocket.OPEN) return;
-      try {
-        ws.send('{"kind":"ping"}');
-      } catch {
-        // socket closing — onclose will clear the timer
-      }
-    }, 25000);
-  };
-  ws.onclose = () => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
-    refs.ws = null;
-    if (refs.wsConnectCancel) {
-      refs.wsConnectCancel();
-      refs.wsConnectCancel = null;
-    }
-    chatReady.value = false;
-    applyTurnState(activeTurn.value, false);
-    if (refs.wsPingTimer) {
-      clearInterval(refs.wsPingTimer);
-      refs.wsPingTimer = null;
-    }
-    if (groupId.value !== gid || threadId.value !== tid) return;
-    const attempt = ++refs.reconnectAttempt;
-    const delay = Math.min(15000, 500 * Math.pow(2, attempt - 1));
-    refs.reconnectCancel = startReconnectCountdown(
-      delay,
-      (seconds) => {
-        if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
-        chatStatus.value = `disconnected \u00b7 reconnecting in ${seconds}s\u2026`;
-      },
-      () => {
-        refs.reconnectCancel = null;
-        if (generation !== refs.chatGeneration || groupId.value !== gid || threadId.value !== tid) return;
-        chatStatus.value = 'disconnected \u00b7 reconnecting\u2026';
-        connectChatWs(ctx);
-      },
-    );
-  };
-  ws.onerror = () => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
-    chatReady.value = false;
-    applyTurnState(activeTurn.value, false);
-    chatStatus.value = 'connection error';
-  };
-  ws.onmessage = (ev: MessageEvent) => {
-    if (refs.ws !== ws || generation !== refs.chatGeneration) return;
-    try {
-      applyConversationFrame(JSON.parse(ev.data), tid);
-      refs.reconnectAttempt = 0;
-    } catch (error) {
-      console.error('Conversation protocol error', error);
-      chatReady.value = false;
-      applyTurnState(activeTurn.value, false);
-      chatStatus.value = error instanceof Error ? error.message : 'Invalid chat data. Reload this page.';
-      if (handleProtocolMismatch(error)) {
-        ws.onclose = null;
-        if (refs.wsPingTimer) clearInterval(refs.wsPingTimer);
-      } else {
-        showToast('Chat synchronization lost. Reconnecting for a fresh snapshot.', 'err');
-      }
-      ws.close();
-    }
-  };
 }
 
 function captureChatSendContext() {
@@ -1528,20 +1394,7 @@ export function clearPinnedContext(): void {
 }
 
 export function reconnectChatNow(): void {
-  const gid = groupId.value;
-  const tid = threadId.value;
-  if (!refs.reconnectCancel || !gid || !tid) return;
-  runReconnectImmediately(refs.reconnectCancel, () => {
-    refs.reconnectCancel = null;
-    chatStatus.value = 'disconnected \u00b7 reconnecting\u2026';
-    connectChatWs({
-      gid,
-      tid,
-      mg: messagingGroupId.value,
-      generation: refs.chatGeneration,
-      channel: channelType.value || 'web',
-    });
-  });
+  syncConnection?.reconnectNow();
 }
 
 // ── pending uploads in composer ─────────────────────────────────────
@@ -1597,24 +1450,6 @@ export function installLivenessHandlers(): void {
     if (document.hidden) return;
     nowTick.value = Date.now();
     syncConnection?.catchUp();
-    if (!threadId.value) return;
-    const ws = refs.ws;
-    const open = !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
-    if (!open) {
-      if (refs.reconnectCancel) {
-        refs.reconnectCancel();
-        refs.reconnectCancel = null;
-      }
-      if (groupId.value) {
-        connectChatWs({
-          gid: groupId.value,
-          tid: threadId.value,
-          mg: messagingGroupId.value,
-          generation: refs.chatGeneration,
-          channel: channelType.value || 'web',
-        });
-      }
-    }
   });
 }
 

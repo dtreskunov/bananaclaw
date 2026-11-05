@@ -1,6 +1,11 @@
 import type { ConversationApproval } from './approval.js';
 import type { AttentionTarget } from './attention.js';
-import type { ConversationSnapshot } from './conversation-protocol.js';
+import {
+  CONVERSATION_PROTOCOL_VERSION,
+  parseConversationFrame,
+  type ConversationFrame,
+  type ConversationSnapshot,
+} from './conversation-protocol.js';
 import type { ThreadSummary } from './thread.js';
 import type { VoiceInputCapability } from './voice.js';
 import { isAttentionTargets } from './attention.js';
@@ -25,20 +30,27 @@ export interface GlobalSyncState {
   group: SyncGroupState | null;
 }
 
-export const SYNC_PROTOCOL_VERSION = 3;
+export const SYNC_PROTOCOL_VERSION = CONVERSATION_PROTOCOL_VERSION;
 export const SYNC_RELOAD_CLOSE_CODE = 4406;
+export interface SyncConversation {
+  threadId: string;
+  channelType: string;
+  messagingGroupId: string | null;
+}
 export interface SyncSubscription {
   kind: 'subscribe';
   protocolVersion: typeof SYNC_PROTOCOL_VERSION;
   subscriptionId: number;
   groupId: string | null;
+  conversation: SyncConversation | null;
 }
 export interface SyncFrame {
   kind: 'sync';
   protocolVersion: typeof SYNC_PROTOCOL_VERSION;
   subscriptionId: number;
   groupId: string | null;
-  data: GlobalSyncState;
+  global?: GlobalSyncState;
+  conversation?: ConversationFrame | null;
 }
 
 const thread = shape({
@@ -85,25 +97,41 @@ const subscription = shape({
   protocolVersion: (value) => value === SYNC_PROTOCOL_VERSION,
   subscriptionId: integer,
   groupId: nullable(groupId),
+  conversation: nullable(
+    shape({
+      threadId: groupId,
+      channelType: groupId,
+      messagingGroupId: nullable(groupId),
+    }),
+  ),
 });
 const frame = shape({
   kind: oneOf('sync'),
   subscriptionId: integer,
   groupId: nullable(groupId),
-  data: shape({
-    approvals: array(isConversationApproval),
-    attention: isAttentionTargets,
-    group: nullable(
-      shape({
-        threads: array(thread),
-        voiceInput: shape({ backend: oneOf('disabled', 'elevenlabs'), ready: bool, reason: optional(text) }),
-      }),
-    ),
-  }),
+  global: optional(
+    shape({
+      approvals: array(isConversationApproval),
+      attention: isAttentionTargets,
+      group: nullable(
+        shape({
+          threads: array(thread),
+          voiceInput: shape({ backend: oneOf('disabled', 'elevenlabs'), ready: bool, reason: optional(text) }),
+        }),
+      ),
+    }),
+  ),
 });
 
 export function isSyncSubscription(value: unknown): value is SyncSubscription {
-  return subscription(value);
+  return (
+    object(value) &&
+    subscription(value) &&
+    (value.conversation === null ||
+      (value.groupId !== null &&
+        object(value.conversation) &&
+        (value.conversation.channelType === 'web' || value.conversation.messagingGroupId !== null)))
+  );
 }
 
 function isSyncFrame(value: unknown): value is SyncFrame {
@@ -119,7 +147,16 @@ export class SyncProtocolError extends Error {
 export function parseSyncFrame(value: unknown): SyncFrame {
   if (!object(value) || value.kind === 'protocol_mismatch' || value.protocolVersion !== SYNC_PROTOCOL_VERSION)
     throw new SyncProtocolError();
-  if (!isSyncFrame(value) || (value.groupId === null && value.data.group !== null))
-    throw new Error('Invalid global sync snapshot. Reconnect or reload.');
+  if (
+    !isSyncFrame(value) ||
+    (value.global === undefined && value.conversation === undefined) ||
+    (value.groupId === null && (value.global?.group != null || value.conversation != null))
+  )
+    throw new Error('Invalid synchronization frame. Reconnect or reload.');
+  if (value.conversation != null) {
+    if (object(value.conversation) && value.conversation.protocolVersion !== SYNC_PROTOCOL_VERSION)
+      throw new SyncProtocolError();
+    parseConversationFrame(value.conversation);
+  }
   return value;
 }

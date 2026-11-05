@@ -14,10 +14,10 @@ Optional read-only web UI mounted on the existing webhook HTTP server under `/ui
   public views.
 - [Threads](../src/ui/server/chat/threads.ts) owns authorized thread listing.
   [Global projections](../src/ui/server/chat/sync-state.ts) cache expensive thread
-  scans while keeping interaction and voice reads fresh; the
-  [subscription service](../src/ui/server/chat/global-sync.ts) maps host changes
-  to those dependencies. Socket controllers contain no thread-reader callback
-  plumbing or workflow lifecycle policy.
+  scans while keeping interaction and voice reads fresh. The
+  [sync socket](../src/ui/server/chat/sync-socket.ts) owns selection, authorization
+  and the single host-change subscription. Pure metadata and conversation streams
+  independently coalesce reads; neither owns workflow lifecycle policy.
 - The [server](../src/ui/server/server.ts), [router](../src/ui/server/chat/routes.ts)
   and [chat controller](../src/ui/server/chat/chat.ts) own HTTP/socket orchestration.
   Shared readers never import these transport modules or compatibility re-exports.
@@ -1344,9 +1344,14 @@ restore the backup over newer accepted messages.
 
 ### Authoritative conversation synchronization
 
-An active conversation, including non-web channels, uses one versioned WebSocket
-subscription. Non-web sockets specify the same `channel` and `mg` context as
-HTTP reads and retain the same viewer/ownership checks. Its first
+The app uses one authenticated, same-origin WebSocket at `/ui/chat/api/sync/ws`
+for global metadata and the selected conversation, including non-web channels.
+Version-10 `subscribe` requests carry a monotonic `subscriptionId`, a nullable
+`groupId`, and a nullable `conversation` containing `threadId`, `channelType` and
+`messagingGroupId`. Non-web contexts require a messaging group and retain the
+same viewer/ownership checks as HTTP reads. Web bookmarks can omit the messaging
+group with an explicit null. Navigation resubscribes without replacing the socket.
+The first conversation
 snapshot includes messages, durable input dispositions, turns, current activity,
 usage metadata, questions, runner connection state and permitted actions.
 Subsequent envelopes update that view atomically. A final response is not rendered
@@ -1362,18 +1367,21 @@ Usage retains its accounting IDs and is displayed once per record, not once per
 response; metadata explicitly distinguishes provisional, partial, final and
 unavailable reports. Missing usage never becomes fabricated zero tokens.
 
-The app also keeps one authenticated, same-origin global socket at
-`/ui/chat/api/sync/ws`, independent of the selected conversation. Its version-3
-`subscribe` requests carry a monotonic `subscriptionId` and a nullable `groupId`.
 Global approvals and oldest-first attention are always included, even with no
-group selected. The required `group` field is null with no selected group or
+group selected, in complete `global` metadata snapshots. Their required `group`
+field is null with no selected group or
 after access is revoked; otherwise it contains the authorized thread list and
 voice capability. Losing access explicitly clears group state.
-Global and conversation upgrades both require the browser Origin to match
+The upgrade requires the browser Origin to match
 `UI_BASE_URL`; configure that external URL when using a reverse proxy.
 
-The server sends complete authoritative `sync` snapshots carrying a protocol
-version and subscription ID. The ordered socket and subscription identity are
+Every `sync` envelope carries one protocol version, subscription ID and group ID.
+Its optional `global` field replaces metadata; its optional `conversation` field
+contains a revision-checked snapshot/update or null to clear inaccessible state.
+Omitted fields leave that projection unchanged. Activity updates use conversation
+deltas, not a separate event stream or replay log. Fields arriving together are
+validated and applied in one browser batch, not a cross-database transaction.
+The ordered socket and subscription identity are
 sufficient for full replacements; only conversation deltas need stream revisions.
 Unchanged background state
 sends nothing; an explicit refresh always acknowledges with a fresh snapshot.
@@ -1383,8 +1391,10 @@ Refresh callers wait until their matching snapshot has been applied.
 
 Committed mutation helpers invalidate metadata, including CLI operations,
 session-less approvals, session/fork changes, configuration and access changes.
-Session projection events refresh the selected group's summaries. Reads are
-coalesced for 100 ms with one in-flight async build and a bounded dirty flag.
+Session projection events refresh the selected group's summaries. Metadata reads are coalesced for 100 ms with one in-flight async build and a
+bounded dirty flag. Conversation reads retain their independent 40 ms coalescing;
+a pending thread scan cannot block transcript or activity publication. Switching
+threads in the same group reuses its cached scan; explicit refresh rescans threads.
 Live and committed activity-only events invalidate the matching conversation,
 not metadata or thread scans. Durable turn observers do not broaden these notices.
 Interaction changes refresh approvals and attention without rescanning the selected
@@ -1399,24 +1409,44 @@ session changes during coalescing.
 Changes during a scan schedule a further read without starving publication of
 completed, authorized snapshots. Obsolete subscriptions are never published.
 Interaction metadata is read once after the thread scan, using current approval
-permissions. Authorization is checked again before publication. Only the UI
-authentication session has a socket expiry deadline; interaction lifetimes do not
-schedule refreshes. Host `.env` replacements/edits trigger a filesystem notification. Manual
+permissions. Authorization is checked again before publication. Only the UI authentication
+session has a socket expiry deadline; it closes the connection even while the
+first thread scan is blocked. Interaction lifetimes do not schedule refreshes.
+Host `.env` replacements/edits trigger a filesystem notification. Manual
 SQL edits outside normal host mutation helpers require an explicit refresh or
 host restart.
 
 There is no ten-second global ticker and no HTTP fallback after socket failure.
 The client reconnects with jittered backoff and takes a fresh snapshot, retaining
-old metadata with a stale indication while disconnected. Returning to a visible
-tab requests catch-up. Protocol mismatch requires a reload, including when the
+old metadata and transcript with a stale indication while disconnected; live
+conversation controls are disabled. Returning to a visible tab requests catch-up
+for both projections. Protocol mismatch requires a reload, including when the
 server rejects an outdated subscription before sending a snapshot; slow clients are
 disconnected rather than queued without bounds. WebSocket ping/pong and
-authorization-only checks remain; idle timers do not rebuild projections.
+an authentication-expiry timer remain; idle timers do not rebuild projections.
 `GET /api/sync` remains available for diagnostics/older clients. The browser
 requires global synchronization to be initialized and never uses a REST fallback.
 
+Conversation access loss clears its state without disconnecting global updates.
 Local composer drafts, uploads and command request IDs remain separate from
 the server store; HTTP acceptance does not prove a command took effect.
+
+### Unified socket upgrade
+
+- **Detect:** old browsers open both `/api/sync/ws` and
+  `/api/groups/<group>/chat/<thread>/ws`, or send version-3 subscriptions without
+  `conversation`.
+- **Why:** metadata, transcript and activity now share one transport lifecycle
+  and protocol version. The per-conversation socket route is removed, not aliased.
+- **Fix:** deploy the matching host and built chat assets together, then reload
+  browser tabs. No database conversion, runner rebuild or credential change is
+  required. Custom clients must send the selected messaging context and consume
+  the optional `global`/`conversation` fields of version-10 sync envelopes.
+- **Verify:** switching web and non-web threads retains one sync socket; activity
+  updates during a slow thread scan; revoking group access clears the transcript
+  while global updates remain connected; reconnect restores a fresh trace.
+- **Rollback:** redeploy the previous matching host and chat assets and reload
+  tabs. Storage is unchanged; do not restore session databases or replay commands.
 
 ### Request lifetime upgrade
 

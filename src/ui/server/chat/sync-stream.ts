@@ -1,9 +1,27 @@
 import type { SyncFrame, GlobalSyncState } from '../../shared/sync.js';
 import { SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
 
+export function sendSyncFrame(
+  socket: {
+    bufferedAmount: number;
+    readyState: number;
+    send: (data: string) => void;
+    close: (code: number, reason: string) => void;
+  },
+  frame: SyncFrame,
+): void {
+  const encoded = JSON.stringify(frame);
+  if (socket.bufferedAmount > 1024 * 1024 || Buffer.byteLength(encoded) > 16 * 1024 * 1024) {
+    socket.close(1013, 'Synchronization buffer limit; reconnect for a snapshot');
+    throw new Error('Synchronization transport buffer limit');
+  }
+  if (socket.readyState !== 1) throw new Error('Synchronization socket is not open');
+  socket.send(encoded);
+}
+
 export interface SyncStreamOptions {
   read: (groupId: string | null, refreshThreads: boolean) => Promise<GlobalSyncState>;
-  authorize: () => number | null;
+  authorize: () => void;
   canPublish: () => boolean;
   subscribe: (invalidate: (groupId?: string, refreshThreads?: boolean) => void) => () => void;
   send: (frame: SyncFrame) => void;
@@ -20,13 +38,11 @@ export function startSyncStream(options: SyncStreamOptions) {
   let running = false;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
   let unsubscribe = () => {};
   const stop = () => {
     if (stopped) return;
     stopped = true;
     clearTimeout(timer);
-    clearTimeout(deadlineTimer);
     unsubscribe();
   };
   const schedule = (groupId?: string, refreshThreads = true) => {
@@ -51,7 +67,7 @@ export function startSyncStream(options: SyncStreamOptions) {
       options.authorize();
       const data = await options.read(current.groupId, refreshThreads);
       if (stopped) return;
-      const deadline = options.authorize();
+      options.authorize();
       if (current !== subscription) return;
       if (!options.canPublish()) {
         schedule();
@@ -64,14 +80,9 @@ export function startSyncStream(options: SyncStreamOptions) {
           protocolVersion: SYNC_PROTOCOL_VERSION,
           subscriptionId: current.id,
           groupId: current.groupId,
-          data,
+          global: data,
         });
         previous = encoded;
-      }
-      clearTimeout(deadlineTimer);
-      if (deadline !== null) {
-        deadlineTimer = setTimeout(() => schedule(), Math.min(2_147_483_647, Math.max(1, deadline - Date.now())));
-        deadlineTimer.unref?.();
       }
     } catch (error) {
       if (!stopped) {
@@ -86,11 +97,11 @@ export function startSyncStream(options: SyncStreamOptions) {
   unsubscribe = options.subscribe(schedule);
   return {
     stop,
-    subscribe(id: number, groupId: string | null) {
+    subscribe(id: number, groupId: string | null, refreshThreads = true) {
       if (stopped || (subscription && id <= subscription.id)) return;
       subscription = { id, groupId };
       previous = null;
-      schedule();
+      schedule(undefined, refreshThreads);
     },
   };
 }

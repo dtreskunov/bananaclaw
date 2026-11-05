@@ -24,7 +24,7 @@ class Socket {
         protocolVersion: SYNC_PROTOCOL_VERSION,
         subscriptionId,
         groupId,
-        data: {
+        global: {
           approvals: [],
           attention: [],
           group: groupId
@@ -54,6 +54,7 @@ function fixture() {
       return socket as unknown as WebSocket;
     },
     apply: vi.fn(),
+    connecting: vi.fn(),
     unavailable: vi.fn(),
     reload: vi.fn(),
     unauthorized: vi.fn(),
@@ -71,7 +72,9 @@ describe('global sync browser connection', () => {
     socket.open();
     expect(JSON.parse(socket.send.mock.calls[0][0])).toMatchObject({ groupId: null, subscriptionId: 0 });
     socket.frame(0, null);
-    expect(f.apply).toHaveBeenCalledWith({ approvals: [], attention: [], group: null }, null);
+    expect(f.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ global: { approvals: [], attention: [], group: null } }),
+    );
     await vi.advanceTimersByTimeAsync(60_000);
     expect(socket.send).toHaveBeenCalledOnce();
     expect(f.sockets).toHaveLength(1);
@@ -92,12 +95,12 @@ describe('global sync browser connection', () => {
     const f = fixture();
     f.connection.start();
     f.sockets[0].open();
-    f.connection.setGroup('old');
-    f.connection.setGroup('new');
+    f.connection.select('old', null);
+    f.connection.select('new', null);
     f.sockets[0].frame(1, 'old');
     f.sockets[0].frame(2, 'new');
     expect(f.apply).toHaveBeenCalledOnce();
-    expect(f.apply.mock.calls[0][1]).toBe('new');
+    expect(f.apply.mock.calls[0][0].groupId).toBe('new');
   });
 
   it('applies successive complete snapshots without requiring revision tracking', () => {
@@ -112,7 +115,7 @@ describe('global sync browser connection', () => {
 
   it('retains the selected group and takes a fresh snapshot after reconnect', async () => {
     const f = fixture();
-    f.connection.setGroup('g');
+    f.connection.select('g', null);
     f.connection.start();
     f.sockets[0].open();
     f.sockets[0].frame(1, 'g');
@@ -132,6 +135,54 @@ describe('global sync browser connection', () => {
     f.connection.catchUp();
     expect(f.sockets).toHaveLength(1);
     expect(JSON.parse(f.sockets[0].send.mock.calls.at(-1)![0])).toMatchObject({ subscriptionId: 1 });
+  });
+
+  it('resubscribes conversation contexts on one socket and preserves them across reconnect', async () => {
+    const f = fixture();
+    f.connection.start();
+    f.sockets[0].open();
+    const conversation = { threadId: 'first', channelType: 'telegram', messagingGroupId: 'mg' };
+    f.connection.select('g', conversation);
+    f.connection.select('g', { ...conversation, threadId: 'second' });
+    expect(f.sockets).toHaveLength(1);
+    expect(JSON.parse(f.sockets[0].send.mock.calls.at(-1)![0])).toMatchObject({
+      subscriptionId: 2,
+      groupId: 'g',
+      conversation: { ...conversation, threadId: 'second' },
+    });
+    f.sockets[0].close();
+    f.connection.reconnectNow();
+    f.sockets[1].open();
+    expect(JSON.parse(f.sockets[1].send.mock.calls[0][0])).toMatchObject({
+      subscriptionId: 2,
+      conversation: { ...conversation, threadId: 'second' },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.sockets).toHaveLength(2);
+  });
+
+  it('does not resolve metadata refreshes from conversation-only frames', async () => {
+    const f = fixture();
+    let resolved = false;
+    const pending = f.connection.refresh('g').then(() => {
+      resolved = true;
+    });
+    f.sockets[0].open();
+    const subscriptionId = JSON.parse(f.sockets[0].send.mock.calls.at(-1)![0]).subscriptionId;
+    f.sockets[0].onmessage?.({
+      data: JSON.stringify({
+        kind: 'sync',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        groupId: 'g',
+        subscriptionId,
+        conversation: null,
+      }),
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    f.sockets[0].frame(subscriptionId, 'g');
+    await pending;
+    expect(resolved).toBe(true);
   });
 
   it('fails freshness barriers explicitly and never falls back to HTTP', async () => {

@@ -1,6 +1,12 @@
 import { vi } from 'vitest';
-import { runSync, startGlobalSync } from './actions';
-import { SYNC_PROTOCOL_VERSION, type SyncResponse, type SyncGroupState } from '../../../shared/sync';
+import { runSync, startSync } from './actions';
+import {
+  SYNC_PROTOCOL_VERSION,
+  type SyncResponse,
+  type SyncGroupState,
+  type SyncSubscription,
+} from '../../../shared/sync';
+import type { ConversationFrame } from '../../../shared/conversation-protocol';
 import type { ThreadSummary } from '../../../shared/thread';
 import { threads } from './state';
 import type { Thread } from './types';
@@ -21,6 +27,7 @@ export async function installSyncFixture(
   vi.stubGlobal('location', { hash: '', protocol: 'https:', host: 'example.test' });
   vi.stubGlobal('requestAnimationFrame', vi.fn());
   const sockets: TestSocket[] = [];
+  const subscriptions: SyncSubscription[] = [];
   class TestSocket {
     static OPEN = 1;
     static CONNECTING = 0;
@@ -29,7 +36,7 @@ export async function installSyncFixture(
     onclose: ((event: { code: number }) => void) | null = null;
     onmessage: ((event: { data: string }) => void) | null = null;
     onerror: (() => void) | null = null;
-    request: { subscriptionId: number; groupId: string | null } | null = null;
+    request: SyncSubscription | null = null;
     constructor(readonly url: string) {
       sockets.push(this);
       queueMicrotask(() => {
@@ -41,6 +48,7 @@ export async function installSyncFixture(
       if (!this.url.endsWith('/api/sync/ws')) return;
       const scheduled = this.request !== null;
       this.request = JSON.parse(encoded);
+      subscriptions.push(this.request!);
       if (scheduled) return;
       queueMicrotask(() => {
         const request = this.request!;
@@ -53,7 +61,7 @@ export async function installSyncFixture(
               protocolVersion: SYNC_PROTOCOL_VERSION,
               subscriptionId: request.subscriptionId,
               groupId: request.groupId,
-              data: {
+              global: {
                 ...data,
                 group:
                   data.group !== undefined
@@ -74,6 +82,15 @@ export async function installSyncFixture(
     receive(frame: unknown) {
       this.onmessage?.({ data: JSON.stringify(frame) });
     }
+    receiveConversation(frame: ConversationFrame, subscription = subscriptions.at(-1)!) {
+      this.receive({
+        kind: 'sync',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        subscriptionId: subscription.subscriptionId,
+        groupId: subscription.groupId,
+        conversation: frame,
+      });
+    }
     close() {
       if (this.readyState === 3) return;
       this.readyState = 3;
@@ -81,13 +98,13 @@ export async function installSyncFixture(
     }
   }
   vi.stubGlobal('WebSocket', TestSocket);
-  const dispose = startGlobalSync();
+  const dispose = startSync();
   await runSync();
   read.mockClear();
   return {
     read,
     dispose,
     sockets,
-    conversationUrls: () => sockets.filter((s) => !s.url.endsWith('/api/sync/ws')).map((s) => s.url),
+    subscriptions,
   };
 }

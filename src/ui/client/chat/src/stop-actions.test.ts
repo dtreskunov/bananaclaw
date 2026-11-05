@@ -62,9 +62,9 @@ describe('Stop integration with chat actions', () => {
     expect(stopRequest.value).toBeNull();
   });
 
-  it('loads authoritative turn state for external channels through their conversation socket', async () => {
+  it('loads external-channel turn state through the existing synchronization socket', async () => {
     await openChat('group', 'thread', { channelType: 'telegram', messagingGroupId: 'chat', canSend: true });
-    sync.sockets.at(-1)!.receive(
+    sync.sockets.at(-1)!.receiveConversation(
       testSnapshot({
         turns: [{ ...testTurn, id: 'external-turn' }],
         connection: { connected: true, activeTurnId: 'external-turn' },
@@ -72,8 +72,12 @@ describe('Stop integration with chat actions', () => {
     );
     expect(activeTurn.value).toMatchObject({ id: 'external-turn', status: 'running' });
     expect(turnConnected.value).toBe(true);
-    expect(sync.conversationUrls()[0]).toContain('channel=telegram');
-    expect(sync.conversationUrls()[0]).toContain('mg=chat');
+    expect(sync.sockets).toHaveLength(1);
+    expect(sync.subscriptions.at(-1)?.conversation).toEqual({
+      threadId: 'thread',
+      channelType: 'telegram',
+      messagingGroupId: 'chat',
+    });
   });
 
   it('does not let a web sync snapshot overwrite newer WebSocket turn state', async () => {
@@ -96,12 +100,14 @@ describe('Stop integration with chat actions', () => {
   it('does not restore an old external turn after navigation', async () => {
     await openChat('group', 'thread', { channelType: 'telegram', messagingGroupId: 'chat', canSend: true });
     const socket = sync.sockets.at(-1)!;
+    const subscription = sync.subscriptions.at(-1)!;
     clearChat();
-    socket.receive(
+    socket.receiveConversation(
       testSnapshot({
         turns: [{ ...testTurn, id: 'old-turn' }],
         connection: { connected: true, activeTurnId: 'old-turn' },
       }),
+      subscription,
     );
     expect(activeTurn.value).toBeNull();
     expect(turnConnected.value).toBe(false);

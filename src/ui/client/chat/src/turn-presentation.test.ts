@@ -34,10 +34,13 @@ import { dismissToast } from './components/Toast';
 import { appearance } from './appearance-state';
 import { DEFAULT_APPEARANCE } from './appearance';
 import { isOutcomeTraceStep, parseStep } from '../../../shared/activity-presentation';
+import { installSyncFixture } from './sync-action-test-fixtures';
+import { SYNC_PROTOCOL_VERSION } from '../../../shared/sync';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 vi.mock('./hash', () => ({ writeHash: vi.fn() }));
 let receive: (payload: unknown) => void;
+let sync: Awaited<ReturnType<typeof installSyncFixture>>;
 const initial: Conversation = testSnapshot({
   turns: [testTurn],
   connection: { connected: true, activeTurnId: testTurn.id },
@@ -58,28 +61,27 @@ function update(next: Conversation): void {
 beforeEach(async () => {
   appearance.value = { preferences: { ...DEFAULT_APPEARANCE }, resolvedMode: 'light', error: null };
   vi.useFakeTimers();
-  const sockets: Array<{ onmessage?: (event: { data: string }) => void }> = [];
-  vi.stubGlobal('location', { protocol: 'https:', host: 'example.test' });
-  vi.stubGlobal(
-    'WebSocket',
-    class {
-      constructor() {
-        sockets.push(this);
-      }
-      onmessage?: (event: { data: string }) => void;
-      close() {}
-    },
-  );
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ attention: [], approvals: [] }) }));
   vi.spyOn(console, 'error').mockImplementation(() => {});
   threadId.value = null;
+  sync = await installSyncFixture();
   highlightMessageId.value = 'skip-focus';
   await openChat('group', 'thread', null);
-  receive = (payload) => sockets[0].onmessage?.({ data: JSON.stringify(payload) });
+  receive = (payload) => {
+    const selection = sync.subscriptions.at(-1)!;
+    sync.sockets[0].receive({
+      kind: 'sync',
+      protocolVersion: SYNC_PROTOCOL_VERSION,
+      subscriptionId: selection.subscriptionId,
+      groupId: selection.groupId,
+      conversation: payload,
+    });
+  };
   receive(testSnapshot(initial));
 });
 afterEach(() => {
   clearChat();
+  sync.dispose();
   groupId.value = null;
   pending.value = [];
   while (toastMessage.value) dismissToast();
@@ -862,21 +864,20 @@ describe('authoritative turn presentation', () => {
     expect(chatReady.value).toBe(false);
     expect(chatReloadRequired.value).toBe(true);
     expect(chatStatus.value).toContain('Reload');
-    expect(toastMessage.value).toMatchObject({ text: 'Chat protocol changed', kind: 'ok', actionLabel: 'Reload' });
+    expect(toastMessage.value).toMatchObject({
+      text: 'Synchronization protocol changed',
+      kind: 'ok',
+      actionLabel: 'Reload',
+    });
     expect(toastMessage.value?.action).toBeTypeOf('function');
   });
   it('requires the same reload for incompatible non-Web snapshots', async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({ attention: [], approvals: [], conversation: { kind: 'snapshot', protocolVersion: 99 } }),
-        { status: 200 },
-      ),
-    );
     await openChat('group', 'external-thread', {
       channelType: 'slack',
       messagingGroupId: 'slack-group',
       canSend: false,
     });
+    receive({ kind: 'snapshot', protocolVersion: 99 });
     expect(chatReady.value).toBe(false);
     expect(chatReloadRequired.value).toBe(true);
     expect(chatStatus.value).toContain('Reload');

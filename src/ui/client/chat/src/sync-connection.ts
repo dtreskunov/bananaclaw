@@ -4,11 +4,15 @@ import {
   SYNC_PROTOCOL_VERSION,
   SYNC_RELOAD_CLOSE_CODE,
   type GlobalSyncState,
+  type SyncConversation,
+  type SyncFrame,
 } from '../../../shared/sync';
+import { startReconnectCountdown } from './reconnect-countdown';
 
 export interface SyncConnectionOptions {
   socket: () => WebSocket;
-  apply: (data: GlobalSyncState, groupId: string | null) => void;
+  apply: (frame: SyncFrame) => void;
+  connecting: () => void;
   unavailable: (message: string) => void;
   reload: () => void;
   unauthorized: () => void;
@@ -17,10 +21,12 @@ export interface SyncConnectionOptions {
 export class SyncConnection {
   private socket: WebSocket | null = null;
   private groupId: string | null = null;
+  private conversation: SyncConversation | null = null;
   private subscriptionId = 0;
   private attempt = 0;
   private stopped = false;
-  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private failure: string | null = null;
+  private retryCancel: (() => void) | undefined;
   private connectTimer: ReturnType<typeof setTimeout> | undefined;
   private pending: {
     promise: Promise<GlobalSyncState>;
@@ -33,8 +39,9 @@ export class SyncConnection {
 
   start(): void {
     if (this.socket || this.stopped) return;
-    clearTimeout(this.retryTimer);
-    this.retryTimer = undefined;
+    this.retryCancel?.();
+    this.retryCancel = undefined;
+    this.options.connecting();
     const socket = this.options.socket();
     this.socket = socket;
     this.connectTimer = setTimeout(() => {
@@ -51,15 +58,17 @@ export class SyncConnection {
         const value: unknown = JSON.parse(event.data);
         const frame = parseSyncFrame(value);
         if (frame.subscriptionId !== this.subscriptionId || frame.groupId !== this.groupId) return;
-        this.options.apply(frame.data, frame.groupId);
+        this.options.apply(frame);
+        this.failure = null;
         this.attempt = 0;
-        if (this.pending) {
+        if (this.pending && frame.global && frame.subscriptionId === this.subscriptionId) {
           clearTimeout(this.pending.timer);
-          this.pending.resolve(frame.data);
+          this.pending.resolve(frame.global);
           this.pending = null;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Global synchronization failed';
+        this.failure = message;
         this.options.unavailable(message);
         // A protocol mismatch needs new assets, not an endless reconnect loop.
         if (error instanceof SyncProtocolError) {
@@ -90,13 +99,21 @@ export class SyncConnection {
       }
       this.options.unavailable('Global updates disconnected. Reconnecting...');
       const delay = Math.min(15_000, 500 * 2 ** Math.min(this.attempt++, 5));
-      this.retryTimer = setTimeout(() => this.start(), delay * (0.75 + Math.random() * 0.5));
+      this.retryCancel = startReconnectCountdown(
+        delay * (0.75 + Math.random() * 0.5),
+        (seconds) =>
+          this.options.unavailable(
+            `disconnected \u00b7 reconnecting in ${seconds}s\u2026${this.failure ? ` ${this.failure}` : ''}`,
+          ),
+        () => this.start(),
+      );
     };
   }
 
-  setGroup(groupId: string | null): void {
-    if (this.groupId === groupId) return;
+  select(groupId: string | null, conversation: SyncConversation | null): void {
+    if (this.groupId === groupId && JSON.stringify(this.conversation) === JSON.stringify(conversation)) return;
     this.groupId = groupId;
+    this.conversation = conversation;
     this.rejectPending(new Error('Global sync selection changed'));
     ++this.subscriptionId;
     this.sendSubscription();
@@ -104,7 +121,7 @@ export class SyncConnection {
 
   refresh(groupId: string | null): Promise<GlobalSyncState> {
     if (this.stopped) return Promise.reject(new Error('Global synchronization is stopped. Reload this page.'));
-    this.setGroup(groupId);
+    this.select(groupId, groupId === this.groupId ? this.conversation : null);
     if (this.pending) return this.pending.promise;
     let resolve!: (value: GlobalSyncState) => void;
     let reject!: (error: Error) => void;
@@ -130,9 +147,14 @@ export class SyncConnection {
     this.sendSubscription();
   }
 
+  reconnectNow(): void {
+    if (this.stopped || this.socket) return;
+    this.start();
+  }
+
   stop(): void {
     this.stopped = true;
-    clearTimeout(this.retryTimer);
+    this.retryCancel?.();
     clearTimeout(this.connectTimer);
     this.rejectPending(new Error('Global synchronization stopped'));
     this.socket?.close();
@@ -147,6 +169,7 @@ export class SyncConnection {
         protocolVersion: SYNC_PROTOCOL_VERSION,
         subscriptionId: this.subscriptionId,
         groupId: this.groupId,
+        conversation: this.conversation,
       }),
     );
   }

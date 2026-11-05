@@ -133,12 +133,7 @@ export const pendingQuestions: Signal<PendingQuestionDto[]> = signal<PendingQues
 
 // ── non-reactive refs (mutated outside render) ──────────────────────
 export interface Refs {
-  ws: WebSocket | null;
   chatGeneration: number;
-  reconnectCancel: (() => void) | null;
-  reconnectAttempt: number;
-  wsConnectCancel: (() => void) | null;
-  wsPingTimer: ReturnType<typeof setInterval> | null;
   seenIds: Set<string>;
   suppressHashCount: number;
   uploadDragDepth: number;
@@ -146,12 +141,7 @@ export interface Refs {
 }
 
 export const refs: Refs = {
-  ws: null,
   chatGeneration: 0,
-  reconnectCancel: null,
-  reconnectAttempt: 0,
-  wsConnectCancel: null,
-  wsPingTimer: null,
   seenIds: new Set<string>(),
   suppressHashCount: 0,
   uploadDragDepth: 0,

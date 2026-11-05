@@ -16,7 +16,7 @@ import { showToast } from './components/Toast';
 import { applyPanelClasses } from './panels';
 import { applyHash, parseHash } from './hash';
 import { router } from './router';
-import { installLivenessHandlers, startGlobalSync } from './actions';
+import { installLivenessHandlers, startSync } from './actions';
 import { observeTableScrollEdges } from './table-scroll';
 import { fitVisualViewport } from './viewport-fit';
 import type { Group } from './types';
@@ -130,7 +130,7 @@ async function init(): Promise<void> {
   if (parsed && parsed.groupId) chatLoading.value = true;
   render(<App />, app);
   observeTableScrollEdges(app);
-  startGlobalSync();
+  startSync();
   await applyHash(router, { newConversation: true }).catch((err) => console.error('initial route failed', err));
   try {
     const sp = new URLSearchParams(window.location.search);

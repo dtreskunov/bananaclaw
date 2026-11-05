@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SyncFrame, GlobalSyncState } from '../../shared/sync.js';
-import { startSyncStream, type SyncStreamOptions } from './sync-stream.js';
+import { sendSyncFrame, startSyncStream, type SyncStreamOptions } from './sync-stream.js';
+import { SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
 
 afterEach(() => vi.useRealTimers());
 
@@ -42,6 +43,20 @@ function fixture(overrides: Partial<SyncStreamOptions> = {}) {
 }
 
 describe('global synchronization stream', () => {
+  it('closes a slow transport without adding another frame to its buffer', () => {
+    const socket = { bufferedAmount: 1024 * 1024 + 1, readyState: 1, close: vi.fn(), send: vi.fn() };
+    expect(() =>
+      sendSyncFrame(socket, {
+        kind: 'sync',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        subscriptionId: 1,
+        groupId: null,
+        global: { approvals: [], attention: [], group: null },
+      }),
+    ).toThrow('buffer limit');
+    expect(socket.close).toHaveBeenCalledWith(1013, expect.any(String));
+    expect(socket.send).not.toHaveBeenCalled();
+  });
   it('sends an initial snapshot and never polls idle projections', async () => {
     const f = fixture();
     f.stream.subscribe(1, null);
@@ -193,7 +208,7 @@ describe('global synchronization stream', () => {
     try {
       await vi.advanceTimersByTimeAsync(250);
       expect(f.frames).toHaveLength(2);
-      expect(f.frames[1].data.attention[0].id).toBe('2');
+      expect(f.frames[1].global?.attention[0].id).toBe('2');
     } finally {
       clearInterval(mutations);
       f.stream.stop();
@@ -221,20 +236,6 @@ describe('global synchronization stream', () => {
     expect(f.frames).toEqual([]);
     expect(f.fail).toHaveBeenCalledWith(expect.objectContaining({ message: 'revoked' }));
     expect(f.unsubscribe).toHaveBeenCalledOnce();
-  });
-
-  it('refreshes at an expiry deadline without recurring database scans', async () => {
-    const f = fixture({ authorize: () => (Date.now() < 1000 ? 1000 : null) });
-    vi.setSystemTime(0);
-    f.stream.subscribe(1, null);
-    await vi.advanceTimersByTimeAsync(100);
-    await vi.advanceTimersByTimeAsync(999);
-    expect(f.read).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(f.read).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(f.read).toHaveBeenCalledTimes(2);
-    f.stream.stop();
   });
 
   it('stops cleanly on transport failure and does not send an in-flight result after close', async () => {
