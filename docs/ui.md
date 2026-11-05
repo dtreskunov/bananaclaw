@@ -124,6 +124,10 @@ The PWA worker is the single app-badge writer, serializing authenticated
 `GET /api/unread` refreshes from pushes and foreground metadata updates. App
 focus, notification dismissal/delivery and muting notifications do not mark
 conversations read.
+Native badging is enabled only by a supported installed-app client. A durable
+platform-capability flag lets background pushes refresh the badge after the
+app closes; it stores no unread counter. Ordinary and embedded browser tabs
+never enable unsupported native worker badging.
 
 Existing history is read at rollout. New users receive a baseline at account
 creation. Subsequent summary repairs do not reset either baseline or watermarks.

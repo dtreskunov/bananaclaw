@@ -36606,12 +36606,14 @@ function App() {
 var initialized = false;
 function initBadge() {
   if (initialized || typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  const installed = window.matchMedia("(display-mode: standalone)").matches || "standalone" in navigator && navigator.standalone === true;
+  if (!installed || !("setAppBadge" in navigator) || typeof navigator.setAppBadge !== "function") return;
   initialized = true;
   const unread = g2(() => agentActivity.value.reduce((sum, group) => sum + (group.unreadThreadCount ?? 0), 0));
   j3(() => {
     void unread.value;
     void navigator.serviceWorker.ready.then((registration2) => {
-      registration2.active?.postMessage({ type: "READ_STATE_CHANGED" });
+      registration2.active?.postMessage({ type: "READ_STATE_CHANGED", badgeEnabled: true });
     }).catch((error) => console.warn("Unread badge update failed", error));
   });
 }

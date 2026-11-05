@@ -22,9 +22,13 @@ const NOTIF_DETAILS_URL = '/ui/chat/api/push/notification';
 const SUBSCRIBE_URL = '/ui/chat/api/push/subscribe';
 let badgeQueue = Promise.resolve();
 
-function refreshUnreadBadge() {
+function refreshUnreadBadge(enable = false) {
   badgeQueue = badgeQueue.then(async () => {
     if (!self.navigator || typeof self.navigator.setAppBadge !== 'function') return;
+    const capability = await caches.open('nanoclaw-badge-capability');
+    const key = '/ui/chat/.badge-capability';
+    if (enable) await capability.put(key, new Response('enabled'));
+    if (!await capability.match(key)) return;
     const response = await fetch('/ui/chat/api/unread', { credentials: 'include', cache: 'no-store' });
     if (response.status === 401) {
       await self.navigator.clearAppBadge();
@@ -84,7 +88,7 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'READ_STATE_CHANGED') event.waitUntil(refreshUnreadBadge());
+  if (event.data?.type === 'READ_STATE_CHANGED') event.waitUntil(refreshUnreadBadge(event.data.badgeEnabled === true));
   // Triggered by the client when the user accepts the "Reload to update" toast.
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();

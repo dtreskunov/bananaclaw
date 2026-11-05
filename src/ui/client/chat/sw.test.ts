@@ -31,8 +31,11 @@ describe('service worker notification cadence', () => {
       const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ unreadThreadCount: 3 }) })
         .mockResolvedValueOnce({ ok: true, json: async () => ({ unreadThreadCount: 0 }) });
       const sandbox: {
-        self: object; fetch: typeof fetch; refresh?: () => Promise<void>;
-      } = { self: { addEventListener() {}, navigator: { setAppBadge: set, clearAppBadge: clear } }, fetch };
+        self: object; fetch: typeof fetch; caches: object; refresh?: () => Promise<void>;
+      } = {
+        self: { addEventListener() {}, navigator: { setAppBadge: set, clearAppBadge: clear } }, fetch,
+        caches: { open: async () => ({ match: async () => ({}) }) },
+      };
       vm.runInNewContext(`${source}\n;globalThis.refresh = refreshUnreadBadge;`, sandbox);
       if (!sandbox.refresh) throw new Error('Badge refresh missing');
       await Promise.all([sandbox.refresh(), sandbox.refresh()]);
@@ -42,6 +45,20 @@ describe('service worker notification cadence', () => {
       const client = fs.readFileSync(new URL('./src/badge.ts', import.meta.url), 'utf8');
       expect(client).not.toContain('visibilitychange');
       expect(client).not.toContain('unread += 1');
+      expect(client).toContain('(display-mode: standalone)');
+    });
+    it('does not call native badging for non-installed browser and embedded clients', async () => {
+      const source = fs.readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
+      const native = vi.fn(), fetch = vi.fn();
+      const sandbox: { self: object; fetch: typeof fetch; caches: object; refresh?: () => Promise<void> } = {
+        self: { addEventListener() {}, navigator: { setAppBadge: native, clearAppBadge: native } }, fetch,
+        caches: { open: async () => ({ match: async () => undefined }) },
+      };
+      vm.runInNewContext(`${source}\n;globalThis.refresh = refreshUnreadBadge;`, sandbox);
+      if (!sandbox.refresh) throw new Error('Badge refresh missing');
+      await sandbox.refresh();
+      expect(native).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
     });
   });
 
