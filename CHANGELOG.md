@@ -4,6 +4,14 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Unified waiting-first activity indicators.** Waiting replaces
+  attention-count badges and wins over running on threads and agents. Non-idle
+  thread titles use trace-colored filled circles; agent tabs and mobile picker
+  use lowercase waiting/running labels and omit idle. Agent status updates
+  globally through small metadata patches, including unselected agents.
+  Deploy matching host/UI and reload for protocol 13; no new DB backfill is
+  needed. See [verification and rollback](docs/ui.md#unified-activity-presentation-upgrade).
+
 - **[BREAKING] Maintained thread summaries and activity indicators.** Indexed
   host projections replace the thread-scanning worker, scan cache and dependency
   flags. Transactional dirty routes recover interrupted updates without an event

@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -20,13 +21,17 @@ import {
   type GlobalProjection,
   reduceGlobal,
 } from '../../shared/sync.js';
-import { initSessionFolder } from '../../../session-manager.js';
+import { initSessionFolder, inboundDbPath, outboundDbPath } from '../../../session-manager.js';
+import { refreshThreadSummaries } from '../../../thread-summaries.js';
 import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
 import { attachSyncSocket } from './sync-socket.js';
 import { readGlobalSync, createGlobalProjection } from './sync-state.js';
 import * as attention from './attention.js';
 import { revokeRole, grantRole } from '../../../modules/permissions/db/user-roles.js';
-vi.mock('./threads.js', () => ({ listThreadsForViewer: vi.fn(async () => []) }));
+vi.mock('./threads.js', async (original) => ({
+  ...(await original<typeof import('./threads.js')>()),
+  listThreadsForViewer: vi.fn(async () => []),
+}));
 vi.mock('../../../config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../config.js')>()),
   DATA_DIR: '.test-sync-socket',
@@ -165,6 +170,42 @@ async function connect(
 }
 
 describe('unified sync WebSocket integration', () => {
+  it('updates an unselected agent from runtime notices using only an agent status patch', async () => {
+    grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
+    getDb().exec(`
+      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
+        VALUES('other-mg','web','web','group:other',1,'now');
+      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
+        VALUES('other-wire','other-mg','other','per-thread','now');
+      INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
+        VALUES('other-session','other','other-mg','other-thread','now');
+    `);
+    initSessionFolder('other', 'other-session');
+    const source = new Database(inboundDbPath('other', 'other-session'));
+    const output = new Database(outboundDbPath('other', 'other-session'));
+    try {
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
+        VALUES('other-input',2,'chat','now','web','group:other','other-thread','{"text":"Other"}');`);
+      refreshThreadSummaries('other-session');
+      await connect('g');
+      expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.activity).toBe('idle');
+      output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
+        VALUES('other-turn','running','pending','native','web','group:other','other-thread','now');`);
+      refreshThreadSummaries('other-session');
+      publishHostChange({ kind: 'runtime', sessionId: 'other-session' });
+      await vi.waitFor(() =>
+        expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.activity).toBe('running'),
+      );
+      const patch = frames.at(-1)?.global;
+      if (patch?.kind !== 'update') throw new Error('Expected agent status patch');
+      expect(patch.changes.group).toBeUndefined();
+      expect(patch.changes.agentActivity?.upserts).toEqual([{ id: 'other', activity: 'running', activityStale: true }]);
+      expect(JSON.stringify(frames.at(-1)).length).toBeLessThan(512);
+    } finally {
+      source.close();
+      output.close();
+    }
+  });
   it('acknowledges unchanged metadata refreshes without resnapshotting the conversation', async () => {
     startTurn();
     const client = await connect('g', conversation);
@@ -345,6 +386,7 @@ describe('unified sync WebSocket integration', () => {
         },
       ]),
     );
+    expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.activity).toBe('waiting');
     expect(listThreads).toHaveBeenCalledTimes(2);
   });
 

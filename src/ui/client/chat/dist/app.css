@@ -1548,6 +1548,12 @@ nav.tab-bar-strip.group-strip {
   letter-spacing: 0.01em;
   color: var(--muted);
 }
+.attention-separator {
+  flex: none;
+  color: var(--muted);
+  font-weight: 400;
+  white-space: pre;
+}
 .tab-item > .tab-item-sublabel {
   min-height: 1.2em;
   display: flex;
@@ -1645,39 +1651,68 @@ nav.tab-bar-strip.group-strip {
   opacity: 0.7;
 }
 
-/* src/components/AttentionBadge.css */
-.attention-badge {
-  font: inherit;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.attention-separator {
+/* src/components/ActivityIndicator.css */
+.activity-indicator {
   flex: none;
+  display: inline-flex;
+  align-items: center;
   color: var(--muted);
-  font-weight: 400;
-  white-space: pre;
 }
-.msg-action-btn:has(> .attention-badge) {
-  font: inherit;
-  letter-spacing: inherit;
+.activity-indicator.running {
+  color: var(--activity-status-running);
+}
+.activity-indicator.waiting {
+  color: var(--activity-status-queued);
+}
+.activity-indicator.stale {
+  color: var(--muted);
+}
+.activity-indicator.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.activity-action,
+.msg-action-btn:has(> .activity-indicator) {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
   width: auto;
   height: auto;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--warning);
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
 }
-.msg-action-btn:has(> .attention-badge):hover:not(:disabled) {
-  color: var(--warning);
+.activity-action:hover:not(:disabled),
+.msg-action-btn:has(> .activity-indicator):hover:not(:disabled) {
   background: transparent;
   text-decoration: underline;
 }
-.msg-action-btn:has(> .attention-badge):focus-visible {
-  color: var(--warning);
+.activity-action:focus-visible,
+.msg-action-btn:has(> .activity-indicator):focus-visible {
   background: transparent;
   outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: 3px;
+}
+.activity-action:disabled,
+.msg-action-btn:has(> .activity-indicator):disabled {
+  opacity: 1;
+  cursor: default;
+}
+.activity-dot-action {
+  position: relative;
+}
+.activity-dot-action::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
 }
 [data-attention-target]:focus,
 [data-attention-target]:focus-within {
@@ -1846,6 +1881,9 @@ nav.tab-bar-strip.group-strip {
   display: flex;
   align-items: center;
   min-width: 0;
+}
+.threads-rail .thread .title > :is(.activity-indicator, .activity-action) {
+  margin-right: 6px;
 }
 .threads-rail .thread .title .title-text {
   min-width: 0;
@@ -2305,43 +2343,6 @@ nav.tab-bar-strip.group-strip {
 .nc-pane .collapsed-actions .action-menu.open .rail-icon-btn {
   opacity: 1;
   background: var(--wash);
-}
-
-/* src/components/ThreadActivity.css */
-.thread-activity {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  color: var(--muted);
-}
-.thread-activity.running {
-  color: var(--activity-status-running);
-}
-.thread-activity.waiting {
-  color: var(--warning);
-}
-.thread-activity.stale {
-  color: var(--muted);
-}
-.thread-activity-dot {
-  width: 0.45em;
-  height: 0.45em;
-  margin-right: 0.35em;
-  border-radius: 50%;
-  background: currentColor;
-}
-.thread-activity.running:not(.stale) .thread-activity-dot {
-  animation: thread-activity-pulse 1.8s ease-in-out infinite;
-}
-@keyframes thread-activity-pulse {
-  50% {
-    opacity: 0.4;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .thread-activity.running:not(.stale) .thread-activity-dot {
-    animation: none;
-  }
 }
 
 /* src/components/ChatMain.css */

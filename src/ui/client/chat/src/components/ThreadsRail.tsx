@@ -24,9 +24,8 @@ import { Pane } from './Pane';
 import { TrashIcon } from './ActionIcons';
 import { RelativeTime } from './RelativeTime';
 import type { Thread, SearchResult } from '../types';
-import { AttentionBadge } from './AttentionBadge';
-import { ThreadActivity } from './ThreadActivity';
-import { attentionError, threadAttentionCount } from '../attention-state';
+import { ActivityIndicator, activityDetails } from './ActivityIndicator';
+import { threadAttentionCount } from '../attention-state';
 
 function ThreadAttention({ thread }: { thread: Thread }) {
   const location = {
@@ -34,21 +33,20 @@ function ThreadAttention({ thread }: { thread: Thread }) {
     channelType: thread.channelType || 'web', messagingGroupId: thread.messagingGroupId ?? null,
   };
   const count = threadAttentionCount(location);
-  return count > 0 ? <>
-    <span class="attention-separator" aria-hidden="true">{' \u00b7 '}</span>
-    <button type="button" class="msg-action-btn thread-attention"
-    disabled={!!attentionError.value}
-    aria-label={attentionError.value
-      ? `Input status unavailable. ${count} last known requests in ${thread.title}`
-      : `${count} requests need your input. Open oldest request in ${thread.title}`}
-    title={attentionError.value || 'Open oldest input request in this thread'}
-    onClick={(event: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-      void navigateAttention(location);
-    }}>
-    <AttentionBadge value={count} label={`${count} requests need your input`} />
+  const { actionable, description } = activityDetails(thread, count, thread.title);
+  const indicator = <ActivityIndicator status={thread} variant="dot" description={description} />;
+  return thread.activity === 'waiting' ? (
+    <button type="button" class="activity-action activity-dot-action thread-attention"
+      disabled={!actionable}
+      aria-label={description}
+      title={description}
+      onClick={(event: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        if (actionable) void navigateAttention(location);
+      }}>
+      {indicator}
     </button>
-  </> : null;
+  ) : indicator;
 }
 
 export function ThreadRow({ t }: { t: Thread }) {
@@ -120,6 +118,7 @@ export function ThreadRow({ t }: { t: Thread }) {
       onClick={onOpen}
     >
       <div class="title">
+        <ThreadAttention thread={t} />
         {origin
           ? <span
               class={'fork-pill' + (origin.deleted ? ' orphan' : '')}
@@ -151,8 +150,6 @@ export function ThreadRow({ t }: { t: Thread }) {
       </div>
       <div class="meta">
         <span><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</span>
-        <ThreadActivity thread={t} />
-        <ThreadAttention thread={t} />
       </div>
       <div class="thread-actions">
         {isAdmin.value && (ct === 'web' || (t.sessionMode === 'per-thread' && !!t.messagingGroupId))
@@ -174,6 +171,7 @@ export function DmRow({ t }: { t: Thread }) {
   return (
     <div class={'thread dm' + (active ? ' active' : '')} data-id={t.threadId} onClick={onOpen}>
       <div class="title">
+        <ThreadAttention thread={t} />
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
         <span class="title-text">{meta.label}</span>
       </div>
@@ -183,8 +181,6 @@ export function DmRow({ t }: { t: Thread }) {
           {t.counterparty ? ' \u00b7 ' + t.counterparty : ''}
           {t.messageCount ? ' \u00b7 ' + t.messageCount + ' msg' : ''}
         </span>
-        <ThreadActivity thread={t} />
-        <ThreadAttention thread={t} />
       </div>
     </div>
   );

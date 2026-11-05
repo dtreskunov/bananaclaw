@@ -1,7 +1,16 @@
 /** Authorized thread-list entry; private routing and ownership checks stay on the host. */
 export type ThreadActivityState = 'idle' | 'running' | 'waiting';
 
-export interface ThreadSummary {
+export interface ActivityStatus {
+  activity: ThreadActivityState;
+  activityStale?: boolean;
+}
+
+export interface AgentGroupActivity extends ActivityStatus {
+  id: string;
+}
+
+export interface ThreadSummary extends ActivityStatus {
   threadId: string;
   sessionId: string;
   channelType: string;
@@ -11,8 +20,6 @@ export interface ThreadSummary {
   title: string;
   lastActivityAt: string;
   messageCount: number;
-  activity: ThreadActivityState;
-  activityStale?: boolean;
   counterparty?: string;
   /** Presentation hint, not send authorization. */
   canSend?: boolean;

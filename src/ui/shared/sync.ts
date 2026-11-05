@@ -6,7 +6,7 @@ import {
   type ConversationFrame,
   type ConversationSnapshot,
 } from './conversation-protocol.js';
-import type { ThreadSummary } from './thread.js';
+import type { ThreadSummary, AgentGroupActivity } from './thread.js';
 import type { VoiceInputCapability } from './voice.js';
 import { isAttentionTargets } from './attention.js';
 import { isConversationApproval } from './conversation-protocol.js';
@@ -25,6 +25,7 @@ import {
 export interface SyncResponse {
   approvals: ConversationApproval[];
   attention: AttentionTarget[];
+  agentActivity?: AgentGroupActivity[];
   threads?: ThreadSummary[];
   conversation?: ConversationSnapshot;
   voiceInput?: VoiceInputCapability;
@@ -37,6 +38,7 @@ export interface SyncGroupState {
 export interface GlobalSyncState {
   approvals: ConversationApproval[];
   attention: AttentionTarget[];
+  agentActivity: AgentGroupActivity[];
   group: SyncGroupState | null;
 }
 
@@ -53,6 +55,7 @@ export interface GlobalSnapshot extends ProjectionCursor {
 export interface GlobalChanges {
   approvals?: CollectionPatch<ConversationApproval>;
   attention?: CollectionPatch<AttentionTarget>;
+  agentActivity?: CollectionPatch<AgentGroupActivity>;
   group?:
     | { kind: 'replace'; value: SyncGroupState | null }
     | {
@@ -137,9 +140,11 @@ const groupId = (value: unknown) => text(value) && value.length > 0 && value.len
 const cursor = shape({ streamId: id, revision: integer });
 const voiceInput = shape({ backend: oneOf('disabled', 'elevenlabs'), ready: bool, reason: optional(text) });
 const groupState = shape({ threads: array(thread), voiceInput });
+const agentActivity = shape({ id, activity: oneOf('idle', 'running', 'waiting'), activityStale: optional(bool) });
 const globalState = shape({
   approvals: array(isConversationApproval),
   attention: isAttentionTargets,
+  agentActivity: array(agentActivity),
   group: nullable(groupState),
 });
 const groupChanges = (value: unknown) =>
@@ -160,6 +165,7 @@ const globalFrame = (value: unknown) =>
         changes: shape({
           approvals: optional(collectionPatchCheck(isConversationApproval, id)),
           attention: optional(collectionPatchCheck((item) => isAttentionTargets([item]), id)),
+          agentActivity: optional(collectionPatchCheck(agentActivity, id)),
           group: optional(groupChanges),
         }),
       })(value)));
@@ -246,6 +252,7 @@ export function diffGlobal(before: GlobalProjection, after: GlobalSyncState, gro
   return {
     approvals: diffCollection(before.data.approvals, after.approvals, entityId),
     attention: diffCollection(before.data.attention, after.attention, entityId),
+    agentActivity: diffCollection(before.data.agentActivity, after.agentActivity, entityId),
     group,
   };
 }
@@ -280,12 +287,14 @@ export function reduceGlobal(
       data = {
         approvals: applyCollection(state.data.approvals, patch.approvals, entityId),
         attention: applyCollection(state.data.attention, patch.attention, entityId),
+        agentActivity: applyCollection(state.data.agentActivity, patch.agentActivity, entityId),
         group,
       };
     }
     if (!globalState(data) || (groupId === null && data.group !== null)) throw new SyncStateError('invalid_frame');
     uniqueKeys(data.approvals, entityId);
     uniqueKeys(data.attention, entityId);
+    uniqueKeys(data.agentActivity, entityId);
     if (data.group) uniqueKeys(data.group.threads, threadKey);
     return { kind: 'snapshot', streamId: frame.streamId, revision: frame.revision, groupId, data };
   } catch (error) {

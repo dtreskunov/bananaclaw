@@ -15637,6 +15637,7 @@ function loadStartupData(load, onState) {
 
 // src/state.ts
 var groups = y3([]);
+var agentActivity = y3([]);
 var groupId = y3(null);
 var isAdmin = g2(() => {
   const id2 = groupId.value;
@@ -18911,7 +18912,7 @@ function accessRequestInput(raw) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 12;
+var CONVERSATION_PROTOCOL_VERSION = 13;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -20397,9 +20398,11 @@ var groupId2 = (value) => text(value) && value.length > 0 && value.length <= 512
 var cursor = shape({ streamId: id, revision: integer });
 var voiceInput2 = shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) });
 var groupState = shape({ threads: array(thread), voiceInput: voiceInput2 });
+var agentActivity2 = shape({ id, activity: oneOf("idle", "running", "waiting"), activityStale: optional(bool) });
 var globalState = shape({
   approvals: array(isConversationApproval),
   attention: isAttentionTargets,
+  agentActivity: array(agentActivity2),
   group: nullable(groupState)
 });
 var groupChanges = (value) => shape({ kind: oneOf("replace"), value: nullable(groupState) })(value) || shape({
@@ -20412,6 +20415,7 @@ var globalFrame = (value) => cursor(value) && (shape({ kind: oneOf("snapshot"), 
   changes: shape({
     approvals: optional(collectionPatchCheck(isConversationApproval, id)),
     attention: optional(collectionPatchCheck((item) => isAttentionTargets([item]), id)),
+    agentActivity: optional(collectionPatchCheck(agentActivity2, id)),
     group: optional(groupChanges)
   })
 })(value));
@@ -20488,12 +20492,14 @@ function reduceGlobal(state, frame2, groupId3) {
       data = {
         approvals: applyCollection(state.data.approvals, patch.approvals, entityId),
         attention: applyCollection(state.data.attention, patch.attention, entityId),
+        agentActivity: applyCollection(state.data.agentActivity, patch.agentActivity, entityId),
         group
       };
     }
     if (!globalState(data) || groupId3 === null && data.group !== null) throw new SyncStateError("invalid_frame");
     uniqueKeys(data.approvals, entityId);
     uniqueKeys(data.attention, entityId);
+    uniqueKeys(data.agentActivity, entityId);
     if (data.group) uniqueKeys(data.group.threads, threadKey);
     return { kind: "snapshot", streamId: frame2.streamId, revision: frame2.revision, groupId: groupId3, data };
   } catch (error) {
@@ -20779,7 +20785,7 @@ function MobileDialogList({ children, className }) {
   return /* @__PURE__ */ u4("div", { class: `mobile-dialog-list${className ? ` ${className}` : ""}`, children });
 }
 function MobileDialogItem(props) {
-  const { label, badge, onBadgeClick, badgeDisabled, sublabel, onClick, type = "button", active, chevron, title, className } = props;
+  const { label, badge, badgeLabel, onBadgeClick, badgeDisabled, sublabel, onClick, type = "button", active, chevron, title, className } = props;
   const item = /* @__PURE__ */ u4(
     "button",
     {
@@ -20797,7 +20803,18 @@ function MobileDialogItem(props) {
   );
   return badge != null && badge !== false ? /* @__PURE__ */ u4("div", { class: "mobile-dialog-item-row", children: [
     item,
-    onBadgeClick ? /* @__PURE__ */ u4("button", { type: "button", class: "msg-action-btn mobile-dialog-item-badge", disabled: badgeDisabled, onClick: onBadgeClick, children: badge }) : /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-badge", children: badge })
+    onBadgeClick ? /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "msg-action-btn mobile-dialog-item-badge",
+        disabled: badgeDisabled,
+        "aria-label": badgeLabel,
+        title: badgeLabel,
+        onClick: onBadgeClick,
+        children: badge
+      }
+    ) : /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-badge", children: badge })
   ] }) : item;
 }
 function MobileDialogDivider() {
@@ -21322,6 +21339,7 @@ async function runSync() {
 function applyGlobalSync(res, gid) {
   n2(() => {
     attentionTargets.value = res.attention;
+    agentActivity.value = res.agentActivity;
     attentionError.value = null;
     pendingApprovals.value = res.approvals;
   });
@@ -22235,6 +22253,8 @@ function tabBadge(item) {
       type: "button",
       class: "msg-action-btn tab-item-badge",
       disabled: item.badgeDisabled,
+      "aria-label": item.badgeLabel,
+      title: item.badgeLabel,
       onClick: (event) => {
         event.stopPropagation();
         item.onBadgeClick?.();
@@ -22244,7 +22264,7 @@ function tabBadge(item) {
   ) : /* @__PURE__ */ u4("span", { class: "tab-item-badge", children: item.badge });
 }
 function TabBar(props) {
-  const { ariaLabel, activeId, items, onSelect, extras, className, mobileSheetTitle, mobileFallbackLabel } = props;
+  const { ariaLabel, activeId, items, onSelect, extras, className, mobileSheetTitle, mobileFallbackLabel, mobileFallbackItem } = props;
   const navRef = A2(null);
   const [sheetOpen, setSheetOpen] = h2(false);
   y2(() => {
@@ -22261,7 +22281,7 @@ function TabBar(props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [sheetOpen]);
-  const activeItem = items.find((it) => it.id === activeId) ?? null;
+  const activeItem = items.find((it) => it.id === activeId) ?? mobileFallbackItem ?? null;
   const sheetTitle = mobileSheetTitle ?? ariaLabel;
   const dropdownLabel = activeItem?.label ?? mobileFallbackLabel ?? sheetTitle;
   const cls = (base) => className ? `${base} ${className}` : base;
@@ -22359,6 +22379,7 @@ function TabBarSheet(props) {
       {
         label: it.label,
         badge: it.badge,
+        badgeLabel: it.badgeLabel,
         badgeDisabled: it.badgeDisabled,
         onBadgeClick: it.onBadgeClick ? () => {
           onClose();
@@ -22387,22 +22408,49 @@ function TabBarSheet(props) {
   ] }) });
 }
 
-// src/components/AttentionBadge.tsx
-function AttentionBadge({
-  value,
-  label
-}) {
-  return /* @__PURE__ */ u4("span", { class: "attention-badge", "aria-label": label, title: label, children: [
-    value,
-    " attn"
-  ] });
+// src/components/ActivityIndicator.tsx
+var labels = { idle: "Idle", running: "Running", waiting: "Waiting" };
+function activityDetails(status, requestCount = 0, subject) {
+  const stale = !!status.activityStale || !!attentionError.value;
+  const label = labels[status.activity];
+  let description = stale ? `Last known activity: ${label}. Live activity status is unavailable; waiting for updates.` : `Activity: ${label}`;
+  if (status.activity === "waiting" && subject) {
+    const requests2 = `${requestCount} ${requestCount === 1 ? "request" : "requests"}`;
+    description += stale ? ` ${requestCount} last known ${requestCount === 1 ? "request" : "requests"} in ${subject}.` : requestCount > 0 ? `. ${requests2} ${requestCount === 1 ? "needs" : "need"} your input. Open oldest request in ${subject}` : `. No actionable requests available in ${subject}.`;
+  }
+  return { stale, description, actionable: status.activity === "waiting" && !stale && requestCount > 0 };
+}
+function ActivityIndicator({ status, variant = "label", description }) {
+  if (status.activity === "idle") return null;
+  const details = activityDetails(status);
+  const label = description ?? details.description;
+  return /* @__PURE__ */ u4(
+    "span",
+    {
+      class: `activity-indicator ${variant} ${status.activity}${details.stale ? " stale" : ""}`,
+      role: "status",
+      "aria-live": "off",
+      "aria-label": label,
+      title: label,
+      children: variant === "label" ? status.activity : null
+    }
+  );
 }
 
 // src/components/GroupPicker.tsx
-function attentionBadge(group) {
+function activityBadge(group) {
+  const status = agentActivity.value.find((activity) => activity.id === group.id);
+  if (!status || status.activity === "idle") return {};
   const count = groupAttentionCount(group.id);
-  const label = attentionError.value ? `Input status unavailable. ${count} last known requests for ${group.name}` : `${count} requests need your input. Open oldest request in ${group.name}`;
-  return count > 0 ? /* @__PURE__ */ u4(AttentionBadge, { value: count, label }) : void 0;
+  const { actionable, description } = activityDetails(status, count, group.name);
+  return {
+    badge: /* @__PURE__ */ u4(ActivityIndicator, { status, description }),
+    badgeLabel: description,
+    badgeDisabled: !actionable,
+    onBadgeClick: status.activity === "waiting" ? () => {
+      if (actionable) void navigateAttention(group.id);
+    } : void 0
+  };
 }
 function isElevatedOnly(g8) {
   return g8.elevatedOnly === true;
@@ -22433,11 +22481,7 @@ function GroupStrip() {
     return {
       id: g8.id,
       label: g8.name,
-      badge: attentionBadge(g8),
-      badgeDisabled: !!attentionError.value,
-      onBadgeClick: () => {
-        void navigateAttention(g8.id);
-      },
+      ...activityBadge(g8),
       sublabel: sublabel || void 0,
       reserveSublabel: true,
       title: tipFor(g8, isAdminOnly),
@@ -22468,6 +22512,7 @@ function GroupStrip() {
       ariaLabel: "Agent groups",
       mobileSheetTitle: "Agent groups",
       mobileFallbackLabel: active?.name,
+      mobileFallbackItem: active ? { id: active.id, label: active.name, ...activityBadge(active) } : void 0,
       activeId: active?.id ?? null,
       items,
       onSelect: pick,
@@ -22507,16 +22552,16 @@ function GroupPickerModal() {
     const isActive = g8.id === groupId.value;
     const { parts, isAdminOnly } = chipParts(g8, elevated);
     const subtitle = parts.join(" \xB7 ");
+    const activity = activityBadge(g8);
     return /* @__PURE__ */ u4(
       MobileDialogItem,
       {
         label: g8.name,
-        badge: attentionBadge(g8),
-        badgeDisabled: !!attentionError.value,
-        onBadgeClick: () => {
+        ...activity,
+        onBadgeClick: activity.onBadgeClick ? () => {
           close();
-          void navigateAttention(g8.id);
-        },
+          activity.onBadgeClick?.();
+        } : void 0,
         sublabel: subtitle || void 0,
         active: isActive,
         className: isAdminOnly ? "is-admin-visible" : void 0,
@@ -22761,30 +22806,6 @@ function RelativeTime({ ts, className }) {
   return /* @__PURE__ */ u4("span", { class: className || "ts", title: fmtAbsolute(ts), children: fmtRelative(ts) });
 }
 
-// src/components/ThreadActivity.tsx
-var labels = { idle: "Idle", running: "Running", waiting: "Waiting" };
-function ThreadActivity({ thread: thread2 }) {
-  const stale = !!thread2.activityStale || !!attentionError.value;
-  const label = labels[thread2.activity];
-  const description = stale ? `Last known activity: ${label}. Live activity status is unavailable; waiting for updates.` : `Activity: ${label}`;
-  return /* @__PURE__ */ u4(
-    "span",
-    {
-      class: `thread-activity ${thread2.activity}${stale ? " stale" : ""}`,
-      role: "status",
-      "aria-live": "off",
-      "aria-label": description,
-      title: description,
-      children: [
-        /* @__PURE__ */ u4("span", { class: "attention-separator", "aria-hidden": "true", children: " \xB7 " }),
-        thread2.activity === "running" ? /* @__PURE__ */ u4("span", { class: "thread-activity-dot", "aria-hidden": "true" }) : null,
-        label,
-        stale ? " (last known)" : ""
-      ]
-    }
-  );
-}
-
 // src/components/ThreadsRail.tsx
 function ThreadAttention({ thread: thread2 }) {
   const location2 = {
@@ -22794,24 +22815,23 @@ function ThreadAttention({ thread: thread2 }) {
     messagingGroupId: thread2.messagingGroupId ?? null
   };
   const count = threadAttentionCount(location2);
-  return count > 0 ? /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4("span", { class: "attention-separator", "aria-hidden": "true", children: " \xB7 " }),
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "msg-action-btn thread-attention",
-        disabled: !!attentionError.value,
-        "aria-label": attentionError.value ? `Input status unavailable. ${count} last known requests in ${thread2.title}` : `${count} requests need your input. Open oldest request in ${thread2.title}`,
-        title: attentionError.value || "Open oldest input request in this thread",
-        onClick: (event) => {
-          event.stopPropagation();
-          void navigateAttention(location2);
-        },
-        children: /* @__PURE__ */ u4(AttentionBadge, { value: count, label: `${count} requests need your input` })
-      }
-    )
-  ] }) : null;
+  const { actionable, description } = activityDetails(thread2, count, thread2.title);
+  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status: thread2, variant: "dot", description });
+  return thread2.activity === "waiting" ? /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "activity-action activity-dot-action thread-attention",
+      disabled: !actionable,
+      "aria-label": description,
+      title: description,
+      onClick: (event) => {
+        event.stopPropagation();
+        if (actionable) void navigateAttention(location2);
+      },
+      children: indicator
+    }
+  ) : indicator;
 }
 function ThreadRow({ t: t4 }) {
   const ct = t4.channelType || "web";
@@ -22879,6 +22899,7 @@ This also cancels its outstanding approval requests. Already applied changes are
       onClick: onOpen,
       children: [
         /* @__PURE__ */ u4("div", { class: "title", children: [
+          /* @__PURE__ */ u4(ThreadAttention, { thread: t4 }),
           origin ? /* @__PURE__ */ u4(
             "span",
             {
@@ -22916,15 +22937,11 @@ This also cancels its outstanding approval requests. Already applied changes are
             }
           ) : null
         ] }),
-        /* @__PURE__ */ u4("div", { class: "meta", children: [
-          /* @__PURE__ */ u4("span", { children: [
-            /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
-            subTrailer,
-            costStr
-          ] }),
-          /* @__PURE__ */ u4(ThreadActivity, { thread: t4 }),
-          /* @__PURE__ */ u4(ThreadAttention, { thread: t4 })
-        ] }),
+        /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4("span", { children: [
+          /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
+          subTrailer,
+          costStr
+        ] }) }),
         /* @__PURE__ */ u4("div", { class: "thread-actions", children: isAdmin.value && (ct === "web" || t4.sessionMode === "per-thread" && !!t4.messagingGroupId) ? /* @__PURE__ */ u4("button", { type: "button", class: "msg-action-btn danger del", title: "Delete thread", "aria-label": "Delete thread", onClick: onDel, children: /* @__PURE__ */ u4(TrashIcon, {}) }) : null })
       ]
     }
@@ -22940,18 +22957,15 @@ function DmRow({ t: t4 }) {
   };
   return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
+      /* @__PURE__ */ u4(ThreadAttention, { thread: t4 }),
       /* @__PURE__ */ u4("span", { class: "ch-pill dm", title: meta.label, children: meta.icon }),
       /* @__PURE__ */ u4("span", { class: "title-text", children: meta.label })
     ] }),
-    /* @__PURE__ */ u4("div", { class: "meta", children: [
-      /* @__PURE__ */ u4("span", { children: [
-        /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
-        t4.counterparty ? " \xB7 " + t4.counterparty : "",
-        t4.messageCount ? " \xB7 " + t4.messageCount + " msg" : ""
-      ] }),
-      /* @__PURE__ */ u4(ThreadActivity, { thread: t4 }),
-      /* @__PURE__ */ u4(ThreadAttention, { thread: t4 })
-    ] })
+    /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4("span", { children: [
+      /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
+      t4.counterparty ? " \xB7 " + t4.counterparty : "",
+      t4.messageCount ? " \xB7 " + t4.messageCount + " msg" : ""
+    ] }) })
   ] });
 }
 function renderRow(t4) {

@@ -64,6 +64,7 @@ export function MobileDialogList({ children, className }: { children: ComponentC
 interface MobileDialogItemProps {
   label: string;
   badge?: ComponentChildren;
+  badgeLabel?: string;
   onBadgeClick?: () => void;
   badgeDisabled?: boolean;
   sublabel?: string;
@@ -76,7 +77,7 @@ interface MobileDialogItemProps {
 }
 
 export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
-  const { label, badge, onBadgeClick, badgeDisabled, sublabel, onClick, type = 'button', active, chevron, title, className } = props;
+  const { label, badge, badgeLabel, onBadgeClick, badgeDisabled, sublabel, onClick, type = 'button', active, chevron, title, className } = props;
   const item = (
     <button
       type={type}
@@ -94,7 +95,8 @@ export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
     <div class="mobile-dialog-item-row">
       {item}
       {onBadgeClick ? (
-        <button type="button" class="msg-action-btn mobile-dialog-item-badge" disabled={badgeDisabled} onClick={onBadgeClick}>
+        <button type="button" class="msg-action-btn mobile-dialog-item-badge" disabled={badgeDisabled}
+          aria-label={badgeLabel} title={badgeLabel} onClick={onBadgeClick}>
           {badge}
         </button>
       ) : <span class="mobile-dialog-item-badge">{badge}</span>}

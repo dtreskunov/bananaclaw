@@ -12,7 +12,7 @@ vi.mock('../db.js', () => ({
 vi.mock('../../../db/sessions.js', () => ({ getSession: () => ({ agent_group_id: 'g' }) }));
 vi.mock('./sync-state.js', () => ({
   createGlobalProjection: () => ({
-    read: async () => ({ approvals: [], attention: [], group: null }),
+    read: async () => ({ agentActivity: [], approvals: [], attention: [], group: null }),
     canPublish: () => true,
   }),
 }));
@@ -78,7 +78,7 @@ it('keeps a pending output delta and its stream revision across a metadata refre
     });
     expect(frames.at(-1)).toMatchObject({
       subscriptionId: 2,
-      global: { kind: 'snapshot', data: { approvals: [], attention: [], group: null } },
+      global: { kind: 'snapshot', data: { agentActivity: [], approvals: [], attention: [], group: null } },
     });
   } finally {
     ws.emit('close');

@@ -66,6 +66,7 @@ export async function installSyncFixture(
                 streamId: `fixture-${request.subscriptionId}`,
                 revision: 0,
                 data: {
+                  agentActivity: [],
                   ...data,
                   group:
                     data.group !== undefined

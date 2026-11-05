@@ -54,24 +54,27 @@ Nested commits merge their notices into the parent; rollback discards them.
 Read models re-authorize committed state rather than trusting event payloads.
 There are no separate UI or conversation invalidation registries.
 
-The same subtle count button appears on agent tabs, the mobile agent picker and
-thread rows. Agent counts cover their threads; thread counts use the exact
-agent/channel/messaging-group/thread route. Counts include only requests the
-viewer can act on, not every request they can read.
+Waiting activity replaces separate attention-count badges on agent tabs, the
+mobile agent picker and thread rows. Agent activity covers authorized threads;
+thread activity uses the exact agent/channel/messaging-group/thread route.
+Request counts include only requests the viewer can act on, not every request
+they can read, and appear only in accessible names and tooltips.
 Read-only references without a requesting thread or available response controls
 remain visible in the existing UI but do not inflate these actionable counts.
 
-Clicking an agent's count opens its oldest pending request across its threads;
-clicking a thread's count opens the oldest request in that exact thread. These
+Clicking an agent's `waiting` label opens its oldest pending request across its
+threads; clicking a thread's waiting circle opens the oldest request in that exact thread. These
 are separate native buttons, not nested inside the agent/thread selection
 control. Navigation focuses the existing question or approval card and does not
 steal focus on later refreshes. There is no floating attention control.
 
-Status lines read like `2h · 4 msg · 1 attn`. Attention uses the same font and
-size as the surrounding status text, with bold weight and the theme's warning
-color. It remains a native clickable control without badge fill, border or
-padding; hover underlines it and keyboard focus stays visible. Counts remain
-visible without hover. Thread delete buttons retain their
+Agent status lines use lowercase `waiting` or `running`, omitting idle. Thread
+titles have one solid 7px circle on their left for waiting or running and no
+indicator for idle. Both use the activity trace's queued/running colors and root
+dot fill style; thread circles do not pulse. Waiting remains a native clickable
+control, with a larger hit target around the small circle. Keyboard focus stays
+visible. There is no visible `N attn` badge or duplicate activity label.
+Thread delete buttons retain their
 larger 32px target, vertical centering, hover/focus reveal and touch visibility.
 
 Attention comes from the canonical pending interactions through the existing
@@ -199,14 +202,15 @@ refresh can reconcile outstanding markers after the cause is fixed. An initial
 offline backfill is required for existing installs; see
 [the upgrade procedure](#thread-summary-upgrade).
 
-Thread and DM metadata lines show exactly **Idle**, **Running**, or **Waiting**.
-Running includes stopping/finalization and wins over an outstanding request;
-otherwise actionable unanswered questions/approvals mean Waiting. Future
+Thread, DM and agent activity all use waiting > running > idle precedence.
+An actionable unanswered question/approval means waiting even while execution
+continues. Otherwise running includes stopping/finalization. Future
 scheduled work does not. Shared-session execution marks only its exact origin
 conversation. Disconnected unfinished execution retains its last-known Running
 state with a stale explanation, not a fabricated completion or fourth state.
-Global disconnection likewise makes indicators stale and stops animation.
-Reduced-motion preferences disable the running animation.
+Global disconnection likewise makes indicators stale and disables waiting actions.
+Stale state is muted and explained in accessible names/tooltips; tab text stays
+lowercase and thread indicators remain circles.
 
 #### Startup recovery
 
@@ -1359,7 +1363,7 @@ restore the backup over newer accepted messages.
 
 The app uses one authenticated, same-origin WebSocket at `/ui/chat/api/sync/ws`
 for global metadata and the selected conversation, including non-web channels.
-Version-12 `subscribe` requests carry a monotonic `subscriptionId`, a nullable
+Version-13 `subscribe` requests carry a monotonic `subscriptionId`, a nullable
 `groupId`, and a nullable `conversation` containing `threadId`, `channelType` and
 `messagingGroupId`. A nullable `globalCursor` carries the last applied metadata
 `streamId` and `revision`. Non-web contexts require a messaging group and retain the
@@ -1393,8 +1397,15 @@ trace. Activity, changed timeline placements, outputs and turn fields apply
 atomically within one conversation revision. Omitted fields preserve their
 existing objects. Navigation and reconnect snapshots still include full traces.
 
-Global approvals and oldest-first attention are always subscribed, even with no
-group selected. The initial `global` metadata snapshot includes a required `group`
+Global approvals, oldest-first attention and `agentActivity` are always subscribed,
+even with no group selected. Agent activity is an ID-keyed collection of
+`{ id, activity, activityStale? }` for accessible groups, independent of the
+selected conversation. Waiting comes from the same authorized attention targets
+used by navigation. Running uses only visible active route candidates from
+live state and the central summary projection, reusing selected summaries;
+idle agents do not require complete thread-list construction. No source history,
+new DB table, per-agent socket, timer or persisted aggregate counter is involved.
+The initial `global` metadata snapshot includes a required `group`
 field, null with no selected group or
 after access is revoked; otherwise it contains the authorized thread list and
 voice capability. Losing access explicitly clears group state.
@@ -1408,7 +1419,7 @@ Omitted fields leave that projection unchanged. Activity updates use conversatio
 deltas, not a separate event stream or replay log. Fields arriving together are
 validated and applied in one browser batch, not a cross-database transaction.
 Metadata has its own stream ID and contiguous revisions. Updates carry optional
-approval and attention patches and an optional group change. Group changes
+approval, attention and agent-activity patches and an optional group change. Group changes
 either replace the selected group on navigation/access loss or patch its
 threads and voice capability. Thread keys encode channel, messaging group and
 thread ID together. An approval change sends no threads, a voice change sends
@@ -1443,6 +1454,9 @@ refresh approvals, attention and Waiting indicators. Session changes refresh the
 affected source projection and group; configuration changes refresh current voice
 capability. An internal access generation prevents a snapshot from being published if authority changes across an
 asynchronous read.
+Runtime/summary changes in an unselected group still invalidate global metadata
+so inactive agent tabs update. Metadata diffs send only changed agent IDs when
+selected-group state is unchanged.
 Access changes can subsume queued session notices, so their handler also drains
 durable dirty markers; source updates cannot disappear during coalescing.
 
@@ -1536,6 +1550,25 @@ the server store; HTTP acceptance does not prove a command took effect.
   no source message, workflow or turn data is converted. Do not restore an old
   database over newly accepted messages. Before re-upgrading after writes by an
   older host, run the offline rebuild again.
+
+### Unified activity presentation upgrade
+
+- **Detect:** protocol-12 clients display separate `N attn` badges and textual
+  thread activity, and lack the global `agentActivity` collection.
+- **Why:** waiting has precedence consistently on threads and agents; one
+  actionable indicator replaces duplicate attention/activity controls.
+- **Fix:** deploy matching host and rebuilt chat assets, restart the host and
+  reload browsers for protocol 13. No DB migration, summary backfill, runner
+  rebuild or credential changes are needed after the thread-summary upgrade.
+- **Verify:** waiting wins while a turn is running; idle threads have no marker;
+  waiting/running thread circles precede their title and match trace dot colors
+  and fill. Agent tabs/mobile picker show only lowercase waiting/running, omit
+  idle and update while unselected. Waiting opens the oldest actionable request;
+  staleness disables actions without fabricating idle. Test desktop/mobile,
+  permissions/revocation, small agent-only patches and reconnect recovery.
+- **Rollback:** redeploy the previous matching host and chat assets, restart and
+  reload browsers. The maintained summary projection is unchanged; do not
+  restore databases or replay decisions.
 
 ### Request lifetime upgrade
 

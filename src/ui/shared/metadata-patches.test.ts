@@ -42,7 +42,7 @@ const group: SyncGroupState = {
   })),
   voiceInput: { backend: 'disabled', ready: false },
 };
-const data: GlobalSyncState = { approvals: [approval], attention: [], group };
+const data: GlobalSyncState = { approvals: [approval], attention: [], agentActivity: [], group };
 const state: GlobalProjection = { ...testGlobalSnapshot(data), groupId: 'g' };
 const patch = (next: GlobalSyncState, groupId: string | null = 'g'): GlobalUpdate => ({
   kind: 'update',
@@ -73,6 +73,57 @@ describe('incremental metadata projections', () => {
     expect(reduced.data).toEqual(next);
     expect(reduced.data.group?.threads[0]).toBe(group.threads[0]);
     expect(reduced.data.approvals).toBe(data.approvals);
+  });
+  it('patches one agent status independently of the selected group and its 1000 threads', () => {
+    const before = {
+      ...state,
+      data: {
+        ...data,
+        agentActivity: [
+          { id: 'g', activity: 'idle' as const },
+          { id: 'other', activity: 'running' as const },
+        ],
+      },
+    };
+    const next = {
+      ...before.data,
+      agentActivity: [before.data.agentActivity[0], { id: 'other', activity: 'waiting' as const }],
+    };
+    const changes = wire(diffGlobal(before, next, 'g'));
+    expect(changes).toEqual({ agentActivity: { upserts: [{ id: 'other', activity: 'waiting' }], removeIds: [] } });
+    const reduced = reduceGlobal(before, { ...patch(data), changes }, 'g');
+    expect(reduced.data).toEqual(next);
+    expect(reduced.data.group).toBe(before.data.group);
+    expect(JSON.stringify(changes).length).toBeLessThan(128);
+    const removed = diffGlobal(reduced, { ...next, agentActivity: [next.agentActivity[0]] }, 'g');
+    expect(removed.agentActivity?.removeIds).toEqual(['other']);
+  });
+  it('rejects invalid or duplicate agent status records without replacing metadata', () => {
+    expect(() =>
+      reduceGlobal(
+        null,
+        testGlobalSnapshot({
+          ...data,
+          agentActivity: [
+            { id: 'g', activity: 'idle' },
+            { id: 'g', activity: 'waiting' },
+          ],
+        }),
+        'g',
+      ),
+    ).toThrow('invalid_frame');
+    expect(() =>
+      parseSyncFrame({
+        kind: 'sync',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        groupId: null,
+        subscriptionId: 1,
+        global: {
+          ...patch(data),
+          changes: { agentActivity: { upserts: [{ id: 'g', activity: 'unknown' }], removeIds: [] } },
+        },
+      }),
+    ).toThrow('Invalid');
   });
   it('sends only voice capability and acknowledges unchanged refreshes with an empty patch', () => {
     const next = { ...data, group: { ...group, voiceInput: { ...group.voiceInput, reason: 'Disabled' } } };

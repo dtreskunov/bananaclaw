@@ -45,7 +45,7 @@ import { handleChatRequest } from './chat.js';
 import { listThreadsForViewer, viewerHasContent } from './threads.js';
 import { readChatHistory } from './history.js';
 import { canRespondToApproval, questionResponseOrigin } from './interaction-access.js';
-import { readInteractionSync } from './attention.js';
+import { readGlobalSync } from './sync-state.js';
 import { handleGroupAdminRequest } from './group-admin.js';
 import { handleCredentialsRequest } from './credentials-admin.js';
 import { usesAgentVault } from '../../../modules/credentials/agent-vault-client.js';
@@ -65,7 +65,6 @@ import {
   type SkillsAdminResult,
 } from './skills-admin.js';
 import { handleWriteRequest } from './write.js';
-import { resolveVoiceInputConfig } from './voice-input-config.js';
 
 export { handleChatUpgrade, closeChatSockets } from './chat.js';
 import { readConversation } from './conversation.js';
@@ -550,24 +549,21 @@ async function handleCreateGroup(ctx: Ctx, userId: string): Promise<void> {
 }
 
 async function handleSync(ctx: Ctx, userId: string): Promise<void> {
+  const gid = ctx.url.searchParams.get('gid') || '';
   let out: SyncResponse;
   try {
-    out = readInteractionSync(userId);
+    const state = await readGlobalSync(userId, gid || null);
+    out = {
+      approvals: state.approvals,
+      attention: state.attention,
+      agentActivity: state.agentActivity,
+      ...(state.group ? { threads: state.group.threads, voiceInput: state.group.voiceInput } : {}),
+    };
   } catch (error) {
-    log.error('Interaction sync failed', { userId, error });
-    return json(ctx, 503, { error: 'Input requests unavailable; retry the request' });
+    log.error('Synchronization projection failed', { userId, error });
+    return json(ctx, 503, { error: 'Synchronization unavailable; retry the request' });
   }
-  const gid = ctx.url.searchParams.get('gid') || '';
-  if (gid && canAccessAgentGroup(userId, gid).allowed && getAgentGroup(gid)) {
-    out.voiceInput = resolveVoiceInputConfig(gid);
-    // Elevated users also see every non-web thread. Shared web threads are
-    // already visible to every member through listThreadsForViewer.
-    try {
-      out.threads = await listThreadsForViewer(userId, gid);
-    } catch (err) {
-      log.warn('sync threads list failed', { userId, gid, err });
-      return json(ctx, 503, { error: 'Thread list unavailable; retry the request' });
-    }
+  if (gid && out.threads) {
     const tid = ctx.url.searchParams.get('tid') || '';
     const channel = ctx.url.searchParams.get('channel') || '';
     const mg = ctx.url.searchParams.get('mg') || '';

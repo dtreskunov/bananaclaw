@@ -31,7 +31,10 @@ import { initSessionFolder, inboundDbPath, outboundDbPath } from '../../../sessi
 import { putTurn } from '../../../db/turns.js';
 import { refreshThreadSummaries, startThreadSummaryProjection } from '../../../thread-summaries.js';
 import { publishHostChange } from '../../../host-changes.js';
-import { listThreadsForViewer } from './threads.js';
+import { listThreadsForViewer, readAgentActivity } from './threads.js';
+import { readInteractionSync } from './attention.js';
+import * as summaryProjection from '../../../thread-summaries.js';
+import { addMember } from '../../../modules/permissions/db/agent-group-members.js';
 
 const ROOT = path.resolve('.test-thread-activity');
 let inbound: Database.Database;
@@ -184,7 +187,7 @@ describe('thread activity projection', () => {
     signal.connected = true;
     expect((await activities()).a.activity).toBe('running');
   });
-  it('waits for actionable input only when no execution remains', async () => {
+  it('gives waiting precedence over execution on threads and agent groups', async () => {
     createQuestion({
       id: 'q',
       session_id: 's',
@@ -200,11 +203,108 @@ describe('thread activity projection', () => {
     turn('turn-a', 'a', 'running');
     signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
     signal.connected = true;
-    expect((await activities()).a.activity).toBe('running');
+    expect((await activities()).a).toEqual({ activity: 'waiting', stale: false });
+    expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
+      { id: 'g', activity: 'waiting' },
+    ]);
     turn('turn-a', 'a', 'settled');
     expect((await activities()).a.activity).toBe('waiting');
     answerQuestion('q', { responseType: 'text', value: 'Done', userId: 'viewer', answeredAt: '2026-11-05T00:02:00Z' });
     expect((await activities()).a.activity).toBe('idle');
+  });
+  it('omits inaccessible groups and does not build thread lists for idle agents', () => {
+    getDb().exec(`INSERT INTO agent_groups(id,name,folder,created_at) VALUES('private','Private','private','now');`);
+    const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
+    expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle' }]);
+    expect(read).not.toHaveBeenCalled();
+  });
+  it('reuses selected summaries and includes unselected groups without private thread leakage', async () => {
+    turn('turn-a', 'a', 'running');
+    signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
+    signal.connected = true;
+    const selected = await listThreadsForViewer('viewer', 'g', []);
+    const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
+    expect(readAgentActivity('viewer', [], 'g', selected)).toEqual([{ id: 'g', activity: 'running' }]);
+    expect(read).not.toHaveBeenCalled();
+    getDb().exec(`
+      INSERT INTO agent_groups(id,name,folder,created_at) VALUES('other','Other','other','now');
+      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
+        VALUES('other-mg','web','web','group:other',1,'now');
+      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
+        VALUES('other-wire','other-mg','other','per-thread','now');
+      INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
+        VALUES('other-session','other','other-mg','other-thread','now');
+    `);
+    initSessionFolder('other', 'other-session');
+    const source = new Database(inboundDbPath('other', 'other-session'));
+    const output = new Database(outboundDbPath('other', 'other-session'));
+    try {
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
+        VALUES('other-input',2,'chat','now','web','group:other','other-thread','{"text":"Other"}');`);
+      output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
+        VALUES('other-turn','running','pending','native','web','group:other','other-thread','now');`);
+      refreshThreadSummaries('other-session');
+      expect(readAgentActivity('viewer', [], null, []).map((group) => group.id)).toEqual(['g']);
+      addMember({ user_id: 'viewer', agent_group_id: 'other', added_by: null, added_at: 'now' });
+      expect(readAgentActivity('viewer', [], null, [])).toEqual([
+        { id: 'g', activity: 'running' },
+        { id: 'other', activity: 'running', activityStale: true },
+      ]);
+    } finally {
+      source.close();
+      output.close();
+    }
+  });
+  it('builds only active route candidates for an unselected shared-session agent', () => {
+    turn('turn-a', 'a', 'running');
+    signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
+    signal.connected = true;
+    const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
+    expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'running' }]);
+    expect(read).toHaveBeenCalledOnce();
+    expect(read.mock.results[0].value.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual(['a']);
+  });
+  it('removes a group immediately after access is revoked and fails closed on broken projection state', () => {
+    removeMember('viewer', 'g');
+    expect(readAgentActivity('viewer', [], null, [])).toEqual([]);
+    stopProjection();
+    getDb().prepare('UPDATE thread_summary_meta SET ready=0').run();
+    expect(() => readAgentActivity('viewer', [], null, [])).toThrow('offline backfill');
+  });
+  it('does not expose execution in a private non-web thread through its group status', async () => {
+    insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'own@example.com' });
+    getDb().exec(`
+      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
+        VALUES('private-mg','resend','resend','bot@example.com',1,'now');
+      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
+        VALUES('private-wire','private-mg','g','per-thread','now');
+      INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
+        VALUES('private-session','g','private-mg','private-thread','now');
+    `);
+    initSessionFolder('g', 'private-session');
+    const source = new Database(inboundDbPath('g', 'private-session'));
+    const output = new Database(outboundDbPath('g', 'private-session'));
+    try {
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
+        VALUES('private-input',2,'chat','now','resend','bot@example.com','private-thread','{"text":"Private","sender":"other@example.com"}');`);
+      output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
+        VALUES('private-turn','running','pending','native','resend','bot@example.com','private-thread','now');`);
+      refreshThreadSummaries('private-session');
+      signal.turn = {
+        id: 'private-turn',
+        status: 'running',
+        channelType: 'resend',
+        platformId: 'bot@example.com',
+        threadId: 'private-thread',
+      };
+      signal.connected = true;
+      expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle' }]);
+      grantRole({ user_id: 'admin', role: 'admin', agent_group_id: null, granted_by: null, granted_at: 'now' });
+      expect(readAgentActivity('admin', [], null, [])).toEqual([{ id: 'g', activity: 'running' }]);
+    } finally {
+      source.close();
+      output.close();
+    }
   });
   it('does not expose approval waiting state to a viewer who cannot act on it', async () => {
     grantRole({ user_id: 'admin', role: 'admin', agent_group_id: 'g', granted_by: null, granted_at: 'now' });

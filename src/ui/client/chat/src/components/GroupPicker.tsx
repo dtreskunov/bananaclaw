@@ -11,6 +11,7 @@ import {
   groupPickerOpen,
   groupPickerMode,
   credentialsOpen,
+  agentActivity,
 } from '../state';
 import { openChat } from '../credentials-navigation';
 import { navigateAttention, selectGroup } from '../actions';
@@ -19,15 +20,22 @@ import type { Group } from '../types';
 import { createGroupOpen } from './CreateGroupModal';
 import { TabBar, type TabItem, type TabExtra } from './TabBar';
 import { MobileDialog, MobileDialogItem, MobileDialogList } from './MobileDialog';
-import { AttentionBadge } from './AttentionBadge';
-import { attentionError, groupAttentionCount } from '../attention-state';
+import { ActivityIndicator, activityDetails } from './ActivityIndicator';
+import { groupAttentionCount } from '../attention-state';
 
-function attentionBadge(group: Group) {
+function activityBadge(group: Group) {
+  const status = agentActivity.value.find((activity) => activity.id === group.id);
+  if (!status || status.activity === 'idle') return {};
   const count = groupAttentionCount(group.id);
-  const label = attentionError.value
-    ? `Input status unavailable. ${count} last known requests for ${group.name}`
-    : `${count} requests need your input. Open oldest request in ${group.name}`;
-  return count > 0 ? <AttentionBadge value={count} label={label} /> : undefined;
+  const { actionable, description } = activityDetails(status, count, group.name);
+  return {
+    badge: <ActivityIndicator status={status} description={description} />,
+    badgeLabel: description,
+    badgeDisabled: !actionable,
+    onBadgeClick: status.activity === 'waiting'
+      ? () => { if (actionable) void navigateAttention(group.id); }
+      : undefined,
+  };
 }
 
 function isElevatedOnly(g: Group): boolean {
@@ -71,9 +79,7 @@ export function GroupStrip(): JSX.Element | null {
     return {
       id: g.id,
       label: g.name,
-      badge: attentionBadge(g),
-      badgeDisabled: !!attentionError.value,
-      onBadgeClick: () => { void navigateAttention(g.id); },
+      ...activityBadge(g),
       sublabel: sublabel || undefined,
       reserveSublabel: true,
       title: tipFor(g, isAdminOnly),
@@ -104,6 +110,7 @@ export function GroupStrip(): JSX.Element | null {
       ariaLabel="Agent groups"
       mobileSheetTitle="Agent groups"
       mobileFallbackLabel={active?.name}
+      mobileFallbackItem={active ? { id: active.id, label: active.name, ...activityBadge(active) } : undefined}
       activeId={active?.id ?? null}
       items={items}
       onSelect={pick}
@@ -151,13 +158,13 @@ export function GroupPickerModal() {
           const isActive = g.id === groupId.value;
           const { parts, isAdminOnly } = chipParts(g, elevated);
           const subtitle = parts.join(' \u00B7 ');
+          const activity = activityBadge(g);
           return (
             <MobileDialogItem
               key={g.id}
               label={g.name}
-              badge={attentionBadge(g)}
-              badgeDisabled={!!attentionError.value}
-              onBadgeClick={() => { close(); void navigateAttention(g.id); }}
+              {...activity}
+              onBadgeClick={activity.onBadgeClick ? () => { close(); activity.onBadgeClick?.(); } : undefined}
               sublabel={subtitle || undefined}
               active={isActive}
               className={isAdminOnly ? 'is-admin-visible' : undefined}

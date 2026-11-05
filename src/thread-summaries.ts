@@ -55,6 +55,11 @@ export interface ThreadSummarySpec {
   sessionId: string;
   thread?: { channelType: string; platformId: string; threadId: string };
 }
+export interface ThreadActivityRoute {
+  channelType: string;
+  platformId: string;
+  threadId: string | null;
+}
 export interface SummarizedThread {
   channelType: string;
   platformId: string;
@@ -349,8 +354,7 @@ export function rebuildThreadSummaries(dataDir = DATA_DIR): void {
   central.prepare('UPDATE thread_summary_meta SET ready=1 WHERE id=1').run();
 }
 
-function sourceRows(sessionId: string): SummaryRow[] {
-  assertThreadSummariesReady();
+export function assertThreadSummaryAvailable(sessionId: string): void {
   const errors = projectionErrors();
   if (errors.has(sessionId)) {
     const error = errors.get(sessionId);
@@ -359,21 +363,41 @@ function sourceRows(sessionId: string): SummaryRow[] {
       { cause: error },
     );
   }
-  return getDb().prepare('SELECT * FROM thread_summaries WHERE session_id=?').all(sessionId) as SummaryRow[];
+}
+
+function sourceRows(sessionId: string, turnsOnly = false): SummaryRow[] {
+  assertThreadSummariesReady();
+  assertThreadSummaryAvailable(sessionId);
+  return getDb()
+    .prepare(
+      `SELECT * FROM thread_summaries WHERE session_id=?${turnsOnly ? " AND source='outbound' AND kind='turn'" : ''}`,
+    )
+    .all(sessionId) as SummaryRow[];
 }
 
 export function readSummaryTurns(sessionId: string): (Route & SummaryTurn)[] {
-  return sourceRows(sessionId)
-    .filter((row) => row.kind === 'turn')
-    .flatMap((row) => {
-      const turn = JSON.parse(row.value) as SummaryTurn | null;
-      return turn ? [{ ...row, ...turn }] : [];
-    });
+  return sourceRows(sessionId, true).flatMap((row) => {
+    const turn = JSON.parse(row.value) as SummaryTurn | null;
+    return turn ? [{ ...row, ...turn }] : [];
+  });
 }
 
 /** Central indexed summaries only; no session DB handles, history scans or viewer cache. */
-export function readSessionThreadSummary(spec: ThreadSummarySpec): SessionThreadSummary {
-  const rows = sourceRows(spec.sessionId);
+export function readSessionThreadSummary(
+  spec: ThreadSummarySpec,
+  activityRoutes?: readonly ThreadActivityRoute[],
+): SessionThreadSummary {
+  const keys =
+    activityRoutes &&
+    new Set(activityRoutes.map((route) => JSON.stringify([route.channelType, route.platformId, route.threadId ?? ''])));
+  const rows = sourceRows(spec.sessionId).filter(
+    (row) =>
+      !keys ||
+      row.kind !== 'route' ||
+      (spec.thread
+        ? row.channel_type === spec.thread.channelType && row.thread_id === spec.thread.threadId
+        : keys.has(JSON.stringify([row.channel_type, row.platform_id, row.thread_id]))),
+  );
   const inbound = rows
     .filter((row) => row.kind === 'route' && row.source === 'inbound')
     .map((row) => ({ ...row, data: JSON.parse(row.value) as InboundSummary }));

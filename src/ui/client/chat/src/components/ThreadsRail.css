@@ -46,6 +46,7 @@
 .threads-rail .thread:hover { background: var(--wash-soft); }
 .threads-rail .thread.active { background: var(--accent); }
 .threads-rail .thread .title { grid-column: 1; font-size: var(--font-base); display: flex; align-items: center; min-width: 0; }
+.threads-rail .thread .title > :is(.activity-indicator, .activity-action) { margin-right: 6px; }
 .threads-rail .thread .title .title-text { min-width: 0; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .threads-rail .thread .meta { grid-column: 1; min-width: 0; display: flex; align-items: center; font-size: var(--font-xs); color: var(--muted); margin-top: 2px; }
 .threads-rail .thread .meta > span:not(.attention-separator) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

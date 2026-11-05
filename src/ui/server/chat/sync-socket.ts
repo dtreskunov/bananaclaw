@@ -1,6 +1,5 @@
 import { log } from '../../../log.js';
 import { onHostChange } from '../../../host-changes.js';
-import { getSession } from '../../../db/sessions.js';
 import {
   isSyncSubscription,
   SYNC_PROTOCOL_VERSION,
@@ -79,8 +78,7 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
   const off = onHostChange((change) => {
     if (change.kind === 'configuration') invalidateGlobal(change.groupId ?? undefined);
     else if (change.kind === 'sessions' || change.kind === 'thread-summaries' || change.kind === 'runtime') {
-      const groupId = change.groupId ?? (change.sessionId ? getSession(change.sessionId)?.agent_group_id : undefined);
-      invalidateGlobal(groupId ?? undefined);
+      invalidateGlobal();
     } else if (change.kind !== 'activity') invalidateGlobal();
     if (!selection?.conversation || !selection.groupId) return;
     if ('groupId' in change && change.groupId && change.groupId !== selection.groupId) return;

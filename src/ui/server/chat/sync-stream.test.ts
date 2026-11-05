@@ -15,6 +15,7 @@ function fixture(overrides: Partial<SyncStreamOptions> = {}) {
   const unsubscribe = vi.fn();
   const read = vi.fn(
     async (_groupId: string | null): Promise<GlobalSyncState> => ({
+      agentActivity: [],
       approvals: [],
       attention: [],
       group: null,
@@ -57,7 +58,7 @@ describe('global synchronization stream', () => {
         protocolVersion: SYNC_PROTOCOL_VERSION,
         subscriptionId: 1,
         groupId: null,
-        global: testGlobalSnapshot({ approvals: [], attention: [], group: null }),
+        global: testGlobalSnapshot({ agentActivity: [], approvals: [], attention: [], group: null }),
       }),
     ).toThrow('buffer limit');
     expect(socket.close).toHaveBeenCalledWith(1013, expect.any(String));
@@ -122,6 +123,7 @@ describe('global synchronization stream', () => {
     await vi.advanceTimersByTimeAsync(100);
     const stale = f.cursor();
     f.read.mockResolvedValue({
+      agentActivity: [],
       approvals: [],
       group: null,
       attention: [
@@ -165,13 +167,13 @@ describe('global synchronization stream', () => {
             finish = resolve;
           }),
       )
-      .mockResolvedValue({ approvals: [], attention: [], group: null });
+      .mockResolvedValue({ agentActivity: [], approvals: [], attention: [], group: null });
     const f = fixture({ read });
     f.stream.subscribe(1, 'g');
     await vi.advanceTimersByTimeAsync(100);
     f.invalidate('g');
     f.invalidate();
-    finish({ approvals: [], attention: [], group: null });
+    finish({ agentActivity: [], approvals: [], attention: [], group: null });
     await vi.advanceTimersByTimeAsync(100);
     expect(read).toHaveBeenLastCalledWith('g');
     f.invalidate();
@@ -199,6 +201,7 @@ describe('global synchronization stream', () => {
     f.stream.subscribe(1, null);
     await vi.advanceTimersByTimeAsync(100);
     f.read.mockResolvedValue({
+      agentActivity: [],
       approvals: [],
       group: null,
       attention: [
@@ -225,14 +228,14 @@ describe('global synchronization stream', () => {
             finish = resolve;
           }),
       )
-      .mockResolvedValue({ approvals: [], attention: [], group: null });
+      .mockResolvedValue({ agentActivity: [], approvals: [], attention: [], group: null });
     const f = fixture({ read });
     f.stream.subscribe(1, 'old');
     await vi.advanceTimersByTimeAsync(100);
     f.stream.subscribe(2, 'new');
     for (let i = 0; i < 1000; i++) f.invalidate();
     expect(read).toHaveBeenCalledOnce();
-    finish({ approvals: [], attention: [], group: null });
+    finish({ agentActivity: [], approvals: [], attention: [], group: null });
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames).toHaveLength(1);
     expect(f.frames[0]).toMatchObject({ subscriptionId: 2, groupId: 'new' });
@@ -247,6 +250,7 @@ describe('global synchronization stream', () => {
         const id = String(++revision);
         await new Promise((resolve) => setTimeout(resolve, 20));
         return {
+          agentActivity: [],
           approvals: [],
           group: null,
           attention: [{ id, origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'mg' } }],
@@ -281,7 +285,7 @@ describe('global synchronization stream', () => {
     f.stream.subscribe(1, 'g');
     await vi.advanceTimersByTimeAsync(100);
     allowed = false;
-    finish({ approvals: [], attention: [], group: null });
+    finish({ agentActivity: [], approvals: [], attention: [], group: null });
     await vi.advanceTimersByTimeAsync(0);
     expect(f.frames).toEqual([]);
     expect(f.fail).toHaveBeenCalledWith(expect.objectContaining({ message: 'revoked' }));

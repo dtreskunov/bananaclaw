@@ -74,7 +74,7 @@ describe('global sync browser connection', () => {
     expect(JSON.parse(socket.send.mock.calls[0][0])).toMatchObject({ groupId: null, subscriptionId: 0 });
     socket.frame(0, null);
     expect(f.apply).toHaveBeenCalledWith(
-      expect.objectContaining({ global: { approvals: [], attention: [], group: null } }),
+      expect.objectContaining({ global: { approvals: [], attention: [], agentActivity: [], group: null } }),
     );
     await vi.advanceTimersByTimeAsync(60_000);
     expect(socket.send).toHaveBeenCalledOnce();

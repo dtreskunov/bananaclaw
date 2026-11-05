@@ -15,6 +15,7 @@ export interface TabItem {
   id: string;
   label: string;
   badge?: ComponentChildren;
+  badgeLabel?: string;
   onBadgeClick?: () => void;
   badgeDisabled?: boolean;
   /** Optional second line under the label (e.g. relative activity time). */
@@ -53,12 +54,15 @@ interface TabBarProps {
   mobileSheetTitle?: string;
   /** Label when the active item is intentionally absent from `items`. */
   mobileFallbackLabel?: string;
+  /** Selected item intentionally absent from the desktop strip (e.g. admin-only agent). */
+  mobileFallbackItem?: TabItem;
 }
 
 function tabBadge(item: TabItem) {
   if (item.badge == null || item.badge === false) return null;
   return item.onBadgeClick ? (
     <button type="button" class="msg-action-btn tab-item-badge" disabled={item.badgeDisabled}
+      aria-label={item.badgeLabel} title={item.badgeLabel}
       onClick={(event) => { event.stopPropagation(); item.onBadgeClick?.(); }}>
       {item.badge}
     </button>
@@ -66,7 +70,7 @@ function tabBadge(item: TabItem) {
 }
 
 export function TabBar(props: TabBarProps): JSX.Element {
-  const { ariaLabel, activeId, items, onSelect, extras, className, mobileSheetTitle, mobileFallbackLabel } = props;
+  const { ariaLabel, activeId, items, onSelect, extras, className, mobileSheetTitle, mobileFallbackLabel, mobileFallbackItem } = props;
   const navRef = useRef<HTMLElement | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -88,7 +92,7 @@ export function TabBar(props: TabBarProps): JSX.Element {
     return () => window.removeEventListener('keydown', onKey);
   }, [sheetOpen]);
 
-  const activeItem = items.find((it) => it.id === activeId) ?? null;
+  const activeItem = items.find((it) => it.id === activeId) ?? mobileFallbackItem ?? null;
   const sheetTitle = mobileSheetTitle ?? ariaLabel;
   const dropdownLabel = activeItem?.label ?? mobileFallbackLabel ?? sheetTitle;
 
@@ -196,6 +200,7 @@ function TabBarSheet(props: TabBarSheetProps): JSX.Element {
             key={it.id}
             label={it.label}
             badge={it.badge}
+            badgeLabel={it.badgeLabel}
             badgeDisabled={it.badgeDisabled}
             onBadgeClick={it.onBadgeClick ? () => { onClose(); it.onBadgeClick?.(); } : undefined}
             sublabel={it.sublabel}

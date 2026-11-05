@@ -5,6 +5,7 @@ import { cancelRecording } from './recorder';
 import { inheritActivityPanels, submissionTraceOwner } from './activity-trace-state';
 import {
   groupId,
+  agentActivity,
   threads,
   threadId,
   channelType,
@@ -522,6 +523,7 @@ export async function runSync(): Promise<boolean> {
 function applyGlobalSync(res: GlobalSyncState, gid: string | null): void {
   batch(() => {
     attentionTargets.value = res.attention;
+    agentActivity.value = res.agentActivity;
     attentionError.value = null;
     pendingApprovals.value = res.approvals;
   });
