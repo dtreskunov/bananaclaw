@@ -91,6 +91,14 @@ These rules are enforced by convention in `src/session-manager.ts` and `containe
 
 ## 5. Design patterns at a glance
 
+Delivery selects outstanding messages with a SQL anti-join against host-owned
+inbound receipts, using a temporary read attachment on the read-only outbound
+connection. It does not load historical message bodies or all receipt IDs into
+JavaScript. Existing receipt/retry semantics and the single-writer boundary are
+unchanged. Ordering uses a timestamp/ID index; pending-only indexes exclude
+completed input history from wake and runner polling scans. Apply the current
+session schema to stopped host session DBs to install those additive indexes.
+
 1. **Host stores plus runner projection.** `inbound.db` and `outbound.db` are
    host-owned; `runner-state.db` is runner-owned. No SQLite file has cross-boundary writers.
 2. **Seq parity.** Even = host, odd = container. Disjoint namespace across both tables lets the agent reference any message by `seq` alone. Details in [db-session.md §3](db-session.md#3-sequence-numbering-invariant).

@@ -48,6 +48,7 @@ import { migration049 } from './049-interactions.js';
 import { migration050 } from './050-thread-summaries.js';
 import { migration051 } from './051-conversation-reads.js';
 import { migration052 } from './052-integrity.js';
+import { migration053 } from './053-query-indexes.js';
 import { transaction } from '../transaction.js';
 
 export interface Migration {
@@ -113,6 +114,7 @@ export const migrations: Migration[] = [
   migration050,
   migration051,
   migration052,
+  migration053,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a

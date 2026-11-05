@@ -48,6 +48,8 @@ function applyRunnerStateSchema(db: Database): void {
       sender_identity TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_runner_messages_in_series ON messages_in(series_id);
+    CREATE INDEX IF NOT EXISTS idx_runner_messages_in_pending_seq ON messages_in(seq)
+      WHERE status='pending';
     CREATE TABLE IF NOT EXISTS destinations (
       name TEXT PRIMARY KEY,
       display_name TEXT,

@@ -13,7 +13,7 @@ import { getActiveSessions, createQuestion, getSession } from './db/sessions.js'
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
-import { getDueOutboundMessages, getDeliveredIds, markDelivered, markDeliveryFailed } from './db/session-db.js';
+import { getDueOutboundMessages, markDelivered, markDeliveryFailed } from './db/session-db.js';
 import { log } from './log.js';
 import { isQuestionInput } from './ui/shared/conversation-protocol.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
@@ -167,13 +167,7 @@ async function drainSession(session: Session): Promise<void> {
   }
 
   try {
-    // Read all due messages from outbound.db (read-only)
-    const allDue = getDueOutboundMessages(outDb);
-    if (allDue.length === 0) return;
-
-    // Filter out already-delivered messages using inbound.db's delivered table
-    const delivered = getDeliveredIds(inDb);
-    const undelivered = allDue.filter((m) => !delivered.has(m.id));
+    const undelivered = getDueOutboundMessages(outDb, inDb.name);
     if (undelivered.length === 0) return;
 
     for (const msg of undelivered) {
@@ -188,8 +182,6 @@ async function drainSession(session: Session): Promise<void> {
           try {
             const text = extractOutboundText(msg.content);
             if (text) {
-              // OutboundMessage interface omits `timestamp` but SELECT * returns it.
-              const ts = (msg as unknown as { timestamp: string }).timestamp || new Date().toISOString();
               indexMessage({
                 id: msg.id,
                 sessionId: session.id,
@@ -198,7 +190,7 @@ async function drainSession(session: Session): Promise<void> {
                 channelType: msg.channel_type,
                 threadId: msg.thread_id,
                 direction: 'out',
-                timestamp: ts,
+                timestamp: msg.timestamp,
                 text,
               });
             }

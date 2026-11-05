@@ -207,6 +207,8 @@ CREATE TABLE IF NOT EXISTS messages_in (
   sender_identity TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_in_series ON messages_in(series_id);
+CREATE INDEX IF NOT EXISTS idx_messages_in_pending_wake ON messages_in(process_after,seq)
+  WHERE status='pending' AND trigger=1 AND kind!='system';
 
 -- Host tracks delivery outcomes for messages_out IDs.
 -- Keeps channel delivery receipts with the host-owned inbound routing state.
@@ -407,6 +409,7 @@ CREATE TABLE IF NOT EXISTS processing_ack (
   status         TEXT NOT NULL,
   status_changed TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_messages_out_delivery_order ON messages_out(timestamp,id);
 
 -- Persistent key/value state owned by the container. Used (among other things)
 -- to store the SDK session ID so the agent's conversation resumes across

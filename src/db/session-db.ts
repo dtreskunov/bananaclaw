@@ -422,6 +422,7 @@ export function getContainerState(outDb: Database.Database): ContainerState | nu
 
 export interface OutboundMessage {
   id: string;
+  timestamp: string;
   kind: string;
   platform_id: string | null;
   channel_type: string | null;
@@ -430,14 +431,22 @@ export interface OutboundMessage {
   in_reply_to: string | null;
 }
 
-export function getDueOutboundMessages(db: Database.Database): OutboundMessage[] {
-  return db
-    .prepare(
-      `SELECT * FROM messages_out
-       WHERE (deliver_after IS NULL OR deliver_after <= datetime('now'))
-       ORDER BY timestamp ASC`,
-    )
-    .all() as OutboundMessage[];
+export function getDueOutboundMessages(db: Database.Database, receiptsPath: string): OutboundMessage[] {
+  db.prepare('ATTACH DATABASE ? AS delivery_receipts').run(receiptsPath);
+  try {
+    return db
+      .prepare(
+        `SELECT m.* FROM messages_out m
+         WHERE (deliver_after IS NULL OR julianday(deliver_after) <= julianday('now'))
+           AND NOT EXISTS (
+             SELECT 1 FROM delivery_receipts.delivered d WHERE d.message_out_id=m.id
+           )
+         ORDER BY timestamp ASC, id ASC`,
+      )
+      .all() as OutboundMessage[];
+  } finally {
+    db.exec('DETACH DATABASE delivery_receipts');
+  }
 }
 
 // ---------------------------------------------------------------------------
