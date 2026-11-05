@@ -41,7 +41,7 @@ it.each(['questions', 'pending_questions', 'approvals', 'pending_approvals', 'ap
     const db = initTestDb();
     runMigrations(
       db,
-      migrations.filter((migration) => migration !== migration049),
+      migrations.slice(0, migrations.indexOf(migration049)),
     );
     db.exec(`CREATE TABLE ${table}(id TEXT); INSERT INTO ${table} VALUES('preserved')`);
     expect(() => runMigrations(db)).toThrow('explicit offline cutover');

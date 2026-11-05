@@ -4,14 +4,10 @@
 // including foreground tabs. This module is responsible for SW
 // registration, permission flow, and pushManager subscription lifecycle.
 //
-// The legacy in-page `new Notification(...)` path was removed — the SW
-// handles all notifications, foreground or background. `maybeNotify` is
-// retained as a no-op shim so existing call sites compile.
+// The worker owns notification display and the authoritative unread badge.
 import { effect } from '@preact/signals';
 import { notifMutedSig, NOTIF_MUTE_KEY } from './state';
-import type { ChatMessageFile } from './types';
 import { showStickyToast, showToast } from './components/Toast';
-import { bumpUnread } from './badge';
 import { shouldAutoSubscribe, type NotificationPermissionState } from './notification-policy';
 
 let registration: ServiceWorkerRegistration | null = null;
@@ -253,14 +249,6 @@ async function unsubscribePush(): Promise<void> {
   } catch (err) {
     console.warn('push unsubscribe failed', err);
   }
-}
-
-/** Retained for source compatibility — SW now handles all notification display. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function maybeNotify(_text: string, _files: ChatMessageFile[] | null | undefined): void {
-  // SW shows the notification; we bump the installed-app badge here.
-  if (notifMutedSig.value) return;
-  bumpUnread();
 }
 
 /** True on iOS Safari that hasn't been installed as a PWA — Web Push on

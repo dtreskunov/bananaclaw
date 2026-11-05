@@ -16437,7 +16437,7 @@ function createAppearanceController(win, doc) {
     const next = color || brandedBrowserColor;
     if (next) doc.querySelector('meta[name="theme-color"]')?.setAttribute("content", next);
   }
-  function apply2() {
+  function apply() {
     const snapshot = getSnapshot();
     const restoreDensity = doc.documentElement.dataset.density !== preferences.density ? Array.from(densityListeners, (listener) => listener()) : [];
     doc.documentElement.dataset.theme = preferences.theme;
@@ -16454,17 +16454,17 @@ function createAppearanceController(win, doc) {
     } catch (cause) {
       if (!isStorageError(cause)) throw cause;
       report("Appearance could not be synchronized with another tab.", cause);
-      apply2();
+      apply();
       return;
     }
     error = null;
     read(event.key === null ? null : event.newValue);
-    apply2();
+    apply();
   }
   function onSystemChange() {
-    if (preferences.mode === "system") apply2();
+    if (preferences.mode === "system") apply();
   }
-  apply2();
+  apply();
   media.addEventListener("change", onSystemChange);
   win.addEventListener("storage", onStorage);
   doc.addEventListener("DOMContentLoaded", updateBrowserColor, { once: true });
@@ -16479,7 +16479,7 @@ function createAppearanceController(win, doc) {
         if (!isStorageError(cause)) throw cause;
         report("Appearance changed, but could not be saved. It may reset when you reload.", cause);
       }
-      apply2();
+      apply();
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -18723,6 +18723,12 @@ var array = (check) => (value) => Array.isArray(value) && value.every(check);
 var oneOf = (...values) => (value) => typeof value === "string" && values.includes(value);
 var shape = (fields) => (value) => object(value) && Object.entries(fields).every(([key, check]) => check(value[key]));
 
+// ../../shared/read-state.ts
+var cursor = shape({ sessionId: id, key: (value) => typeof value === "string" && /^[a-f0-9]{32}$/.test(value) });
+function isReadCursor(value) {
+  return cursor(value);
+}
+
 // ../../shared/collection-patch.ts
 var CollectionPatchError = class extends Error {
   constructor() {
@@ -18912,7 +18918,7 @@ function accessRequestInput(raw) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 14;
+var CONVERSATION_PROTOCOL_VERSION = 15;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -19109,6 +19115,7 @@ var capabilities = shape({
   cancelInput: bool
 });
 var conversation = shape({
+  readCursor: optional(isReadCursor),
   threadId: id,
   messages: array(message),
   turns: array(turn),
@@ -19124,6 +19131,7 @@ function parseConversationFrame(value) {
   if (!id(value.streamId) || !integer(value.revision)) throw new ConversationProtocolError("invalid_frame");
   if (value.kind === "snapshot" && conversation(value.conversation)) return value;
   if (value.kind === "update" && integer(value.baseRevision) && value.revision === Number(value.baseRevision) + 1 && shape({
+    readCursor: optional(nullable(isReadCursor)),
     messages: changes(message),
     turns: changes((value2) => shape(turnFields)(value2) && object(value2) && value2.activity === void 0),
     activity: optional(array(shape({ turnId: id, changes: collectionPatchCheck(activityLine, integer) }))),
@@ -19230,7 +19238,8 @@ function applyConversation(state, frame2) {
       interactions: applyCollection(state.conversation.interactions, changes2.interactions, entityId),
       timeline: applyCollection(state.conversation.timeline, changes2.timeline, timelineKey),
       connection: changes2.connection ?? state.conversation.connection,
-      capabilities: changes2.capabilities ?? state.conversation.capabilities
+      capabilities: changes2.capabilities ?? state.conversation.capabilities,
+      readCursor: changes2.readCursor === void 0 ? state.conversation.readCursor : changes2.readCursor ?? void 0
     }
   };
   validateTimeline(next.conversation);
@@ -19724,380 +19733,6 @@ function playCompletionChime() {
   setTimeout(() => tone(880, 180, 0.05), 110);
 }
 
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
-var f4 = 0;
-var i4 = Array.isArray;
-function u4(e4, t4, n3, o4, i5, u5) {
-  t4 || (t4 = {});
-  var a4, c4, p5 = t4;
-  if ("ref" in p5) for (c4 in p5 = {}, t4) "ref" == c4 ? a4 = t4[c4] : p5[c4] = t4[c4];
-  var l7 = { type: e4, props: p5, key: n3, ref: a4, __k: null, __: null, __b: 0, __e: null, __c: null, constructor: void 0, __v: --f4, __i: -1, __u: 0, __source: i5, __self: u5 };
-  if ("function" == typeof e4 && (a4 = e4.defaultProps)) for (c4 in a4) void 0 === p5[c4] && (p5[c4] = a4[c4]);
-  return l.vnode && l.vnode(l7), l7;
-}
-
-// src/components/Toast.tsx
-var nextId = 1;
-var hideTimer = null;
-var pending3 = [];
-function displayToast(message2, ms) {
-  if (hideTimer) {
-    clearTimeout(hideTimer);
-    hideTimer = null;
-  }
-  toastMessage.value = message2;
-  if (message2.kind === "err" || message2.action) return;
-  hideTimer = setTimeout(() => {
-    hideTimer = null;
-    if (toastMessage.value?.id === message2.id) dismissToast();
-  }, ms);
-}
-function enqueueToast(message2, ms = 1800) {
-  const current = toastMessage.value;
-  if (message2.action && message2.action === current?.action && message2.actionLabel === current.actionLabel) {
-    displayToast(message2, ms);
-  } else if (current?.kind === "err" || current?.actionLabel) {
-    pending3.push({ message: message2, ms });
-  } else {
-    displayToast(message2, ms);
-  }
-}
-function showToast(text2, kind = "ok", ms = 1800) {
-  enqueueToast({ id: nextId++, text: text2, kind }, ms);
-}
-function showStickyToast(text2, onClick, kind = "ok", actionLabel) {
-  enqueueToast({ id: nextId++, text: text2, kind, action: onClick, actionLabel });
-}
-function dismissToast() {
-  if (hideTimer) {
-    clearTimeout(hideTimer);
-    hideTimer = null;
-  }
-  const next = pending3.shift();
-  if (next) displayToast(next.message, next.ms);
-  else toastMessage.value = null;
-}
-function Toast() {
-  const t4 = toastMessage.value;
-  if (!t4) return null;
-  if (t4.action && t4.actionLabel) {
-    return /* @__PURE__ */ u4(
-      "div",
-      {
-        class: "toast toast-" + t4.kind + " toast-sticky toast-action" + (t4.kind === "ok" ? " accent-icon-btn" : ""),
-        role: t4.kind === "err" ? "alert" : "status",
-        children: [
-          /* @__PURE__ */ u4("span", { class: "toast-text", children: t4.text }),
-          /* @__PURE__ */ u4("div", { class: "toast-controls", children: /* @__PURE__ */ u4("button", { type: "button", onClick: t4.action, children: t4.actionLabel }) })
-        ]
-      },
-      t4.id
-    );
-  }
-  if (t4.kind === "err") {
-    return /* @__PURE__ */ u4("div", { class: "toast toast-err toast-sticky", children: [
-      /* @__PURE__ */ u4("span", { class: "toast-text", role: "alert", children: t4.text }),
-      /* @__PURE__ */ u4("div", { class: "toast-controls", children: [
-        t4.action ? /* @__PURE__ */ u4("button", { type: "button", onClick: t4.action, children: "Continue" }) : null,
-        /* @__PURE__ */ u4("button", { type: "button", onClick: dismissToast, "aria-label": "Dismiss error", children: "Dismiss" })
-      ] })
-    ] }, t4.id);
-  }
-  const sticky = !!t4.action;
-  return /* @__PURE__ */ u4(
-    "button",
-    {
-      type: "button",
-      class: "toast accent-icon-btn toast-" + (t4.kind || "ok") + (sticky ? " toast-sticky" : ""),
-      "aria-live": "polite",
-      onClick: t4.action || dismissToast,
-      children: /* @__PURE__ */ u4("span", { class: "toast-text", children: t4.text })
-    },
-    t4.id
-  );
-}
-
-// src/badge.ts
-var unread = 0;
-var initialized = false;
-function nav() {
-  if (typeof navigator === "undefined") return null;
-  const n3 = navigator;
-  return typeof n3.setAppBadge === "function" ? n3 : null;
-}
-function apply() {
-  const n3 = nav();
-  if (!n3) return;
-  if (unread <= 0) {
-    void n3.clearAppBadge?.();
-  } else {
-    void n3.setAppBadge?.(unread);
-  }
-}
-function initBadge() {
-  if (initialized) return;
-  initialized = true;
-  if (!nav()) return;
-  const clear = () => {
-    if (document.visibilityState === "visible") {
-      unread = 0;
-      apply();
-    }
-  };
-  document.addEventListener("visibilitychange", clear);
-  window.addEventListener("focus", clear);
-  clear();
-}
-function bumpUnread() {
-  if (!nav()) return;
-  if (document.visibilityState === "visible") return;
-  unread += 1;
-  apply();
-}
-
-// src/notification-policy.ts
-function shouldAutoSubscribe(muted, permission) {
-  return !muted && permission === "granted";
-}
-function notificationStatus(muted, permission) {
-  if (permission === "unsupported") return "Browser notifications are not supported on this device.";
-  if (permission === "denied") return "Blocked by the browser. Allow notifications in site settings to enable them.";
-  if (muted) return "Off. Enabling will ask the browser for permission.";
-  return "Enabled for new messages.";
-}
-
-// src/notify.ts
-var registration = null;
-var updatePromptShown = false;
-var updateReloadStarted = false;
-var updateReloadPending = false;
-function reloadForUpdate() {
-  if (updateReloadStarted) return;
-  updateReloadStarted = true;
-  location.reload();
-}
-function loadMuted() {
-  try {
-    return localStorage.getItem(NOTIF_MUTE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-function initNotif() {
-  const permission = notificationPermission();
-  notifMutedSig.value = loadMuted() || permission !== "granted";
-  j3(() => {
-    try {
-      localStorage.setItem(NOTIF_MUTE_KEY, notifMutedSig.value ? "1" : "0");
-    } catch {
-    }
-  });
-  void registerServiceWorker().then(() => {
-    if (shouldAutoSubscribe(notifMutedSig.value, notificationPermission())) {
-      void ensureSubscribed(false);
-    }
-  });
-}
-function notificationPermission() {
-  if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
-  return Notification.permission;
-}
-async function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) return;
-  try {
-    const existing = await navigator.serviceWorker.getRegistration("/ui/chat/");
-    if (existing && !existing.active && !existing.installing && !existing.waiting) {
-      await existing.unregister().catch(() => {
-      });
-    }
-    registration = await navigator.serviceWorker.register("/ui/chat/sw.js", {
-      scope: "/ui/chat/",
-      updateViaCache: "none"
-    });
-    watchForUpdates(registration);
-  } catch (err) {
-    console.warn("SW register failed", err);
-  }
-}
-function watchForUpdates(reg) {
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    reloadForUpdate();
-  });
-  const onNewWorker = (worker) => {
-    worker.addEventListener("statechange", () => {
-      if (worker.state === "installed" && navigator.serviceWorker.controller) {
-        showClientReloadPrompt("New version available");
-      }
-    });
-  };
-  if (reg.waiting && navigator.serviceWorker.controller) {
-    showClientReloadPrompt("New version available");
-  }
-  reg.addEventListener("updatefound", () => {
-    if (reg.installing) onNewWorker(reg.installing);
-  });
-}
-function requestClientReload() {
-  void reloadChatClient();
-}
-function showClientReloadPrompt(text2) {
-  if (updatePromptShown) return;
-  updatePromptShown = true;
-  showStickyToast(text2, requestClientReload, "ok", "Reload");
-}
-function activateUpdatedWorker(worker) {
-  return new Promise((resolve, reject) => {
-    let skipRequested = false;
-    const finish = (error) => {
-      clearTimeout(timer2);
-      worker.removeEventListener("statechange", onStateChange);
-      if (error) reject(error);
-      else resolve();
-    };
-    const onStateChange = () => {
-      if (worker.state === "activated") finish();
-      else if (worker.state === "redundant") finish(new Error("The updated chat client could not be activated."));
-      else if (worker.state === "installed" && !skipRequested) {
-        skipRequested = true;
-        try {
-          worker.postMessage({ type: "SKIP_WAITING" });
-        } catch (error) {
-          finish(new Error("Could not activate the updated chat client.", { cause: error }));
-        }
-      }
-    };
-    const timer2 = setTimeout(() => finish(new Error("Timed out loading the updated chat client.")), 3e4);
-    worker.addEventListener("statechange", onStateChange);
-    onStateChange();
-  });
-}
-async function reloadChatClient() {
-  if (updateReloadPending || updateReloadStarted) return;
-  updateReloadPending = true;
-  try {
-    if ("serviceWorker" in navigator) {
-      const reg = registration ?? await navigator.serviceWorker.getRegistration("/ui/chat/");
-      if (reg) {
-        await reg.update();
-        const worker = reg.installing ?? reg.waiting;
-        if (worker) await activateUpdatedWorker(worker);
-      }
-    }
-    reloadForUpdate();
-  } catch (error) {
-    console.error("Chat client update failed", error);
-    showStickyToast(
-      "Could not load the current chat client. Check your connection and try Reload again.",
-      requestClientReload,
-      "err",
-      "Reload"
-    );
-  } finally {
-    updateReloadPending = false;
-  }
-}
-async function toggleMute() {
-  if (!notifMutedSig.value) {
-    notifMutedSig.value = true;
-    await unsubscribePush();
-    return;
-  }
-  await enableNotifications();
-}
-async function enableNotifications() {
-  const result = await ensureSubscribed(true);
-  if (result === "enabled") {
-    notifMutedSig.value = false;
-    return;
-  }
-  notifMutedSig.value = true;
-  showToast(
-    result === "denied" ? "Notifications are blocked in browser settings" : result === "unsupported" ? "Notifications are not supported on this device" : "Could not enable notifications",
-    "err"
-  );
-}
-async function ensureSubscribed(requestPermission) {
-  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
-    return "unsupported";
-  }
-  let permission = Notification.permission;
-  if (permission === "default" && requestPermission) {
-    try {
-      permission = await Notification.requestPermission();
-    } catch {
-      return "failed";
-    }
-  }
-  if (permission !== "granted") return "denied";
-  if (!registration) {
-    try {
-      registration = await navigator.serviceWorker.ready;
-    } catch {
-      return "failed";
-    }
-  }
-  try {
-    let sub = await registration.pushManager.getSubscription();
-    if (!sub) {
-      const keyResp = await fetch("api/push/public-key", { credentials: "include" });
-      if (!keyResp.ok) return "failed";
-      const { publicKey } = await keyResp.json();
-      if (!publicKey) return "failed";
-      sub = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey).buffer
-      });
-    }
-    const response = await fetch("api/push/subscribe", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(sub.toJSON())
-    });
-    return response.ok ? "enabled" : "failed";
-  } catch (err) {
-    console.warn("push subscribe failed", err);
-    return "failed";
-  }
-}
-async function unsubscribePush() {
-  if (!registration) return;
-  try {
-    const sub = await registration.pushManager.getSubscription();
-    if (!sub) return;
-    const endpoint = sub.endpoint;
-    await sub.unsubscribe();
-    await fetch("api/push/subscribe", {
-      method: "DELETE",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint })
-    });
-  } catch (err) {
-    console.warn("push unsubscribe failed", err);
-  }
-}
-function maybeNotify(_text, _files) {
-  if (notifMutedSig.value) return;
-  bumpUnread();
-}
-function shouldShowIosInstallHint() {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent || "";
-  const isIos = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
-  if (!isIos) return false;
-  const standalone = typeof window.matchMedia === "function" && window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
-  return !standalone;
-}
-function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i5 = 0; i5 < rawData.length; ++i5) outputArray[i5] = rawData.charCodeAt(i5);
-  return outputArray;
-}
-
 // src/turn-completion.ts
 function completedResponseId(previous, messages) {
   const live = new Set(previous?.turns.filter((turn2) => turn2.phase !== "settled").map((turn2) => turn2.id));
@@ -20342,10 +19977,6 @@ function applyConversationFrame(raw, expectedThreadId) {
     else if (turn2.id === activeTurn.value?.id && JSON.stringify(turn2.activity) !== JSON.stringify(oldTurns.get(turn2.id)?.activity))
       playProgressTick();
   }
-  const oldOutputs = new Set(previous.conversation.messages.filter((m6) => m6.direction === "out").map((m6) => m6.id));
-  for (const message2 of view.messages) {
-    if (message2.direction === "out" && !oldOutputs.has(message2.id)) maybeNotify(message2.text, message2.files ?? []);
-  }
 }
 
 // ../../shared/attention.ts
@@ -20379,6 +20010,7 @@ var thread = shape({
   activity: oneOf("idle", "running"),
   waiting: optional(bool),
   activityStale: optional(bool),
+  unread: optional(bool),
   canSend: optional(bool),
   kind: optional(oneOf("thread", "dm")),
   counterparty: optional(text),
@@ -20408,7 +20040,7 @@ var thread = shape({
   forkChildren: optional(array(shape({ threadId: id, messageId: id, title: text })))
 });
 var groupId2 = (value) => text(value) && value.length > 0 && value.length <= 512;
-var cursor = shape({ streamId: id, revision: integer });
+var cursor2 = shape({ streamId: id, revision: integer });
 var voiceInput2 = shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) });
 var groupState = shape({ threads: array(thread), voiceInput: voiceInput2 });
 var agentActivity2 = shape({
@@ -20416,7 +20048,8 @@ var agentActivity2 = shape({
   activity: oneOf("idle", "running"),
   waiting: optional(bool),
   activityStale: optional(bool),
-  threadCount: optional(integer)
+  threadCount: optional(integer),
+  unreadThreadCount: optional(integer)
 });
 var globalState = shape({
   approvals: array(isConversationApproval),
@@ -20429,7 +20062,7 @@ var groupChanges = (value) => shape({ kind: oneOf("replace"), value: nullable(gr
   threads: optional(collectionPatchCheck(thread, id)),
   voiceInput: optional(voiceInput2)
 })(value);
-var globalFrame = (value) => cursor(value) && (shape({ kind: oneOf("snapshot"), data: globalState })(value) || object(value) && integer(value.baseRevision) && value.revision === Number(value.baseRevision) + 1 && shape({
+var globalFrame = (value) => cursor2(value) && (shape({ kind: oneOf("snapshot"), data: globalState })(value) || object(value) && integer(value.baseRevision) && value.revision === Number(value.baseRevision) + 1 && shape({
   kind: oneOf("update"),
   changes: shape({
     approvals: optional(collectionPatchCheck(isConversationApproval, id)),
@@ -20450,7 +20083,7 @@ var subscription = shape({
       messagingGroupId: nullable(groupId2)
     })
   ),
-  globalCursor: nullable(cursor)
+  globalCursor: nullable(cursor2)
 });
 var frame = shape({
   kind: oneOf("sync"),
@@ -20749,6 +20382,338 @@ function openChat() {
   credentialsOpen.value = false;
   writeHash();
   if (location.hash === "#credentials") location.hash = "";
+}
+
+// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+var f4 = 0;
+var i4 = Array.isArray;
+function u4(e4, t4, n3, o4, i5, u5) {
+  t4 || (t4 = {});
+  var a4, c4, p5 = t4;
+  if ("ref" in p5) for (c4 in p5 = {}, t4) "ref" == c4 ? a4 = t4[c4] : p5[c4] = t4[c4];
+  var l7 = { type: e4, props: p5, key: n3, ref: a4, __k: null, __: null, __b: 0, __e: null, __c: null, constructor: void 0, __v: --f4, __i: -1, __u: 0, __source: i5, __self: u5 };
+  if ("function" == typeof e4 && (a4 = e4.defaultProps)) for (c4 in a4) void 0 === p5[c4] && (p5[c4] = a4[c4]);
+  return l.vnode && l.vnode(l7), l7;
+}
+
+// src/components/Toast.tsx
+var nextId = 1;
+var hideTimer = null;
+var pending3 = [];
+function displayToast(message2, ms) {
+  if (hideTimer) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+  toastMessage.value = message2;
+  if (message2.kind === "err" || message2.action) return;
+  hideTimer = setTimeout(() => {
+    hideTimer = null;
+    if (toastMessage.value?.id === message2.id) dismissToast();
+  }, ms);
+}
+function enqueueToast(message2, ms = 1800) {
+  const current = toastMessage.value;
+  if (message2.action && message2.action === current?.action && message2.actionLabel === current.actionLabel) {
+    displayToast(message2, ms);
+  } else if (current?.kind === "err" || current?.actionLabel) {
+    pending3.push({ message: message2, ms });
+  } else {
+    displayToast(message2, ms);
+  }
+}
+function showToast(text2, kind = "ok", ms = 1800) {
+  enqueueToast({ id: nextId++, text: text2, kind }, ms);
+}
+function showStickyToast(text2, onClick, kind = "ok", actionLabel) {
+  enqueueToast({ id: nextId++, text: text2, kind, action: onClick, actionLabel });
+}
+function dismissToast() {
+  if (hideTimer) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+  const next = pending3.shift();
+  if (next) displayToast(next.message, next.ms);
+  else toastMessage.value = null;
+}
+function Toast() {
+  const t4 = toastMessage.value;
+  if (!t4) return null;
+  if (t4.action && t4.actionLabel) {
+    return /* @__PURE__ */ u4(
+      "div",
+      {
+        class: "toast toast-" + t4.kind + " toast-sticky toast-action" + (t4.kind === "ok" ? " accent-icon-btn" : ""),
+        role: t4.kind === "err" ? "alert" : "status",
+        children: [
+          /* @__PURE__ */ u4("span", { class: "toast-text", children: t4.text }),
+          /* @__PURE__ */ u4("div", { class: "toast-controls", children: /* @__PURE__ */ u4("button", { type: "button", onClick: t4.action, children: t4.actionLabel }) })
+        ]
+      },
+      t4.id
+    );
+  }
+  if (t4.kind === "err") {
+    return /* @__PURE__ */ u4("div", { class: "toast toast-err toast-sticky", children: [
+      /* @__PURE__ */ u4("span", { class: "toast-text", role: "alert", children: t4.text }),
+      /* @__PURE__ */ u4("div", { class: "toast-controls", children: [
+        t4.action ? /* @__PURE__ */ u4("button", { type: "button", onClick: t4.action, children: "Continue" }) : null,
+        /* @__PURE__ */ u4("button", { type: "button", onClick: dismissToast, "aria-label": "Dismiss error", children: "Dismiss" })
+      ] })
+    ] }, t4.id);
+  }
+  const sticky = !!t4.action;
+  return /* @__PURE__ */ u4(
+    "button",
+    {
+      type: "button",
+      class: "toast accent-icon-btn toast-" + (t4.kind || "ok") + (sticky ? " toast-sticky" : ""),
+      "aria-live": "polite",
+      onClick: t4.action || dismissToast,
+      children: /* @__PURE__ */ u4("span", { class: "toast-text", children: t4.text })
+    },
+    t4.id
+  );
+}
+
+// src/notification-policy.ts
+function shouldAutoSubscribe(muted, permission) {
+  return !muted && permission === "granted";
+}
+function notificationStatus(muted, permission) {
+  if (permission === "unsupported") return "Browser notifications are not supported on this device.";
+  if (permission === "denied") return "Blocked by the browser. Allow notifications in site settings to enable them.";
+  if (muted) return "Off. Enabling will ask the browser for permission.";
+  return "Enabled for new messages.";
+}
+
+// src/notify.ts
+var registration = null;
+var updatePromptShown = false;
+var updateReloadStarted = false;
+var updateReloadPending = false;
+function reloadForUpdate() {
+  if (updateReloadStarted) return;
+  updateReloadStarted = true;
+  location.reload();
+}
+function loadMuted() {
+  try {
+    return localStorage.getItem(NOTIF_MUTE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function initNotif() {
+  const permission = notificationPermission();
+  notifMutedSig.value = loadMuted() || permission !== "granted";
+  j3(() => {
+    try {
+      localStorage.setItem(NOTIF_MUTE_KEY, notifMutedSig.value ? "1" : "0");
+    } catch {
+    }
+  });
+  void registerServiceWorker().then(() => {
+    if (shouldAutoSubscribe(notifMutedSig.value, notificationPermission())) {
+      void ensureSubscribed(false);
+    }
+  });
+}
+function notificationPermission() {
+  if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
+  return Notification.permission;
+}
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const existing = await navigator.serviceWorker.getRegistration("/ui/chat/");
+    if (existing && !existing.active && !existing.installing && !existing.waiting) {
+      await existing.unregister().catch(() => {
+      });
+    }
+    registration = await navigator.serviceWorker.register("/ui/chat/sw.js", {
+      scope: "/ui/chat/",
+      updateViaCache: "none"
+    });
+    watchForUpdates(registration);
+  } catch (err) {
+    console.warn("SW register failed", err);
+  }
+}
+function watchForUpdates(reg) {
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    reloadForUpdate();
+  });
+  const onNewWorker = (worker) => {
+    worker.addEventListener("statechange", () => {
+      if (worker.state === "installed" && navigator.serviceWorker.controller) {
+        showClientReloadPrompt("New version available");
+      }
+    });
+  };
+  if (reg.waiting && navigator.serviceWorker.controller) {
+    showClientReloadPrompt("New version available");
+  }
+  reg.addEventListener("updatefound", () => {
+    if (reg.installing) onNewWorker(reg.installing);
+  });
+}
+function requestClientReload() {
+  void reloadChatClient();
+}
+function showClientReloadPrompt(text2) {
+  if (updatePromptShown) return;
+  updatePromptShown = true;
+  showStickyToast(text2, requestClientReload, "ok", "Reload");
+}
+function activateUpdatedWorker(worker) {
+  return new Promise((resolve, reject) => {
+    let skipRequested = false;
+    const finish = (error) => {
+      clearTimeout(timer2);
+      worker.removeEventListener("statechange", onStateChange);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onStateChange = () => {
+      if (worker.state === "activated") finish();
+      else if (worker.state === "redundant") finish(new Error("The updated chat client could not be activated."));
+      else if (worker.state === "installed" && !skipRequested) {
+        skipRequested = true;
+        try {
+          worker.postMessage({ type: "SKIP_WAITING" });
+        } catch (error) {
+          finish(new Error("Could not activate the updated chat client.", { cause: error }));
+        }
+      }
+    };
+    const timer2 = setTimeout(() => finish(new Error("Timed out loading the updated chat client.")), 3e4);
+    worker.addEventListener("statechange", onStateChange);
+    onStateChange();
+  });
+}
+async function reloadChatClient() {
+  if (updateReloadPending || updateReloadStarted) return;
+  updateReloadPending = true;
+  try {
+    if ("serviceWorker" in navigator) {
+      const reg = registration ?? await navigator.serviceWorker.getRegistration("/ui/chat/");
+      if (reg) {
+        await reg.update();
+        const worker = reg.installing ?? reg.waiting;
+        if (worker) await activateUpdatedWorker(worker);
+      }
+    }
+    reloadForUpdate();
+  } catch (error) {
+    console.error("Chat client update failed", error);
+    showStickyToast(
+      "Could not load the current chat client. Check your connection and try Reload again.",
+      requestClientReload,
+      "err",
+      "Reload"
+    );
+  } finally {
+    updateReloadPending = false;
+  }
+}
+async function toggleMute() {
+  if (!notifMutedSig.value) {
+    notifMutedSig.value = true;
+    await unsubscribePush();
+    return;
+  }
+  await enableNotifications();
+}
+async function enableNotifications() {
+  const result = await ensureSubscribed(true);
+  if (result === "enabled") {
+    notifMutedSig.value = false;
+    return;
+  }
+  notifMutedSig.value = true;
+  showToast(
+    result === "denied" ? "Notifications are blocked in browser settings" : result === "unsupported" ? "Notifications are not supported on this device" : "Could not enable notifications",
+    "err"
+  );
+}
+async function ensureSubscribed(requestPermission) {
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+    return "unsupported";
+  }
+  let permission = Notification.permission;
+  if (permission === "default" && requestPermission) {
+    try {
+      permission = await Notification.requestPermission();
+    } catch {
+      return "failed";
+    }
+  }
+  if (permission !== "granted") return "denied";
+  if (!registration) {
+    try {
+      registration = await navigator.serviceWorker.ready;
+    } catch {
+      return "failed";
+    }
+  }
+  try {
+    let sub = await registration.pushManager.getSubscription();
+    if (!sub) {
+      const keyResp = await fetch("api/push/public-key", { credentials: "include" });
+      if (!keyResp.ok) return "failed";
+      const { publicKey } = await keyResp.json();
+      if (!publicKey) return "failed";
+      sub = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey).buffer
+      });
+    }
+    const response = await fetch("api/push/subscribe", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sub.toJSON())
+    });
+    return response.ok ? "enabled" : "failed";
+  } catch (err) {
+    console.warn("push subscribe failed", err);
+    return "failed";
+  }
+}
+async function unsubscribePush() {
+  if (!registration) return;
+  try {
+    const sub = await registration.pushManager.getSubscription();
+    if (!sub) return;
+    const endpoint = sub.endpoint;
+    await sub.unsubscribe();
+    await fetch("api/push/subscribe", {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint })
+    });
+  } catch (err) {
+    console.warn("push unsubscribe failed", err);
+  }
+}
+function shouldShowIosInstallHint() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const isIos = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  if (!isIos) return false;
+  const standalone = typeof window.matchMedia === "function" && window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  return !standalone;
+}
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i5 = 0; i5 < rawData.length; ++i5) outputArray[i5] = rawData.charCodeAt(i5);
+  return outputArray;
 }
 
 // src/components/MobileDialog.tsx
@@ -22287,9 +22252,9 @@ function TabBar(props) {
   const navRef = A2(null);
   const [sheetOpen, setSheetOpen] = h2(false);
   y2(() => {
-    const nav2 = navRef.current;
-    if (!nav2) return;
-    const el = nav2.querySelector('[aria-selected="true"]');
+    const nav = navRef.current;
+    if (!nav) return;
+    const el = nav.querySelector('[aria-selected="true"]');
     if (el) el.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeId]);
   y2(() => {
@@ -22357,7 +22322,7 @@ function TabBar(props) {
         "button",
         {
           type: "button",
-          class: "tab-bar-dropdown",
+          class: `tab-bar-dropdown${activeItem?.className ? ` ${activeItem.className}` : ""}`,
           "aria-label": ariaLabel,
           "aria-haspopup": "dialog",
           "aria-expanded": sheetOpen,
@@ -22489,9 +22454,24 @@ function chipParts(g8, elevated) {
 }
 function tipFor(g8, isAdminOnly) {
   const parts = [g8.name];
+  const unread = agentActivity.value.find((activity) => activity.id === g8.id)?.unreadThreadCount;
+  if (unread) parts.push(`${unread} unread ${unread === 1 ? "conversation" : "conversations"}`);
   if (isAdminOnly) parts.push("Visible to you as admin");
   if (g8.lastActivityAt) parts.push(fmtAbsolute(g8.lastActivityAt));
   return parts.join(" \xB7 ");
+}
+function groupItem(g8, elevated) {
+  const { parts, isAdminOnly } = chipParts(g8, elevated);
+  const unread = agentActivity.value.find((activity) => activity.id === g8.id)?.unreadThreadCount;
+  return {
+    id: g8.id,
+    label: g8.name,
+    ...activityBadge(g8),
+    sublabel: parts.join(" \xB7 ") || void 0,
+    reserveSublabel: true,
+    title: tipFor(g8, isAdminOnly),
+    className: [isAdminOnly ? "is-admin-visible" : "", unread ? "is-unread" : ""].filter(Boolean).join(" ") || void 0
+  };
 }
 function GroupStrip() {
   const elevated = isElevatedUser.value;
@@ -22499,19 +22479,7 @@ function GroupStrip() {
   const all = groups.value;
   const memberGroups = all.filter((g8) => !isElevatedOnly(g8));
   const active = all.find((g8) => g8.id === groupId.value);
-  const items = memberGroups.map((g8) => {
-    const { parts, isAdminOnly } = chipParts(g8, elevated);
-    const sublabel = parts.join(" \xB7 ");
-    return {
-      id: g8.id,
-      label: g8.name,
-      ...activityBadge(g8),
-      sublabel: sublabel || void 0,
-      reserveSublabel: true,
-      title: tipFor(g8, isAdminOnly),
-      className: isAdminOnly ? "is-admin-visible" : void 0
-    };
-  });
+  const items = memberGroups.map((g8) => groupItem(g8, elevated));
   const extras = [];
   if (elevated) {
     extras.push({
@@ -22536,7 +22504,7 @@ function GroupStrip() {
       ariaLabel: "Agent groups",
       mobileSheetTitle: "Agent groups",
       mobileFallbackLabel: active?.name,
-      mobileFallbackItem: active ? { id: active.id, label: active.name, ...activityBadge(active) } : void 0,
+      mobileFallbackItem: active ? groupItem(active, elevated) : void 0,
       activeId: active?.id ?? null,
       items,
       onSelect: pick,
@@ -22574,22 +22542,16 @@ function GroupPickerModal() {
   };
   return /* @__PURE__ */ u4(MobileDialog, { title, onClose: close, maxWidth: "480px", children: /* @__PURE__ */ u4(MobileDialogList, { children: visible.map((g8) => {
     const isActive = g8.id === groupId.value;
-    const { parts, isAdminOnly } = chipParts(g8, elevated);
-    const subtitle = parts.join(" \xB7 ");
-    const activity = activityBadge(g8);
+    const item = groupItem(g8, elevated);
     return /* @__PURE__ */ u4(
       MobileDialogItem,
       {
-        label: g8.name,
-        ...activity,
-        onBadgeClick: activity.onBadgeClick ? () => {
+        ...item,
+        onBadgeClick: item.onBadgeClick ? () => {
           close();
-          activity.onBadgeClick?.();
+          item.onBadgeClick?.();
         } : void 0,
-        sublabel: subtitle || void 0,
         active: isActive,
-        className: isAdminOnly ? "is-admin-visible" : void 0,
-        title: tipFor(g8, isAdminOnly),
         onClick: () => pick(g8.id)
       },
       g8.id
@@ -22919,7 +22881,7 @@ This also cancels its outstanding approval requests. Already applied changes are
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: "thread" + (active ? " active" : "") + (origin ? " branch" : ""),
+      class: "thread" + (active ? " active" : "") + (origin ? " branch" : "") + (t4.unread ? " is-unread" : ""),
       "data-id": t4.threadId,
       onClick: onOpen,
       children: [
@@ -22934,7 +22896,10 @@ This also cancels its outstanding approval requests. Already applied changes are
             }
           ) : null,
           ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
-          /* @__PURE__ */ u4("span", { class: "title-text", children: t4.title }),
+          /* @__PURE__ */ u4("span", { class: "title-text", children: [
+            t4.unread ? /* @__PURE__ */ u4("span", { class: "unread-label", children: "Unread. " }) : null,
+            t4.title
+          ] }),
           branchCount > 0 ? /* @__PURE__ */ u4(
             "span",
             {
@@ -22980,11 +22945,14 @@ function DmRow({ t: t4 }) {
     if (groupId.value) openChat2(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
-  return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
+  return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : "") + (t4.unread ? " is-unread" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
       /* @__PURE__ */ u4(ThreadAttention, { thread: t4 }),
       /* @__PURE__ */ u4("span", { class: "ch-pill dm", title: meta.label, children: meta.icon }),
-      /* @__PURE__ */ u4("span", { class: "title-text", children: meta.label })
+      /* @__PURE__ */ u4("span", { class: "title-text", children: [
+        t4.unread ? /* @__PURE__ */ u4("span", { class: "unread-label", children: "Unread. " }) : null,
+        meta.label
+      ] })
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta", children: /* @__PURE__ */ u4("span", { children: [
       /* @__PURE__ */ u4(RelativeTime, { ts: t4.lastActivityAt }),
@@ -25345,7 +25313,7 @@ function AccessRequestReview({
   async function manageAccount(account2) {
     if (await prepareSetup()) onManage(account2, effectiveRequest);
   }
-  async function apply2() {
+  async function apply() {
     if (!preview || !canApply || !isApprovalThread(request.origin)) return;
     setBusy(true);
     setError("");
@@ -25376,7 +25344,7 @@ function AccessRequestReview({
     }
   }
   y2(() => {
-    if (setup && created?.status === "ready" && selected === created.id && canApply) void apply2();
+    if (setup && created?.status === "ready" && selected === created.id && canApply) void apply();
   }, [setup, created?.id, created?.status, selected, canApply]);
   async function reject() {
     if (!isApprovalThread(request.origin)) return;
@@ -25665,7 +25633,7 @@ function AccessRequestReview({
             type: "button",
             class: "approval-btn approval-approve primary",
             disabled: !canApply,
-            onClick: () => void apply2(),
+            onClick: () => void apply(),
             children: busy ? "Applying\u2026" : setup ? "Confirm account setup" : "Allow access"
           }
         ) : null
@@ -27628,6 +27596,63 @@ function revealLatestActivity(viewport, details = false) {
   );
 }
 
+// src/read-state.ts
+var ReadAckError = class extends Error {
+};
+function attachReadTracking(log, target) {
+  let timer2;
+  let complete = false;
+  let request = null;
+  const eligible = () => document.visibilityState === "visible" && document.hasFocus() && log.getClientRects().length > 0 && log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  const send = async () => {
+    if (complete || request || !eligible()) return;
+    request = new AbortController();
+    const active = request;
+    let url = `api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/read`;
+    if (target.messagingGroupId)
+      url += `?channel=${encodeURIComponent(target.channelType)}&mg=${encodeURIComponent(target.messagingGroupId)}`;
+    const timeout = setTimeout(() => active.abort(), 1e4);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(target.cursor),
+        signal: active.signal
+      });
+      if (!response.ok) throw new ReadAckError(`Read acknowledgement failed: HTTP ${response.status}`);
+      complete = true;
+    } catch (error) {
+      if (request === null) return;
+      if (!(error instanceof ReadAckError) && !(error instanceof TypeError) && !(error instanceof Error && error.name === "AbortError")) throw error;
+      console.warn("Read acknowledgement failed", error);
+      showToast("Could not mark this conversation read. Refocus or scroll to retry.", "err");
+    } finally {
+      clearTimeout(timeout);
+      if (request === active) request = null;
+    }
+  };
+  const schedule = () => {
+    clearTimeout(timer2);
+    if (eligible() && !complete) timer2 = setTimeout(() => {
+      void send();
+    }, 150);
+  };
+  log.addEventListener("scroll", schedule);
+  document.addEventListener("visibilitychange", schedule);
+  window.addEventListener("focus", schedule);
+  schedule();
+  return () => {
+    clearTimeout(timer2);
+    const active = request;
+    request = null;
+    active?.abort();
+    log.removeEventListener("scroll", schedule);
+    document.removeEventListener("visibilitychange", schedule);
+    window.removeEventListener("focus", schedule);
+  };
+}
+
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
 var revealedMobileMessageActionsId = y3(null);
@@ -28808,6 +28833,11 @@ function MessageLog({ dockRef }) {
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
   const responseId = completedResponse.value;
+  const readCursor = conversationState.value?.conversation.readCursor;
+  const readGroup = groupId.value;
+  const readChannel = channelType.value;
+  const readMessagingGroup = messagingGroupId.value;
+  const readyForRead = chatReady.value;
   const atBottomRef = A2(true);
   const followingBottomRef = A2(true);
   const responseReadingTopRef = A2(null);
@@ -28848,6 +28878,16 @@ function MessageLog({ dockRef }) {
   const onLogScroll = () => {
     if (!densityReflowRef.current) followingBottomRef.current = measureScroll();
   };
+  y2(() => {
+    if (!ref.current || !readCursor || !readGroup || !activeThreadId || !readyForRead) return;
+    return attachReadTracking(ref.current, {
+      groupId: readGroup,
+      threadId: activeThreadId,
+      channelType: readChannel,
+      messagingGroupId: readMessagingGroup,
+      cursor: readCursor
+    });
+  }, [readCursor?.key, readCursor?.sessionId, readGroup, activeThreadId, readChannel, readMessagingGroup, readyForRead]);
   _2(() => {
     prevMsgCountRef.current = 0;
     prevLayoutRef.current = "";
@@ -35856,10 +35896,10 @@ function SettingsTab({
   const effectiveRestart = needsRestart || effectiveRebuild;
   const canSave = changed;
   y2(() => {
-    onActions({ refresh, apply: apply2, busy, canSave });
+    onActions({ refresh, apply, busy, canSave });
     return () => onActions(null);
   }, [busy, canSave, needsRestart, needsRebuild]);
-  function apply2() {
+  function apply() {
     if (!changed) return;
     setRebuildChecked(false);
     setConfirmOpen(true);
@@ -36562,6 +36602,20 @@ function App() {
   ] });
 }
 
+// src/badge.ts
+var initialized = false;
+function initBadge() {
+  if (initialized || typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  initialized = true;
+  const unread = g2(() => agentActivity.value.reduce((sum, group) => sum + (group.unreadThreadCount ?? 0), 0));
+  j3(() => {
+    void unread.value;
+    void navigator.serviceWorker.ready.then((registration2) => {
+      registration2.active?.postMessage({ type: "READ_STATE_CHANGED" });
+    }).catch((error) => console.warn("Unread badge update failed", error));
+  });
+}
+
 // src/table-scroll.ts
 function observeTableScrollEdges(root) {
   const attached = /* @__PURE__ */ new Map();
@@ -36590,13 +36644,13 @@ function observeTableScrollEdges(root) {
 function fitVisualViewport(viewport, style) {
   if (!viewport) return () => {
   };
-  const apply2 = () => style.setProperty("--app-height", `${viewport.height}px`);
-  apply2();
-  viewport.addEventListener("resize", apply2);
-  viewport.addEventListener("scroll", apply2);
+  const apply = () => style.setProperty("--app-height", `${viewport.height}px`);
+  apply();
+  viewport.addEventListener("resize", apply);
+  viewport.addEventListener("scroll", apply);
   return () => {
-    viewport.removeEventListener("resize", apply2);
-    viewport.removeEventListener("scroll", apply2);
+    viewport.removeEventListener("resize", apply);
+    viewport.removeEventListener("scroll", apply);
   };
 }
 
@@ -36723,7 +36777,7 @@ function handleShareTarget() {
     return;
   }
   const combined = [title, text2, url].filter(Boolean).join("\n").trim();
-  const apply2 = () => {
+  const apply = () => {
     const el = document.getElementById("chat-input");
     if (!el) return false;
     el.value = (el.value ? el.value + "\n\n" : "") + combined;
@@ -36731,10 +36785,10 @@ function handleShareTarget() {
     el.focus();
     return true;
   };
-  if (!apply2()) {
+  if (!apply()) {
     let tries = 0;
     const t4 = window.setInterval(() => {
-      if (apply2() || ++tries > 50) window.clearInterval(t4);
+      if (apply() || ++tries > 50) window.clearInterval(t4);
     }, 100);
   }
   const nextPath = onShareRoute ? "/ui/chat/" : window.location.pathname;

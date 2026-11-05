@@ -75,6 +75,7 @@ import { attachDensityReflow } from '../density-reflow';
 import { attachScrollEdges } from '../scroll-edges';
 import { revealLatestActivity } from '../activity-trace-scroll';
 import { showToast } from './Toast';
+import { attachReadTracking } from '../read-state';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingApprovalDto, PendingWebSend, Thread, TranscriptRow, TurnUsage } from '../types';
 
@@ -1331,6 +1332,11 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
   const scrollTick = scrollToBottomTick.value;
   const activeThreadId = threadId.value;
   const responseId = completedResponse.value;
+  const readCursor = conversationState.value?.conversation.readCursor;
+  const readGroup = groupId.value;
+  const readChannel = channelType.value;
+  const readMessagingGroup = messagingGroupId.value;
+  const readyForRead = chatReady.value;
   const atBottomRef = useRef<boolean>(true);
   const followingBottomRef = useRef<boolean>(true);
   const responseReadingTopRef = useRef<number | null>(null);
@@ -1379,6 +1385,14 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
   const onLogScroll = () => {
     if (!densityReflowRef.current) followingBottomRef.current = measureScroll();
   };
+
+  useEffect(() => {
+    if (!ref.current || !readCursor || !readGroup || !activeThreadId || !readyForRead) return;
+    return attachReadTracking(ref.current, {
+      groupId: readGroup, threadId: activeThreadId, channelType: readChannel,
+      messagingGroupId: readMessagingGroup, cursor: readCursor,
+    });
+  }, [readCursor?.key, readCursor?.sessionId, readGroup, activeThreadId, readChannel, readMessagingGroup, readyForRead]);
 
   useLayoutEffect(() => {
     prevMsgCountRef.current = 0;

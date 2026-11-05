@@ -1746,6 +1746,33 @@ nav.tab-bar-strip.group-strip {
   outline: 2px solid var(--warning-border);
   outline-offset: 3px;
 }
+.is-unread .title-text,
+.is-unread .tab-item-label,
+.is-unread .tab-bar-dropdown-text,
+.is-unread .mobile-dialog-item-label {
+  font-weight: 700;
+}
+.is-unread .title-text::after,
+.is-unread .tab-item-label::after,
+.is-unread .tab-bar-dropdown-text::after,
+.is-unread .mobile-dialog-item-label::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--activity-status-running);
+  vertical-align: middle;
+}
+.unread-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* src/components/UserMenu.css */
 .user-menu {

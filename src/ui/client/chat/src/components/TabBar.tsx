@@ -155,7 +155,7 @@ export function TabBar(props: TabBarProps): JSX.Element {
         {activeItem ? tabBadge(activeItem) : null}
         <button
           type="button"
-          class="tab-bar-dropdown"
+          class={`tab-bar-dropdown${activeItem?.className ? ` ${activeItem.className}` : ''}`}
           aria-label={ariaLabel}
           aria-haspopup="dialog"
           aria-expanded={sheetOpen}

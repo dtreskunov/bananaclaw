@@ -28,7 +28,6 @@ import { applyTurnState } from './stop-turn';
 import { applyToolStopState, resetToolStops } from './stop-tool';
 import { confirmCancelledInput } from './pending-cancel';
 import { playCompletionChime, playProgressTick } from './sound';
-import { maybeNotify } from './notify';
 import { adoptSubmissionTraces, inheritActivityPanels, resetActivityTraceView } from './activity-trace-state';
 import { completedResponseId } from './turn-completion';
 import type { ChatMessage, Thread, TranscriptRow } from './types';
@@ -215,9 +214,5 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
       JSON.stringify(turn.activity) !== JSON.stringify(oldTurns.get(turn.id)?.activity)
     )
       playProgressTick();
-  }
-  const oldOutputs = new Set(previous.conversation.messages.filter((m) => m.direction === 'out').map((m) => m.id));
-  for (const message of view.messages) {
-    if (message.direction === 'out' && !oldOutputs.has(message.id)) maybeNotify(message.text, message.files ?? []);
   }
 }

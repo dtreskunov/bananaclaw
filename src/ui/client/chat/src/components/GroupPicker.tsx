@@ -62,9 +62,22 @@ function chipParts(g: Group, elevated: boolean): ChipParts {
 
 function tipFor(g: Group, isAdminOnly: boolean): string {
   const parts: string[] = [g.name];
+  const unread = agentActivity.value.find(activity => activity.id === g.id)?.unreadThreadCount;
+  if (unread) parts.push(`${unread} unread ${unread === 1 ? 'conversation' : 'conversations'}`);
   if (isAdminOnly) parts.push('Visible to you as admin');
   if (g.lastActivityAt) parts.push(fmtAbsolute(g.lastActivityAt));
   return parts.join(' \u00B7 ');
+}
+
+function groupItem(g: Group, elevated: boolean): TabItem {
+  const { parts, isAdminOnly } = chipParts(g, elevated);
+  const unread = agentActivity.value.find(activity => activity.id === g.id)?.unreadThreadCount;
+  return {
+    id: g.id, label: g.name, ...activityBadge(g),
+    sublabel: parts.join(' \u00B7 ') || undefined, reserveSublabel: true,
+    title: tipFor(g, isAdminOnly),
+    className: [isAdminOnly ? 'is-admin-visible' : '', unread ? 'is-unread' : ''].filter(Boolean).join(' ') || undefined,
+  };
 }
 
 export function GroupStrip(): JSX.Element | null {
@@ -77,19 +90,7 @@ export function GroupStrip(): JSX.Element | null {
   const memberGroups = all.filter((g) => !isElevatedOnly(g));
   const active = all.find((g) => g.id === groupId.value);
 
-  const items: TabItem[] = memberGroups.map((g) => {
-    const { parts, isAdminOnly } = chipParts(g, elevated);
-    const sublabel = parts.join(' \u00B7 ');
-    return {
-      id: g.id,
-      label: g.name,
-      ...activityBadge(g),
-      sublabel: sublabel || undefined,
-      reserveSublabel: true,
-      title: tipFor(g, isAdminOnly),
-      className: isAdminOnly ? 'is-admin-visible' : undefined,
-    };
-  });
+  const items = memberGroups.map(g => groupItem(g, elevated));
 
   const extras: TabExtra[] = [];
   if (elevated) {
@@ -114,7 +115,7 @@ export function GroupStrip(): JSX.Element | null {
       ariaLabel="Agent groups"
       mobileSheetTitle="Agent groups"
       mobileFallbackLabel={active?.name}
-      mobileFallbackItem={active ? { id: active.id, label: active.name, ...activityBadge(active) } : undefined}
+      mobileFallbackItem={active ? groupItem(active, elevated) : undefined}
       activeId={active?.id ?? null}
       items={items}
       onSelect={pick}
@@ -160,19 +161,13 @@ export function GroupPickerModal() {
       <MobileDialogList>
         {visible.map((g) => {
           const isActive = g.id === groupId.value;
-          const { parts, isAdminOnly } = chipParts(g, elevated);
-          const subtitle = parts.join(' \u00B7 ');
-          const activity = activityBadge(g);
+          const item = groupItem(g, elevated);
           return (
             <MobileDialogItem
               key={g.id}
-              label={g.name}
-              {...activity}
-              onBadgeClick={activity.onBadgeClick ? () => { close(); activity.onBadgeClick?.(); } : undefined}
-              sublabel={subtitle || undefined}
+              {...item}
+              onBadgeClick={item.onBadgeClick ? () => { close(); item.onBadgeClick?.(); } : undefined}
               active={isActive}
-              className={isAdminOnly ? 'is-admin-visible' : undefined}
-              title={tipFor(g, isAdminOnly)}
               onClick={() => pick(g.id)}
             />
           );

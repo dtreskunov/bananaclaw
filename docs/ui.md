@@ -91,6 +91,42 @@ same middle-dot separator as thread message counts. The count includes every
 viewer-visible conversation row, including channel DMs; zero and unavailable
 counts are omitted. Counts update through the existing keyed agent metadata
 patches and use the thread rail's authorization and deduplication rules.
+
+### Unread conversations
+
+Unread is per user and orthogonal to execution/waiting. Bold names and a small
+trailing dot identify unread threads and agent groups across desktop, dropdown
+and picker presentations. Agent summaries contain `unreadThreadCount`, counting
+visible conversations rather than messages.
+
+Unread includes newly published messages/files and routed question/approval
+cards. Own inputs, edits, reactions and trace/runtime updates do not count.
+Reading a question does not answer it or clear waiting. Approvals remain
+visible only to authorized approvers; DM counterparty and thread-owner checks
+apply to both unread metadata and read acknowledgements.
+
+The central publication index stores identity/routing and a stable opaque
+cursor, not transcript bodies or a UI event log. Replays and repairs preserve
+positions; deleted content is inactive, and a response held behind an unsettled
+turn gets its position only when it becomes visible. No timestamps, source
+sequence numbers or WebSocket revisions are used as cross-source read cursors.
+
+`Conversation.readCursor` covers only actual projected messages/cards. A
+foreground, focused, visible transcript acknowledges that cursor after reaching
+the bottom, using `POST /api/groups/:group/chat/:thread/read` with
+`{ sessionId, key }` and the normal optional channel/messaging-group context.
+The host validates current access and cursor scope and advances read watermarks
+monotonically. A concurrent newer publication remains unread. Failed
+acknowledgements retain unread state and report an error; refocus/scroll retries.
+
+Read notices invalidate only the same user's sockets, including other devices.
+The PWA worker is the single app-badge writer, serializing authenticated
+`GET /api/unread` refreshes from pushes and foreground metadata updates. App
+focus, notification dismissal/delivery and muting notifications do not mark
+conversations read.
+
+Existing history is read at rollout. New users receive a baseline at account
+creation. Subsequent summary repairs do not reset either baseline or watermarks.
 Thread delete buttons retain their
 larger 32px target, vertical centering, hover/focus reveal and touch visibility.
 
@@ -1417,13 +1453,13 @@ existing objects. Navigation and reconnect snapshots still include full traces.
 
 Global approvals, oldest-first attention and `agentActivity` are always subscribed,
 even with no group selected. Agent activity is an ID-keyed collection of
-`{ id, activity: 'idle' | 'running', waiting?, activityStale?, threadCount? }` for accessible groups, independent of the
+`{ id, activity: 'idle' | 'running', waiting?, activityStale?, threadCount?, unreadThreadCount? }` for accessible groups, independent of the
 selected conversation. Waiting comes from the same authorized attention targets
 used by navigation. Running uses only visible active route candidates from
-live state and the central summary projection, reusing selected summaries;
-thread counts read the same central summaries as the rail, reusing the selected
-group's list. Execution still examines only active route candidates. No source history,
-new DB table, per-agent socket, timer or persisted aggregate counter is involved.
+live state and the central summary projection. Thread counts, activity and
+unread reuse one authorized summary list per group, including the selected
+group's existing list. No source history is scanned for metadata, and there is
+no per-agent socket, polling timer or persisted aggregate counter.
 The initial `global` metadata snapshot includes a required `group`
 field, null with no selected group or
 after access is revoked; otherwise it contains the authorized thread list and
@@ -1569,6 +1605,30 @@ the server store; HTTP acceptance does not prove a command took effect.
   no source message, workflow or turn data is converted. Do not restore an old
   database over newly accepted messages. Before re-upgrading after writes by an
   older host, run the offline rebuild again.
+
+### Durable unread upgrade
+
+- **Detect:** protocol-14 clients have no durable unread state and clear local
+  app badges on focus; `thread_summary_meta.unread_ready=0` means publication
+  bootstrap has not completed.
+- **Why:** unread needs per-user watermarks and stable publication identity,
+  independent of activity, notification delivery and browser lifetime.
+- **Fix:** stop the host and back up the central and host-owned session
+  databases. With matching new code, run
+  `pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped`.
+  Migration 051 creates the publication index, read watermarks and private user
+  baselines; the explicit rebuild seeds existing content as read once. Build
+  and restart the host/chat assets and reload protocol-15 clients, activating
+  the updated service worker. No runner image or credential changes are needed.
+- **Verify:** unread survives restart and differs between users; reading in one
+  tab/device clears the same user's other tabs, not another user's state.
+  Hidden/unfocused/scrolled-up views never auto-read. A new item arriving during
+  acknowledgement remains unread. Test messages/files/cards, permissions,
+  delayed response publication, small metadata patches and app-badge counts.
+- **Rollback:** restore the previous matching host/UI and restart. Older code
+  ignores the added read tables/columns. Do not restore old databases over new
+  messages. Rebuild projections before re-upgrading; existing watermarks and
+  baselines are preserved.
 
 ### Queued activity projection upgrade
 

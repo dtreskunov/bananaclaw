@@ -115,7 +115,7 @@ export function ThreadRow({ t }: { t: Thread }) {
   const branchCount = t.forkChildren?.length ?? 0;
   return (
     <div
-      class={'thread' + (active ? ' active' : '') + (origin ? ' branch' : '')}
+      class={'thread' + (active ? ' active' : '') + (origin ? ' branch' : '') + (t.unread ? ' is-unread' : '')}
       data-id={t.threadId}
       onClick={onOpen}
     >
@@ -130,7 +130,7 @@ export function ThreadRow({ t }: { t: Thread }) {
             >{'\u2442'}</span>
           : null}
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
-        <span class="title-text">{t.title}</span>
+        <span class="title-text">{t.unread ? <span class="unread-label">Unread. </span> : null}{t.title}</span>
         {branchCount > 0
           ? <span
               class="fork-count"
@@ -171,11 +171,11 @@ export function DmRow({ t }: { t: Thread }) {
     drawerOpen.threads.value = false;
   };
   return (
-    <div class={'thread dm' + (active ? ' active' : '')} data-id={t.threadId} onClick={onOpen}>
+    <div class={'thread dm' + (active ? ' active' : '') + (t.unread ? ' is-unread' : '')} data-id={t.threadId} onClick={onOpen}>
       <div class="title">
         <ThreadAttention thread={t} />
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
-        <span class="title-text">{meta.label}</span>
+        <span class="title-text">{t.unread ? <span class="unread-label">Unread. </span> : null}{meta.label}</span>
       </div>
       <div class="meta">
         <span>

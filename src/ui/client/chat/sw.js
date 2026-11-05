@@ -20,6 +20,25 @@
 const SCOPE_PATH = '/ui/chat/';
 const NOTIF_DETAILS_URL = '/ui/chat/api/push/notification';
 const SUBSCRIBE_URL = '/ui/chat/api/push/subscribe';
+let badgeQueue = Promise.resolve();
+
+function refreshUnreadBadge() {
+  badgeQueue = badgeQueue.then(async () => {
+    if (!self.navigator || typeof self.navigator.setAppBadge !== 'function') return;
+    const response = await fetch('/ui/chat/api/unread', { credentials: 'include', cache: 'no-store' });
+    if (response.status === 401) {
+      await self.navigator.clearAppBadge();
+      return;
+    }
+    if (!response.ok) throw new Error(`Unread badge request failed: ${response.status}`);
+    const { unreadThreadCount } = await response.json();
+    if (!Number.isSafeInteger(unreadThreadCount) || unreadThreadCount < 0)
+      throw new Error('Invalid unread badge count');
+    if (unreadThreadCount) await self.navigator.setAppBadge(unreadThreadCount);
+    else await self.navigator.clearAppBadge();
+  }).catch(error => console.warn('Unread badge refresh failed', error));
+  return badgeQueue;
+}
 
 const CACHE_VERSION = '__CACHE_VERSION__';
 const SHELL_CACHE = 'nanoclaw-shell-' + CACHE_VERSION;
@@ -59,11 +78,13 @@ self.addEventListener('activate', (event) => {
           .map((k) => caches.delete(k)),
       );
       await self.clients.claim();
+      await refreshUnreadBadge();
     })(),
   );
 });
 
 self.addEventListener('message', (event) => {
+  if (event.data?.type === 'READ_STATE_CHANGED') event.waitUntil(refreshUnreadBadge());
   // Triggered by the client when the user accepts the "Reload to update" toast.
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
@@ -226,13 +247,7 @@ async function handlePush(event) {
       { action: 'dismiss', title: 'Dismiss' },
     ],
   });
-  try {
-    if (self.navigator && typeof self.navigator.setAppBadge === 'function') {
-      await self.navigator.setAppBadge();
-    }
-  } catch (_e) {
-    /* Badging API is optional */
-  }
+  await refreshUnreadBadge();
 }
 
 function shouldRenotify(deliveryOrigin, hasExistingNotification) {

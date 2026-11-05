@@ -36,7 +36,7 @@ import {
   type Check,
 } from './validation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 14;
+export const CONVERSATION_PROTOCOL_VERSION = 15;
 export type EntityChanges<T> = CollectionPatch<T>;
 export type ConversationTurnFields = Omit<ConversationTurn, 'activity'>;
 export interface ConversationActivityPatch {

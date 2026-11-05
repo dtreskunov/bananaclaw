@@ -38,6 +38,17 @@ function waitingGroup() {
 }
 
 describe('agent activity status', () => {
+  it('shares unread styling and descriptions across tabs and the admin-only mobile fallback', () => {
+    waitingGroup();
+    agentActivity.value = [{ id: 'g', activity: 'idle', waiting: true, unreadThreadCount: 2 }];
+    const item = GroupStrip()!.props.items[0];
+    expect(item.className).toContain('is-unread');
+    expect(item.title).toContain('2 unread conversations');
+    expect(item.badge.props.status.waiting).toBe(true);
+    groups.value = [{ ...groups.value[0], elevatedOnly: true }];
+    groupId.value = 'g';
+    expect(GroupStrip()!.props.mobileFallbackItem.className).toContain('is-unread');
+  });
   it('joins thread counts to last activity with the same dot separator as thread metadata', () => {
     waitingGroup();
     groups.value = [{ id: 'g', name: 'Group', isAdmin: true, lastActivityAt: '2026-11-05T00:00:00Z' }];
