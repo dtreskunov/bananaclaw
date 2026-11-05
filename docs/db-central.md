@@ -4,6 +4,27 @@ Complete reference for `data/v2.db`, the host-owned admin-plane database. Start 
 
 Access layer: `src/db/`. Authoritative schema reference: `src/db/schema.ts` (comments only — actual creation runs via migrations in `src/db/migrations/`).
 
+### Integrity upgrades
+
+Migration 052 makes single-column text primary keys explicitly non-null,
+enforces role values/global owner scope, and adds null-aware uniqueness for
+global roles, primary identities and active routed sessions. It preserves rowids,
+indexes, triggers and existing data. Nullable global scope remains supported.
+Primary-identity replacement is transactional.
+
+The migration aborts atomically on incompatible existing rows: it never
+deduplicates roles, chooses a session, or deletes data automatically. Back up
+the central DB with SQLite's backup API before upgrading. If it refuses the
+upgrade, stop the host and inspect null keys, duplicate global roles, duplicate
+primary identities and active session routes on the backup. Resolve those
+records explicitly, retry the upgrade, and verify `PRAGMA foreign_key_check`.
+For rollback, stop the host and restore the pre-upgrade backup before starting
+the previous revision.
+
+Native provider connections also explicitly enforce foreign keys and refuse
+existing orphaned messages. Repair native state only while its runner is
+stopped; do not remove orphaned messages without deciding how to recover them.
+
 ---
 
 ## 1. Tables

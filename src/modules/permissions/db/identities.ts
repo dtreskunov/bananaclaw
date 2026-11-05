@@ -57,12 +57,18 @@ export function insertIdentity(args: {
   primary?: boolean;
   metadata?: Record<string, unknown> | null;
 }): void {
-  getDb()
-    .prepare(
+  const db = getDb();
+  transaction(db, () => {
+    if (args.primary) {
+      db.prepare('UPDATE identities SET primary_for_channel=0 WHERE user_id=? AND channel=?').run(
+        args.userId,
+        args.channel,
+      );
+    }
+    db.prepare(
       `INSERT INTO identities (user_id, channel, handle, verified_at, primary_for_channel, metadata_json)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+    ).run(
       args.userId,
       args.channel,
       args.handle,
@@ -70,6 +76,7 @@ export function insertIdentity(args: {
       (args.primary ?? false) ? 1 : 0,
       args.metadata ? JSON.stringify(args.metadata) : null,
     );
+  })();
   recordHostChange({ kind: 'access' });
 }
 

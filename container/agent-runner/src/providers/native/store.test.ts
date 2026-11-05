@@ -20,6 +20,11 @@ afterEach(() => {
 });
 
 describe('NativeStore', () => {
+  it('rejects messages whose conversation does not exist', () => {
+    expect(() => store.append('missing', [{ role: 'user', content: 'orphan' }])).toThrow('FOREIGN KEY');
+    expect(store.messages('missing')).toEqual([]);
+  });
+
   it('marks only explicitly finished turns, persists them, and keeps fork/rollback boundaries exact', () => {
     const conversation = store.createConversation();
     const first = store.append(conversation, [{ role: 'user', content: 'first input' }]);

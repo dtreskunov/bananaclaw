@@ -34,6 +34,7 @@ export class NativeStore {
     this.db = new Database(filename, { create: true });
     this.db.exec('PRAGMA journal_mode = DELETE');
     this.db.exec('PRAGMA busy_timeout = 5000');
+    this.db.exec('PRAGMA foreign_keys = ON');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
@@ -81,6 +82,9 @@ export class NativeStore {
       );
     `);
     try {
+      if (this.db.query('PRAGMA foreign_key_check').get()) {
+        throw new Error('Native state has foreign-key violations; repair it offline before reopening');
+      }
       for (const row of this.db.query<{ id: string; content_json: string }, []>(
         'SELECT id, content_json FROM tool_results',
       ).iterate()) this.materializeResult(row.id, row.content_json);
