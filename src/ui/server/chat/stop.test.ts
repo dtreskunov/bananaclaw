@@ -127,6 +127,7 @@ function connectConversation(
         subscriptionId: 1,
         groupId: 'agent',
         conversation,
+        globalCursor: null,
       }),
     ),
     false,

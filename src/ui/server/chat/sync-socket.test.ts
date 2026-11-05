@@ -17,6 +17,8 @@ import {
   SYNC_RELOAD_CLOSE_CODE,
   type SyncFrame,
   type SyncConversation,
+  type GlobalProjection,
+  reduceGlobal,
 } from '../../shared/sync.js';
 import { initSessionFolder } from '../../../session-manager.js';
 import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
@@ -38,6 +40,9 @@ let server: WebSocketServer;
 let token: string;
 const clients: WebSocket[] = [];
 const frames: SyncFrame[] = [];
+let globalState: GlobalProjection | null = null;
+const globalView = () => globalState?.data;
+const globalCursor = () => (globalState ? { streamId: globalState.streamId, revision: globalState.revision } : null);
 const listThreads = vi.mocked(listThreadsForViewer);
 const now = () => new Date().toISOString();
 const conversation = { threadId: 'thread', channelType: 'web', messagingGroupId: 'mg' };
@@ -110,6 +115,7 @@ beforeEach(async () => {
   token = createSession('viewer', 60_000).token;
   initSessionFolder('g', 'session');
   frames.length = 0;
+  globalState = null;
   listThreads.mockClear();
   server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   server.on('connection', (socket, req) => {
@@ -138,7 +144,11 @@ async function connect(
     headers: { Cookie: `${COOKIE_NAME}=${token}` },
   });
   clients.push(client);
-  client.on('message', (raw) => frames.push(parseSyncFrame(JSON.parse(raw.toString()))));
+  client.on('message', (raw) => {
+    const frame = parseSyncFrame(JSON.parse(raw.toString()));
+    frames.push(frame);
+    if (frame.global) globalState = reduceGlobal(globalState, frame.global, frame.groupId);
+  });
   await once(client, 'open');
   client.send(
     JSON.stringify({
@@ -147,6 +157,7 @@ async function connect(
       subscriptionId: 1,
       groupId,
       conversation,
+      globalCursor: null,
     }),
   );
   if (waitForSnapshot) await vi.waitFor(() => expect(frames.some((frame) => frame.global)).toBe(true));
@@ -165,9 +176,14 @@ describe('unified sync WebSocket integration', () => {
         subscriptionId: 2,
         groupId: 'g',
         conversation,
+        globalCursor: globalCursor(),
       }),
     );
     await vi.waitFor(() => expect(frames.some((frame) => frame.subscriptionId === 2 && frame.global)).toBe(true));
+    expect(frames.find((frame) => frame.subscriptionId === 2 && frame.global)?.global).toMatchObject({
+      kind: 'update',
+      changes: {},
+    });
     expect(frames.filter((frame) => frame.conversation)).toHaveLength(1);
     trace();
     await vi.waitFor(() => expect(conversationView()?.turns[0].activity).toHaveLength(1));
@@ -237,6 +253,7 @@ describe('unified sync WebSocket integration', () => {
         subscriptionId: 2,
         groupId: 'g',
         conversation: { ...conversation, threadId: 'other-thread' },
+        globalCursor: globalCursor(),
       }),
     );
     await vi.waitFor(() => expect(frames.some((frame) => frame.subscriptionId === 2 && frame.global)).toBe(true));
@@ -255,15 +272,15 @@ describe('unified sync WebSocket integration', () => {
     revokeRole('viewer', 'admin', 'g');
     removeMember('viewer', 'g');
     await vi.waitFor(() => expect(frames.some((frame) => frame.conversation === null)).toBe(true));
-    await vi.waitFor(() => expect(frames.at(-1)?.global?.group).toBeNull());
+    await vi.waitFor(() => expect(globalView()?.group).toBeNull());
     expect(client.readyState).toBe(WebSocket.OPEN);
-    expect(frames.at(-1)?.global?.approvals).toEqual([]);
+    expect(globalView()?.approvals).toEqual([]);
   });
 
   it('does not expose a forged non-web messaging context despite group access', async () => {
     const client = await connect('g', { ...conversation, channelType: 'telegram' });
     expect(frames.find((frame) => frame.conversation !== undefined)?.conversation).toBeNull();
-    expect(frames.find((frame) => frame.global)?.global?.group).not.toBeNull();
+    expect(globalView()?.group).not.toBeNull();
     expect(client.readyState).toBe(WebSocket.OPEN);
   });
 
@@ -320,7 +337,7 @@ describe('unified sync WebSocket integration', () => {
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     await vi.waitFor(() =>
-      expect(frames.at(-1)?.global!.attention).toEqual([
+      expect(globalView()?.attention).toEqual([
         {
           id: 'off-screen-question',
           origin: { agentGroupId: 'other', threadId: 'other-thread', channelType: 'web', messagingGroupId: 'other-mg' },
@@ -341,7 +358,12 @@ describe('unified sync WebSocket integration', () => {
       created_at: now(),
       input: { action: 'test', title: 'Review', payload: {}, options: [] },
     });
-    await vi.waitFor(() => expect(frames.at(-1)?.global!.approvals.map((row) => row.id)).toEqual(['off-screen']));
+    await vi.waitFor(() => expect(globalView()?.approvals.map((row) => row.id)).toEqual(['off-screen']));
+    const last = frames.at(-1)?.global;
+    expect(last?.kind).toBe('update');
+    if (last?.kind !== 'update') throw new Error('Expected metadata patch');
+    expect(last.changes.group).toBeUndefined();
+    expect(last.changes.approvals?.upserts.map((row) => row.id)).toEqual(['off-screen']);
     expect(listThreads).toHaveBeenCalledOnce();
   });
 
@@ -458,14 +480,14 @@ describe('unified sync WebSocket integration', () => {
       created_at: now(),
       input: { action: 'test', title: 'Review', payload: {}, options: [] },
     });
-    await vi.waitFor(() => expect(frames.at(-1)?.global!.approvals.map((row) => row.id)).toEqual(['visible']));
+    await vi.waitFor(() => expect(globalView()?.approvals.map((row) => row.id)).toEqual(['visible']));
     updateApprovalStatus('visible', 'cancelled');
-    await vi.waitFor(() => expect(frames.at(-1)?.global!.approvals).toEqual([]));
+    await vi.waitFor(() => expect(globalView()?.approvals).toEqual([]));
     expect(listThreads).not.toHaveBeenCalled();
   });
 
   it('enforces legacy deadlines on refresh without scheduling a workflow transition', async () => {
-    const expiresAt = new Date(Date.now() + 700).toISOString();
+    const expiresAt = new Date(Date.now() + 2000).toISOString();
     createInteraction({
       id: 'q',
       kind: 'question',
@@ -480,8 +502,8 @@ describe('unified sync WebSocket integration', () => {
       input: { question: 'Continue?', responseMode: 'text', options: [] },
     });
     const client = await connect();
-    expect(frames[0].global!.attention.map((row) => row.id)).toEqual(['q']);
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(globalView()!.attention.map((row) => row.id)).toEqual(['q']);
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, Date.parse(expiresAt) - Date.now() + 50)));
     expect(frames).toHaveLength(1);
     client.send(
       JSON.stringify({
@@ -490,9 +512,10 @@ describe('unified sync WebSocket integration', () => {
         subscriptionId: 2,
         groupId: null,
         conversation: null,
+        globalCursor: globalCursor(),
       }),
     );
-    await vi.waitFor(() => expect(frames.at(-1)?.global!.attention).toEqual([]), { timeout: 2000 });
+    await vi.waitFor(() => expect(globalView()?.attention).toEqual([]), { timeout: 2000 });
     expect(getDb().prepare("SELECT status FROM interactions WHERE id='q'").get()).toEqual({ status: 'pending' });
   });
 
@@ -501,11 +524,19 @@ describe('unified sync WebSocket integration', () => {
     const scans = listThreads.mock.calls.length;
     ensureContainerConfig('g');
     updateContainerConfigScalars('g', { voice_input_enabled: 0 });
-    await vi.waitFor(() => expect(frames.at(-1)?.global!.group?.voiceInput.reason).toBe('Voice input is disabled.'));
+    await vi.waitFor(() => expect(globalView()?.group?.voiceInput.reason).toBe('Voice input is disabled.'));
+    expect(frames.at(-1)?.global).toMatchObject({
+      kind: 'update',
+      changes: { group: { kind: 'update', voiceInput: { reason: 'Voice input is disabled.' } } },
+    });
+    const voicePatch = frames.at(-1)?.global;
+    if (voicePatch?.kind !== 'update' || voicePatch.changes.group?.kind !== 'update')
+      throw new Error('Expected voice patch');
+    expect(voicePatch.changes.group.threads).toBeUndefined();
     expect(listThreads).toHaveBeenCalledTimes(scans);
     getDb().prepare("DELETE FROM user_roles WHERE user_id='viewer'").run();
     removeMember('viewer', 'g');
-    await vi.waitFor(() => expect(frames.at(-1)?.global!.group).toBeNull());
+    await vi.waitFor(() => expect(globalView()?.group).toBeNull());
   });
 
   it('closes a revoked UI session without waiting for another projection mutation', async () => {
@@ -542,6 +573,6 @@ describe('unified sync WebSocket integration', () => {
     finish([]);
     await connecting;
     expect(frames).toHaveLength(1);
-    expect(frames[0].global!.group).toBeNull();
+    expect(globalView()!.group).toBeNull();
   });
 });

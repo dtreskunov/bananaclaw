@@ -148,7 +148,7 @@ describe('conversation protocol', () => {
     expect(() =>
       reduceConversation(snapshot, {
         ...update,
-        changes: { ...update.changes, messages: { ...update.changes.messages, order: ['missing'] } },
+        changes: { ...update.changes, messages: { ...update.changes.messages!, order: ['missing'] } },
       }),
     ).toThrow('invalid_frame');
     expect(snapshot.conversation).toEqual(empty);
@@ -169,7 +169,14 @@ describe('conversation protocol', () => {
       expect(() =>
         reduceConversation(snapshot, {
           ...update,
-          changes: { ...update.changes, timeline },
+          changes: {
+            ...update.changes,
+            timeline: {
+              upserts: timeline,
+              removeIds: [],
+              order: timeline.map((row) => JSON.stringify(['message', row.messageId])),
+            },
+          },
         }),
       ).toThrow('invalid_frame');
       expect(snapshot.conversation).toEqual(empty);

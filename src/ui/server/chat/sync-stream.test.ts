@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SyncFrame, GlobalSyncState } from '../../shared/sync.js';
 import { sendSyncFrame, startSyncStream, type SyncStreamOptions } from './sync-stream.js';
 import { SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
+import { reduceGlobal, type GlobalProjection } from '../../shared/sync.js';
+import { testGlobalSnapshot } from '../../shared/sync-test-fixtures.js';
 
 afterEach(() => vi.useRealTimers());
 
 function fixture(overrides: Partial<SyncStreamOptions> = {}) {
   vi.useFakeTimers();
   const frames: SyncFrame[] = [];
+  let state: GlobalProjection | null = null;
   let invalidate: (groupId?: string, refreshThreads?: boolean) => void = () => {};
   const unsubscribe = vi.fn();
   const read = vi.fn(
@@ -28,6 +31,7 @@ function fixture(overrides: Partial<SyncStreamOptions> = {}) {
     },
     send: (frame) => {
       frames.push(frame);
+      if (frame.global) state = reduceGlobal(state, frame.global, frame.groupId);
     },
     fail,
     ...overrides,
@@ -39,6 +43,8 @@ function fixture(overrides: Partial<SyncStreamOptions> = {}) {
     unsubscribe,
     read,
     fail,
+    state: () => state,
+    cursor: () => (state ? { streamId: state.streamId, revision: state.revision } : null),
   };
 }
 
@@ -51,7 +57,7 @@ describe('global synchronization stream', () => {
         protocolVersion: SYNC_PROTOCOL_VERSION,
         subscriptionId: 1,
         groupId: null,
-        global: { approvals: [], attention: [], group: null },
+        global: testGlobalSnapshot({ approvals: [], attention: [], group: null }),
       }),
     ).toThrow('buffer limit');
     expect(socket.close).toHaveBeenCalledWith(1013, expect.any(String));
@@ -81,10 +87,54 @@ describe('global synchronization stream', () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(f.read).toHaveBeenCalledTimes(2);
     expect(f.frames).toHaveLength(1);
-    f.stream.subscribe(2, 'g');
+    f.stream.subscribe(2, 'g', true, f.cursor());
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames).toHaveLength(2);
-    expect(f.frames[1]).toMatchObject({ subscriptionId: 2 });
+    expect(f.frames[1]).toMatchObject({
+      subscriptionId: 2,
+      global: { kind: 'update', baseRevision: 0, revision: 1, changes: {} },
+    });
+    expect(JSON.stringify(f.frames[1]).length).toBeLessThan(256);
+    f.stream.stop();
+  });
+
+  it('reuses global state across group navigation and replaces only the group slice', async () => {
+    const f = fixture();
+    f.stream.subscribe(1, 'old');
+    await vi.advanceTimersByTimeAsync(100);
+    const cursor = f.cursor();
+    f.stream.subscribe(2, 'new', true, cursor);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.frames[1].global).toMatchObject({
+      kind: 'update',
+      streamId: cursor?.streamId,
+      changes: { group: { kind: 'replace', value: null } },
+    });
+    if (f.frames[1].global?.kind !== 'update') throw new Error('Expected metadata update');
+    expect(JSON.parse(JSON.stringify(f.frames[1].global.changes))).toEqual({ group: { kind: 'replace', value: null } });
+    expect(f.state()?.groupId).toBe('new');
+    f.stream.stop();
+  });
+
+  it('resnapshots when navigation reports a cursor that missed an already published patch', async () => {
+    const f = fixture();
+    f.stream.subscribe(1, 'old');
+    await vi.advanceTimersByTimeAsync(100);
+    const stale = f.cursor();
+    f.read.mockResolvedValue({
+      approvals: [],
+      group: null,
+      attention: [
+        { id: 'q', origin: { agentGroupId: 'old', threadId: 't', channelType: 'web', messagingGroupId: 'mg' } },
+      ],
+    });
+    f.invalidate();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.frames[1].global?.kind).toBe('update');
+    f.stream.subscribe(2, 'new', true, stale);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.frames[2].global).toMatchObject({ kind: 'snapshot', revision: 0 });
+    expect(f.frames[2].global?.streamId).not.toBe(stale?.streamId);
     f.stream.stop();
   });
 
@@ -208,7 +258,7 @@ describe('global synchronization stream', () => {
     try {
       await vi.advanceTimersByTimeAsync(250);
       expect(f.frames).toHaveLength(2);
-      expect(f.frames[1].global?.attention[0].id).toBe('2');
+      expect(f.state()?.data.attention[0].id).toBe('2');
     } finally {
       clearInterval(mutations);
       f.stream.stop();

@@ -5,13 +5,15 @@ import {
   SYNC_RELOAD_CLOSE_CODE,
   type GlobalSyncState,
   type SyncConversation,
-  type SyncFrame,
+  type AppliedSyncFrame,
+  type GlobalProjection,
+  reduceGlobal,
 } from '../../../shared/sync';
 import { startReconnectCountdown } from './reconnect-countdown';
 
 export interface SyncConnectionOptions {
   socket: () => WebSocket;
-  apply: (frame: SyncFrame) => void;
+  apply: (frame: AppliedSyncFrame) => void;
   connecting: () => void;
   unavailable: (message: string) => void;
   reload: () => void;
@@ -22,6 +24,7 @@ export class SyncConnection {
   private socket: WebSocket | null = null;
   private groupId: string | null = null;
   private conversation: SyncConversation | null = null;
+  private global: GlobalProjection | null = null;
   private subscriptionId = 0;
   private attempt = 0;
   private stopped = false;
@@ -44,6 +47,7 @@ export class SyncConnection {
     this.options.connecting();
     const socket = this.options.socket();
     this.socket = socket;
+    this.global = null;
     this.connectTimer = setTimeout(() => {
       if (this.socket === socket) socket.close();
     }, 10_000);
@@ -58,12 +62,16 @@ export class SyncConnection {
         const value: unknown = JSON.parse(event.data);
         const frame = parseSyncFrame(value);
         if (frame.subscriptionId !== this.subscriptionId || frame.groupId !== this.groupId) return;
-        this.options.apply(frame);
+        const previous = this.global;
+        if (frame.global) this.global = reduceGlobal(previous, frame.global, frame.groupId);
+        const metadataChanged = this.global !== previous;
+        if (!metadataChanged && frame.conversation === undefined) return;
+        this.options.apply({ ...frame, global: metadataChanged ? this.global?.data : undefined });
         this.failure = null;
         this.attempt = 0;
-        if (this.pending && frame.global && frame.subscriptionId === this.subscriptionId) {
+        if (this.pending && metadataChanged && frame.subscriptionId === this.subscriptionId) {
           clearTimeout(this.pending.timer);
-          this.pending.resolve(frame.global);
+          this.pending.resolve(this.global!.data);
           this.pending = null;
         }
       } catch (error) {
@@ -170,6 +178,7 @@ export class SyncConnection {
         subscriptionId: this.subscriptionId,
         groupId: this.groupId,
         conversation: this.conversation,
+        globalCursor: this.global ? { streamId: this.global.streamId, revision: this.global.revision } : null,
       }),
     );
   }

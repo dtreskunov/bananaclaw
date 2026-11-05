@@ -1,5 +1,7 @@
-import type { SyncFrame, GlobalSyncState } from '../../shared/sync.js';
-import { SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
+import { randomUUID } from 'node:crypto';
+import type { SyncFrame, GlobalSyncState, GlobalProjection, GlobalFrame, ProjectionCursor } from '../../shared/sync.js';
+import { diffGlobal, SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
+import { sameValue } from '../../shared/collection-patch.js';
 
 export function sendSyncFrame(
   socket: {
@@ -29,10 +31,11 @@ export interface SyncStreamOptions {
   coalesceMs?: number;
 }
 
-/** Full authoritative snapshots; one in-flight build and one dirty bit, never a queue. */
+/** Authoritative metadata patches; one in-flight build and one dirty bit, never a queue. */
 export function startSyncStream(options: SyncStreamOptions) {
   let subscription: { id: number; groupId: string | null } | null = null;
-  let previous: string | null = null;
+  let previous: GlobalProjection | null = null;
+  let acknowledgedId: number | null = null;
   let dirty = false;
   let threadsDirty = false;
   let running = false;
@@ -73,16 +76,36 @@ export function startSyncStream(options: SyncStreamOptions) {
         schedule();
         return;
       }
-      const encoded = JSON.stringify(data);
-      if (previous !== encoded) {
+      if (
+        !previous ||
+        acknowledgedId !== current.id ||
+        previous.groupId !== current.groupId ||
+        !sameValue(previous.data, data)
+      ) {
+        const global: GlobalFrame = previous
+          ? {
+              kind: 'update',
+              streamId: previous.streamId,
+              baseRevision: previous.revision,
+              revision: previous.revision + 1,
+              changes: diffGlobal(previous, data, current.groupId),
+            }
+          : { kind: 'snapshot', streamId: randomUUID(), revision: 0, data };
         options.send({
           kind: 'sync',
           protocolVersion: SYNC_PROTOCOL_VERSION,
           subscriptionId: current.id,
           groupId: current.groupId,
-          global: data,
+          global,
         });
-        previous = encoded;
+        previous = {
+          kind: 'snapshot',
+          streamId: global.streamId,
+          revision: global.revision,
+          groupId: current.groupId,
+          data,
+        };
+        acknowledgedId = current.id;
       }
     } catch (error) {
       if (!stopped) {
@@ -97,10 +120,10 @@ export function startSyncStream(options: SyncStreamOptions) {
   unsubscribe = options.subscribe(schedule);
   return {
     stop,
-    subscribe(id: number, groupId: string | null, refreshThreads = true) {
+    subscribe(id: number, groupId: string | null, refreshThreads = true, cursor: ProjectionCursor | null = null) {
       if (stopped || (subscription && id <= subscription.id)) return;
       subscription = { id, groupId };
-      previous = null;
+      if (!previous || cursor?.streamId !== previous.streamId || cursor.revision !== previous.revision) previous = null;
       schedule(undefined, refreshThreads);
     },
   };

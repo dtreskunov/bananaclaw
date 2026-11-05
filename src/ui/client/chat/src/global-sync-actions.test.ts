@@ -9,6 +9,7 @@ import { applyTurnState } from './stop-turn';
 import { testSnapshot, testThread } from './conversation-test-fixtures';
 import { SYNC_PROTOCOL_VERSION } from '../../../shared/sync';
 import { installSyncFixture } from './sync-action-test-fixtures';
+import { testGlobalSnapshot } from '../../../shared/sync-test-fixtures';
 
 let dispose = () => {};
 afterEach(() => {
@@ -59,7 +60,7 @@ it('pushes metadata and resolves refreshes without HTTP polling or overwriting a
   const data = {
     approvals: [],
     attention: [],
-    group: { threads: [testThread()], voiceInput: { backend: 'disabled', ready: false } },
+    group: { threads: [testThread()], voiceInput: { backend: 'disabled' as const, ready: false } },
   };
   sockets[0].onmessage?.({
     data: JSON.stringify({
@@ -67,7 +68,7 @@ it('pushes metadata and resolves refreshes without HTTP polling or overwriting a
       protocolVersion: SYNC_PROTOCOL_VERSION,
       subscriptionId: subscription.subscriptionId,
       groupId: 'g',
-      global: data,
+      global: testGlobalSnapshot(data),
     }),
   });
   expect(await refreshed).toBe(true);
@@ -116,14 +117,17 @@ it('rejects an invalid conversation before applying metadata in the same envelop
     protocolVersion: SYNC_PROTOCOL_VERSION,
     subscriptionId: subscription.subscriptionId,
     groupId: 'g',
-    global: {
-      approvals: [],
-      attention: [],
-      group: {
-        threads: [testThread({ threadId: 'must-not-apply' })],
-        voiceInput: { backend: 'disabled', ready: false },
+    global: testGlobalSnapshot(
+      {
+        approvals: [],
+        attention: [],
+        group: {
+          threads: [testThread({ threadId: 'must-not-apply' })],
+          voiceInput: { backend: 'disabled', ready: false },
+        },
       },
-    },
+      'invalid-envelope',
+    ),
     conversation: {
       ...snapshot,
       conversation: {

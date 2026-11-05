@@ -50,6 +50,7 @@ it('keeps a pending output delta and its stream revision across a metadata refre
           subscriptionId,
           groupId: 'g',
           conversation: { threadId: 'thread', channelType: 'web', messagingGroupId: 'mg' },
+          globalCursor: null,
         }),
       ),
       false,
@@ -73,7 +74,10 @@ it('keeps a pending output delta and its stream revision across a metadata refre
       subscriptionId: 2,
       conversation: { streamId: initial.streamId, baseRevision: 0, revision: 1 },
     });
-    expect(frames.at(-1)).toMatchObject({ subscriptionId: 2, global: { approvals: [], attention: [], group: null } });
+    expect(frames.at(-1)).toMatchObject({
+      subscriptionId: 2,
+      global: { kind: 'snapshot', data: { approvals: [], attention: [], group: null } },
+    });
   } finally {
     ws.emit('close');
   }

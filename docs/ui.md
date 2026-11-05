@@ -1346,9 +1346,10 @@ restore the backup over newer accepted messages.
 
 The app uses one authenticated, same-origin WebSocket at `/ui/chat/api/sync/ws`
 for global metadata and the selected conversation, including non-web channels.
-Version-10 `subscribe` requests carry a monotonic `subscriptionId`, a nullable
+Version-11 `subscribe` requests carry a monotonic `subscriptionId`, a nullable
 `groupId`, and a nullable `conversation` containing `threadId`, `channelType` and
-`messagingGroupId`. Non-web contexts require a messaging group and retain the
+`messagingGroupId`. A nullable `globalCursor` carries the last applied metadata
+`streamId` and `revision`. Non-web contexts require a messaging group and retain the
 same viewer/ownership checks as HTTP reads. Web bookmarks can omit the messaging
 group with an explicit null. Navigation resubscribes without replacing the socket.
 The first conversation
@@ -1367,27 +1368,50 @@ Usage retains its accounting IDs and is displayed once per record, not once per
 response; metadata explicitly distinguishes provisional, partial, final and
 unavailable reports. Missing usage never becomes fabricated zero tokens.
 
-Global approvals and oldest-first attention are always included, even with no
-group selected, in complete `global` metadata snapshots. Their required `group`
-field is null with no selected group or
+Conversation updates are sparse. Messages, turn fields, interactions and timeline
+rows use keyed collection patches with `upserts`, `removeIds`, and `order` only
+when the key sequence changes. Timeline keys encode the row kind and its
+message/interaction ID or turn ID plus anchor. Activity patches are scoped by
+`turnId`, keyed by the displayed entry's numeric `ordinal`, and use the same
+collection reducer. Lifecycle updates replace the existing ordinal after host
+reduction; they do not append another displayed step. Ordinary turn upserts
+exclude `activity`, so settlement or usage updates cannot resend a recorded
+trace. Activity, changed timeline placements, outputs and turn fields apply
+atomically within one conversation revision. Omitted fields preserve their
+existing objects. Navigation and reconnect snapshots still include full traces.
+
+Global approvals and oldest-first attention are always subscribed, even with no
+group selected. The initial `global` metadata snapshot includes a required `group`
+field, null with no selected group or
 after access is revoked; otherwise it contains the authorized thread list and
 voice capability. Losing access explicitly clears group state.
 The upgrade requires the browser Origin to match
 `UI_BASE_URL`; configure that external URL when using a reverse proxy.
 
 Every `sync` envelope carries one protocol version, subscription ID and group ID.
-Its optional `global` field replaces metadata; its optional `conversation` field
+Its optional `global` field carries a metadata snapshot or update; its optional `conversation` field
 contains a revision-checked snapshot/update or null to clear inaccessible state.
 Omitted fields leave that projection unchanged. Activity updates use conversation
 deltas, not a separate event stream or replay log. Fields arriving together are
 validated and applied in one browser batch, not a cross-database transaction.
-The ordered socket and subscription identity are
-sufficient for full replacements; only conversation deltas need stream revisions.
-Unchanged background state
-sends nothing; an explicit refresh always acknowledges with a fresh snapshot.
-Snapshots replace metadata slices, not conversation state or client-only blank
-threads. They need no durable replay or contiguous-revision delta reduction.
-Refresh callers wait until their matching snapshot has been applied.
+Metadata has its own stream ID and contiguous revisions. Updates carry optional
+approval and attention patches and an optional group change. Group changes
+either replace the selected group on navigation/access loss or patch its
+threads and voice capability. Thread keys encode channel, messaging group and
+thread ID together. An approval change sends no threads, a voice change sends
+no thread list, and a one-thread update sends only that thread unless order
+also changes. Unchanged background state sends nothing; an explicit refresh
+acknowledges with an empty revisioned patch when nothing changed. Refresh callers
+wait until their matching metadata frame has been reduced and applied.
+
+The host retains one metadata baseline per socket, not an event history.
+Matching cursors preserve it across refresh and navigation; changing groups
+replaces only the group slice, retaining unchanged global approvals/attention.
+If a cursor missed an already published frame during navigation, the host
+sends a fresh baseline rather than an unusable patch. New connections send
+`globalCursor: null`. Revision gaps and unknown streams reconnect for authorized
+snapshots; there is no replay journal. Client-only blank threads and drafts stay
+outside the authoritative reducer.
 
 Committed mutation helpers invalidate metadata, including CLI operations,
 session-less approvals, session/fork changes, configuration and access changes.
@@ -1450,6 +1474,26 @@ the server store; HTTP acceptance does not prove a command took effect.
   while global updates remain connected; reconnect restores a fresh trace.
 - **Rollback:** redeploy the previous matching host and chat assets and reload
   tabs. Storage is unchanged; do not restore session databases or replay commands.
+
+### Incremental sync upgrade
+
+- **Detect:** version-10 clients send no `globalCursor`, interpret `global` as
+  complete metadata, and include activity arrays in conversation turn upserts.
+- **Why:** metadata and trace lifecycle changes no longer retransmit whole lists
+  or entire turn traces. Both projections use revision-checked sparse patches
+  with shared collection validation.
+- **Fix:** deploy the matching host and rebuilt chat assets together, then reload
+  browsers for protocol 11. Custom clients must apply metadata snapshots/updates,
+  send their last applied metadata cursor, and reduce per-turn activity and
+  timeline patches atomically. No DB migration, event-log table, runner rebuild
+  or credential change is required.
+- **Verify:** one activity lifecycle change sends one ordinal, an approval
+  change sends no thread list, and an unchanged refresh sends an empty metadata
+  patch without resnapshotting the conversation. Test additions/removals,
+  settlement, group navigation and reconnect with the same rendered traces.
+  Stale metadata cursors must recover with a fresh baseline, never partial state.
+- **Rollback:** redeploy the previous matching host and browser assets and
+  reload tabs. Storage is unchanged; do not restore databases or replay commands.
 
 ### Request lifetime upgrade
 

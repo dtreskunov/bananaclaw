@@ -18708,6 +18708,50 @@ function isTurnStartStep(step) {
   return step.kind === "notification" && !!step.id?.startsWith("ui:start:");
 }
 
+// ../../shared/validation.ts
+var object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var text = (value) => typeof value === "string";
+var id = (value) => text(value) && value.length > 0;
+var bool = (value) => typeof value === "boolean";
+var number = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+var integer = (value) => number(value) && Number.isSafeInteger(value);
+var position = (value) => integer(value) && Number(value) > 0;
+var optional = (check) => (value) => value === void 0 || check(value);
+var nullable = (check) => (value) => value === null || check(value);
+var array = (check) => (value) => Array.isArray(value) && value.every(check);
+var oneOf = (...values) => (value) => typeof value === "string" && values.includes(value);
+var shape = (fields) => (value) => object(value) && Object.entries(fields).every(([key, check]) => check(value[key]));
+
+// ../../shared/collection-patch.ts
+var CollectionPatchError = class extends Error {
+  constructor() {
+    super("Invalid collection patch (invalid_frame)");
+  }
+};
+var entityId = (entity) => entity.id;
+var collectionPatchCheck = (entity, key) => shape({ upserts: array(entity), removeIds: array(key), order: optional(array(key)) });
+function uniqueKeys(items, key) {
+  if (new Set(items.map(key)).size !== items.length) throw new CollectionPatchError();
+}
+function applyCollection(prior, patch, key) {
+  if (!patch) return prior;
+  uniqueKeys(prior, key);
+  uniqueKeys(patch.upserts, key);
+  uniqueKeys(patch.removeIds, (id2) => id2);
+  const values = new Map(prior.map((item) => [key(item), item]));
+  const removed = new Set(patch.removeIds);
+  for (const id2 of removed) if (!values.delete(id2)) throw new CollectionPatchError();
+  for (const item of patch.upserts) {
+    if (removed.has(key(item))) throw new CollectionPatchError();
+    values.set(key(item), item);
+  }
+  const order = patch.order ?? prior.map(key).filter((id2) => !removed.has(id2));
+  if (new Set(order).size !== order.length || order.length !== values.size || order.some((id2) => !values.has(id2)))
+    throw new CollectionPatchError();
+  const next = order.map((id2) => values.get(id2));
+  return next.length === prior.length && next.every((item, index) => item === prior[index]) ? prior : next;
+}
+
 // ../../shared/oauth-app.ts
 function isOAuthScope(value) {
   return typeof value === "string" && value.length > 0 && [...value].every((character) => character >= "!" && character <= "~" && character !== '"' && character !== "\\");
@@ -18866,22 +18910,8 @@ function accessRequestInput(raw) {
   };
 }
 
-// ../../shared/validation.ts
-var object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-var text = (value) => typeof value === "string";
-var id = (value) => text(value) && value.length > 0;
-var bool = (value) => typeof value === "boolean";
-var number = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
-var integer = (value) => number(value) && Number.isSafeInteger(value);
-var position = (value) => integer(value) && Number(value) > 0;
-var optional = (check) => (value) => value === void 0 || check(value);
-var nullable = (check) => (value) => value === null || check(value);
-var array = (check) => (value) => Array.isArray(value) && value.every(check);
-var oneOf = (...values) => (value) => typeof value === "string" && values.includes(value);
-var shape = (fields) => (value) => object(value) && Object.entries(fields).every(([key, check]) => check(value[key]));
-
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 10;
+var CONVERSATION_PROTOCOL_VERSION = 11;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -18985,7 +19015,8 @@ var message = shape({
     })
   )
 });
-var turn = shape({
+var activityLine = shape({ ordinal: integer, ts: text, text, timelinePosition: position });
+var turnFields = {
   id,
   phase: oneOf("running", "stopping", "settling", "settled"),
   outcome: oneOf("pending", "replied", "warning", "silent", "stopped", "failed", "unknown", "interrupted"),
@@ -18994,14 +19025,14 @@ var turn = shape({
   endedAt: nullable(text),
   inputIds: strings,
   outputIds: strings,
-  activity: array(shape({ ordinal: integer, ts: text, text, timelinePosition: position })),
   usage: array(shape({ id, value: reportedUsage })),
   metadata: shape({
     status: oneOf("provisional", "partial", "final", "unavailable"),
     model: nullable(text),
     durationMs: nullable(number)
   })
-});
+};
+var turn = shape({ ...turnFields, activity: array(activityLine) });
 var question = (value) => isQuestionInput(value) && shape({
   kind: oneOf("question"),
   id,
@@ -19085,7 +19116,7 @@ var conversation = shape({
   connection,
   capabilities
 });
-var changes = (entity) => shape({ upserts: array(entity), removeIds: strings, order: strings });
+var changes = (entity) => optional(collectionPatchCheck(entity, id));
 function parseConversationFrame(value) {
   if (!object(value) || value.protocolVersion !== CONVERSATION_PROTOCOL_VERSION)
     throw new ConversationProtocolError("protocol_mismatch");
@@ -19093,28 +19124,18 @@ function parseConversationFrame(value) {
   if (value.kind === "snapshot" && conversation(value.conversation)) return value;
   if (value.kind === "update" && integer(value.baseRevision) && value.revision === Number(value.baseRevision) + 1 && shape({
     messages: changes(message),
-    turns: changes(turn),
+    turns: changes((value2) => shape(turnFields)(value2) && object(value2) && value2.activity === void 0),
+    activity: optional(array(shape({ turnId: id, changes: collectionPatchCheck(activityLine, integer) }))),
     interactions: changes(interaction),
-    connection,
-    capabilities,
-    timeline: array(timelineRow)
+    connection: optional(connection),
+    capabilities: optional(capabilities),
+    timeline: changes(timelineRow)
   })(value.changes))
     return value;
   throw new ConversationProtocolError("invalid_frame");
 }
-function unique(entities) {
-  if (new Set(entities.map((entity) => entity.id)).size !== entities.length)
-    throw new ConversationProtocolError("invalid_frame");
-}
-function applyEntities(prior, delta) {
-  unique(delta.upserts);
-  const values = new Map(prior.map((entity) => [entity.id, entity]));
-  for (const id2 of delta.removeIds) values.delete(id2);
-  for (const entity of delta.upserts) values.set(entity.id, entity);
-  if (new Set(delta.order).size !== delta.order.length || delta.order.length !== values.size || delta.order.some((id2) => !values.has(id2)))
-    throw new ConversationProtocolError("invalid_frame");
-  return delta.order.map((id2) => values.get(id2));
-}
+var activityOrdinal = (line) => line.ordinal;
+var timelineKey = (row) => row.kind === "message" ? JSON.stringify([row.kind, row.messageId]) : row.kind === "interaction" ? JSON.stringify([row.kind, row.interactionId]) : JSON.stringify([row.kind, row.turnId, row.afterId]);
 function validateTimeline(view) {
   const questionIds = new Set(view.interactions.filter(isQuestionInteraction).map((item) => item.id));
   if (view.messages.some(
@@ -19126,6 +19147,7 @@ function validateTimeline(view) {
   );
   const interactions = new Set(view.interactions.map((item) => item.id));
   const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
+  for (const turn2 of view.turns) uniqueKeys(turn2.activity, activityOrdinal);
   const seenRows = /* @__PURE__ */ new Set();
   const seenActivity = /* @__PURE__ */ new Set();
   const owners = /* @__PURE__ */ new Set();
@@ -19164,12 +19186,12 @@ function validateTimeline(view) {
   if (messages.size || interactions.size || view.turns.some((turn2) => turn2.activity.some((line) => !seenActivity.has(`${turn2.id}:${line.ordinal}`))))
     throw new ConversationProtocolError("invalid_frame");
 }
-function reduceConversation(state, frame2) {
+function applyConversation(state, frame2) {
   if (frame2.kind === "snapshot") {
     if (state?.streamId === frame2.streamId && frame2.revision <= state.revision) return state;
-    unique(frame2.conversation.messages);
-    unique(frame2.conversation.turns);
-    unique(frame2.conversation.interactions);
+    uniqueKeys(frame2.conversation.messages, entityId);
+    uniqueKeys(frame2.conversation.turns, entityId);
+    uniqueKeys(frame2.conversation.interactions, entityId);
     validateTimeline(frame2.conversation);
     return frame2;
   }
@@ -19177,6 +19199,24 @@ function reduceConversation(state, frame2) {
   if (frame2.revision <= state.revision) return state;
   if (frame2.baseRevision !== state.revision) throw new ConversationProtocolError("revision_gap");
   const changes2 = frame2.changes;
+  const oldTurns = new Map(state.conversation.turns.map((turn2) => [turn2.id, turn2]));
+  let turns = applyCollection(
+    state.conversation.turns,
+    changes2.turns && {
+      ...changes2.turns,
+      upserts: changes2.turns.upserts.map((turn2) => ({ ...turn2, activity: oldTurns.get(turn2.id)?.activity ?? [] }))
+    },
+    entityId
+  );
+  if (changes2.activity) {
+    uniqueKeys(changes2.activity, (patch) => patch.turnId);
+    const patches = new Map(changes2.activity.map((patch) => [patch.turnId, patch.changes]));
+    if (changes2.activity.some((patch) => !turns.some((turn2) => turn2.id === patch.turnId)))
+      throw new ConversationProtocolError("invalid_frame");
+    turns = turns.map(
+      (turn2) => patches.has(turn2.id) ? { ...turn2, activity: applyCollection(turn2.activity, patches.get(turn2.id), activityOrdinal) } : turn2
+    );
+  }
   const next = {
     kind: "snapshot",
     protocolVersion: CONVERSATION_PROTOCOL_VERSION,
@@ -19184,16 +19224,24 @@ function reduceConversation(state, frame2) {
     revision: frame2.revision,
     conversation: {
       threadId: state.conversation.threadId,
-      messages: applyEntities(state.conversation.messages, changes2.messages),
-      turns: applyEntities(state.conversation.turns, changes2.turns),
-      interactions: applyEntities(state.conversation.interactions, changes2.interactions),
-      timeline: changes2.timeline,
-      connection: changes2.connection,
-      capabilities: changes2.capabilities
+      messages: applyCollection(state.conversation.messages, changes2.messages, entityId),
+      turns,
+      interactions: applyCollection(state.conversation.interactions, changes2.interactions, entityId),
+      timeline: applyCollection(state.conversation.timeline, changes2.timeline, timelineKey),
+      connection: changes2.connection ?? state.conversation.connection,
+      capabilities: changes2.capabilities ?? state.conversation.capabilities
     }
   };
   validateTimeline(next.conversation);
   return next;
+}
+function reduceConversation(state, frame2) {
+  try {
+    return applyConversation(state, frame2);
+  } catch (error) {
+    if (error instanceof CollectionPatchError) throw new ConversationProtocolError("invalid_frame");
+    throw error;
+  }
 }
 
 // src/stop-request.ts
@@ -20344,6 +20392,27 @@ var thread = shape({
   forkChildren: optional(array(shape({ threadId: id, messageId: id, title: text })))
 });
 var groupId2 = (value) => text(value) && value.length > 0 && value.length <= 512;
+var cursor = shape({ streamId: id, revision: integer });
+var voiceInput2 = shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) });
+var groupState = shape({ threads: array(thread), voiceInput: voiceInput2 });
+var globalState = shape({
+  approvals: array(isConversationApproval),
+  attention: isAttentionTargets,
+  group: nullable(groupState)
+});
+var groupChanges = (value) => shape({ kind: oneOf("replace"), value: nullable(groupState) })(value) || shape({
+  kind: oneOf("update"),
+  threads: optional(collectionPatchCheck(thread, id)),
+  voiceInput: optional(voiceInput2)
+})(value);
+var globalFrame = (value) => cursor(value) && (shape({ kind: oneOf("snapshot"), data: globalState })(value) || object(value) && integer(value.baseRevision) && value.revision === Number(value.baseRevision) + 1 && shape({
+  kind: oneOf("update"),
+  changes: shape({
+    approvals: optional(collectionPatchCheck(isConversationApproval, id)),
+    attention: optional(collectionPatchCheck((item) => isAttentionTargets([item]), id)),
+    group: optional(groupChanges)
+  })
+})(value));
 var subscription = shape({
   kind: oneOf("subscribe"),
   protocolVersion: (value) => value === SYNC_PROTOCOL_VERSION,
@@ -20355,24 +20424,14 @@ var subscription = shape({
       channelType: groupId2,
       messagingGroupId: nullable(groupId2)
     })
-  )
+  ),
+  globalCursor: nullable(cursor)
 });
 var frame = shape({
   kind: oneOf("sync"),
   subscriptionId: integer,
   groupId: nullable(groupId2),
-  global: optional(
-    shape({
-      approvals: array(isConversationApproval),
-      attention: isAttentionTargets,
-      group: nullable(
-        shape({
-          threads: array(thread),
-          voiceInput: shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) })
-        })
-      )
-    })
-  )
+  global: optional(globalFrame)
 });
 function isSyncFrame(value) {
   return frame(value);
@@ -20385,7 +20444,7 @@ var SyncProtocolError = class extends Error {
 function parseSyncFrame(value) {
   if (!object(value) || value.kind === "protocol_mismatch" || value.protocolVersion !== SYNC_PROTOCOL_VERSION)
     throw new SyncProtocolError();
-  if (!isSyncFrame(value) || value.global === void 0 && value.conversation === void 0 || value.groupId === null && (value.global?.group != null || value.conversation != null))
+  if (!isSyncFrame(value) || value.global === void 0 && value.conversation === void 0 || value.groupId === null && (value.conversation != null || value.global?.kind === "snapshot" && value.global.data.group !== null))
     throw new Error("Invalid synchronization frame. Reconnect or reload.");
   if (value.conversation != null) {
     if (object(value.conversation) && value.conversation.protocolVersion !== SYNC_PROTOCOL_VERSION)
@@ -20393,6 +20452,52 @@ function parseSyncFrame(value) {
     parseConversationFrame(value.conversation);
   }
   return value;
+}
+var SyncStateError = class extends Error {
+  constructor(code) {
+    super(`Metadata synchronization failed (${code}). Reconnect for a fresh snapshot.`);
+    this.code = code;
+  }
+};
+var threadKey = (thread2) => JSON.stringify([thread2.channelType, thread2.messagingGroupId, thread2.threadId]);
+function reduceGlobal(state, frame2, groupId3) {
+  try {
+    let data;
+    if (frame2.kind === "snapshot") {
+      if (state?.streamId === frame2.streamId && frame2.revision <= state.revision) return state;
+      data = frame2.data;
+    } else {
+      if (!state || state.streamId !== frame2.streamId) throw new SyncStateError("unknown_stream");
+      if (frame2.revision <= state.revision) return state;
+      if (frame2.baseRevision !== state.revision) throw new SyncStateError("revision_gap");
+      const patch = frame2.changes;
+      let group = state.data.group;
+      if (patch.group?.kind === "replace") group = patch.group.value;
+      else {
+        if (state.groupId !== groupId3) throw new SyncStateError("invalid_frame");
+        if (patch.group) {
+          if (!group) throw new SyncStateError("invalid_frame");
+          group = {
+            threads: applyCollection(group.threads, patch.group.threads, threadKey),
+            voiceInput: patch.group.voiceInput ?? group.voiceInput
+          };
+        }
+      }
+      data = {
+        approvals: applyCollection(state.data.approvals, patch.approvals, entityId),
+        attention: applyCollection(state.data.attention, patch.attention, entityId),
+        group
+      };
+    }
+    if (!globalState(data) || groupId3 === null && data.group !== null) throw new SyncStateError("invalid_frame");
+    uniqueKeys(data.approvals, entityId);
+    uniqueKeys(data.attention, entityId);
+    if (data.group) uniqueKeys(data.group.threads, threadKey);
+    return { kind: "snapshot", streamId: frame2.streamId, revision: frame2.revision, groupId: groupId3, data };
+  } catch (error) {
+    if (error instanceof CollectionPatchError) throw new SyncStateError("invalid_frame");
+    throw error;
+  }
 }
 
 // src/sync-connection.ts
@@ -20403,6 +20508,7 @@ var SyncConnection = class {
   socket = null;
   groupId = null;
   conversation = null;
+  global = null;
   subscriptionId = 0;
   attempt = 0;
   stopped = false;
@@ -20417,6 +20523,7 @@ var SyncConnection = class {
     this.options.connecting();
     const socket = this.options.socket();
     this.socket = socket;
+    this.global = null;
     this.connectTimer = setTimeout(() => {
       if (this.socket === socket) socket.close();
     }, 1e4);
@@ -20431,12 +20538,16 @@ var SyncConnection = class {
         const value = JSON.parse(event.data);
         const frame2 = parseSyncFrame(value);
         if (frame2.subscriptionId !== this.subscriptionId || frame2.groupId !== this.groupId) return;
-        this.options.apply(frame2);
+        const previous = this.global;
+        if (frame2.global) this.global = reduceGlobal(previous, frame2.global, frame2.groupId);
+        const metadataChanged = this.global !== previous;
+        if (!metadataChanged && frame2.conversation === void 0) return;
+        this.options.apply({ ...frame2, global: metadataChanged ? this.global?.data : void 0 });
         this.failure = null;
         this.attempt = 0;
-        if (this.pending && frame2.global && frame2.subscriptionId === this.subscriptionId) {
+        if (this.pending && metadataChanged && frame2.subscriptionId === this.subscriptionId) {
           clearTimeout(this.pending.timer);
-          this.pending.resolve(frame2.global);
+          this.pending.resolve(this.global.data);
           this.pending = null;
         }
       } catch (error) {
@@ -20534,7 +20645,8 @@ var SyncConnection = class {
         protocolVersion: SYNC_PROTOCOL_VERSION,
         subscriptionId: this.subscriptionId,
         groupId: this.groupId,
-        conversation: this.conversation
+        conversation: this.conversation,
+        globalCursor: this.global ? { streamId: this.global.streamId, revision: this.global.revision } : null
       })
     );
   }

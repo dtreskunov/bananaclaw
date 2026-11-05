@@ -62,16 +62,24 @@ export async function installSyncFixture(
               subscriptionId: request.subscriptionId,
               groupId: request.groupId,
               global: {
-                ...data,
-                group:
-                  data.group !== undefined
-                    ? data.group
-                    : request.groupId
-                      ? {
-                          threads: data.threads ?? [],
-                          voiceInput: data.voiceInput ?? { backend: 'disabled', ready: false },
-                        }
-                      : null,
+                kind: 'snapshot',
+                streamId: `fixture-${request.subscriptionId}`,
+                revision: 0,
+                data: {
+                  ...data,
+                  group:
+                    data.group !== undefined
+                      ? data.group
+                      : request.groupId
+                        ? {
+                            threads: (data.threads ?? []).filter(
+                              (thread): thread is ThreadSummary =>
+                                thread.sessionId !== null && thread.messagingGroupId !== null,
+                            ),
+                            voiceInput: data.voiceInput ?? { backend: 'disabled', ready: false },
+                          }
+                        : null,
+                },
               },
             });
           },

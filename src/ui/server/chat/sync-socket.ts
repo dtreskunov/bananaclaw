@@ -124,7 +124,7 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
         JSON.stringify(selection.conversation) === JSON.stringify(message.conversation);
       const refreshThreads = !selection || selection.groupId !== message.groupId || sameConversation;
       selection = message;
-      global.subscribe(message.subscriptionId, message.groupId, refreshThreads);
+      global.subscribe(message.subscriptionId, message.groupId, refreshThreads, message.globalCursor);
       if (sameConversation) {
         invalidateConversation();
         return;

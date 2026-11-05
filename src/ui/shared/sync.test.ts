@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isSyncSubscription, parseSyncFrame, SYNC_PROTOCOL_VERSION } from './sync.js';
 import { conversationSnapshot } from '../server/chat/conversation-stream.js';
+import { testGlobalSnapshot } from './sync-test-fixtures.js';
 
 describe('global sync protocol', () => {
   const global = {
@@ -9,28 +10,40 @@ describe('global sync protocol', () => {
     subscriptionId: 1,
     groupId: null,
     conversation: null,
-    global: { approvals: [], attention: [], group: null },
+    global: testGlobalSnapshot({ approvals: [], attention: [], group: null }),
   };
   it('accepts authoritative empty state but rejects missing attention and malformed approvals', () => {
     expect(parseSyncFrame(global)).toEqual(global);
-    expect(() => parseSyncFrame({ ...global, global: { approvals: [] } })).toThrow('Invalid');
-    expect(() => parseSyncFrame({ ...global, global: { approvals: [{}], attention: [] } })).toThrow('Invalid');
+    expect(() => parseSyncFrame({ ...global, global: { ...global.global, data: { approvals: [] } } })).toThrow(
+      'Invalid',
+    );
+    expect(() =>
+      parseSyncFrame({ ...global, global: { ...global.global, data: { approvals: [{}], attention: [] } } }),
+    ).toThrow('Invalid');
   });
   it('requires complete group state and explicitly represents revoked access', () => {
-    expect(() => parseSyncFrame({ ...global, global: { approvals: [], attention: [] } })).toThrow('Invalid');
+    expect(() =>
+      parseSyncFrame({ ...global, global: { ...global.global, data: { approvals: [], attention: [] } } }),
+    ).toThrow('Invalid');
     expect(
       parseSyncFrame({
         ...global,
         groupId: 'g',
-      }).global!.group,
-    ).toBeNull();
-    const group = { threads: [], voiceInput: { backend: 'disabled', ready: false } };
-    expect(parseSyncFrame({ ...global, groupId: 'g', global: { ...global.global!, group } }).global!.group).toEqual(
-      group,
+      }).global,
+    ).toEqual(global.global);
+    const group = { threads: [], voiceInput: { backend: 'disabled' as const, ready: false } };
+    expect(
+      parseSyncFrame({ ...global, groupId: 'g', global: testGlobalSnapshot({ ...global.global.data, group }) }).global,
+    ).toEqual(testGlobalSnapshot({ ...global.global.data, group }));
+    expect(() => parseSyncFrame({ ...global, global: testGlobalSnapshot({ ...global.global.data, group }) })).toThrow(
+      'Invalid',
     );
-    expect(() => parseSyncFrame({ ...global, global: { ...global.global!, group } })).toThrow('Invalid');
     expect(() =>
-      parseSyncFrame({ ...global, groupId: 'g', global: { ...global.global!, group: { threads: [] } } }),
+      parseSyncFrame({
+        ...global,
+        groupId: 'g',
+        global: { ...global.global, data: { ...global.global.data, group: { threads: [] } } },
+      }),
     ).toThrow('Invalid');
   });
   it.each([{ sessionId: null }, { messageCount: -1 }, { liveTasks: [{}] }, { forkedFrom: {} }])(
@@ -53,8 +66,11 @@ describe('global sync protocol', () => {
           ...global,
           groupId: 'g',
           global: {
-            ...global.global!,
-            group: { threads: [thread], voiceInput: { backend: 'disabled', ready: false } },
+            ...global.global,
+            data: {
+              ...global.global.data,
+              group: { threads: [thread], voiceInput: { backend: 'disabled', ready: false } },
+            },
           },
         }),
       ).toThrow('Invalid');
@@ -87,6 +103,7 @@ describe('global sync protocol', () => {
       subscriptionId: 1,
       groupId: 'g',
       conversation: { threadId: 'thread', channelType: 'telegram', messagingGroupId: 'mg' },
+      globalCursor: null,
     };
     expect(isSyncSubscription(request)).toBe(true);
     expect(isSyncSubscription({ ...request, groupId: null })).toBe(false);
@@ -111,6 +128,7 @@ describe('global sync protocol', () => {
         subscriptionId: 1,
         groupId: null,
         conversation: null,
+        globalCursor: null,
       }),
     ).toBe(true);
     expect(
@@ -120,6 +138,7 @@ describe('global sync protocol', () => {
         subscriptionId: -1,
         groupId: 'g',
         conversation: null,
+        globalCursor: null,
       }),
     ).toBe(false);
     expect(
@@ -129,6 +148,7 @@ describe('global sync protocol', () => {
         subscriptionId: 1,
         groupId: 'g'.repeat(513),
         conversation: null,
+        globalCursor: null,
       }),
     ).toBe(false);
     expect(() => parseSyncFrame({ ...global, protocolVersion: 999 })).toThrow('protocol changed');

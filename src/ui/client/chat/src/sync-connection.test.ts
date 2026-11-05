@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncConnection } from './sync-connection';
 import { SYNC_PROTOCOL_VERSION, SYNC_RELOAD_CLOSE_CODE } from '../../../shared/sync';
+import { testGlobalSnapshot } from '../../../shared/sync-test-fixtures';
 
 class Socket {
   readyState = 0;
@@ -24,7 +25,7 @@ class Socket {
         protocolVersion: SYNC_PROTOCOL_VERSION,
         subscriptionId,
         groupId,
-        global: {
+        global: testGlobalSnapshot({
           approvals: [],
           attention: [],
           group: groupId
@@ -33,7 +34,7 @@ class Socket {
                 voiceInput: { backend: 'disabled', ready: false },
               }
             : null,
-        },
+        }),
       }),
     });
   }
@@ -103,14 +104,23 @@ describe('global sync browser connection', () => {
     expect(f.apply.mock.calls[0][0].groupId).toBe('new');
   });
 
-  it('applies successive complete snapshots without requiring revision tracking', () => {
+  it('ignores duplicate metadata snapshots but applies empty revisioned acknowledgements', () => {
     const f = fixture();
     f.connection.start();
     f.sockets[0].open();
     f.sockets[0].frame(0, null);
     f.sockets[0].frame(0, null);
+    expect(f.apply).toHaveBeenCalledOnce();
+    f.sockets[0].onmessage?.({
+      data: JSON.stringify({
+        kind: 'sync',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        subscriptionId: 0,
+        groupId: null,
+        global: { kind: 'update', streamId: 'test-global', baseRevision: 0, revision: 1, changes: {} },
+      }),
+    });
     expect(f.apply).toHaveBeenCalledTimes(2);
-    expect(f.apply.mock.calls[0]).toEqual(f.apply.mock.calls[1]);
   });
 
   it('retains the selected group and takes a fresh snapshot after reconnect', async () => {
@@ -193,6 +203,47 @@ describe('global sync browser connection', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     await rejected;
     expect(f.unavailable).toHaveBeenCalled();
+  });
+
+  it('reports metadata revisions on navigation and clears the cursor after reconnect', () => {
+    const f = fixture();
+    f.connection.start();
+    f.sockets[0].open();
+    f.sockets[0].frame(0, null);
+    f.connection.select('g', null);
+    expect(JSON.parse(f.sockets[0].send.mock.calls.at(-1)![0]).globalCursor).toEqual({
+      streamId: 'test-global',
+      revision: 0,
+    });
+    f.sockets[0].close();
+    f.connection.reconnectNow();
+    f.sockets[1].open();
+    expect(JSON.parse(f.sockets[1].send.mock.calls[0][0]).globalCursor).toBeNull();
+  });
+
+  it('recovers a metadata revision gap with a new baseline, never a success-shaped refresh', async () => {
+    const f = fixture();
+    f.connection.start();
+    f.sockets[0].open();
+    f.sockets[0].frame(0, null);
+    const fresh = f.connection.refresh(null);
+    const rejected = expect(fresh).rejects.toThrow('disconnected');
+    f.sockets[0].onmessage?.({
+      data: JSON.stringify({
+        kind: 'sync',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        groupId: null,
+        subscriptionId: 1,
+        global: { kind: 'update', streamId: 'test-global', baseRevision: 2, revision: 3, changes: {} },
+      }),
+    });
+    await rejected;
+    expect(f.apply).toHaveBeenCalledOnce();
+    expect(f.unavailable).toHaveBeenCalledWith(expect.stringContaining('revision_gap'));
+    await vi.advanceTimersByTimeAsync(1000);
+    f.sockets[1].open();
+    f.sockets[1].frame(1, null);
+    expect(f.apply).toHaveBeenCalledTimes(2);
   });
 
   it('requires a reload on protocol mismatch rather than reconnecting indefinitely', async () => {

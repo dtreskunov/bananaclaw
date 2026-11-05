@@ -1,5 +1,22 @@
-import type { Conversation, ConversationMessage, ConversationInteraction, ConversationTurn } from './conversation.js';
+import type {
+  Conversation,
+  ConversationMessage,
+  ConversationInteraction,
+  ConversationTurn,
+  ConversationActivity,
+  ConversationTimelineRow,
+} from './conversation.js';
 import { isQuestionInteraction } from './conversation.js';
+import {
+  applyCollection,
+  diffCollection,
+  entityId,
+  sameValue,
+  uniqueKeys,
+  collectionPatchCheck,
+  CollectionPatchError,
+  type CollectionPatch,
+} from './collection-patch.js';
 import { accessRequestInput, ConnectionInputError } from './connection-input.js';
 import type { QuestionInput, QuestionResponse } from './question.js';
 import {
@@ -18,19 +35,21 @@ import {
   type Check,
 } from './validation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 10;
-export interface EntityChanges<T> {
-  upserts: T[];
-  removeIds: string[];
-  order: string[];
+export const CONVERSATION_PROTOCOL_VERSION = 11;
+export type EntityChanges<T> = CollectionPatch<T>;
+export type ConversationTurnFields = Omit<ConversationTurn, 'activity'>;
+export interface ConversationActivityPatch {
+  turnId: string;
+  changes: CollectionPatch<ConversationActivity, number>;
 }
 export interface ConversationChanges {
-  messages: EntityChanges<ConversationMessage>;
-  turns: EntityChanges<ConversationTurn>;
-  interactions: EntityChanges<ConversationInteraction>;
-  connection: Conversation['connection'];
-  capabilities: Conversation['capabilities'];
-  timeline: Conversation['timeline'];
+  messages?: EntityChanges<ConversationMessage>;
+  turns?: EntityChanges<ConversationTurnFields>;
+  activity?: ConversationActivityPatch[];
+  interactions?: EntityChanges<ConversationInteraction>;
+  connection?: Conversation['connection'];
+  capabilities?: Conversation['capabilities'];
+  timeline?: EntityChanges<ConversationTimelineRow>;
 }
 export interface ConversationSnapshot {
   kind: 'snapshot';
@@ -154,7 +173,8 @@ const message = shape({
     }),
   ),
 });
-const turn = shape({
+const activityLine = shape({ ordinal: integer, ts: text, text, timelinePosition: position });
+const turnFields = {
   id,
   phase: oneOf('running', 'stopping', 'settling', 'settled'),
   outcome: oneOf('pending', 'replied', 'warning', 'silent', 'stopped', 'failed', 'unknown', 'interrupted'),
@@ -163,14 +183,14 @@ const turn = shape({
   endedAt: nullable(text),
   inputIds: strings,
   outputIds: strings,
-  activity: array(shape({ ordinal: integer, ts: text, text, timelinePosition: position })),
   usage: array(shape({ id, value: reportedUsage })),
   metadata: shape({
     status: oneOf('provisional', 'partial', 'final', 'unavailable'),
     model: nullable(text),
     durationMs: nullable(number),
   }),
-});
+};
+const turn = shape({ ...turnFields, activity: array(activityLine) });
 const question: Check = (value) =>
   isQuestionInput(value) &&
   shape({
@@ -259,7 +279,7 @@ const conversation = shape({
   connection,
   capabilities,
 });
-const changes = (entity: Check) => shape({ upserts: array(entity), removeIds: strings, order: strings });
+const changes = (entity: Check) => optional(collectionPatchCheck(entity, id));
 
 /** Validate before touching reactive state; unsupported servers never enter a legacy path. */
 export function parseConversationFrame(value: unknown): ConversationFrame {
@@ -273,35 +293,25 @@ export function parseConversationFrame(value: unknown): ConversationFrame {
     value.revision === Number(value.baseRevision) + 1 &&
     shape({
       messages: changes(message),
-      turns: changes(turn),
+      turns: changes((value) => shape(turnFields)(value) && object(value) && value.activity === undefined),
+      activity: optional(array(shape({ turnId: id, changes: collectionPatchCheck(activityLine, integer) }))),
       interactions: changes(interaction),
-      connection,
-      capabilities,
-      timeline: array(timelineRow),
+      connection: optional(connection),
+      capabilities: optional(capabilities),
+      timeline: changes(timelineRow),
     })(value.changes)
   )
     return value as unknown as ConversationUpdate;
   throw new ConversationProtocolError('invalid_frame');
 }
 
-function unique<T extends { id: string }>(entities: T[]): void {
-  if (new Set(entities.map((entity) => entity.id)).size !== entities.length)
-    throw new ConversationProtocolError('invalid_frame');
-}
-function applyEntities<T extends { id: string }>(prior: T[], delta: EntityChanges<T>): T[] {
-  unique(delta.upserts);
-  const values = new Map(prior.map((entity) => [entity.id, entity]));
-  for (const id of delta.removeIds) values.delete(id);
-  for (const entity of delta.upserts) values.set(entity.id, entity);
-  if (
-    new Set(delta.order).size !== delta.order.length ||
-    delta.order.length !== values.size ||
-    delta.order.some((id) => !values.has(id))
-  )
-    throw new ConversationProtocolError('invalid_frame');
-  return delta.order.map((id) => values.get(id)!);
-}
-
+const activityOrdinal = (line: ConversationActivity) => line.ordinal;
+const timelineKey = (row: ConversationTimelineRow): string =>
+  row.kind === 'message'
+    ? JSON.stringify([row.kind, row.messageId])
+    : row.kind === 'interaction'
+      ? JSON.stringify([row.kind, row.interactionId])
+      : JSON.stringify([row.kind, row.turnId, row.afterId]);
 function validateTimeline(view: Conversation): void {
   const questionIds = new Set(view.interactions.filter(isQuestionInteraction).map((item) => item.id));
   if (
@@ -316,6 +326,7 @@ function validateTimeline(view: Conversation): void {
   );
   const interactions = new Set(view.interactions.map((item) => item.id));
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
+  for (const turn of view.turns) uniqueKeys(turn.activity, activityOrdinal);
   const seenRows = new Set<string>();
   const seenActivity = new Set<string>();
   const owners = new Set<string>();
@@ -365,12 +376,12 @@ function validateTimeline(view: Conversation): void {
 }
 
 /** Atomic and pure. Duplicates are idempotent; gaps and unknown streams require a snapshot. */
-export function reduceConversation(state: ConversationSnapshot | null, frame: ConversationFrame): ConversationSnapshot {
+function applyConversation(state: ConversationSnapshot | null, frame: ConversationFrame): ConversationSnapshot {
   if (frame.kind === 'snapshot') {
     if (state?.streamId === frame.streamId && frame.revision <= state.revision) return state;
-    unique(frame.conversation.messages);
-    unique(frame.conversation.turns);
-    unique(frame.conversation.interactions);
+    uniqueKeys(frame.conversation.messages, entityId);
+    uniqueKeys(frame.conversation.turns, entityId);
+    uniqueKeys(frame.conversation.interactions, entityId);
     validateTimeline(frame.conversation);
     return frame;
   }
@@ -378,6 +389,26 @@ export function reduceConversation(state: ConversationSnapshot | null, frame: Co
   if (frame.revision <= state.revision) return state;
   if (frame.baseRevision !== state.revision) throw new ConversationProtocolError('revision_gap');
   const changes = frame.changes;
+  const oldTurns = new Map(state.conversation.turns.map((turn) => [turn.id, turn]));
+  let turns = applyCollection(
+    state.conversation.turns,
+    changes.turns && {
+      ...changes.turns,
+      upserts: changes.turns.upserts.map((turn) => ({ ...turn, activity: oldTurns.get(turn.id)?.activity ?? [] })),
+    },
+    entityId,
+  );
+  if (changes.activity) {
+    uniqueKeys(changes.activity, (patch) => patch.turnId);
+    const patches = new Map(changes.activity.map((patch) => [patch.turnId, patch.changes]));
+    if (changes.activity.some((patch) => !turns.some((turn) => turn.id === patch.turnId)))
+      throw new ConversationProtocolError('invalid_frame');
+    turns = turns.map((turn) =>
+      patches.has(turn.id)
+        ? { ...turn, activity: applyCollection(turn.activity, patches.get(turn.id), activityOrdinal) }
+        : turn,
+    );
+  }
   const next: ConversationSnapshot = {
     kind: 'snapshot',
     protocolVersion: CONVERSATION_PROTOCOL_VERSION,
@@ -385,36 +416,44 @@ export function reduceConversation(state: ConversationSnapshot | null, frame: Co
     revision: frame.revision,
     conversation: {
       threadId: state.conversation.threadId,
-      messages: applyEntities(state.conversation.messages, changes.messages),
-      turns: applyEntities(state.conversation.turns, changes.turns),
-      interactions: applyEntities(state.conversation.interactions, changes.interactions),
-      timeline: changes.timeline,
-      connection: changes.connection,
-      capabilities: changes.capabilities,
+      messages: applyCollection(state.conversation.messages, changes.messages, entityId),
+      turns,
+      interactions: applyCollection(state.conversation.interactions, changes.interactions, entityId),
+      timeline: applyCollection(state.conversation.timeline, changes.timeline, timelineKey),
+      connection: changes.connection ?? state.conversation.connection,
+      capabilities: changes.capabilities ?? state.conversation.capabilities,
     },
   };
   validateTimeline(next.conversation);
   return next;
 }
 
-function diffEntities<T extends { id: string }>(before: T[], after: T[]): EntityChanges<T> {
-  const old = new Map(before.map((entity) => [entity.id, JSON.stringify(entity)]));
-  const order = after.map((entity) => entity.id);
-  const retained = new Set(order);
-  return {
-    upserts: after.filter((entity) => old.get(entity.id) !== JSON.stringify(entity)),
-    removeIds: [...old.keys()].filter((id) => !retained.has(id)),
-    order,
-  };
+export function reduceConversation(state: ConversationSnapshot | null, frame: ConversationFrame): ConversationSnapshot {
+  try {
+    return applyConversation(state, frame);
+  } catch (error) {
+    if (error instanceof CollectionPatchError) throw new ConversationProtocolError('invalid_frame');
+    throw error;
+  }
 }
 export function diffConversation(before: Conversation, after: Conversation): ConversationChanges {
   if (before.threadId !== after.threadId) throw new ConversationProtocolError('invalid_frame');
+  const fields = (turn: ConversationTurn): ConversationTurnFields => {
+    const { activity: _activity, ...rest } = turn;
+    return rest;
+  };
+  const oldTurns = new Map(before.turns.map((turn) => [turn.id, turn]));
+  const activity = after.turns.flatMap((turn): ConversationActivityPatch[] => {
+    const changes = diffCollection(oldTurns.get(turn.id)?.activity ?? [], turn.activity, activityOrdinal);
+    return changes ? [{ turnId: turn.id, changes }] : [];
+  });
   return {
-    messages: diffEntities(before.messages, after.messages),
-    turns: diffEntities(before.turns, after.turns),
-    interactions: diffEntities(before.interactions, after.interactions),
-    connection: after.connection,
-    capabilities: after.capabilities,
-    timeline: after.timeline,
+    messages: diffCollection(before.messages, after.messages, entityId),
+    turns: diffCollection(before.turns.map(fields), after.turns.map(fields), entityId),
+    ...(activity.length ? { activity } : {}),
+    interactions: diffCollection(before.interactions, after.interactions, entityId),
+    connection: sameValue(before.connection, after.connection) ? undefined : after.connection,
+    capabilities: sameValue(before.capabilities, after.capabilities) ? undefined : after.capabilities,
+    timeline: diffCollection(before.timeline, after.timeline, timelineKey),
   };
 }

@@ -4,6 +4,14 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Incremental metadata and activity synchronization.** Metadata
+  sends only changed approvals, attention, threads or voice capability; activity
+  sends ordinal-keyed patches rather than whole turn traces. Shared collection
+  validation preserves atomic timeline/settlement updates. Refreshes acknowledge
+  unchanged state without sending snapshots; stale cursors recover with a fresh
+  baseline. Deploy matching host/UI and reload for protocol 11. See
+  [upgrade, verification and rollback](docs/ui.md#incremental-sync-upgrade).
+
 - **[BREAKING] One chat synchronization socket.** Global metadata, the selected
   transcript and activity traces share one authenticated socket and subscription
   lifecycle. Conversation deltas remain independently scheduled; activity-only

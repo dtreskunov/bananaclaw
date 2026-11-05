@@ -3,7 +3,10 @@ import { CONVERSATION_PROTOCOL_VERSION, type ConversationSnapshot } from '../../
 import { conversationTimeline } from '../../../server/chat/conversation-timeline';
 import type { PendingWebSend, Thread } from './types';
 import type { AccountInteraction, AccountRequirements } from '../../../shared/approval';
+import type { ThreadSummary } from '../../../shared/thread';
 
+export function testThread(overrides?: Partial<ThreadSummary>): ThreadSummary;
+export function testThread(overrides: Partial<Thread>): Thread;
 export function testThread(overrides: Partial<Thread> = {}): Thread {
   return {
     threadId: 'thread',
