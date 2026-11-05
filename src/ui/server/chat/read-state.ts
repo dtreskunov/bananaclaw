@@ -36,8 +36,10 @@ function baselineFor(userId: string): number {
 export function conversationUnread(userId: string, groupId: string, context: TurnContext): boolean {
   const db = getDb();
   const baseline = baselineFor(userId);
-  const reads = db.prepare('SELECT platform_id,position FROM conversation_reads WHERE user_id=? AND session_id=? AND channel_type=? AND thread_id=?')
-    .all(userId, context.sessionId ?? '', context.channelType, context.threadId ?? '') as { platform_id: string; position: number }[];
+  const reads = db.prepare(`SELECT platform_id,position FROM conversation_reads
+    WHERE user_id=? AND session_id=? AND channel_type=? AND thread_id=?
+      AND platform_id IN (${context.platformIds.map(() => '?')})`)
+    .all(userId, context.sessionId ?? '', context.channelType, context.threadId ?? '', ...context.platformIds) as { platform_id: string; position: number }[];
   const positions = new Map(reads.map(row => [row.platform_id, row.position]));
   return visiblePublications(userId, groupId, context).some(row => row.position > Math.max(baseline, positions.get(row.platform_id) ?? 0));
 }
