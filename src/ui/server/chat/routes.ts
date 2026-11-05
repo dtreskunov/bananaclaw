@@ -69,6 +69,8 @@ import { handleWriteRequest } from './write.js';
 export { handleChatUpgrade, closeChatSockets } from './chat.js';
 import { readConversation } from './conversation.js';
 import { conversationSnapshot } from './conversation-stream.js';
+import { acknowledgeRead, ReadStateError } from './read-state.js';
+import { isReadCursor } from '../../shared/read-state.js';
 
 // UI assets live under src/ (not compiled by tsc); resolve from project root,
 // which the host always runs from.
@@ -145,6 +147,33 @@ function on(method: FmwMethod, route: string, handler: RouteHandler): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   router.on(method, route, handler as any);
 }
+
+on('POST', '/api/groups/:groupId/chat/:threadId/read', authed(async (ctx, userId, params) => {
+  let body: unknown;
+  try { body = await readJsonBody(ctx.req, 4096); }
+  catch (error) {
+    if (error instanceof SyntaxError) return json(ctx, 400, { error: 'invalid_json' });
+    if (error instanceof Error && error.message === 'body_too_large') return json(ctx, 413, { error: 'body_too_large' });
+    throw error;
+  }
+  if (!isReadCursor(body)) return json(ctx, 400, { error: 'invalid_read_cursor' });
+  const channelType = ctx.url.searchParams.get('channel');
+  const messagingGroupId = ctx.url.searchParams.get('mg');
+  if (!!channelType !== !!messagingGroupId) return json(ctx, 400, { error: 'invalid_context' });
+  try {
+    acknowledgeRead(userId, params.groupId, params.threadId, { sessionId: body.sessionId, key: body.key },
+      channelType && messagingGroupId ? { channelType, messagingGroupId } : undefined);
+    return json(ctx, 200, { ok: true });
+  } catch (error) {
+    if (error instanceof ReadStateError) return json(ctx, error.status, { error: error.code });
+    throw error;
+  }
+}));
+
+on('GET', '/api/unread', authed(async (ctx, userId) => {
+  const state = await readGlobalSync(userId, null);
+  return json(ctx, 200, { unreadThreadCount: state.agentActivity.reduce((sum, group) => sum + (group.unreadThreadCount ?? 0), 0) });
+}));
 
 /** Wrap a handler that requires an authenticated session; injects userId.
  *

@@ -7,12 +7,14 @@ export interface ActivityStatus {
   activityStale?: boolean;
 }
 
-export interface AgentGroupActivity extends ActivityStatus {
+export interface AgentGroupSummary extends ActivityStatus {
   id: string;
   threadCount?: number;
+  unreadThreadCount?: number;
 }
 
 export interface ThreadSummary extends ActivityStatus {
+  unread?: boolean;
   threadId: string;
   sessionId: string;
   channelType: string;

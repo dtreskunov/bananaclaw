@@ -7,7 +7,8 @@ import { openInboundDb, openOutboundDb, sessionDir } from '../../../session-mana
 import { summarizeTaskPrompt } from '../../../thread-summaries.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { log } from '../../../log.js';
-import { normalizeDisplayCardPayload } from '../../../channels/display-card.js';
+import { chatSdkHistoryContent } from '../../shared/readable-output.js';
+export { chatSdkHistoryContent } from '../../shared/readable-output.js';
 import { shortcodeToEmoji } from './emoji.js';
 import { WEB_CHANNEL_TYPE } from '../../../channels/web.js';
 import { isRepresentedApprovalOutcome } from './approval-transcript.js';
@@ -413,24 +414,6 @@ export function readChatHistory(
     (a, b) => timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition),
   );
   return messages;
-}
-
-export function chatSdkHistoryContent(
-  content: string,
-): Pick<ConversationMessage, 'text' | 'card' | 'timelinePosition'> | null {
-  try {
-    const payload = JSON.parse(content);
-    const normalized = normalizeDisplayCardPayload(payload);
-    if (!normalized || (!normalized.card && !normalized.fallbackText)) return null;
-    const timelinePosition = parseTimelinePosition(payload?.timelinePosition);
-    return {
-      text: normalized.fallbackText,
-      ...(normalized.card ? { card: normalized.card } : {}),
-      ...(timelinePosition !== undefined ? { timelinePosition } : {}),
-    };
-  } catch {
-    return null;
-  }
 }
 
 function taskWasAutoPaused(content: string): boolean {

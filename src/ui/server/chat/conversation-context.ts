@@ -10,6 +10,7 @@ import { getIdentitiesForUser } from '../../../modules/permissions/db/identities
 import { isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
 import { getChannelAdapter } from '../../../channels/channel-registry.js';
 import { WEB_CHANNEL_TYPE } from '../../../channels/web.js';
+import { readSessionThreadSummary } from '../../../thread-summaries.js';
 /** Elevated access to non-web messaging contexts. Web chats are group-wide. */
 export function isElevated(userId: string): boolean {
   return isOwner(userId) || isGlobalAdmin(userId);
@@ -142,6 +143,16 @@ export function resolveTurnContext(
   const isDm = threadId.startsWith('__dm:');
   if (isDm && threadId !== `__dm:${mg.id}`) return null;
   const session = resolveSessionForMode(groupId, mg.id, target.sessionMode, isDm ? '' : threadId);
+  if (session && !isDm && target.channelType !== WEB_CHANNEL_TYPE && !isElevated(userId)) {
+    const stored = getDb().prepare('SELECT thread_id FROM sessions WHERE id=?').get(session.id) as { thread_id: string | null };
+    if (stored.thread_id !== null) {
+      const summary = readSessionThreadSummary({
+        agentGroupId: groupId, sessionId: session.id,
+        thread: { channelType: target.channelType, platformId: mg.platform_id, threadId },
+      });
+      if (!viewerHandlesForChannel(userId, target.channelType).some(handle => summary.owners.includes(handle))) return null;
+    }
+  }
   const owned = userOwnsMessagingGroup(userId, groupId, target.channelType, mg.id);
   const adapter = target.channelType === WEB_CHANNEL_TYPE ? null : getChannelAdapter(target.channelType);
   return {

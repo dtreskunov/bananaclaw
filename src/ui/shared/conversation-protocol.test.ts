@@ -45,6 +45,18 @@ const update: ConversationUpdate = {
   changes: diffConversation(empty, next),
 };
 describe('conversation protocol', () => {
+  it('patches and clears opaque rendered-content cursors without replacing transcript collections', () => {
+    const withCursor = { ...empty, readCursor: { sessionId: 'session', key: 'a'.repeat(32) } };
+    const changes = JSON.parse(JSON.stringify(diffConversation(empty, withCursor)));
+    expect(changes).toEqual({ readCursor: withCursor.readCursor });
+    const applied = reduceConversation(snapshot, { ...update, changes });
+    expect(applied.conversation.readCursor).toEqual(withCursor.readCursor);
+    expect(applied.conversation.messages).toBe(empty.messages);
+    const cleared = JSON.parse(JSON.stringify(diffConversation(withCursor, empty)));
+    expect(cleared).toEqual({ readCursor: null });
+    expect(reduceConversation(applied, { ...update, baseRevision: 1, revision: 2, changes: cleared }).conversation.readCursor).toBeUndefined();
+    expect(() => parseConversationFrame({ ...update, changes: { readCursor: { sessionId: 'session', key: 12 } } })).toThrow('invalid_frame');
+  });
   it.each([2, 3])('requires protocol %s clients to reload for title-free questions', (protocolVersion) => {
     expect(() => parseConversationFrame({ ...snapshot, protocolVersion })).toThrow('Chat protocol changed');
   });

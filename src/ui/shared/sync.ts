@@ -6,7 +6,7 @@ import {
   type ConversationFrame,
   type ConversationSnapshot,
 } from './conversation-protocol.js';
-import type { ThreadSummary, AgentGroupActivity } from './thread.js';
+import type { ThreadSummary, AgentGroupSummary } from './thread.js';
 import type { VoiceInputCapability } from './voice.js';
 import { isAttentionTargets } from './attention.js';
 import { isConversationApproval } from './conversation-protocol.js';
@@ -25,7 +25,7 @@ import {
 export interface SyncResponse {
   approvals: ConversationApproval[];
   attention: AttentionTarget[];
-  agentActivity?: AgentGroupActivity[];
+  agentActivity?: AgentGroupSummary[];
   threads?: ThreadSummary[];
   conversation?: ConversationSnapshot;
   voiceInput?: VoiceInputCapability;
@@ -38,7 +38,7 @@ export interface SyncGroupState {
 export interface GlobalSyncState {
   approvals: ConversationApproval[];
   attention: AttentionTarget[];
-  agentActivity: AgentGroupActivity[];
+  agentActivity: AgentGroupSummary[];
   group: SyncGroupState | null;
 }
 
@@ -55,7 +55,7 @@ export interface GlobalSnapshot extends ProjectionCursor {
 export interface GlobalChanges {
   approvals?: CollectionPatch<ConversationApproval>;
   attention?: CollectionPatch<AttentionTarget>;
-  agentActivity?: CollectionPatch<AgentGroupActivity>;
+  agentActivity?: CollectionPatch<AgentGroupSummary>;
   group?:
     | { kind: 'replace'; value: SyncGroupState | null }
     | {
@@ -109,6 +109,7 @@ const thread = shape({
   activity: oneOf('idle', 'running'),
   waiting: optional(bool),
   activityStale: optional(bool),
+  unread: optional(bool),
   canSend: optional(bool),
   kind: optional(oneOf('thread', 'dm')),
   counterparty: optional(text),
@@ -143,7 +144,7 @@ const voiceInput = shape({ backend: oneOf('disabled', 'elevenlabs'), ready: bool
 const groupState = shape({ threads: array(thread), voiceInput });
 const agentActivity = shape({
   id, activity: oneOf('idle', 'running'), waiting: optional(bool),
-  activityStale: optional(bool), threadCount: optional(integer),
+  activityStale: optional(bool), threadCount: optional(integer), unreadThreadCount: optional(integer),
 });
 const globalState = shape({
   approvals: array(isConversationApproval),

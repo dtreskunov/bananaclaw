@@ -1,6 +1,7 @@
 import type { InputState } from './input-state.js';
 import type { QuestionInput, QuestionResponse } from './question.js';
 import type { ConversationApproval } from './approval.js';
+import type { ReadCursor } from './read-state.js';
 
 /** Browser-safe, route-scoped host projection. No runner journal or routing IDs. */
 export interface ConversationUsage {
@@ -127,6 +128,7 @@ export interface ConversationCapabilities {
 }
 
 export interface Conversation {
+  readCursor?: ReadCursor;
   threadId: string;
   messages: ConversationMessage[];
   turns: ConversationTurn[];

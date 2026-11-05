@@ -76,6 +76,10 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
     fail,
   });
   const off = onHostChange((change) => {
+    if (change.kind === 'read-state') {
+      if (change.userId === userId) invalidateGlobal();
+      return;
+    }
     if (change.kind === 'configuration') invalidateGlobal(change.groupId ?? undefined);
     else if (change.kind === 'sessions' || change.kind === 'thread-summaries' || change.kind === 'runtime') {
       invalidateGlobal();

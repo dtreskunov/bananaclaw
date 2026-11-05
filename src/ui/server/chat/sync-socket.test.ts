@@ -40,6 +40,7 @@ import { listThreadsForViewer } from './threads.js';
 import { publishHostChange } from '../../../host-changes.js';
 import { readConversation } from './conversation.js';
 import { reduceConversation, type ConversationSnapshot } from '../../shared/conversation-protocol.js';
+import { acknowledgeRead } from './read-state.js';
 
 let server: WebSocketServer;
 let token: string;
@@ -170,6 +171,43 @@ async function connect(
 }
 
 describe('unified sync WebSocket integration', () => {
+  it('synchronizes reads across the same user’s sockets without invalidating another user', async () => {
+    getDb().exec("INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('other','g','now')");
+    const output = new Database(outboundDbPath('g', 'session'));
+    try {
+      output.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
+        VALUES('reply',1,'chat','now','web','group:g','thread','{"text":"Reply"}');`);
+      refreshThreadSummaries('session');
+      await connect();
+      const peer = async (user: string) => {
+        const received: SyncFrame[] = [];
+        const cookie = createSession(user, 60_000).token;
+        const client = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`, {
+          headers: { Cookie: `${COOKIE_NAME}=${cookie}` },
+        });
+        clients.push(client);
+        client.on('message', raw => received.push(parseSyncFrame(JSON.parse(raw.toString()))));
+        await once(client, 'open');
+        client.send(JSON.stringify({ kind: 'subscribe', protocolVersion: SYNC_PROTOCOL_VERSION, subscriptionId: 1,
+          groupId: null, conversation: null, globalCursor: null }));
+        await vi.waitFor(() => expect(received.some(frame => frame.global)).toBe(true));
+        return received;
+      };
+      const same = await peer('viewer');
+      const other = await peer('other');
+      expect(globalView()?.agentActivity.find(group => group.id === 'g')?.unreadThreadCount).toBe(1);
+      const cursor = readConversation('viewer', 'g', 'thread').readCursor;
+      if (!cursor) throw new Error('Expected publication cursor');
+      acknowledgeRead('viewer', 'g', 'thread', cursor);
+      await vi.waitFor(() => expect(globalView()?.agentActivity.find(group => group.id === 'g')?.unreadThreadCount).toBeUndefined());
+      await vi.waitFor(() => expect(same.some(frame => frame.global?.kind === 'update')).toBe(true));
+      const patch = same.at(-1)?.global;
+      if (patch?.kind !== 'update') throw new Error('Expected unread metadata patch');
+      expect(patch.changes.group).toBeUndefined();
+      expect(patch.changes.agentActivity?.upserts.find(group => group.id === 'g')?.unreadThreadCount).toBeUndefined();
+      expect(other).toHaveLength(1);
+    } finally { output.close(); }
+  });
   it('updates an unselected agent from runtime notices using only an agent status patch', async () => {
     grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
     getDb().exec(`

@@ -54,6 +54,14 @@ const patch = (next: GlobalSyncState, groupId: string | null = 'g'): GlobalUpdat
 const wire = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 describe('incremental metadata projections', () => {
+  it('clears only an agent unread flag without replacing its 1000-thread group snapshot', () => {
+    const before = { ...state, data: { ...data, agentActivity: [{ id: 'g', activity: 'idle' as const, unreadThreadCount: 1 }] } };
+    const next = { ...before.data, agentActivity: [{ id: 'g', activity: 'idle' as const }] };
+    const changes = wire(diffGlobal(before, next, 'g'));
+    expect(changes).toEqual({ agentActivity: { upserts: next.agentActivity, removeIds: [] } });
+    expect(reduceGlobal(before, { ...patch(data), changes }, 'g').data.group).toBe(before.data.group);
+    expect(JSON.stringify(changes).length).toBeLessThan(128);
+  });
   it('sends an approval replacement without including any of the 1000 threads', () => {
     const next = { ...data, approvals: [{ ...approval, title: 'Changed' }] };
     const frame = wire(patch(next));

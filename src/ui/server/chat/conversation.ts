@@ -19,6 +19,7 @@ import type {
 } from '../../shared/conversation.js';
 import { publicInboundMessageId, readChatHistory } from './history.js';
 import { resolveTurnContext, routeMatches, type TurnContext } from './conversation-context.js';
+import { renderedReadCursor } from './read-state.js';
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
 
@@ -291,7 +292,7 @@ export function readConversation(
           context.sessionId,
         )
       : [];
-    return projectConversation(
+    const view = projectConversation(
       outDb,
       context,
       threadId,
@@ -301,6 +302,7 @@ export function readConversation(
       getSessionTurnSignals(context.sessionId ?? ''),
       approvalTranscript(userId, groupId, context),
     );
+    return { ...view, readCursor: renderedReadCursor(userId, groupId, context, view) };
   } finally {
     outDb?.close();
   }

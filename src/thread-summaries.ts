@@ -8,6 +8,7 @@ import { ensureSchema } from './db/session-db.js';
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from './channels/homeassistant-text.js';
 import { onHostChange, publishHostChange } from './host-changes.js';
 import type { LiveTaskDto } from './ui/shared/thread.js';
+import { projectMessagePublications, projectInteractionPublications, finishUnreadBootstrap } from './conversation-publications.js';
 
 const failures = new WeakMap<Database.Database, Map<string, unknown>>();
 function projectionErrors(db = getDb()): Map<string, unknown> {
@@ -55,11 +56,6 @@ export interface ThreadSummarySpec {
   agentGroupId: string;
   sessionId: string;
   thread?: { channelType: string; platformId: string; threadId: string };
-}
-export interface ThreadActivityRoute {
-  channelType: string;
-  platformId: string;
-  threadId: string | null;
 }
 export interface SummarizedThread {
   channelType: string;
@@ -279,6 +275,9 @@ export function refreshThreadSummaries(sessionId: string, dataDir = DATA_DIR): v
               route.thread_id,
               value,
             ).changes;
+          if (source === 'outbound' && dirty.some(route => route.kind !== 'usage'))
+            changed += projectMessagePublications(db, sessionId);
+          if (source === 'inbound') changed += projectInteractionPublications(sessionId, true);
         })();
         const acknowledge = db.prepare(
           `DELETE FROM thread_summary_dirty WHERE kind=? AND channel_type=? AND platform_id=? AND thread_id=? AND revision=?`,
@@ -357,6 +356,8 @@ export function rebuildThreadSummaries(dataDir = DATA_DIR): void {
     }
     refreshThreadSummaries(session.id, dataDir);
   }
+  for (const session of sessions) projectInteractionPublications(session.id);
+  finishUnreadBootstrap();
   central.prepare('UPDATE thread_summary_meta SET ready=1 WHERE id=1').run();
 }
 
@@ -406,19 +407,8 @@ export function readSummaryQueuedRoutes(sessionId: string): Route[] {
 /** Central indexed summaries only; no session DB handles, history scans or viewer cache. */
 export function readSessionThreadSummary(
   spec: ThreadSummarySpec,
-  activityRoutes?: readonly ThreadActivityRoute[],
 ): SessionThreadSummary {
-  const keys =
-    activityRoutes &&
-    new Set(activityRoutes.map((route) => JSON.stringify([route.channelType, route.platformId, route.threadId ?? ''])));
-  const rows = sourceRows(spec.sessionId).filter(
-    (row) =>
-      !keys ||
-      row.kind !== 'route' ||
-      (spec.thread
-        ? row.channel_type === spec.thread.channelType && row.thread_id === spec.thread.threadId
-        : keys.has(JSON.stringify([row.channel_type, row.platform_id, row.thread_id]))),
-  );
+  const rows = sourceRows(spec.sessionId);
   const inbound = rows
     .filter((row) => row.kind === 'route' && row.source === 'inbound')
     .map((row) => ({ ...row, data: readInboundSummary(row) }));

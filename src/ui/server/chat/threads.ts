@@ -5,15 +5,13 @@ import { getThreadForksForAgentGroup } from '../../../db/thread-forks.js';
 import { canAccessAgentGroup, listAccessibleAgentGroups } from '../../../modules/permissions/access.js';
 import { getChannelAdapter } from '../../../channels/channel-registry.js';
 import { WEB_CHANNEL_TYPE } from '../../../channels/web.js';
-import type { ThreadSummary, AgentGroupActivity } from '../../shared/thread.js';
+import type { ThreadSummary, AgentGroupSummary } from '../../shared/thread.js';
 import {
   readSessionThreadSummary,
   readSummaryTurns,
   readSummaryQueuedRoutes,
   assertThreadSummariesReady,
-  assertThreadSummaryAvailable,
   type ThreadSummarySpec,
-  type ThreadActivityRoute,
 } from '../../../thread-summaries.js';
 import { getSessionActiveTurn } from '../../../session-link.js';
 import type { AttentionTarget } from '../../shared/attention.js';
@@ -25,6 +23,7 @@ import {
   routeMatches,
   viewerHandlesForChannel,
 } from './conversation-context.js';
+import { conversationUnread } from './read-state.js';
 
 function normTs(s: string): string {
   return s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
@@ -214,6 +213,7 @@ function withExecutionActivity(userId: string, agentGroupId: string, threads: Th
       messagingGroupId: thread.messagingGroupId,
     });
     if (context?.sessionId !== thread.sessionId) return { ...thread, activity: 'idle' };
+    const unread = conversationUnread(userId, agentGroupId, context);
     const state = live.get(thread.sessionId)!;
     const current =
       state.turn &&
@@ -230,7 +230,8 @@ function withExecutionActivity(userId: string, agentGroupId: string, threads: Th
       (current && !(durable?.id === current.id && durable.phase === 'settled')) ||
       (durable && durable.phase !== 'settled');
     const activity = running ? 'running' : 'idle';
-    return { ...thread, activity, ...(running && !pending && (!state.connected || !current) ? { activityStale: true } : {}) };
+    return { ...thread, activity, ...(unread ? { unread: true } : {}),
+      ...(running && !pending && (!state.connected || !current) ? { activityStale: true } : {}) };
   });
 }
 
@@ -239,68 +240,29 @@ export function readAgentActivity(
   attention: AttentionTarget[],
   selectedGroupId: string | null,
   selectedThreads: ThreadSummary[],
-): AgentGroupActivity[] {
+): AgentGroupSummary[] {
   assertThreadSummariesReady();
   const groups = listAccessibleAgentGroups(userId);
-  const allowed = new Set(groups.map((group) => group.id));
   const waiting = new Set(attention.map((target) => target.origin.agentGroupId));
-  const unfinished = new Map<string, ThreadActivityRoute[]>();
-  for (const row of getDb()
-    .prepare(
-      `SELECT session_id,channel_type,platform_id,thread_id FROM thread_summaries
-    WHERE channel_type!='' AND platform_id!='' AND (
-      (kind='turn' AND json_extract(value,'$.phase') != 'settled') OR
-      (source='inbound' AND kind='route' AND json_extract(value,'$.pendingAt') <= ?))`,
-    )
-    .all(Date.now()) as { session_id: string; channel_type: string; platform_id: string; thread_id: string }[]) {
-    let routes = unfinished.get(row.session_id);
-    if (!routes) unfinished.set(row.session_id, (routes = []));
-    routes.push({ channelType: row.channel_type, platformId: row.platform_id, threadId: row.thread_id || null });
-  }
-  const candidates = new Map<string, Map<string, ThreadActivityRoute[]>>();
-  for (const session of getDb().prepare('SELECT id,agent_group_id FROM sessions').all() as {
-    id: string;
-    agent_group_id: string;
-  }[]) {
-    if (!allowed.has(session.agent_group_id)) continue;
-    assertThreadSummaryAvailable(session.id);
-    const routes = [...(unfinished.get(session.id) ?? [])];
-    const live = getSessionActiveTurn(session.id).turn;
-    if (live) routes.push({ channelType: live.channelType, platformId: live.platformId, threadId: live.threadId });
-    if (!routes.length) continue;
-    let sessions = candidates.get(session.agent_group_id);
-    if (!sessions) candidates.set(session.agent_group_id, (sessions = new Map()));
-    sessions.set(session.id, routes);
-  }
-  return groups.map((group): AgentGroupActivity => {
+  return groups.map((group): AgentGroupSummary => {
     const spectator = isElevated(userId);
     const contexts = spectator ? listAgentMessagingContexts(group.id) : listUserMessagingContexts(userId, group.id);
     const handles = contexts.map((context) => viewerHandlesForChannel(userId, context.channelType));
-    const threadCount = group.id === selectedGroupId
-      ? selectedThreads.length
-      : collectThreadsForContexts(group.id, contexts, spectator, handles).length;
-    const sessions = candidates.get(group.id);
     const overlay = waiting.has(group.id) ? { waiting: true } : {};
-    if (!sessions?.size) return { id: group.id, activity: 'idle', threadCount, ...overlay };
     const threads =
       group.id === selectedGroupId
         ? selectedThreads
         : withExecutionActivity(
             userId,
             group.id,
-            collectThreadsForContexts(
-              group.id,
-              contexts,
-              spectator,
-              handles,
-              sessions,
-            ),
+            collectThreadsForContexts(group.id, contexts, spectator, handles),
           );
     const running = threads.filter((thread) => thread.activity === 'running');
     return {
       id: group.id,
       activity: running.length ? 'running' : 'idle',
-      threadCount,
+      threadCount: threads.length,
+      ...(threads.some(thread => thread.unread) ? { unreadThreadCount: threads.filter(thread => thread.unread).length } : {}),
       ...overlay,
       ...(running.length && running.every((thread) => thread.activityStale) ? { activityStale: true } : {}),
     };
@@ -340,12 +302,9 @@ function collectThreadsForContexts(
   ctxs: UserMessagingContext[],
   spectator: boolean,
   handles: string[][],
-  onlySessions?: ReadonlyMap<string, readonly ThreadActivityRoute[]>,
 ): ThreadSummary[] {
   const out: ThreadSummary[] = [];
-  const sessions = getSessionsByAgentGroup(agentGroupId).filter(
-    (session) => !onlySessions || onlySessions.has(session.id),
-  );
+  const sessions = getSessionsByAgentGroup(agentGroupId);
   type Plan = {
     spec: ThreadSummarySpec;
     session: Pick<(typeof sessions)[number], 'id' | 'last_active' | 'created_at'>;
@@ -365,7 +324,6 @@ function collectThreadsForContexts(
       'id' | 'thread_id' | 'last_active' | 'created_at'
     >[];
     for (const session of perThread) {
-      if (onlySessions && !onlySessions.has(session.id)) continue;
       if (session.thread_id === null) continue;
       plans.push({
         spec: {
@@ -396,7 +354,7 @@ function collectThreadsForContexts(
   plans.push(...sharedPlans);
   if (ctxs.length && sessions.some((s) => s.messaging_group_id === null && s.thread_id === null)) {
     const session = findSessionByAgentGroup(agentGroupId);
-    if (session && (!onlySessions || onlySessions.has(session.id)))
+    if (session)
       plans.push({
         spec: { agentGroupId, sessionId: session.id },
         session,
@@ -404,7 +362,7 @@ function collectThreadsForContexts(
         mode: 'agent-shared',
       });
   }
-  const summaries = plans.map((plan) => readSessionThreadSummary(plan.spec, onlySessions?.get(plan.spec.sessionId)));
+  const summaries = plans.map((plan) => readSessionThreadSummary(plan.spec));
   const remaining = new Set(getSessionsByAgentGroup(agentGroupId).map((session) => session.id));
   const dmSummaries: ThreadSummary[] = [];
   const agentSummaries: ThreadSummary[] = [];
@@ -495,7 +453,7 @@ function collectThreadsForContexts(
     seen.add(t.threadId);
     deduped.push(t);
   }
-  if (!onlySessions && stampForkLineage(agentGroupId, deduped)) {
+  if (stampForkLineage(agentGroupId, deduped)) {
     deduped.sort((a, b) => Date.parse(normTs(b.lastActivityAt)) - Date.parse(normTs(a.lastActivityAt)));
   }
   return deduped;

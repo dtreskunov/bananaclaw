@@ -27,6 +27,30 @@ central values before acknowledging those markers. See
 [upgrade and recovery](ui.md#thread-summary-upgrade). These are rebuildable
 derived summaries, not a durable UI event log.
 
+### Durable conversation reads
+
+Migration `051-conversation-reads.ts` adds:
+
+- `conversation_publications`: a current-content index keyed by session, item
+  kind/ID and exact route. Its non-reused integer position is internal; clients
+  receive only a random opaque key. Inactive tombstones preserve identity across
+  deletion/replay. Messages, question cards and approval cards share this order.
+  Payloads stay in their canonical host journals/current-state interaction rows.
+- `conversation_reads`: monotonic per-user, per-session, channel/platform/thread
+  read watermarks. User/session deletion cascades to these rows.
+- `users.unread_baseline`: private rollout/account-creation baseline, omitted
+  from public user records.
+- `thread_summary_meta.unread_ready`: an explicit bootstrap gate. The first
+  offline rebuild baselines existing content; later repairs preserve read state.
+
+Ordinary output publication follows dirty-source projection, with final
+responses gated on turn settlement. Interaction publication is part of the
+interaction mutation transaction; its validated origin route is retained in
+the existing routing columns rather than reconstructed on every UI read.
+Authorization is still evaluated for the current viewer on every metadata,
+conversation and acknowledgement operation. Read changes notify only that
+user's sync subscribers. See [the upgrade procedure](ui.md#durable-unread-upgrade).
+
 ### 1.1 `agent_groups`
 
 Agent workspaces. Each maps 1:1 to a `groups/<folder>/` directory containing `CLAUDE.md` and skills. Container config lives in `container_configs` (see §1.x below); a `container.json` file is materialized at spawn time for the container runner to read.

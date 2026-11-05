@@ -7,6 +7,7 @@ import type {
   ConversationTimelineRow,
 } from './conversation.js';
 import { isQuestionInteraction } from './conversation.js';
+import { isReadCursor } from './read-state.js';
 import {
   applyCollection,
   diffCollection,
@@ -43,6 +44,7 @@ export interface ConversationActivityPatch {
   changes: CollectionPatch<ConversationActivity, number>;
 }
 export interface ConversationChanges {
+  readCursor?: Conversation['readCursor'] | null;
   messages?: EntityChanges<ConversationMessage>;
   turns?: EntityChanges<ConversationTurnFields>;
   activity?: ConversationActivityPatch[];
@@ -271,6 +273,7 @@ const capabilities = shape({
   cancelInput: bool,
 });
 const conversation = shape({
+  readCursor: optional(isReadCursor),
   threadId: id,
   messages: array(message),
   turns: array(turn),
@@ -292,6 +295,7 @@ export function parseConversationFrame(value: unknown): ConversationFrame {
     integer(value.baseRevision) &&
     value.revision === Number(value.baseRevision) + 1 &&
     shape({
+      readCursor: optional(nullable(isReadCursor)),
       messages: changes(message),
       turns: changes((value) => shape(turnFields)(value) && object(value) && value.activity === undefined),
       activity: optional(array(shape({ turnId: id, changes: collectionPatchCheck(activityLine, integer) }))),
@@ -422,6 +426,7 @@ function applyConversation(state: ConversationSnapshot | null, frame: Conversati
       timeline: applyCollection(state.conversation.timeline, changes.timeline, timelineKey),
       connection: changes.connection ?? state.conversation.connection,
       capabilities: changes.capabilities ?? state.conversation.capabilities,
+      readCursor: changes.readCursor === undefined ? state.conversation.readCursor : changes.readCursor ?? undefined,
     },
   };
   validateTimeline(next.conversation);
@@ -454,6 +459,7 @@ export function diffConversation(before: Conversation, after: Conversation): Con
     interactions: diffCollection(before.interactions, after.interactions, entityId),
     connection: sameValue(before.connection, after.connection) ? undefined : after.connection,
     capabilities: sameValue(before.capabilities, after.capabilities) ? undefined : after.capabilities,
+    readCursor: sameValue(before.readCursor, after.readCursor) ? undefined : after.readCursor ?? null,
     timeline: diffCollection(before.timeline, after.timeline, timelineKey),
   };
 }

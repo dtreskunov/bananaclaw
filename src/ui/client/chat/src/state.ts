@@ -1,6 +1,6 @@
 // Reactive state (signals) + constants + non-reactive refs.
 import { signal, computed, effect, type Signal, type ReadonlySignal } from '@preact/signals';
-import type { AgentGroupActivity } from '../../../shared/thread';
+import type { AgentGroupSummary } from '../../../shared/thread';
 import type {
   Group,
   Thread,
@@ -24,7 +24,7 @@ import type {
 
 // ── reactive state ──────────────────────────────────────────────────
 export const groups: Signal<Group[]> = signal<Group[]>([]);
-export const agentActivity = signal<AgentGroupActivity[]>([]);
+export const agentActivity = signal<AgentGroupSummary[]>([]);
 export const groupId: Signal<string | null> = signal<string | null>(null);
 export const isAdmin: ReadonlySignal<boolean> = computed(() => {
   const id = groupId.value;

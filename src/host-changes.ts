@@ -1,6 +1,7 @@
 import { log } from './log.js';
 
 export type HostChange =
+  | { kind: 'read-state'; userId: string; groupId: string }
   | { kind: 'activity'; sessionId: string }
   | { kind: 'runtime'; sessionId: string; groupId?: string | null }
   | { kind: 'interactions'; sessionId?: string | null }

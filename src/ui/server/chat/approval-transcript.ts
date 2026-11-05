@@ -1,6 +1,5 @@
 import { getDb } from '../../../db/connection.js';
 import { queryInteractions, legacyInteractionExpired } from '../../../db/interactions.js';
-import fs from 'node:fs';
 
 import { getApproval, type Approval } from '../../../db/approvals.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
@@ -10,7 +9,7 @@ import { getUser } from '../../../modules/permissions/db/users.js';
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
 import { getAccountRequest } from '../../../modules/approvals/workflows.js';
 import type { AccountInteraction, AccountRequestData } from '../../shared/approval.js';
-import { inboundDbPath, openInboundDb } from '../../../session-manager.js';
+import { interactionRoute } from '../../../conversation-publications.js';
 import type { ApprovalOrigin, ConversationApproval } from '../../shared/approval.js';
 import { presentApproval } from './approval-presentation.js';
 import { resolveTurnContext, type TurnContext } from './conversation-context.js';
@@ -20,26 +19,10 @@ export function approvalOrigin(
   row: { session_id: string | null; origin_message_id?: string | null },
 ): ApprovalOrigin | null {
   const session = row.session_id ? getSession(row.session_id) : undefined;
-  if (!session || !fs.existsSync(inboundDbPath(session.agent_group_id, session.id))) return null;
+  if (!session) return null;
   const mg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
-  if (!row.origin_message_id && session.thread_id === null && mg?.is_group === 1) return null;
-  let route = {
-    channel_type: mg?.channel_type ?? null,
-    platform_id: mg?.platform_id ?? null,
-    thread_id: session.thread_id,
-  };
-  if (row.origin_message_id) {
-    const db = openInboundDb(session.agent_group_id, session.id);
-    try {
-      const source = db
-        .prepare('SELECT channel_type,platform_id,thread_id FROM messages_in WHERE id=?')
-        .get(row.origin_message_id) as typeof route | undefined;
-      if (!source) return null;
-      route = source;
-    } finally {
-      db.close();
-    }
-  }
+  const route = interactionRoute(row);
+  if (!route) return null;
   let messagingGroupId = mg?.channel_type === route.channel_type && mg.platform_id === route.platform_id ? mg.id : null;
   if (!messagingGroupId) {
     const candidates = getDb()
@@ -49,7 +32,7 @@ export function approvalOrigin(
     messagingGroupId = candidates[0].id;
   }
   if (!route.channel_type || !route.platform_id) return null;
-  const threadId = route.thread_id ?? `__dm:${messagingGroupId}`;
+  const threadId = route.thread_id || `__dm:${messagingGroupId}`;
   const context = resolveTurnContext(userId, session.agent_group_id, threadId, {
     channelType: route.channel_type,
     messagingGroupId,
@@ -59,7 +42,7 @@ export function approvalOrigin(
     context.sessionId !== session.id ||
     context.channelType !== route.channel_type ||
     !context.platformIds.includes(route.platform_id) ||
-    context.threadId !== route.thread_id
+    context.threadId !== (route.thread_id || null)
   )
     return null;
   return { agentGroupId: session.agent_group_id, threadId, channelType: route.channel_type, messagingGroupId };

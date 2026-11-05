@@ -144,7 +144,7 @@ describe('thread activity projection', () => {
     });
     expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
     expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'running', waiting: true, threadCount: 2 },
+      { id: 'g', activity: 'running', waiting: true, threadCount: 2, unreadThreadCount: 1 },
     ]);
   });
   it('isolates shared DM activity and waiting state to the authorized counterparty', async () => {
@@ -257,14 +257,14 @@ describe('thread activity projection', () => {
     });
     expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
     expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'idle', waiting: true, threadCount: 2 },
+      { id: 'g', activity: 'idle', waiting: true, threadCount: 2, unreadThreadCount: 1 },
     ]);
     turn('turn-a', 'a', 'running');
     signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
     signal.connected = true;
     expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
     expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'running', waiting: true, threadCount: 2 },
+      { id: 'g', activity: 'running', waiting: true, threadCount: 2, unreadThreadCount: 1 },
     ]);
     turn('turn-a', 'a', 'settled');
     expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
@@ -288,10 +288,10 @@ describe('thread activity projection', () => {
     const selected = await listThreadsForViewer('viewer', 'g');
     expect(selected.find((thread) => thread.threadId === 'a')).toMatchObject({ activity: 'idle', waiting: true });
     expect(readAgentActivity('viewer', attention, 'g', selected)).toEqual([
-      { id: 'g', activity: 'running', waiting: true, activityStale: true, threadCount: 2 },
+      { id: 'g', activity: 'running', waiting: true, activityStale: true, threadCount: 2, unreadThreadCount: 1 },
     ]);
     expect(readAgentActivity('viewer', attention, null, [])).toEqual([
-      { id: 'g', activity: 'running', waiting: true, activityStale: true, threadCount: 2 },
+      { id: 'g', activity: 'running', waiting: true, activityStale: true, threadCount: 2, unreadThreadCount: 1 },
     ]);
   });
   it('reuses selected summaries and includes unselected groups without private thread leakage', async () => {
@@ -331,14 +331,14 @@ describe('thread activity projection', () => {
       output.close();
     }
   });
-  it('builds only active route candidates for an unselected shared-session agent', () => {
+  it('reuses one visible summary read for unselected counts and activity', () => {
     turn('turn-a', 'a', 'running');
     signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
     signal.connected = true;
     const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
     expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'running', threadCount: 2 }]);
-    expect(read).toHaveBeenCalledTimes(2);
-    expect(read.mock.results[1].value.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual(['a']);
+    expect(read).toHaveBeenCalledOnce();
+    expect(read.mock.results[0].value.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual(['a', 'b']);
   });
   it('removes a group immediately after access is revoked and fails closed on broken projection state', () => {
     removeMember('viewer', 'g');
