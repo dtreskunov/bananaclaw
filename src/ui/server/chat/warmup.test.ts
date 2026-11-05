@@ -24,7 +24,6 @@ import { openInboundDb, openOutboundDb } from '../../../session-manager.js';
 import { stopTypingRefresh } from '../../../modules/typing/index.js';
 import type { ChannelAdapter } from '../../../channels/adapter.js';
 import { handleChatRequest, listThreadsForViewer, matchChatPath } from './chat.js';
-import { threadScanner } from './thread-scanner.js';
 
 let adapter: ChannelAdapter;
 const GROUP = 'agent';
@@ -91,7 +90,6 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const session of getSessionsByAgentGroup(GROUP)) stopTypingRefresh(session.id);
   await adapter.teardown?.();
-  await threadScanner.close();
   closeDb();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });

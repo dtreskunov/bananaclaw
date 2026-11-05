@@ -6,9 +6,17 @@ import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import { getChannelAdapter } from '../../../channels/channel-registry.js';
 import { WEB_CHANNEL_TYPE } from '../../../channels/web.js';
 import type { ThreadSummary } from '../../shared/thread.js';
-import type { ThreadScanSpec } from './thread-scan.js';
-import { threadScanner } from './thread-scanner.js';
-import { isElevated, platformIdFor, viewerHandlesForChannel } from './conversation-context.js';
+import { readSessionThreadSummary, readSummaryTurns, type ThreadSummarySpec } from '../../../thread-summaries.js';
+import { getSessionActiveTurn } from '../../../session-link.js';
+import type { AttentionTarget } from '../../shared/attention.js';
+import { readInteractionSync } from './attention.js';
+import {
+  isElevated,
+  platformIdFor,
+  resolveTurnContext,
+  routeMatches,
+  viewerHandlesForChannel,
+} from './conversation-context.js';
 
 function normTs(s: string): string {
   return s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
@@ -135,7 +143,11 @@ function listUserMessagingContexts(userId: string, agentGroupId: string): UserMe
  * session_mode, so the listing stays correct when mga.session_mode and
  * the session table have drifted (e.g. mode was changed mid-life).
  */
-export async function listThreadsForViewer(userId: string, agentGroupId: string): Promise<ThreadSummary[]> {
+export async function listThreadsForViewer(
+  userId: string,
+  agentGroupId: string,
+  attention?: AttentionTarget[],
+): Promise<ThreadSummary[]> {
   const visibility = () => {
     const spectator = isElevated(userId);
     const contexts = spectator
@@ -146,11 +158,51 @@ export async function listThreadsForViewer(userId: string, agentGroupId: string)
   };
   if (!canAccessAgentGroup(userId, agentGroupId).allowed) throw new Error('Thread list access denied');
   const before = visibility();
-  const threads = await collectThreadsForContexts(agentGroupId, before.contexts, before.spectator, before.handles);
+  // Let commit notices refresh their durable projections before the indexed read.
+  await Promise.resolve();
   if (!canAccessAgentGroup(userId, agentGroupId).allowed || JSON.stringify(before) !== JSON.stringify(visibility())) {
-    throw new Error('Thread visibility changed during scanning; retry the request');
+    throw new Error('Thread visibility changed before publication; retry the request');
   }
-  return threads;
+  const threads = collectThreadsForContexts(agentGroupId, before.contexts, before.spectator, before.handles);
+  const waiting = new Set(
+    (attention ?? readInteractionSync(userId).attention)
+      .filter((target) => target.origin.agentGroupId === agentGroupId)
+      .map((target) =>
+        JSON.stringify([target.origin.channelType, target.origin.messagingGroupId, target.origin.threadId]),
+      ),
+  );
+  const live = new Map(
+    [...new Set(threads.map((thread) => thread.sessionId))].map((sessionId) => [
+      sessionId,
+      getSessionActiveTurn(sessionId),
+    ]),
+  );
+  const saved = new Map([...live.keys()].map((sessionId) => [sessionId, readSummaryTurns(sessionId)]));
+  return threads.map((thread) => {
+    const context = resolveTurnContext(userId, agentGroupId, thread.threadId, {
+      channelType: thread.channelType,
+      messagingGroupId: thread.messagingGroupId,
+    });
+    const state = live.get(thread.sessionId)!;
+    const current =
+      context && state.turn && routeMatches(context, state.turn.channelType, state.turn.platformId, state.turn.threadId)
+        ? state.turn
+        : null;
+    const durable =
+      context &&
+      saved
+        .get(thread.sessionId)
+        ?.find((turn) => routeMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null));
+    const running =
+      (current && !(durable?.id === current.id && durable.phase === 'settled')) ||
+      (durable && durable.phase !== 'settled');
+    const activity = running
+      ? 'running'
+      : waiting.has(JSON.stringify([thread.channelType, thread.messagingGroupId, thread.threadId]))
+        ? 'waiting'
+        : 'idle';
+    return { ...thread, activity, ...(running && (!state.connected || !current) ? { activityStale: true } : {}) };
+  });
 }
 
 /**
@@ -181,16 +233,16 @@ function listAgentMessagingContexts(agentGroupId: string): UserMessagingContext[
   return ctxs;
 }
 
-async function collectThreadsForContexts(
+function collectThreadsForContexts(
   agentGroupId: string,
   ctxs: UserMessagingContext[],
   spectator: boolean,
   handles: string[][],
-): Promise<ThreadSummary[]> {
+): ThreadSummary[] {
   const out: ThreadSummary[] = [];
   const sessions = getSessionsByAgentGroup(agentGroupId);
   type Plan = {
-    spec: ThreadScanSpec;
+    spec: ThreadSummarySpec;
     session: Pick<(typeof sessions)[number], 'id' | 'last_active' | 'created_at'>;
     contexts: UserMessagingContext[];
     mode: ThreadSummary['sessionMode'];
@@ -246,15 +298,13 @@ async function collectThreadsForContexts(
         mode: 'agent-shared',
       });
   }
-  // Mutation helpers defer invalidation until their outer transaction unwinds.
-  await Promise.resolve();
-  const scans = await threadScanner.scan(plans.map((plan) => plan.spec));
+  const summaries = plans.map((plan) => readSessionThreadSummary(plan.spec));
   const remaining = new Set(getSessionsByAgentGroup(agentGroupId).map((session) => session.id));
   const dmSummaries: ThreadSummary[] = [];
   const agentSummaries: ThreadSummary[] = [];
   for (const [index, plan] of plans.entries()) {
     if (!remaining.has(plan.session.id)) continue;
-    const scan = scans[index];
+    const scan = summaries[index];
     const usage =
       scan.turnCount > 0 ? { totalCost: scan.totalCost, totalTokens: scan.totalTokens, turnCount: scan.turnCount } : {};
     for (const thread of scan.threads) {
@@ -270,6 +320,7 @@ async function collectThreadsForContexts(
       const target = plan.mode === 'agent-shared' ? agentSummaries : out;
       target.push({
         ...thread,
+        activity: 'idle',
         sessionId: plan.session.id,
         messagingGroupId: ctx.messagingGroupId,
         sessionMode: plan.mode,
@@ -305,6 +356,7 @@ async function collectThreadsForContexts(
       title: 'Direct messages',
       lastActivityAt: times[0] || new Date(0).toISOString(),
       messageCount: dms.reduce((total, dm) => total + dm.messageCount, reply?.messageCount ?? 0),
+      activity: 'idle',
       counterparty: platformId,
       kind: 'dm',
     });

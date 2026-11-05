@@ -73,7 +73,7 @@ import {
   MIN_TASK_SCRIPT_TIMEOUT_MS,
   type TaskUpdate,
 } from '../../../modules/scheduling/db.js';
-import { summarizeTaskPrompt } from './thread-scan.js';
+import { summarizeTaskPrompt } from '../../../thread-summaries.js';
 import { listThreadsForViewer } from './threads.js';
 export { listThreadsForViewer, viewerHasContent } from './threads.js';
 import { readThreadTitle } from '../../../modules/thread-titles/db.js';

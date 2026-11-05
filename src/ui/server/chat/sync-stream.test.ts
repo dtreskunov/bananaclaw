@@ -11,10 +11,10 @@ function fixture(overrides: Partial<SyncStreamOptions> = {}) {
   vi.useFakeTimers();
   const frames: SyncFrame[] = [];
   let state: GlobalProjection | null = null;
-  let invalidate: (groupId?: string, refreshThreads?: boolean) => void = () => {};
+  let invalidate: (groupId?: string) => void = () => {};
   const unsubscribe = vi.fn();
   const read = vi.fn(
-    async (_groupId: string | null, _refreshThreads: boolean): Promise<GlobalSyncState> => ({
+    async (_groupId: string | null): Promise<GlobalSyncState> => ({
       approvals: [],
       attention: [],
       group: null,
@@ -39,7 +39,7 @@ function fixture(overrides: Partial<SyncStreamOptions> = {}) {
   return {
     stream,
     frames,
-    invalidate: (gid?: string, refreshThreads?: boolean) => invalidate(gid, refreshThreads),
+    invalidate: (gid?: string) => invalidate(gid),
     unsubscribe,
     read,
     fail,
@@ -87,7 +87,7 @@ describe('global synchronization stream', () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(f.read).toHaveBeenCalledTimes(2);
     expect(f.frames).toHaveLength(1);
-    f.stream.subscribe(2, 'g', true, f.cursor());
+    f.stream.subscribe(2, 'g', f.cursor());
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames).toHaveLength(2);
     expect(f.frames[1]).toMatchObject({
@@ -103,7 +103,7 @@ describe('global synchronization stream', () => {
     f.stream.subscribe(1, 'old');
     await vi.advanceTimersByTimeAsync(100);
     const cursor = f.cursor();
-    f.stream.subscribe(2, 'new', true, cursor);
+    f.stream.subscribe(2, 'new', cursor);
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames[1].global).toMatchObject({
       kind: 'update',
@@ -131,27 +131,27 @@ describe('global synchronization stream', () => {
     f.invalidate();
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames[1].global?.kind).toBe('update');
-    f.stream.subscribe(2, 'new', true, stale);
+    f.stream.subscribe(2, 'new', stale);
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames[2].global).toMatchObject({ kind: 'snapshot', revision: 0 });
     expect(f.frames[2].global?.streamId).not.toBe(stale?.streamId);
     f.stream.stop();
   });
 
-  it('rescans threads only when requested, including every explicit refresh', async () => {
+  it('reads the indexed projection on relevant invalidation and explicit refresh', async () => {
     const f = fixture();
     f.stream.subscribe(1, 'g');
     await vi.advanceTimersByTimeAsync(100);
-    f.invalidate(undefined, false);
+    f.invalidate();
     await vi.advanceTimersByTimeAsync(100);
-    expect(f.read.mock.calls[1][1]).toBe(false);
+    expect(f.read).toHaveBeenLastCalledWith('g');
     f.invalidate('other');
-    f.invalidate('g', false);
+    f.invalidate('g');
     await vi.advanceTimersByTimeAsync(100);
-    expect(f.read.mock.calls[2][1]).toBe(false);
+    expect(f.read).toHaveBeenCalledTimes(3);
     f.stream.subscribe(2, 'g');
     await vi.advanceTimersByTimeAsync(100);
-    expect(f.read.mock.calls[3][1]).toBe(true);
+    expect(f.read).toHaveBeenCalledTimes(4);
     f.stream.stop();
   });
 
@@ -170,13 +170,13 @@ describe('global synchronization stream', () => {
     f.stream.subscribe(1, 'g');
     await vi.advanceTimersByTimeAsync(100);
     f.invalidate('g');
-    f.invalidate(undefined, false);
+    f.invalidate();
     finish({ approvals: [], attention: [], group: null });
     await vi.advanceTimersByTimeAsync(100);
-    expect(read).toHaveBeenLastCalledWith('g', true);
-    f.invalidate(undefined, false);
+    expect(read).toHaveBeenLastCalledWith('g');
+    f.invalidate();
     await vi.advanceTimersByTimeAsync(100);
-    expect(read).toHaveBeenLastCalledWith('g', false);
+    expect(read).toHaveBeenCalledTimes(3);
     f.stream.stop();
   });
 
@@ -190,7 +190,7 @@ describe('global synchronization stream', () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(f.frames).toHaveLength(1);
     expect(f.fail).not.toHaveBeenCalled();
-    expect(f.read.mock.calls[1][1]).toBe(true);
+    expect(f.read).toHaveBeenLastCalledWith('g');
     f.stream.stop();
   });
 

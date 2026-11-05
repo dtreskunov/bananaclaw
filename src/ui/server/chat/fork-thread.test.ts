@@ -34,7 +34,7 @@ import { upsertThreadTitle } from '../../../modules/thread-titles/db.js';
 import { closeSearchDb, indexMessage, initSearchDb } from '../../../search-index.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath } from '../../../session-manager.js';
 import { handleChatRequest, listThreadsForViewer } from './chat.js';
-import { threadScanner } from './thread-scanner.js';
+import * as threadSummaries from '../../../thread-summaries.js';
 
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 const NOW = new Date().toISOString();
@@ -45,6 +45,7 @@ const WEB_MG = 'web-mg';
 const WEB_PLATFORM_ID = `group:${GROUP_ID}`;
 const THREAD = 'thread-1';
 const SESSION = 'sess-1';
+let stopProjection = () => {};
 
 function makeRes(): { res: http.ServerResponse; done: Promise<void>; status: () => number; body: () => string } {
   let status = 0;
@@ -163,6 +164,7 @@ function seedThread(): void {
     )
     .run(WEB_PLATFORM_ID, THREAD);
   outDb.close();
+  threadSummaries.refreshThreadSummaries(SESSION);
 }
 
 /** The parent's messages as the host would have indexed them. */
@@ -215,10 +217,11 @@ beforeEach(() => {
     .prepare(`INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)`)
     .run(USER_ID, GROUP_ID, USER_ID, NOW);
   grantRole({ user_id: ADMIN_ID, role: 'admin', agent_group_id: null, granted_by: ADMIN_ID, granted_at: NOW });
+  stopProjection = threadSummaries.startThreadSummaryProjection();
 });
 
 afterEach(async () => {
-  await threadScanner.close();
+  stopProjection();
   vi.restoreAllMocks();
   closeDb();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
@@ -348,7 +351,9 @@ describe('asynchronous thread listing', () => {
   it('reports scanner failures instead of returning an empty successful thread list', async () => {
     seedMessagingGroup(WEB_MG, 'web', WEB_PLATFORM_ID, 'per-thread');
     seedThread();
-    vi.spyOn(threadScanner, 'scan').mockRejectedValueOnce(new Error('Scanner unavailable'));
+    vi.spyOn(threadSummaries, 'readSessionThreadSummary').mockImplementationOnce(() => {
+      throw new Error('Projection unavailable');
+    });
     const result = await call('GET', `/api/groups/${GROUP_ID}/chat/threads`);
     expect(result.status).toBe(503);
     expect(result.json).toHaveProperty('error');

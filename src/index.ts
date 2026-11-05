@@ -22,6 +22,7 @@ import { pruneExpiredSubscriptions } from './modules/push/db.js';
 import { resumeTypingForRunningSessions } from './modules/typing/index.js';
 import { routeInbound } from './router.js';
 import { initSearchDb, closeSearchDb } from './search-index.js';
+import { reconcileThreadSummaries, startThreadSummaryProjection } from './thread-summaries.js';
 import { log } from './log.js';
 import { enforceUpgradeTripwire } from './upgrade-state.js';
 import {
@@ -84,6 +85,8 @@ async function main(): Promise<void> {
   const db = initDb(dbPath);
   runMigrations(db);
   log.info('Central DB ready', { path: dbPath });
+  reconcileThreadSummaries();
+  onShutdown(startThreadSummaryProjection());
   await flushManagedUsers();
   startManagedUserSynchronization();
 

@@ -13,8 +13,8 @@ Optional read-only web UI mounted on the existing webhook HTTP server under `/ui
   [approval](../src/ui/server/chat/approval-transcript.ts) readers project their
   public views.
 - [Threads](../src/ui/server/chat/threads.ts) owns authorized thread listing.
-  [Global projections](../src/ui/server/chat/sync-state.ts) cache expensive thread
-  scans while keeping interaction and voice reads fresh. The
+  [Global projections](../src/ui/server/chat/sync-state.ts) read indexed thread
+  summaries, current interactions and voice capabilities. The
   [sync socket](../src/ui/server/chat/sync-socket.ts) owns selection, authorization
   and the single host-change subscription. Pure metadata and conversation streams
   independently coalesce reads; neither owns workflow lifecycle policy.
@@ -173,27 +173,40 @@ entry. Ordinary admission, idle eviction, and idle cleanup govern its container.
 No lease, special promotion, or speculative worker pool is involved. Deleting
 a thread waits for its outstanding warmup before deleting the persisted session.
 
-#### Thread-list scanning
+#### Maintained thread summaries
 
-Thread-list statistics are read by one lazy, persistent Node worker, not on the
-host event loop. Sync, thread listing, search scoping, and push-title lookup share
-this scanner. SQLite connections are worker-local, read-only, and closed after
-each session scan; the runner's private database is never read.
+[Thread summaries](../src/thread-summaries.ts) replace the history-scanning
+worker, worker queue, TTL cache and their invalidations. Sync, thread listing,
+search scoping and push-title lookup read the same indexed central projection.
+Summary contributions retain source session and exact channel/platform/thread
+identity; final viewer filtering, shared-DM aggregation, fork lineage and
+adapter sendability remain in the authorized thread reader.
 
-Concurrent identical requests share one scan. The worker retains up to 1,024
-session/routing results and rescans sessions marked dirty by committed message,
-usage, title, or task changes. Invalidations coalesce until the next request;
-an older in-flight scan cannot clear a newer invalidation. Central session,
-wiring, identity, and fork metadata are read afresh on the host, with visibility
-rechecked after scanning. Adapter connectivity is not cached.
+Triggers in the host-owned inbound/outbound databases mark affected routes in
+the same transaction as message, title, task, usage or turn-header changes.
+Commit notifications refresh only dirty route aggregates, commit their central
+copies, then acknowledge the exact source marker revision. Rollback creates no
+work; a crash before acknowledgement leaves replayable work, not an increment
+that can double count. Normal startup drains these markers before admitting UI
+or channel traffic. Neither the runner's private DB nor activity trace history
+is used to build thread lists. Host tracking tables/triggers are stripped from
+runner-state seeds.
 
-Cached results expire after 60 seconds even when accessed repeatedly, so
-out-of-band database edits are reconciled on a subsequent refresh. No persistent
-summary table or migration is involved. Pending scans are bounded to 32 requests
-with a 30-second deadline; worker failures reject requests, and a later request
-starts a fresh worker. Thread-list/search failures return an explicit 503 rather
-than an empty successful result. Push titles log failures and retain the existing
-group-name fallback.
+There is no thread-scan dependency flag or cached viewer projection. Source
+projection failures are logged and persist an unavailable status rather than
+returning a successful empty/stale list. Startup or an authorized explicit
+refresh can reconcile outstanding markers after the cause is fixed. An initial
+offline backfill is required for existing installs; see
+[the upgrade procedure](#thread-summary-upgrade).
+
+Thread and DM metadata lines show exactly **Idle**, **Running**, or **Waiting**.
+Running includes stopping/finalization and wins over an outstanding request;
+otherwise actionable unanswered questions/approvals mean Waiting. Future
+scheduled work does not. Shared-session execution marks only its exact origin
+conversation. Disconnected unfinished execution retains its last-known Running
+state with a stale explanation, not a fabricated completion or fourth state.
+Global disconnection likewise makes indicators stale and stops animation.
+Reduced-motion preferences disable the running animation.
 
 #### Startup recovery
 
@@ -1346,7 +1359,7 @@ restore the backup over newer accepted messages.
 
 The app uses one authenticated, same-origin WebSocket at `/ui/chat/api/sync/ws`
 for global metadata and the selected conversation, including non-web channels.
-Version-11 `subscribe` requests carry a monotonic `subscriptionId`, a nullable
+Version-12 `subscribe` requests carry a monotonic `subscriptionId`, a nullable
 `groupId`, and a nullable `conversation` containing `threadId`, `channelType` and
 `messagingGroupId`. A nullable `globalCursor` carries the last applied metadata
 `streamId` and `revision`. Non-web contexts require a messaging group and retain the
@@ -1417,28 +1430,28 @@ Committed mutation helpers invalidate metadata, including CLI operations,
 session-less approvals, session/fork changes, configuration and access changes.
 Session projection events refresh the selected group's summaries. Metadata reads are coalesced for 100 ms with one in-flight async build and a
 bounded dirty flag. Conversation reads retain their independent 40 ms coalescing;
-a pending thread scan cannot block transcript or activity publication. Switching
-threads in the same group reuses its cached scan; explicit refresh rescans threads.
+metadata reads query central summaries rather than opening/scanning session history.
+An authorized explicit same-scope refresh reconciles dirty source markers before
+acknowledging current state.
 Same-conversation refresh and visibility catch-up reread the transcript without
 resetting its stream or revisions, so pending output and settlement deltas retain
 completion cues. New selections and reconnects establish fresh snapshots.
 Live and committed activity-only events invalidate the matching conversation,
-not metadata or thread scans. Durable turn observers do not broaden these notices.
-Interaction changes refresh approvals and attention without rescanning the selected
-group's threads. Session changes invalidate thread summaries only for the affected
-group; configuration changes refresh voice capability without rescanning threads.
-Access changes invalidate cached visibility. An internal access generation also
-prevents a cached snapshot from being published if authority changes across an
+not metadata. Durable turn observers do not broaden these notices.
+Runtime notices refresh indicators without opening source DBs. Interaction changes
+refresh approvals, attention and Waiting indicators. Session changes refresh the
+affected source projection and group; configuration changes refresh current voice
+capability. An internal access generation prevents a snapshot from being published if authority changes across an
 asynchronous read.
-Access changes also clear the worker scan cache because they can subsume queued
-session changes during coalescing.
+Access changes can subsume queued session notices, so their handler also drains
+durable dirty markers; source updates cannot disappear during coalescing.
 
 Changes during a scan schedule a further read without starving publication of
 completed, authorized snapshots. Obsolete subscriptions are never published.
-Interaction metadata is read once after the thread scan, using current approval
+Interaction metadata uses current approval
 permissions. Authorization is checked again before publication. Only the UI authentication
 session has a socket expiry deadline; it closes the connection even while the
-first thread scan is blocked. Interaction lifetimes do not schedule refreshes.
+first metadata build is pending. Interaction lifetimes do not schedule refreshes.
 Host `.env` replacements/edits trigger a filesystem notification. Manual
 SQL edits outside normal host mutation helpers require an explicit refresh or
 host restart.
@@ -1494,6 +1507,35 @@ the server store; HTTP acceptance does not prove a command took effect.
   Stale metadata cursors must recover with a fresh baseline, never partial state.
 - **Rollback:** redeploy the previous matching host and browser assets and
   reload tabs. Storage is unchanged; do not restore databases or replay commands.
+
+### Thread-summary upgrade
+
+- **Detect:** the central DB has migration `maintained-thread-summaries` with
+  `thread_summary_meta.ready=0`, or startup reports the offline backfill command.
+  Protocol-11 browsers also lack the required thread activity field.
+- **Why:** thread-list reads no longer reconstruct metadata from message history.
+  Host source DBs now have transactional dirty-route markers and the central DB
+  holds a rebuildable projection. Activity is exactly idle/running/waiting.
+- **Fix:** stop this checkout's host, back up `data/v2.db` and all session DBs,
+  then run from the project root:
+  `pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped`.
+  The command refuses a live host CLI socket, installs host-only source tracking,
+  backfills all known sessions and marks the projection ready only on success.
+  Missing/unreadable sources fail explicitly. Re-running is safe; it rebuilds
+  from source state, not old derived rows. Build matching host/chat assets,
+  restart the host and reload browsers for protocol 12. No runner image or
+  credential changes are needed. Fresh installs have an empty ready projection.
+- **Verify:** compare counts, titles, ownership, tasks and usage with source data;
+  start execution in one shared-session thread and verify its sibling stays
+  idle. Resolve a pending request and verify Waiting clears. An interrupted
+  projection must retain source markers and converge on restart or explicit
+  refresh, without duplicate counts. Runtime/activity-only events must perform
+  no source history aggregation. Check desktop/mobile and reduced motion.
+- **Rollback:** stop the host, deploy the previous matching host/browser assets
+  and reload clients. The previous host ignores these derived tables/triggers;
+  no source message, workflow or turn data is converted. Do not restore an old
+  database over newly accepted messages. Before re-upgrading after writes by an
+  older host, run the offline rebuild again.
 
 ### Request lifetime upgrade
 

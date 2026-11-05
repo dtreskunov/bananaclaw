@@ -38,6 +38,7 @@ const group: SyncGroupState = {
     lastActivityAt: 'now',
     sessionMode: 'per-thread',
     messageCount: 1,
+    activity: 'idle',
   })),
   voiceInput: { backend: 'disabled', ready: false },
 };

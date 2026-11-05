@@ -5,6 +5,8 @@
  */
 import { TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA, TURN_SCHEMA } from './turns.js';
 import { INTERACTION_SCHEMA } from './migrations/049-interactions.js';
+import { INBOUND_THREAD_SUMMARY_SCHEMA, OUTBOUND_THREAD_SUMMARY_SCHEMA } from './thread-summary-schema.js';
+import { THREAD_SUMMARY_SCHEMA } from './migrations/050-thread-summaries.js';
 
 export const SCHEMA = `
 -- Agent workspaces: folder, skills, CLAUDE.md.
@@ -139,6 +141,7 @@ CREATE TABLE pending_sender_approvals (
   created_at         TEXT NOT NULL,
   UNIQUE(messaging_group_id, sender_identity)
 );
+${THREAD_SUMMARY_SCHEMA}
 `;
 
 /**
@@ -374,6 +377,7 @@ AFTER DELETE ON thread_titles BEGIN
     'thread_id', OLD.thread_id
   ), datetime('now'));
 END;
+${INBOUND_THREAD_SUMMARY_SCHEMA}
 `;
 
 /** Host-owned projection of durable runner output and state. */
@@ -487,4 +491,4 @@ CREATE TABLE IF NOT EXISTS applied_runner_events (
 );
 `;
 
-export const OUTBOUND_SCHEMA = TURN_SCHEMA + OUTBOUND_BASE_SCHEMA + TURN_INDEX_SCHEMA;
+export const OUTBOUND_SCHEMA = TURN_SCHEMA + OUTBOUND_BASE_SCHEMA + TURN_INDEX_SCHEMA + OUTBOUND_THREAD_SUMMARY_SCHEMA;

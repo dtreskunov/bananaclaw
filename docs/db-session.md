@@ -30,6 +30,14 @@ events and live status share the per-session socket described in
 
 ## 2. Inbound DB (`inbound.db`)
 
+Both host-owned DBs also contain `thread_summary_clock` and
+`thread_summary_dirty`. Their triggers coalesce changes by summary kind and
+normalized channel/platform/thread route in the source write transaction.
+The host projector updates the central summary and only then deletes a marker
+whose revision still matches. Neither table nor its triggers is copied into
+container-owned runner state. Activity trace writes and live runtime signals do
+not enqueue summary aggregation. See [thread-summary recovery](ui.md#thread-summary-upgrade).
+
 Host-owned and host-private. Schema constant: `INBOUND_SCHEMA` in `src/db/schema.ts`.
 
 ### 2.1 `messages_in`

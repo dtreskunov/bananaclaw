@@ -18,6 +18,8 @@ vi.mock('./sync-state.js', () => ({
 }));
 vi.mock('./conversation-context.js', () => ({ resolveTurnContext: () => ({ sessionId: 's' }) }));
 vi.mock('./conversation.js', () => ({ readConversation: () => state.view }));
+vi.mock('../../../thread-summaries.js', () => ({ reconcileThreadSummaries: () => {} }));
+vi.mock('../../../modules/permissions/access.js', () => ({ canAccessAgentGroup: () => ({ allowed: true }) }));
 import { attachSyncSocket } from './sync-socket.js';
 
 afterEach(() => vi.useRealTimers());

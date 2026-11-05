@@ -59,6 +59,7 @@ describe('global sync protocol', () => {
         lastActivityAt: '',
         sessionMode: 'per-thread',
         messageCount: 0,
+        activity: 'idle',
         ...invalid,
       };
       expect(() =>

@@ -18911,7 +18911,7 @@ function accessRequestInput(raw) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 11;
+var CONVERSATION_PROTOCOL_VERSION = 12;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -20363,6 +20363,8 @@ var thread = shape({
   lastActivityAt: text,
   sessionMode: oneOf("per-thread", "shared", "agent-shared"),
   messageCount: integer,
+  activity: oneOf("idle", "running", "waiting"),
+  activityStale: optional(bool),
   canSend: optional(bool),
   kind: optional(oneOf("thread", "dm")),
   counterparty: optional(text),
@@ -21461,7 +21463,8 @@ async function openChat2(gid, resumeTid, opts, options = {}) {
       sessionMode: "per-thread",
       title: "(new thread)",
       lastActivityAt: (/* @__PURE__ */ new Date()).toISOString(),
-      messageCount: 0
+      messageCount: 0,
+      activity: "idle"
     },
     ...threads.value
   ];
@@ -22758,6 +22761,30 @@ function RelativeTime({ ts, className }) {
   return /* @__PURE__ */ u4("span", { class: className || "ts", title: fmtAbsolute(ts), children: fmtRelative(ts) });
 }
 
+// src/components/ThreadActivity.tsx
+var labels = { idle: "Idle", running: "Running", waiting: "Waiting" };
+function ThreadActivity({ thread: thread2 }) {
+  const stale = !!thread2.activityStale || !!attentionError.value;
+  const label = labels[thread2.activity];
+  const description = stale ? `Last known activity: ${label}. Live activity status is unavailable; waiting for updates.` : `Activity: ${label}`;
+  return /* @__PURE__ */ u4(
+    "span",
+    {
+      class: `thread-activity ${thread2.activity}${stale ? " stale" : ""}`,
+      role: "status",
+      "aria-live": "off",
+      "aria-label": description,
+      title: description,
+      children: [
+        /* @__PURE__ */ u4("span", { class: "attention-separator", "aria-hidden": "true", children: " \xB7 " }),
+        thread2.activity === "running" ? /* @__PURE__ */ u4("span", { class: "thread-activity-dot", "aria-hidden": "true" }) : null,
+        label,
+        stale ? " (last known)" : ""
+      ]
+    }
+  );
+}
+
 // src/components/ThreadsRail.tsx
 function ThreadAttention({ thread: thread2 }) {
   const location2 = {
@@ -22895,6 +22922,7 @@ This also cancels its outstanding approval requests. Already applied changes are
             subTrailer,
             costStr
           ] }),
+          /* @__PURE__ */ u4(ThreadActivity, { thread: t4 }),
           /* @__PURE__ */ u4(ThreadAttention, { thread: t4 })
         ] }),
         /* @__PURE__ */ u4("div", { class: "thread-actions", children: isAdmin.value && (ct === "web" || t4.sessionMode === "per-thread" && !!t4.messagingGroupId) ? /* @__PURE__ */ u4("button", { type: "button", class: "msg-action-btn danger del", title: "Delete thread", "aria-label": "Delete thread", onClick: onDel, children: /* @__PURE__ */ u4(TrashIcon, {}) }) : null })
@@ -22921,6 +22949,7 @@ function DmRow({ t: t4 }) {
         t4.counterparty ? " \xB7 " + t4.counterparty : "",
         t4.messageCount ? " \xB7 " + t4.messageCount + " msg" : ""
       ] }),
+      /* @__PURE__ */ u4(ThreadActivity, { thread: t4 }),
       /* @__PURE__ */ u4(ThreadAttention, { thread: t4 })
     ] })
   ] });
@@ -24420,7 +24449,7 @@ function ApprovalCard({ approval: a4, busy, onRespond }) {
   const status = a4.status;
   const pending4 = status === "pending";
   const here = isApprovalThread(a4.origin);
-  const labels = {
+  const labels2 = {
     approved: "Approved",
     rejected: "Declined",
     applying: "Applying\u2026",
@@ -24437,7 +24466,7 @@ function ApprovalCard({ approval: a4, busy, onRespond }) {
       a4.details ? /* @__PURE__ */ u4("div", { class: "approval-details", children: a4.details }) : null,
       !here ? /* @__PURE__ */ u4("p", { children: a4.origin ? /* @__PURE__ */ u4("a", { href: approvalThreadHref(a4.origin), children: "Open requesting thread" }) : "Requesting thread unavailable." }) : null,
       !pending4 ? /* @__PURE__ */ u4("div", { class: "approval-decision", role: "status", children: [
-        /* @__PURE__ */ u4("strong", { children: labels[status] }),
+        /* @__PURE__ */ u4("strong", { children: labels2[status] }),
         a4.responseMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", children: a4.responseMessage }) : null,
         status === "failed" && a4.outcomeMessage ? /* @__PURE__ */ u4("p", { class: "approval-response-text", role: "alert", children: a4.outcomeMessage }) : null
       ] }) : null,
@@ -24932,7 +24961,7 @@ function useConnectionSignIn(onFinished) {
 
 // src/components/credential-presentation.ts
 function accountRequestStatusText(request) {
-  const labels = {
+  const labels2 = {
     pending: "Waiting for your response.",
     applying: "Applying\u2026",
     completed: request.kind === "account_setup" ? "Account setup confirmed. No agent access was granted." : "Access granted.",
@@ -24941,7 +24970,7 @@ function accountRequestStatusText(request) {
     expired: "Request expired.",
     failed: "Could not finish the request."
   };
-  return labels[request.status];
+  return labels2[request.status];
 }
 var PROVIDERS = {
   "openrouter.ai": "OpenRouter",
@@ -25127,21 +25156,21 @@ function compileRoutes(routes, auth) {
   });
 }
 function credentialFields(services) {
-  const labels = /* @__PURE__ */ new Map();
+  const labels2 = /* @__PURE__ */ new Map();
   for (const service of services) {
     const auth = service.auth;
-    if (auth.token && !labels.has(auth.token)) labels.set(auth.token, "Token");
-    if (auth.key && !labels.has(auth.key)) labels.set(auth.key, "API key");
-    if (auth.username && !labels.has(auth.username)) labels.set(auth.username, "Username");
-    if (auth.password && !labels.has(auth.password)) labels.set(auth.password, "Password");
+    if (auth.token && !labels2.has(auth.token)) labels2.set(auth.token, "Token");
+    if (auth.key && !labels2.has(auth.key)) labels2.set(auth.key, "API key");
+    if (auth.username && !labels2.has(auth.username)) labels2.set(auth.username, "Username");
+    if (auth.password && !labels2.has(auth.password)) labels2.set(auth.password, "Password");
     for (const [header, template] of Object.entries(auth.headers ?? {}))
       for (const match2 of template.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g))
-        if (!labels.has(match2[1])) labels.set(match2[1], `${header || "Header"} value`);
+        if (!labels2.has(match2[1])) labels2.set(match2[1], `${header || "Header"} value`);
     for (const substitution of service.substitutions ?? [])
-      if (!labels.has(substitution.key)) labels.set(substitution.key, "Saved value");
+      if (!labels2.has(substitution.key)) labels2.set(substitution.key, "Saved value");
   }
   const duplicates = /* @__PURE__ */ new Map();
-  return [...labels].map(([key, label]) => {
+  return [...labels2].map(([key, label]) => {
     const count = (duplicates.get(label) ?? 0) + 1;
     duplicates.set(label, count);
     return { key, label: count === 1 ? label : `${label} ${count}` };

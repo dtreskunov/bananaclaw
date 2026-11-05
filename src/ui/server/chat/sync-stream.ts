@@ -22,10 +22,10 @@ export function sendSyncFrame(
 }
 
 export interface SyncStreamOptions {
-  read: (groupId: string | null, refreshThreads: boolean) => Promise<GlobalSyncState>;
+  read: (groupId: string | null) => Promise<GlobalSyncState>;
   authorize: () => void;
   canPublish: () => boolean;
-  subscribe: (invalidate: (groupId?: string, refreshThreads?: boolean) => void) => () => void;
+  subscribe: (invalidate: (groupId?: string) => void) => () => void;
   send: (frame: SyncFrame) => void;
   fail: (error: unknown) => void;
   coalesceMs?: number;
@@ -37,7 +37,6 @@ export function startSyncStream(options: SyncStreamOptions) {
   let previous: GlobalProjection | null = null;
   let acknowledgedId: number | null = null;
   let dirty = false;
-  let threadsDirty = false;
   let running = false;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -48,10 +47,9 @@ export function startSyncStream(options: SyncStreamOptions) {
     clearTimeout(timer);
     unsubscribe();
   };
-  const schedule = (groupId?: string, refreshThreads = true) => {
+  const schedule = (groupId?: string) => {
     if (stopped || (groupId !== undefined && groupId !== subscription?.groupId)) return;
     dirty = true;
-    threadsDirty ||= refreshThreads;
     if (running || timer || !subscription) return;
     timer = setTimeout(() => {
       void refresh();
@@ -62,13 +60,11 @@ export function startSyncStream(options: SyncStreamOptions) {
     timer = undefined;
     if (stopped || running || !subscription) return;
     running = true;
-    const refreshThreads = threadsDirty;
     dirty = false;
-    threadsDirty = false;
     const current = subscription;
     try {
       options.authorize();
-      const data = await options.read(current.groupId, refreshThreads);
+      const data = await options.read(current.groupId);
       if (stopped) return;
       options.authorize();
       if (current !== subscription) return;
@@ -114,17 +110,17 @@ export function startSyncStream(options: SyncStreamOptions) {
       }
     } finally {
       running = false;
-      if (dirty && !stopped) schedule(undefined, false);
+      if (dirty && !stopped) schedule();
     }
   };
   unsubscribe = options.subscribe(schedule);
   return {
     stop,
-    subscribe(id: number, groupId: string | null, refreshThreads = true, cursor: ProjectionCursor | null = null) {
+    subscribe(id: number, groupId: string | null, cursor: ProjectionCursor | null = null) {
       if (stopped || (subscription && id <= subscription.id)) return;
       subscription = { id, groupId };
       if (!previous || cursor?.streamId !== previous.streamId || cursor.revision !== previous.revision) previous = null;
-      schedule(undefined, refreshThreads);
+      schedule();
     },
   };
 }

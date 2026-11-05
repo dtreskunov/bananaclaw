@@ -702,6 +702,7 @@ export async function openChat(
       title: '(new thread)',
       lastActivityAt: new Date().toISOString(),
       messageCount: 0,
+      activity: 'idle',
     },
     ...threads.value,
   ];

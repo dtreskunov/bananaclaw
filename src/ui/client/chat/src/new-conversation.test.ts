@@ -25,6 +25,7 @@ const blank: Thread = {
   sessionId: 'blank-session',
   title: '(new thread)',
   messageCount: 0,
+  activity: 'idle',
 };
 let serverThreads: Thread[];
 let sync: Awaited<ReturnType<typeof installSyncFixture>>;
@@ -233,6 +234,7 @@ describe('new conversation on startup', () => {
       platformId: 'group:agent',
       sessionMode: 'per-thread',
       messageCount: 0,
+      activity: 'idle',
     });
     expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/start', expect.objectContaining({ method: 'POST' }));
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/warmup'), expect.anything());
@@ -309,6 +311,7 @@ describe('new conversation on startup', () => {
     expect(threads.value.find((t) => t.threadId === 'created')).toMatchObject({
       title: '(new thread)',
       messageCount: 0,
+      activity: 'idle',
       messagingGroupId: 'web-context',
     });
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === 'api/groups/agent/chat/start')).toHaveLength(1);

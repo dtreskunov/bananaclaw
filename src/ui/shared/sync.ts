@@ -103,6 +103,8 @@ const thread = shape({
   lastActivityAt: text,
   sessionMode: oneOf('per-thread', 'shared', 'agent-shared'),
   messageCount: integer,
+  activity: oneOf('idle', 'running', 'waiting'),
+  activityStale: optional(bool),
   canSend: optional(bool),
   kind: optional(oneOf('thread', 'dm')),
   counterparty: optional(text),

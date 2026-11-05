@@ -2,8 +2,10 @@ import { log } from './log.js';
 
 export type HostChange =
   | { kind: 'activity'; sessionId: string }
+  | { kind: 'runtime'; sessionId: string; groupId?: string | null }
   | { kind: 'interactions'; sessionId?: string | null }
   | { kind: 'sessions'; sessionId?: string | null; groupId?: string | null }
+  | { kind: 'thread-summaries'; sessionId: string; groupId: string }
   | { kind: 'configuration'; groupId?: string | null }
   | { kind: 'access'; groupId?: string };
 

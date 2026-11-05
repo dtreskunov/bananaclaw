@@ -18,6 +18,7 @@ export function testThread(overrides: Partial<Thread> = {}): Thread {
     title: 'Chat',
     lastActivityAt: '',
     messageCount: 1,
+    activity: 'idle',
     ...overrides,
   };
 }

@@ -103,7 +103,7 @@ function seedSession(id: string, messagingGroupId: string, threadId: string | nu
     )
     .run(id, GROUP_ID, messagingGroupId, threadId, NOW);
   const dir = path.join(TEST_DATA_DIR, 'v2-sessions', GROUP_ID, id);
-  fs.mkdirSync(dir, { recursive: true });
+  initSessionFolder(GROUP_ID, id);
   return dir;
 }
 

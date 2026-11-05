@@ -14,11 +14,13 @@ import { startSyncStream, sendSyncFrame } from './sync-stream.js';
 import { readConversation } from './conversation.js';
 import { resolveTurnContext } from './conversation-context.js';
 import { startConversationStream } from './conversation-stream.js';
+import { reconcileThreadSummaries } from '../../../thread-summaries.js';
+import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import type { WebSocket } from 'ws';
 
 export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: string): void {
   let selection: SyncSubscription | null = null;
-  let invalidateGlobal: (groupId?: string, refreshThreads?: boolean) => void = () => {};
+  let invalidateGlobal: (groupId?: string) => void = () => {};
   let invalidateConversation = () => {};
   let stopConversation = () => {};
   let authTimer: ReturnType<typeof setTimeout> | undefined;
@@ -75,12 +77,11 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
     fail,
   });
   const off = onHostChange((change) => {
-    if (change.kind === 'configuration') invalidateGlobal(change.groupId ?? undefined, false);
-    else if (change.kind === 'sessions') {
+    if (change.kind === 'configuration') invalidateGlobal(change.groupId ?? undefined);
+    else if (change.kind === 'sessions' || change.kind === 'thread-summaries' || change.kind === 'runtime') {
       const groupId = change.groupId ?? (change.sessionId ? getSession(change.sessionId)?.agent_group_id : undefined);
-      invalidateGlobal(undefined, false);
       invalidateGlobal(groupId ?? undefined);
-    } else if (change.kind !== 'activity') invalidateGlobal(undefined, change.kind === 'access');
+    } else if (change.kind !== 'activity') invalidateGlobal();
     if (!selection?.conversation || !selection.groupId) return;
     if ('groupId' in change && change.groupId && change.groupId !== selection.groupId) return;
     if (change.kind === 'interactions' && change.sessionId === null) return;
@@ -122,9 +123,10 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
       const sameConversation =
         selection?.groupId === message.groupId &&
         JSON.stringify(selection.conversation) === JSON.stringify(message.conversation);
-      const refreshThreads = !selection || selection.groupId !== message.groupId || sameConversation;
+      if (sameConversation && message.groupId && canAccessAgentGroup(userId, message.groupId).allowed)
+        reconcileThreadSummaries(message.groupId);
       selection = message;
-      global.subscribe(message.subscriptionId, message.groupId, refreshThreads, message.globalCursor);
+      global.subscribe(message.subscriptionId, message.groupId, message.globalCursor);
       if (sameConversation) {
         invalidateConversation();
         return;

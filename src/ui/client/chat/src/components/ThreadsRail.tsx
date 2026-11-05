@@ -25,6 +25,7 @@ import { TrashIcon } from './ActionIcons';
 import { RelativeTime } from './RelativeTime';
 import type { Thread, SearchResult } from '../types';
 import { AttentionBadge } from './AttentionBadge';
+import { ThreadActivity } from './ThreadActivity';
 import { attentionError, threadAttentionCount } from '../attention-state';
 
 function ThreadAttention({ thread }: { thread: Thread }) {
@@ -50,7 +51,7 @@ function ThreadAttention({ thread }: { thread: Thread }) {
   </> : null;
 }
 
-function ThreadRow({ t }: { t: Thread }) {
+export function ThreadRow({ t }: { t: Thread }) {
   const ct = t.channelType || 'web';
   const meta = channelMeta(ct);
   const active = t.threadId === threadId.value;
@@ -150,6 +151,7 @@ function ThreadRow({ t }: { t: Thread }) {
       </div>
       <div class="meta">
         <span><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</span>
+        <ThreadActivity thread={t} />
         <ThreadAttention thread={t} />
       </div>
       <div class="thread-actions">
@@ -161,7 +163,7 @@ function ThreadRow({ t }: { t: Thread }) {
   );
 }
 
-function DmRow({ t }: { t: Thread }) {
+export function DmRow({ t }: { t: Thread }) {
   const ct = t.channelType || 'web';
   const meta = channelMeta(ct);
   const active = t.threadId === threadId.value;
@@ -181,6 +183,7 @@ function DmRow({ t }: { t: Thread }) {
           {t.counterparty ? ' \u00b7 ' + t.counterparty : ''}
           {t.messageCount ? ' \u00b7 ' + t.messageCount + ' msg' : ''}
         </span>
+        <ThreadActivity thread={t} />
         <ThreadAttention thread={t} />
       </div>
     </div>

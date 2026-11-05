@@ -638,6 +638,8 @@ describe('GET /api/groups/:gid/admin/settings (extended fields)', () => {
     `);
     insert.run('sess-live', 'running', NOW(), NOW());
     insert.run('sess-stopped', 'stopped', NOW(), NOW());
+    initSessionFolder('ag-running', 'sess-live');
+    initSessionFolder('ag-running', 'sess-stopped');
     vi.mocked(isContainerRunning).mockImplementation((sessionId) => sessionId === 'sess-live');
 
     const res = await call('GET', '/ui/chat/api/groups/ag-running/admin/settings');

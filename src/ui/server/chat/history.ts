@@ -4,7 +4,7 @@ import type { ConversationMessage } from '../../shared/conversation.js';
 import type { TaskAttemptDto } from '../../shared/thread.js';
 import { isSessionTurnId } from '../../../session-link.js';
 import { openInboundDb, openOutboundDb, sessionDir } from '../../../session-manager.js';
-import { summarizeTaskPrompt } from './thread-scan.js';
+import { summarizeTaskPrompt } from '../../../thread-summaries.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { log } from '../../../log.js';
 import { normalizeDisplayCardPayload } from '../../../channels/display-card.js';

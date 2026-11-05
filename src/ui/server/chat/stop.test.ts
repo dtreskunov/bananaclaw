@@ -143,6 +143,7 @@ function socketView(frames: Record<string, unknown>[]) {
 }
 async function flushConversation(): Promise<void> {
   publishHostChange({ kind: 'sessions', sessionId: 'session-1' });
+  await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 60));
 }
 

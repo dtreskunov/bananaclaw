@@ -4,6 +4,14 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Maintained thread summaries and activity indicators.** Indexed
+  host projections replace the thread-scanning worker, scan cache and dependency
+  flags. Transactional dirty routes recover interrupted updates without an event
+  log. Thread/DM rows show Idle, Running or Waiting, with separate last-known
+  freshness. Existing installs require the explicit
+  [offline backfill and rollback procedure](docs/ui.md#thread-summary-upgrade).
+  Deploy matching host/UI and reload for protocol 12; no runner rebuild is needed.
+
 - **[BREAKING] Incremental metadata and activity synchronization.** Metadata
   sends only changed approvals, attention, threads or voice capability; activity
   sends ordinal-keyed patches rather than whole turn traces. Shared collection

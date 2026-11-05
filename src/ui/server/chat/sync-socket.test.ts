@@ -263,7 +263,7 @@ describe('unified sync WebSocket integration', () => {
     if (snapshot?.kind !== 'snapshot') throw new Error('Expected selected conversation snapshot');
     expect(snapshot.conversation).toMatchObject({ threadId: 'other-thread', turns: [] });
     expect(clients).toHaveLength(1);
-    expect(listThreads).toHaveBeenCalledOnce();
+    expect(listThreads).toHaveBeenCalledTimes(2);
   });
 
   it('clears revoked conversation and group state while retaining the global subscription', async () => {
@@ -324,6 +324,7 @@ describe('unified sync WebSocket integration', () => {
       INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
         VALUES('other-session','other','other-mg','other-thread','now');
     `);
+    initSessionFolder('other', 'other-session');
     await connect('g');
     createQuestion({
       id: 'off-screen-question',
@@ -344,7 +345,7 @@ describe('unified sync WebSocket integration', () => {
         },
       ]),
     );
-    expect(listThreads).toHaveBeenCalledOnce();
+    expect(listThreads).toHaveBeenCalledTimes(2);
   });
 
   it('pushes an inactive-group approval without rescanning the selected group threads', async () => {
@@ -364,7 +365,7 @@ describe('unified sync WebSocket integration', () => {
     if (last?.kind !== 'update') throw new Error('Expected metadata patch');
     expect(last.changes.group).toBeUndefined();
     expect(last.changes.approvals?.upserts.map((row) => row.id)).toEqual(['off-screen']);
-    expect(listThreads).toHaveBeenCalledOnce();
+    expect(listThreads).toHaveBeenCalledTimes(2);
   });
 
   it('rejects cached approval visibility immediately after a committed role change', async () => {
@@ -376,11 +377,11 @@ describe('unified sync WebSocket integration', () => {
       input: { action: 'test', title: 'Review', payload: {}, options: [] },
     });
     const projection = createGlobalProjection('viewer');
-    const first = await projection.read('g', true);
+    const first = await projection.read('g');
     expect(first.approvals).toHaveLength(1);
     revokeRole('viewer', 'admin', 'g');
     expect(projection.canPublish()).toBe(false);
-    const next = await projection.read('g', false);
+    const next = await projection.read('g');
     expect(next.approvals).toEqual([]);
     expect(next.group).not.toBeNull();
     expect(listThreads).toHaveBeenCalledTimes(2);
@@ -533,7 +534,7 @@ describe('unified sync WebSocket integration', () => {
     if (voicePatch?.kind !== 'update' || voicePatch.changes.group?.kind !== 'update')
       throw new Error('Expected voice patch');
     expect(voicePatch.changes.group.threads).toBeUndefined();
-    expect(listThreads).toHaveBeenCalledTimes(scans);
+    expect(listThreads).toHaveBeenCalledTimes(scans + 1);
     getDb().prepare("DELETE FROM user_roles WHERE user_id='viewer'").run();
     removeMember('viewer', 'g');
     await vi.waitFor(() => expect(globalView()?.group).toBeNull());

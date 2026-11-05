@@ -14,6 +14,7 @@ function thread(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
     title: 'Visible thread',
     lastActivityAt: '2026-07-22T00:00:00.000Z',
     messageCount: 1,
+    activity: 'idle',
     ...overrides,
   };
 }

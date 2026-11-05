@@ -31,11 +31,9 @@ import {
   nextEvenSeq,
 } from './db/session-db.js';
 import { log } from './log.js';
+import { DROP_THREAD_SUMMARY_TRACKING } from './db/thread-summary-schema.js';
 import { extractInboundText, indexMessage } from './search-index.js';
-import {
-  getSessionSignalTurnEndedAt,
-  notifySessionHostState,
-} from './session-link.js';
+import { getSessionSignalTurnEndedAt, notifySessionHostState } from './session-link.js';
 import type { Session } from './types.js';
 
 function isPathInside(parent: string, child: string): boolean {
@@ -75,6 +73,7 @@ export function seedRunnerState(agentGroupId: string, sessionId: string, overwri
   const db = openOutboundDbRwRaw(destination);
   try {
     db.exec('DROP TABLE IF EXISTS applied_runner_events');
+    db.exec(DROP_THREAD_SUMMARY_TRACKING);
   } finally {
     db.close();
   }

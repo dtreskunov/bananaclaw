@@ -8,6 +8,24 @@ Access layer: `src/db/`. Authoritative schema reference: `src/db/schema.ts` (com
 
 ## 1. Tables
 
+### Maintained thread summary projection
+
+Migration `050-thread-summaries.ts` adds `thread_summaries`, keyed by source
+session, inbound/outbound side, summary kind and exact channel/platform/thread
+route. JSON values contain route aggregates (counts, timestamps, fallback/title
+metadata, first-owner hints and pending tasks), session usage or latest durable
+turn headers. They never cache viewer authorization.
+
+`thread_summary_status` records source projection failures so readers cannot
+publish stale summaries as successful state. `thread_summary_meta.ready` gates
+startup until existing sources have been explicitly backfilled. Central session
+deletion cascades to both summary and error rows.
+
+The host-owned source DBs hold transactional dirty markers; the projector commits
+central values before acknowledging those markers. See
+[upgrade and recovery](ui.md#thread-summary-upgrade). These are rebuildable
+derived summaries, not a durable UI event log.
+
 ### 1.1 `agent_groups`
 
 Agent workspaces. Each maps 1:1 to a `groups/<folder>/` directory containing `CLAUDE.md` and skills. Container config lives in `container_configs` (see §1.x below); a `container.json` file is materialized at spawn time for the container runner to read.
