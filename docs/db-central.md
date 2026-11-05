@@ -16,10 +16,11 @@ route. JSON values contain route aggregates (counts, timestamps, fallback/title
 metadata, first-owner hints and pending tasks), session usage or latest durable
 turn headers. They never cache viewer authorization.
 
-`thread_summary_status` records source projection failures so readers cannot
-publish stale summaries as successful state. `thread_summary_meta.ready` gates
+Process-local projection failures block affected readers, including when the
+central DB is unable to write an error record. Dirty source markers survive
+restart and are drained before readers are admitted. `thread_summary_meta.ready` gates
 startup until existing sources have been explicitly backfilled. Central session
-deletion cascades to both summary and error rows.
+deletion cascades to summary rows.
 
 The host-owned source DBs hold transactional dirty markers; the projector commits
 central values before acknowledging those markers. See

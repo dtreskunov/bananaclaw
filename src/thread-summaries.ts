@@ -9,6 +9,16 @@ import { extractDisplayQuery, HA_CHANNEL_TYPE } from './channels/homeassistant-t
 import { onHostChange, publishHostChange } from './host-changes.js';
 import type { LiveTaskDto } from './ui/shared/thread.js';
 
+const failures = new WeakMap<Database.Database, Map<string, unknown>>();
+function projectionErrors(db = getDb()): Map<string, unknown> {
+  let errors = failures.get(db);
+  if (!errors) {
+    errors = new Map();
+    failures.set(db, errors);
+  }
+  return errors;
+}
+
 interface Route {
   channel_type: string;
   platform_id: string;
@@ -219,9 +229,8 @@ export function refreshThreadSummaries(sessionId: string, dataDir = DATA_DIR): v
     | { agent_group_id: string }
     | undefined;
   if (!session) return;
-  const recovering = central.prepare('SELECT error FROM thread_summary_status WHERE session_id=?').get(sessionId) as
-    | { error: string | null }
-    | undefined;
+  const errors = projectionErrors(central);
+  const recovering = errors.has(sessionId);
   let changed = 0;
   try {
     for (const source of ['inbound', 'outbound'] as const) {
@@ -263,17 +272,12 @@ export function refreshThreadSummaries(sessionId: string, dataDir = DATA_DIR): v
         db.close();
       }
     }
-    if (recovering?.error)
-      central.prepare('UPDATE thread_summary_status SET error=NULL WHERE session_id=?').run(sessionId);
+    errors.delete(sessionId);
   } catch (error) {
-    central
-      .prepare(
-        `INSERT INTO thread_summary_status VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET error=excluded.error`,
-      )
-      .run(sessionId, error instanceof Error ? error.message : String(error));
+    errors.set(sessionId, error);
     throw error;
   }
-  if (changed || recovering?.error)
+  if (changed || recovering)
     publishHostChange({ kind: 'thread-summaries', sessionId, groupId: session.agent_group_id });
 }
 
@@ -289,7 +293,7 @@ export function reconcileThreadSummaries(groupId?: string, dataDir = DATA_DIR): 
 export function rebuildThreadSummaries(dataDir = DATA_DIR): void {
   const central = getDb();
   central.prepare('UPDATE thread_summary_meta SET ready=0 WHERE id=1').run();
-  central.exec('DELETE FROM thread_summaries; DELETE FROM thread_summary_status;');
+  central.exec('DELETE FROM thread_summaries;');
   const sessions = central.prepare('SELECT id, agent_group_id FROM sessions').all() as {
     id: string;
     agent_group_id: string;
@@ -338,10 +342,14 @@ export function rebuildThreadSummaries(dataDir = DATA_DIR): void {
 
 function sourceRows(sessionId: string): SummaryRow[] {
   assertThreadSummariesReady();
-  const failure = getDb().prepare('SELECT error FROM thread_summary_status WHERE session_id=?').get(sessionId) as
-    | { error: string | null }
-    | undefined;
-  if (failure?.error) throw new Error(`Thread summary projection unavailable: ${failure.error}`);
+  const errors = projectionErrors();
+  if (errors.has(sessionId)) {
+    const error = errors.get(sessionId);
+    throw new Error(
+      `Thread summary projection unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
   return getDb().prepare('SELECT * FROM thread_summaries WHERE session_id=?').all(sessionId) as SummaryRow[];
 }
 

@@ -11,10 +11,6 @@ CREATE TABLE thread_summaries (
   value TEXT NOT NULL CHECK (json_valid(value)),
   PRIMARY KEY (session_id, source, kind, channel_type, platform_id, thread_id)
 );
-CREATE TABLE thread_summary_status (
-  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-  error TEXT
-);
 CREATE TABLE thread_summary_meta (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   ready INTEGER NOT NULL CHECK (ready IN (0, 1))

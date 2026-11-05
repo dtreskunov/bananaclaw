@@ -193,7 +193,7 @@ is used to build thread lists. Host tracking tables/triggers are stripped from
 runner-state seeds.
 
 There is no thread-scan dependency flag or cached viewer projection. Source
-projection failures are logged and persist an unavailable status rather than
+projection failures are logged and block affected readers rather than
 returning a successful empty/stale list. Startup or an authorized explicit
 refresh can reconcile outstanding markers after the cause is fixed. An initial
 offline backfill is required for existing installs; see
