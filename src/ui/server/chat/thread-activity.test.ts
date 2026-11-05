@@ -1,0 +1,252 @@
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const signal = vi.hoisted(() => ({
+  turn: null as {
+    id: string;
+    status: 'running' | 'stopping';
+    channelType: string;
+    platformId: string;
+    threadId: string | null;
+  } | null,
+  connected: false,
+}));
+vi.mock('../../../config.js', async (original) => ({
+  ...(await original<typeof import('../../../config.js')>()),
+  DATA_DIR: path.resolve('.test-thread-activity'),
+}));
+vi.mock('../../../session-link.js', async (original) => ({
+  ...(await original<typeof import('../../../session-link.js')>()),
+  getSessionActiveTurn: () => ({ turn: signal.turn, connected: signal.connected }),
+}));
+import { initTestDb, runMigrations, closeDb, getDb } from '../../../db/index.js';
+import { createQuestion, answerQuestion } from '../../../db/sessions.js';
+import { createApproval } from '../../../db/approvals.js';
+import { grantRole } from '../../../modules/permissions/db/user-roles.js';
+import { removeMember } from '../../../modules/permissions/db/agent-group-members.js';
+import { insertIdentity } from '../../../modules/permissions/db/identities.js';
+import { initSessionFolder, inboundDbPath, outboundDbPath } from '../../../session-manager.js';
+import { putTurn } from '../../../db/turns.js';
+import { refreshThreadSummaries, startThreadSummaryProjection } from '../../../thread-summaries.js';
+import { publishHostChange } from '../../../host-changes.js';
+import { listThreadsForViewer } from './threads.js';
+
+const ROOT = path.resolve('.test-thread-activity');
+let inbound: Database.Database;
+let outbound: Database.Database;
+let stopProjection = () => {};
+function turn(id: string, thread: string, phase: 'running' | 'stopping' | 'settling' | 'settled') {
+  putTurn(outbound, {
+    id,
+    origin_channel_type: 'web',
+    origin_platform_id: 'group:g',
+    origin_thread_id: thread,
+    origin_source_session_id: null,
+    started_at: '2026-11-05T00:00:00Z',
+    ended_at: phase === 'settled' ? '2026-11-05T00:01:00Z' : null,
+    phase,
+    outcome: phase === 'settled' ? 'replied' : 'pending',
+    provenance: 'native',
+    imported_from_session_id: null,
+    imported_from_turn_id: null,
+  });
+  refreshThreadSummaries('s');
+}
+async function activities(userId = 'viewer') {
+  return Object.fromEntries(
+    (await listThreadsForViewer(userId, 'g')).map((thread) => [
+      thread.threadId,
+      { activity: thread.activity, stale: thread.activityStale === true },
+    ]),
+  );
+}
+beforeEach(() => {
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  runMigrations(initTestDb());
+  getDb().exec(`
+    INSERT INTO users(id,kind,created_at) VALUES('viewer','web','now'),('admin','web','now');
+    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','g','now');
+    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g','now');
+    INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at) VALUES('mg','web','web','group:g',1,'now');
+    INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at) VALUES('wire','mg','g','agent-shared','now');
+    INSERT INTO sessions(id,agent_group_id,created_at) VALUES('s','g','now');
+  `);
+  initSessionFolder('g', 's');
+  inbound = new Database(inboundDbPath('g', 's'));
+  outbound = new Database(outboundDbPath('g', 's'));
+  inbound.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
+    VALUES('input-a',2,'chat','2026-11-05T00:00:00Z','web','group:g','a','{"text":"A"}'),
+      ('input-b',4,'chat','2026-11-05T00:00:00Z','web','group:g','b','{"text":"B"}');`);
+  refreshThreadSummaries('s');
+  signal.turn = null;
+  signal.connected = false;
+  stopProjection = startThreadSummaryProjection();
+});
+afterEach(async () => {
+  await Promise.resolve();
+  stopProjection();
+  inbound.close();
+  outbound.close();
+  closeDb();
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  vi.restoreAllMocks();
+});
+
+describe('thread activity projection', () => {
+  it('isolates shared DM activity and waiting state to the authorized counterparty', async () => {
+    insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'person@example.com' });
+    getDb().exec(`
+      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
+        VALUES('dm-mg','resend','resend','person@example.com',0,'now');
+      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
+        VALUES('dm-wire','dm-mg','g','shared','now');
+      INSERT INTO sessions(id,agent_group_id,messaging_group_id,created_at) VALUES('dm-session','g','dm-mg','now');
+    `);
+    initSessionFolder('g', 'dm-session');
+    const source = new Database(inboundDbPath('g', 'dm-session'));
+    const outputs = new Database(outboundDbPath('g', 'dm-session'));
+    try {
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,content)
+        VALUES('own',2,'chat','now','resend','person@example.com','{"text":"Own"}'),
+          ('other',4,'chat','now','resend','other@example.com','{"text":"Other"}');`);
+      const active = {
+        id: 'dm-turn',
+        origin_channel_type: 'resend',
+        origin_platform_id: 'person@example.com',
+        origin_thread_id: null,
+        origin_source_session_id: null,
+        started_at: '2026-11-05T00:00:00Z',
+        ended_at: null,
+        phase: 'running' as const,
+        outcome: 'pending' as const,
+        provenance: 'native' as const,
+        imported_from_session_id: null,
+        imported_from_turn_id: null,
+      };
+      putTurn(outputs, active);
+      refreshThreadSummaries('dm-session');
+      signal.turn = {
+        id: active.id,
+        status: 'running',
+        channelType: 'resend',
+        platformId: 'person@example.com',
+        threadId: null,
+      };
+      signal.connected = true;
+      expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'running', stale: false });
+      putTurn(outputs, { ...active, phase: 'settled', outcome: 'replied', ended_at: '2026-11-05T00:01:00Z' });
+      putTurn(outputs, { ...active, id: 'private-turn', origin_platform_id: 'other@example.com' });
+      refreshThreadSummaries('dm-session');
+      signal.turn = { ...signal.turn, id: 'private-turn', platformId: 'other@example.com' };
+      expect((await activities())['__dm:dm-mg'].activity).toBe('idle');
+      createQuestion({
+        id: 'dm-q',
+        session_id: 'dm-session',
+        message_out_id: 'dm-question',
+        in_reply_to: null,
+        channel_type: 'resend',
+        platform_id: 'person@example.com',
+        thread_id: null,
+        created_at: 'now',
+        input: { question: 'Choose?', responseMode: 'text', options: [] },
+      });
+      expect((await activities())['__dm:dm-mg'].activity).toBe('waiting');
+    } finally {
+      source.close();
+      outputs.close();
+    }
+  });
+  it('marks only the executing conversation running in a shared session', async () => {
+    expect(await activities()).toEqual({
+      a: { activity: 'idle', stale: false },
+      b: { activity: 'idle', stale: false },
+    });
+    turn('turn-a', 'a', 'running');
+    signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
+    signal.connected = true;
+    expect(await activities()).toEqual({
+      a: { activity: 'running', stale: false },
+      b: { activity: 'idle', stale: false },
+    });
+    turn('turn-a', 'a', 'settled');
+    turn('turn-b', 'b', 'running');
+    signal.turn = { ...signal.turn, id: 'turn-b', threadId: 'b' };
+    expect(await activities()).toEqual({
+      a: { activity: 'idle', stale: false },
+      b: { activity: 'running', stale: false },
+    });
+  });
+  it.each(['stopping', 'settling'] as const)('maps internal phase %s to running', async (phase) => {
+    turn('turn-a', 'a', phase);
+    signal.turn = { id: 'turn-a', status: 'stopping', channelType: 'web', platformId: 'group:g', threadId: 'a' };
+    signal.connected = true;
+    expect((await activities()).a.activity).toBe('running');
+  });
+  it('waits for actionable input only when no execution remains', async () => {
+    createQuestion({
+      id: 'q',
+      session_id: 's',
+      message_out_id: 'question-output',
+      in_reply_to: null,
+      channel_type: 'web',
+      platform_id: 'group:g',
+      thread_id: 'a',
+      created_at: 'now',
+      input: { question: 'Choose?', responseMode: 'text', options: [] },
+    });
+    expect((await activities()).a.activity).toBe('waiting');
+    turn('turn-a', 'a', 'running');
+    signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
+    signal.connected = true;
+    expect((await activities()).a.activity).toBe('running');
+    turn('turn-a', 'a', 'settled');
+    expect((await activities()).a.activity).toBe('waiting');
+    answerQuestion('q', { responseType: 'text', value: 'Done', userId: 'viewer', answeredAt: '2026-11-05T00:02:00Z' });
+    expect((await activities()).a.activity).toBe('idle');
+  });
+  it('does not expose approval waiting state to a viewer who cannot act on it', async () => {
+    grantRole({ user_id: 'admin', role: 'admin', agent_group_id: 'g', granted_by: null, granted_at: 'now' });
+    createApproval({
+      id: 'approval',
+      request_id: 'approval',
+      session_id: 's',
+      agent_group_id: 'g',
+      origin_message_id: 'input-a',
+      created_at: 'now',
+      input: {
+        action: 'test',
+        title: 'Approve?',
+        payload: {},
+        options: [{ label: 'Yes', value: 'yes', selectedLabel: 'Yes' }],
+      },
+    });
+    expect((await activities()).a.activity).toBe('idle');
+    expect((await activities('admin')).a.activity).toBe('waiting');
+    removeMember('viewer', 'g');
+    await expect(activities()).rejects.toThrow('access denied');
+  });
+  it('keeps disconnected execution stale rather than fabricating idle', async () => {
+    turn('turn-a', 'a', 'running');
+    expect((await activities()).a).toEqual({ activity: 'running', stale: true });
+    signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
+    signal.connected = true;
+    expect((await activities()).a.stale).toBe(false);
+    signal.connected = false;
+    expect((await activities()).a).toEqual({ activity: 'running', stale: true });
+  });
+  it('reads indicators with source DBs locked and ignores high-frequency trace invalidations', async () => {
+    await Promise.resolve();
+    inbound.exec('BEGIN EXCLUSIVE');
+    outbound.exec('BEGIN EXCLUSIVE');
+    try {
+      for (let index = 0; index < 100; index++) publishHostChange({ kind: 'runtime', sessionId: 's' });
+      for (let index = 0; index < 100; index++) publishHostChange({ kind: 'activity', sessionId: 's' });
+      expect((await activities()).a.activity).toBe('idle');
+    } finally {
+      inbound.exec('ROLLBACK');
+      outbound.exec('ROLLBACK');
+    }
+  });
+});

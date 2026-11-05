@@ -74,21 +74,22 @@ export interface SessionThreadSummary {
   turnCount: number;
 }
 
-function contentObject(content: string): Record<string, unknown> {
-  let value: unknown;
+function parsedContent(content: string): unknown {
   try {
-    value = JSON.parse(content);
+    return JSON.parse(content);
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
-    value = content;
+    return content;
   }
-  if (typeof value === 'string') return { text: value };
+}
+function contentObject(content: string): Record<string, unknown> {
+  const value = parsedContent(content);
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 export function summarizeTaskPrompt(content: string): string {
-  const object = contentObject(content);
-  const prompt = typeof object.prompt === 'string' ? object.prompt : object.text;
+  const parsed = parsedContent(content);
+  const prompt = typeof parsed === 'string' ? parsed : contentObject(content).prompt;
   const line =
     typeof prompt === 'string'
       ? prompt
@@ -100,6 +101,7 @@ export function summarizeTaskPrompt(content: string): string {
 }
 
 function fallbackTitle(channel: string, content: string): string {
+  const parsed = parsedContent(content);
   const object = contentObject(content);
   if (channel === 'resend') {
     const metadata = object.metadata;
@@ -110,7 +112,14 @@ function fallbackTitle(channel: string, content: string): string {
       (headers && typeof headers === 'object' && 'subject' in headers ? headers.subject : undefined);
     if (typeof subject === 'string' && subject.trim()) return subject.trim();
   }
-  const text = object.cancelled === true ? '' : typeof object.text === 'string' ? object.text : '';
+  const text =
+    object.cancelled === true
+      ? ''
+      : typeof parsed === 'string' && parsed !== content
+        ? parsed
+        : typeof object.text === 'string'
+          ? object.text
+          : '';
   return channel === HA_CHANNEL_TYPE ? extractDisplayQuery(text) : text;
 }
 
@@ -148,7 +157,7 @@ function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
       `
     SELECT series_id, status, process_after, recurrence, content, MAX(seq) AS seq
     FROM messages_in WHERE ${where} AND kind='task' AND status IN ('pending','paused')
-      AND CASE WHEN json_valid(content) THEN COALESCE(json_extract(content,'$.triggerSource'),'scheduled') ELSE 'scheduled' END != 'manual'
+      AND COALESCE(json_extract(content,'$.triggerSource'),'scheduled') != 'manual'
     GROUP BY series_id ORDER BY (process_after IS NULL), process_after
   `,
     )
