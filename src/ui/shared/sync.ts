@@ -141,7 +141,10 @@ const groupId = (value: unknown) => text(value) && value.length > 0 && value.len
 const cursor = shape({ streamId: id, revision: integer });
 const voiceInput = shape({ backend: oneOf('disabled', 'elevenlabs'), ready: bool, reason: optional(text) });
 const groupState = shape({ threads: array(thread), voiceInput });
-const agentActivity = shape({ id, activity: oneOf('idle', 'running'), waiting: optional(bool), activityStale: optional(bool) });
+const agentActivity = shape({
+  id, activity: oneOf('idle', 'running'), waiting: optional(bool),
+  activityStale: optional(bool), threadCount: optional(integer),
+});
 const globalState = shape({
   approvals: array(isConversationApproval),
   attention: isAttentionTargets,

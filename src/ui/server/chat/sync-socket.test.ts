@@ -199,11 +199,48 @@ describe('unified sync WebSocket integration', () => {
       const patch = frames.at(-1)?.global;
       if (patch?.kind !== 'update') throw new Error('Expected agent status patch');
       expect(patch.changes.group).toBeUndefined();
-      expect(patch.changes.agentActivity?.upserts).toEqual([{ id: 'other', activity: 'running', activityStale: true }]);
+      expect(patch.changes.agentActivity?.upserts).toEqual([
+        { id: 'other', activity: 'running', activityStale: true, threadCount: 1 },
+      ]);
       expect(JSON.stringify(frames.at(-1)).length).toBeLessThan(512);
     } finally {
       source.close();
       output.close();
+    }
+  });
+  it('patches an unselected idle agent count when visible threads are added or removed', async () => {
+    grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
+    getDb().exec(`
+      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
+        VALUES('other-mg','web','web','group:other',1,'now');
+      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
+        VALUES('other-wire','other-mg','other','agent-shared','now');
+      INSERT INTO sessions(id,agent_group_id,created_at) VALUES('other-session','other','now');
+    `);
+    initSessionFolder('other', 'other-session');
+    const source = new Database(inboundDbPath('other', 'other-session'));
+    try {
+      await connect('g');
+      expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.threadCount).toBe(0);
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
+        VALUES('one',2,'chat','now','web','group:other','one','{"text":"One"}'),
+          ('two',4,'chat','now','web','group:other','two','{"text":"Two"}');`);
+      refreshThreadSummaries('other-session');
+      await vi.waitFor(() =>
+        expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.threadCount).toBe(2),
+      );
+      source.prepare("DELETE FROM messages_in WHERE id='two'").run();
+      refreshThreadSummaries('other-session');
+      await vi.waitFor(() =>
+        expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.threadCount).toBe(1),
+      );
+      const patch = frames.at(-1)?.global;
+      if (patch?.kind !== 'update') throw new Error('Expected count patch');
+      expect(patch.changes.group).toBeUndefined();
+      expect(patch.changes.agentActivity?.upserts).toEqual([{ id: 'other', activity: 'idle', threadCount: 1 }]);
+      expect(JSON.stringify(frames.at(-1)).length).toBeLessThan(512);
+    } finally {
+      source.close();
     }
   });
   it('acknowledges unchanged metadata refreshes without resnapshotting the conversation', async () => {

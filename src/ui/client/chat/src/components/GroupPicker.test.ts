@@ -38,6 +38,20 @@ function waitingGroup() {
 }
 
 describe('agent activity status', () => {
+  it('joins thread counts to last activity with the same dot separator as thread metadata', () => {
+    waitingGroup();
+    groups.value = [{ id: 'g', name: 'Group', isAdmin: true, lastActivityAt: '2026-11-05T00:00:00Z' }];
+    const before = GroupStrip()!.props.items[0].sublabel;
+    agentActivity.value = [{ id: 'g', activity: 'idle', threadCount: 12 }];
+    expect(GroupStrip()!.props.items[0].sublabel).toBe(`${before} \u00b7 12 thr`);
+  });
+
+  it.each([undefined, 0, 1, 23])('renders count %s without a dangling separator or plural variant', (threadCount) => {
+    groups.value = [{ id: 'g', name: 'Group', isAdmin: true }];
+    agentActivity.value = [{ id: 'g', activity: 'idle', threadCount }];
+    expect(GroupStrip()!.props.items[0].sublabel).toBe(threadCount ? `${threadCount} thr` : undefined);
+  });
+
   it('uses the shared icon for waiting, and opens the oldest pending request', () => {
     waitingGroup();
     const item = GroupStrip()!.props.items[0];
@@ -116,6 +130,7 @@ describe('agent activity status', () => {
 describe.each(['all', 'non-members'] as const)('agent picker (%s)', (mode) => {
   it('reuses activity icons and oldest-request navigation, retaining normal row selection', () => {
     waitingGroup();
+    agentActivity.value = [{ id: 'g', activity: 'idle', waiting: true, threadCount: 3 }];
     if (mode === 'non-members') {
       isElevatedUser.value = true;
       groups.value = [{ ...groups.value[0], elevatedOnly: true }];
@@ -126,6 +141,7 @@ describe.each(['all', 'non-members'] as const)('agent picker (%s)', (mode) => {
     expect(dialog.props.title).toBe(mode === 'non-members' ? 'More agents' : 'Agent groups');
     const row = dialog.props.children.props.children[0];
     expect(row.props.badge.type).toBe(ActivityIndicator);
+    expect(row.props.sublabel).toMatch(/ \u00b7 3 thr$/);
     expect(row.props.badgeLabel).toContain('Open oldest request in Group');
     expect(row.props.badgeDisabled).toBe(false);
     row.props.onBadgeClick();

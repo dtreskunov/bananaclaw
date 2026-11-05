@@ -53,6 +53,8 @@ function chipParts(g: Group, elevated: boolean): ChipParts {
   if (!g.isAdmin) parts.push('\uD83D\uDD12');
   if (isAdminOnly) parts.push('\uD83D\uDC41');
   if (g.lastActivityAt) parts.push(fmtRelative(g.lastActivityAt));
+  const threadCount = agentActivity.value.find((activity) => activity.id === g.id)?.threadCount;
+  if (threadCount) parts.push(`${threadCount} thr`);
   return { parts, isAdminOnly };
 }
 

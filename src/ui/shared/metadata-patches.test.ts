@@ -106,11 +106,21 @@ describe('incremental metadata projections', () => {
   });
   it.each([
     { activity: 'waiting' }, { activity: 'running', waiting: 'yes' },
+    { activity: 'idle', threadCount: -1 }, { activity: 'idle', threadCount: 1.5 },
+    { activity: 'idle', threadCount: '2' },
   ])('rejects obsolete or malformed overlay status %j', (status) => {
     expect(() => parseSyncFrame({
       kind: 'sync', protocolVersion: SYNC_PROTOCOL_VERSION, groupId: null, subscriptionId: 1,
       global: { ...patch(data), changes: { agentActivity: { upserts: [{ id: 'g', ...status }], removeIds: [] } } },
     })).toThrow('Invalid');
+  });
+  it('patches just one unselected agent count without sending its thread list', () => {
+    const before = { ...state, data: { ...data, agentActivity: [{ id: 'other', activity: 'idle' as const, threadCount: 4 }] } };
+    const next = { ...before.data, agentActivity: [{ ...before.data.agentActivity[0], threadCount: 5 }] };
+    const changes = wire(diffGlobal(before, next, 'g'));
+    expect(changes).toEqual({ agentActivity: { upserts: next.agentActivity, removeIds: [] } });
+    expect(reduceGlobal(before, { ...patch(data), changes }, 'g').data).toEqual(next);
+    expect(JSON.stringify(changes).length).toBeLessThan(128);
   });
   it('rejects invalid or duplicate agent status records without replacing metadata', () => {
     expect(() =>

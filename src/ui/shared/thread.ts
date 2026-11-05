@@ -9,6 +9,7 @@ export interface ActivityStatus {
 
 export interface AgentGroupActivity extends ActivityStatus {
   id: string;
+  threadCount?: number;
 }
 
 export interface ThreadSummary extends ActivityStatus {

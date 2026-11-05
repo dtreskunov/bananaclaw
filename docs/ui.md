@@ -76,6 +76,12 @@ Waiting remains a separate native clickable control, with a larger hit target
 and visible keyboard focus. Agent tabs, the selected mobile dropdown and picker
 rows place the icon before the name, not in the secondary status line. There is
 no visible `N attn` badge, activity text label or link-styled waiting action.
+
+Agent tabs and picker rows append `N thr` to their secondary metadata using the
+same middle-dot separator as thread message counts. The count includes every
+viewer-visible conversation row, including channel DMs; zero and unavailable
+counts are omitted. Counts update through the existing keyed agent metadata
+patches and use the thread rail's authorization and deduplication rules.
 Thread delete buttons retain their
 larger 32px target, vertical centering, hover/focus reveal and touch visibility.
 
@@ -1401,11 +1407,12 @@ existing objects. Navigation and reconnect snapshots still include full traces.
 
 Global approvals, oldest-first attention and `agentActivity` are always subscribed,
 even with no group selected. Agent activity is an ID-keyed collection of
-`{ id, activity: 'idle' | 'running', waiting?, activityStale? }` for accessible groups, independent of the
+`{ id, activity: 'idle' | 'running', waiting?, activityStale?, threadCount? }` for accessible groups, independent of the
 selected conversation. Waiting comes from the same authorized attention targets
 used by navigation. Running uses only visible active route candidates from
 live state and the central summary projection, reusing selected summaries;
-idle agents do not require complete thread-list construction. No source history,
+thread counts read the same central summaries as the rail, reusing the selected
+group's list. Execution still examines only active route candidates. No source history,
 new DB table, per-agent socket, timer or persisted aggregate counter is involved.
 The initial `global` metadata snapshot includes a required `group`
 field, null with no selected group or

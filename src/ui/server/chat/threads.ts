@@ -269,12 +269,15 @@ export function readAgentActivity(
     sessions.set(session.id, routes);
   }
   return groups.map((group): AgentGroupActivity => {
+    const spectator = isElevated(userId);
+    const contexts = spectator ? listAgentMessagingContexts(group.id) : listUserMessagingContexts(userId, group.id);
+    const handles = contexts.map((context) => viewerHandlesForChannel(userId, context.channelType));
+    const threadCount = group.id === selectedGroupId
+      ? selectedThreads.length
+      : collectThreadsForContexts(group.id, contexts, spectator, handles).length;
     const sessions = candidates.get(group.id);
     const overlay = waiting.has(group.id) ? { waiting: true } : {};
-    if (!sessions?.size) return { id: group.id, activity: 'idle', ...overlay };
-    const contexts = isElevated(userId)
-      ? listAgentMessagingContexts(group.id)
-      : listUserMessagingContexts(userId, group.id);
+    if (!sessions?.size) return { id: group.id, activity: 'idle', threadCount, ...overlay };
     const threads =
       group.id === selectedGroupId
         ? selectedThreads
@@ -284,8 +287,8 @@ export function readAgentActivity(
             collectThreadsForContexts(
               group.id,
               contexts,
-              isElevated(userId),
-              contexts.map((context) => viewerHandlesForChannel(userId, context.channelType)),
+              spectator,
+              handles,
               sessions,
             ),
           );
@@ -293,6 +296,7 @@ export function readAgentActivity(
     return {
       id: group.id,
       activity: running.length ? 'running' : 'idle',
+      threadCount,
       ...overlay,
       ...(running.length && running.every((thread) => thread.activityStale) ? { activityStale: true } : {}),
     };

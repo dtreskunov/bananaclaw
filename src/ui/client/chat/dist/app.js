@@ -20399,7 +20399,13 @@ var groupId2 = (value) => text(value) && value.length > 0 && value.length <= 512
 var cursor = shape({ streamId: id, revision: integer });
 var voiceInput2 = shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) });
 var groupState = shape({ threads: array(thread), voiceInput: voiceInput2 });
-var agentActivity2 = shape({ id, activity: oneOf("idle", "running"), waiting: optional(bool), activityStale: optional(bool) });
+var agentActivity2 = shape({
+  id,
+  activity: oneOf("idle", "running"),
+  waiting: optional(bool),
+  activityStale: optional(bool),
+  threadCount: optional(integer)
+});
 var globalState = shape({
   approvals: array(isConversationApproval),
   attention: isAttentionTargets,
@@ -22464,6 +22470,8 @@ function chipParts(g8, elevated) {
   if (!g8.isAdmin) parts.push("\u{1F512}");
   if (isAdminOnly) parts.push("\u{1F441}");
   if (g8.lastActivityAt) parts.push(fmtRelative(g8.lastActivityAt));
+  const threadCount = agentActivity.value.find((activity) => activity.id === g8.id)?.threadCount;
+  if (threadCount) parts.push(`${threadCount} thr`);
   return { parts, isAdminOnly };
 }
 function tipFor(g8, isAdminOnly) {

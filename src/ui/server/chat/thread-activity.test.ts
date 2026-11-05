@@ -156,6 +156,7 @@ describe('thread activity projection', () => {
         input: { question: 'Choose?', responseMode: 'text', options: [] },
       });
       expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'idle', waiting: true, stale: false });
+      expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])[0].threadCount).toBe(3);
     } finally {
       source.close();
       outputs.close();
@@ -201,25 +202,25 @@ describe('thread activity projection', () => {
     });
     expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
     expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'idle', waiting: true },
+      { id: 'g', activity: 'idle', waiting: true, threadCount: 2 },
     ]);
     turn('turn-a', 'a', 'running');
     signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
     signal.connected = true;
     expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
     expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'running', waiting: true },
+      { id: 'g', activity: 'running', waiting: true, threadCount: 2 },
     ]);
     turn('turn-a', 'a', 'settled');
     expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
     answerQuestion('q', { responseType: 'text', value: 'Done', userId: 'viewer', answeredAt: '2026-11-05T00:02:00Z' });
     expect((await activities()).a.activity).toBe('idle');
   });
-  it('omits inaccessible groups and does not build thread lists for idle agents', () => {
+  it('counts idle agents from the maintained projection and omits inaccessible groups', () => {
     getDb().exec(`INSERT INTO agent_groups(id,name,folder,created_at) VALUES('private','Private','private','now');`);
     const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
-    expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle' }]);
-    expect(read).not.toHaveBeenCalled();
+    expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle', threadCount: 2 }]);
+    expect(read).toHaveBeenCalledOnce();
   });
   it('combines running in one thread with waiting in another without hiding stale execution', async () => {
     createQuestion({
@@ -232,10 +233,10 @@ describe('thread activity projection', () => {
     const selected = await listThreadsForViewer('viewer', 'g');
     expect(selected.find((thread) => thread.threadId === 'a')).toMatchObject({ activity: 'idle', waiting: true });
     expect(readAgentActivity('viewer', attention, 'g', selected)).toEqual([
-      { id: 'g', activity: 'running', waiting: true, activityStale: true },
+      { id: 'g', activity: 'running', waiting: true, activityStale: true, threadCount: 2 },
     ]);
     expect(readAgentActivity('viewer', attention, null, [])).toEqual([
-      { id: 'g', activity: 'running', waiting: true, activityStale: true },
+      { id: 'g', activity: 'running', waiting: true, activityStale: true, threadCount: 2 },
     ]);
   });
   it('reuses selected summaries and includes unselected groups without private thread leakage', async () => {
@@ -244,7 +245,7 @@ describe('thread activity projection', () => {
     signal.connected = true;
     const selected = await listThreadsForViewer('viewer', 'g', []);
     const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
-    expect(readAgentActivity('viewer', [], 'g', selected)).toEqual([{ id: 'g', activity: 'running' }]);
+    expect(readAgentActivity('viewer', [], 'g', selected)).toEqual([{ id: 'g', activity: 'running', threadCount: 2 }]);
     expect(read).not.toHaveBeenCalled();
     getDb().exec(`
       INSERT INTO agent_groups(id,name,folder,created_at) VALUES('other','Other','other','now');
@@ -267,8 +268,8 @@ describe('thread activity projection', () => {
       expect(readAgentActivity('viewer', [], null, []).map((group) => group.id)).toEqual(['g']);
       addMember({ user_id: 'viewer', agent_group_id: 'other', added_by: null, added_at: 'now' });
       expect(readAgentActivity('viewer', [], null, [])).toEqual([
-        { id: 'g', activity: 'running' },
-        { id: 'other', activity: 'running', activityStale: true },
+        { id: 'g', activity: 'running', threadCount: 2 },
+        { id: 'other', activity: 'running', activityStale: true, threadCount: 1 },
       ]);
     } finally {
       source.close();
@@ -280,9 +281,9 @@ describe('thread activity projection', () => {
     signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
     signal.connected = true;
     const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
-    expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'running' }]);
-    expect(read).toHaveBeenCalledOnce();
-    expect(read.mock.results[0].value.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual(['a']);
+    expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'running', threadCount: 2 }]);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read.mock.results[1].value.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual(['a']);
   });
   it('removes a group immediately after access is revoked and fails closed on broken projection state', () => {
     removeMember('viewer', 'g');
@@ -318,9 +319,9 @@ describe('thread activity projection', () => {
         threadId: 'private-thread',
       };
       signal.connected = true;
-      expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle' }]);
+      expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle', threadCount: 2 }]);
       grantRole({ user_id: 'admin', role: 'admin', agent_group_id: null, granted_by: null, granted_at: 'now' });
-      expect(readAgentActivity('admin', [], null, [])).toEqual([{ id: 'g', activity: 'running' }]);
+      expect(readAgentActivity('admin', [], null, [])).toEqual([{ id: 'g', activity: 'running', threadCount: 3 }]);
     } finally {
       source.close();
       output.close();
