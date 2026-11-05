@@ -1,10 +1,6 @@
 import type { Migration } from './index.js';
 
-export const migration051: Migration = {
-  version: 51,
-  name: 'durable-conversation-reads',
-  up(db) {
-    db.exec(`
+export const CONVERSATION_READ_SCHEMA = `
       CREATE TABLE conversation_publications (
         position INTEGER PRIMARY KEY AUTOINCREMENT,
         key TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
@@ -36,6 +32,10 @@ export const migration051: Migration = {
       END;
       ALTER TABLE thread_summary_meta ADD COLUMN unread_ready INTEGER NOT NULL DEFAULT 0;
       UPDATE thread_summary_meta SET unread_ready=CASE WHEN EXISTS(SELECT 1 FROM sessions) THEN 0 ELSE 1 END;
-    `);
-  },
+`;
+
+export const migration051: Migration = {
+  version: 51,
+  name: 'durable-conversation-reads',
+  up(db) { db.exec(CONVERSATION_READ_SCHEMA); },
 };

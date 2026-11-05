@@ -7,6 +7,7 @@ import { TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA, TURN_SCHEMA } from './turns.js
 import { INTERACTION_SCHEMA } from './migrations/049-interactions.js';
 import { INBOUND_THREAD_SUMMARY_SCHEMA, OUTBOUND_THREAD_SUMMARY_SCHEMA } from './thread-summary-schema.js';
 import { THREAD_SUMMARY_SCHEMA } from './migrations/050-thread-summaries.js';
+import { CONVERSATION_READ_SCHEMA } from './migrations/051-conversation-reads.js';
 
 export const SCHEMA = `
 -- Agent workspaces: folder, skills, CLAUDE.md.
@@ -142,6 +143,7 @@ CREATE TABLE pending_sender_approvals (
   UNIQUE(messaging_group_id, sender_identity)
 );
 ${THREAD_SUMMARY_SCHEMA}
+${CONVERSATION_READ_SCHEMA}
 `;
 
 /**
