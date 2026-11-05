@@ -21,6 +21,7 @@ import { upsertThreadTitle } from './modules/thread-titles/db.js';
 import {
   assertThreadSummariesReady,
   readSessionThreadSummary,
+  readSummaryQueuedRoutes,
   reconcileThreadSummaries,
   rebuildThreadSummaries,
   refreshThreadSummaries,
@@ -62,6 +63,29 @@ afterEach(async () => {
 });
 
 describe('maintained thread summaries', () => {
+  it('requires explicit backfill for old queue facts and refreshes the trigger gate capture', () => {
+    message('one');
+    refreshThreadSummaries('s');
+    expect(readSummaryQueuedRoutes('s')).toHaveLength(1);
+    getDb().exec("UPDATE thread_summaries SET value=json_remove(value,'$.pendingAt') WHERE source='inbound' AND kind='route'");
+    expect(() => readSessionThreadSummary(spec)).toThrow('offline backfill');
+    expect(() => readSummaryQueuedRoutes('s')).toThrow('offline backfill');
+    inbound.exec("DROP TRIGGER thread_summary_messages_in_update");
+    rebuildThreadSummaries(ROOT);
+    expect(readSummaryQueuedRoutes('s')).toHaveLength(1);
+    inbound.exec("UPDATE messages_in SET trigger=0 WHERE id='one'");
+    refreshThreadSummaries('s');
+    expect(readSummaryQueuedRoutes('s')).toHaveLength(0);
+  });
+
+  it('evaluates a future input becoming runnable without rebuilding its summary', () => {
+    message('one');
+    inbound.exec("UPDATE messages_in SET process_after='2999-01-01T00:00:00Z'");
+    refreshThreadSummaries('s');
+    expect(readSummaryQueuedRoutes('s')).toHaveLength(0);
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2999-01-01T00:00:01Z'));
+    expect(readSummaryQueuedRoutes('s')).toHaveLength(1);
+  });
   it('does not copy host projection tracking into the container-owned runner store', () => {
     seedRunnerState('g', 's', true);
     const runner = new Database(runnerStateDbPath('g', 's'), { readonly: true });

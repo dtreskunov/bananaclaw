@@ -14,9 +14,9 @@ describe('shared activity styling', () => {
     expect(css).toContain('@keyframes activity-spin { to { transform: rotate(360deg); } }');
   });
 
-  it('keeps question marks stationary and stops spinning when stale or motion is reduced', () => {
+  it('keeps question marks stationary and stale rings spinning, respecting reduced motion', () => {
     expect(css).toMatch(/\.activity-indicator-question\s*\{[^}]*position: absolute;[^}]*color: var\(--activity-status-queued\)/);
-    expect(css).toContain('.activity-indicator.stale .activity-indicator-base { animation: none; }');
+    expect(css).not.toContain('.activity-indicator.stale .activity-indicator-base { animation: none; }');
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.activity-indicator\.running \.activity-indicator-base \{ animation: none; \}/);
   });
 

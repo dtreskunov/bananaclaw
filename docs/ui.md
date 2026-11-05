@@ -71,7 +71,8 @@ steal focus on later refreshes. There is no floating attention control.
 Threads and agent names use the same leading activity icon: a subtle muted
 circle for idle, a blue running ring/spinner, and a stationary `?` overlay when
 input is waiting. Waiting does not hide simultaneous execution. Only the ring
-rotates; stale execution and reduced-motion preferences stop its animation.
+rotates; reduced-motion preferences stop its animation. Staleness mutes the
+indicator without freezing its running ring.
 Waiting remains a separate native clickable control, with a larger hit target
 and visible keyboard focus. Agent tabs, the selected mobile dropdown and picker
 rows place the icon before the name, not in the secondary status line. There is
@@ -212,7 +213,8 @@ offline backfill is required for existing installs; see
 
 Thread, DM and agent activity separates execution (`idle`/`running`) from the
 optional `waiting` overlay. An actionable unanswered question/approval adds the
-overlay even while execution continues. Running includes stopping/finalization. Future
+overlay even while execution continues. Running includes runnable queued inputs
+before a turn starts, as well as stopping/finalization. Future
 scheduled work does not. Shared-session execution marks only its exact origin
 conversation. Disconnected unfinished execution retains its last-known Running
 state with a stale explanation, not a fabricated completion or fourth state.
@@ -1559,6 +1561,27 @@ the server store; HTTP acceptance does not prove a command took effect.
   no source message, workflow or turn data is converted. Do not restore an old
   database over newly accepted messages. Before re-upgrading after writes by an
   older host, run the offline rebuild again.
+
+### Queued activity projection upgrade
+
+- **Detect:** queued inputs show idle until a turn starts, or reading old route
+  facts reports that thread queue summaries require offline backfill.
+- **Why:** inbound route facts now retain the earliest runnable input time.
+  Busy includes pending, triggering, non-system input whose scheduled time is
+  due, without opening session databases during UI reads. Future work, paused
+  input and non-triggering/system rows do not make a conversation busy.
+- **Fix:** stop the host and back up the central and host-owned session
+  databases. Run `pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped`
+  with the new code, then restart the matching host/browser build and reload.
+  The rebuild also refreshes trigger-gate invalidation. No runner rebuild or
+  database schema migration is required.
+- **Verify:** a queued thread and its agent have a spinning ring before a turn
+  exists; completion clears it. Question-mark overlays remain stationary.
+  Staleness mutes but does not stop rings; reduced-motion preferences still do.
+  Check channel ownership and selected/unselected groups.
+- **Rollback:** restore the previous matching host/browser code and restart.
+  The old reader ignores the extra derived queue fact; do not overwrite newly
+  accepted messages with old databases. Rebuild summaries before re-upgrading.
 
 ### Activity overlay upgrade
 

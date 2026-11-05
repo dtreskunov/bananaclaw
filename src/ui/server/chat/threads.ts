@@ -9,6 +9,7 @@ import type { ThreadSummary, AgentGroupActivity } from '../../shared/thread.js';
 import {
   readSessionThreadSummary,
   readSummaryTurns,
+  readSummaryQueuedRoutes,
   assertThreadSummariesReady,
   assertThreadSummaryAvailable,
   type ThreadSummarySpec,
@@ -206,29 +207,30 @@ function withExecutionActivity(userId: string, agentGroupId: string, threads: Th
     ]),
   );
   const saved = new Map([...live.keys()].map((sessionId) => [sessionId, readSummaryTurns(sessionId)]));
+  const queued = new Map([...live.keys()].map((sessionId) => [sessionId, readSummaryQueuedRoutes(sessionId)]));
   return threads.map((thread) => {
     const context = resolveTurnContext(userId, agentGroupId, thread.threadId, {
       channelType: thread.channelType,
       messagingGroupId: thread.messagingGroupId,
     });
+    if (context?.sessionId !== thread.sessionId) return { ...thread, activity: 'idle' };
     const state = live.get(thread.sessionId)!;
     const current =
-      context?.sessionId === thread.sessionId &&
       state.turn &&
       routeMatches(context, state.turn.channelType, state.turn.platformId, state.turn.threadId)
         ? state.turn
         : null;
-    const durable =
-      context?.sessionId === thread.sessionId
-        ? saved
-            .get(thread.sessionId)
-            ?.find((turn) => routeMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null))
-        : undefined;
-    const running =
+    const durable = saved.get(thread.sessionId)?.find(
+      (turn) => routeMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null),
+    );
+    const pending = queued.get(thread.sessionId)?.some(
+      (route) => routeMatches(context, route.channel_type, route.platform_id, route.thread_id || null),
+    );
+    const running = pending ||
       (current && !(durable?.id === current.id && durable.phase === 'settled')) ||
       (durable && durable.phase !== 'settled');
     const activity = running ? 'running' : 'idle';
-    return { ...thread, activity, ...(running && (!state.connected || !current) ? { activityStale: true } : {}) };
+    return { ...thread, activity, ...(running && !pending && (!state.connected || !current) ? { activityStale: true } : {}) };
   });
 }
 
@@ -246,9 +248,11 @@ export function readAgentActivity(
   for (const row of getDb()
     .prepare(
       `SELECT session_id,channel_type,platform_id,thread_id FROM thread_summaries
-    WHERE kind='turn' AND channel_type!='' AND platform_id!='' AND json_extract(value,'$.phase') != 'settled'`,
+    WHERE channel_type!='' AND platform_id!='' AND (
+      (kind='turn' AND json_extract(value,'$.phase') != 'settled') OR
+      (source='inbound' AND kind='route' AND json_extract(value,'$.pendingAt') <= ?))`,
     )
-    .all() as { session_id: string; channel_type: string; platform_id: string; thread_id: string }[]) {
+    .all(Date.now()) as { session_id: string; channel_type: string; platform_id: string; thread_id: string }[]) {
     let routes = unfinished.get(row.session_id);
     if (!routes) unfinished.set(row.session_id, (routes = []));
     routes.push({ channelType: row.channel_type, platformId: row.platform_id, threadId: row.thread_id || null });

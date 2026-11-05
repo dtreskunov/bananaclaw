@@ -1687,9 +1687,6 @@ nav.tab-bar-strip.group-strip {
 .activity-indicator.stale .activity-indicator-question {
   color: var(--muted);
 }
-.activity-indicator.stale .activity-indicator-base {
-  animation: none;
-}
 @keyframes activity-spin {
   to {
     transform: rotate(360deg);

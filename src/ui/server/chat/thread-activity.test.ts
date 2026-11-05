@@ -79,9 +79,9 @@ beforeEach(() => {
   initSessionFolder('g', 's');
   inbound = new Database(inboundDbPath('g', 's'));
   outbound = new Database(outboundDbPath('g', 's'));
-  inbound.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
-    VALUES('input-a',2,'chat','2026-11-05T00:00:00Z','web','group:g','a','{"text":"A"}'),
-      ('input-b',4,'chat','2026-11-05T00:00:00Z','web','group:g','b','{"text":"B"}');`);
+  inbound.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
+    VALUES('input-a',2,'chat','2026-11-05T00:00:00Z','completed','web','group:g','a','{"text":"A"}'),
+      ('input-b',4,'chat','2026-11-05T00:00:00Z','completed','web','group:g','b','{"text":"B"}');`);
   refreshThreadSummaries('s');
   signal.turn = null;
   signal.connected = false;
@@ -98,6 +98,55 @@ afterEach(async () => {
 });
 
 describe('thread activity projection', () => {
+  it('shows queued work before a turn exists, then clears it after processing', async () => {
+    inbound.exec("UPDATE messages_in SET status='pending' WHERE id='input-b'");
+    refreshThreadSummaries('s');
+    expect(await activities()).toEqual({
+      a: { activity: 'idle', stale: false },
+      b: { activity: 'running', stale: false },
+    });
+    expect(readAgentActivity('viewer', [], null, [])).toEqual([
+      { id: 'g', activity: 'running', threadCount: 2 },
+    ]);
+    turn('turn-b', 'b', 'running');
+    signal.turn = { id: 'turn-b', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'b' };
+    signal.connected = true;
+    inbound.exec("UPDATE messages_in SET status='completed' WHERE id='input-b'");
+    refreshThreadSummaries('s');
+    expect((await activities()).b.activity).toBe('running');
+    turn('turn-b', 'b', 'settled');
+    expect((await activities()).b.activity).toBe('idle');
+  });
+
+  it.each([
+    "status='paused'",
+    "status='failed'",
+    "kind='system'",
+    "trigger=0",
+    "process_after='2999-01-01T00:00:00Z'",
+  ])('does not spin for input excluded from runnable work: %s', async (exclude) => {
+    inbound.exec(`UPDATE messages_in SET status='pending', ${exclude} WHERE id='input-b'`);
+    refreshThreadSummaries('s');
+    expect((await activities()).b.activity).toBe('idle');
+    expect(readAgentActivity('viewer', [], null, [])[0].activity).toBe('idle');
+  });
+
+  it('invalidates queue facts when the trigger gate changes and preserves the waiting overlay', async () => {
+    inbound.exec("UPDATE messages_in SET status='pending', trigger=0 WHERE id='input-a'");
+    refreshThreadSummaries('s');
+    expect((await activities()).a.activity).toBe('idle');
+    inbound.exec("UPDATE messages_in SET trigger=1 WHERE id='input-a'");
+    refreshThreadSummaries('s');
+    createQuestion({
+      id: 'queued-q', session_id: 's', message_out_id: 'queued-question', in_reply_to: null,
+      channel_type: 'web', platform_id: 'group:g', thread_id: 'a', created_at: 'now',
+      input: { question: 'Choose?', responseMode: 'text', options: [] },
+    });
+    expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
+    expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
+      { id: 'g', activity: 'running', waiting: true, threadCount: 2 },
+    ]);
+  });
   it('isolates shared DM activity and waiting state to the authorized counterparty', async () => {
     insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'person@example.com' });
     getDb().exec(`
@@ -111,9 +160,9 @@ describe('thread activity projection', () => {
     const source = new Database(inboundDbPath('g', 'dm-session'));
     const outputs = new Database(outboundDbPath('g', 'dm-session'));
     try {
-      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,content)
-        VALUES('own',2,'chat','now','resend','person@example.com','{"text":"Own"}'),
-          ('other',4,'chat','now','resend','other@example.com','{"text":"Other"}');`);
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,content)
+        VALUES('own',2,'chat','now','completed','resend','person@example.com','{"text":"Own"}'),
+          ('other',4,'chat','now','completed','resend','other@example.com','{"text":"Other"}');`);
       const active = {
         id: 'dm-turn',
         origin_channel_type: 'resend',
@@ -143,6 +192,12 @@ describe('thread activity projection', () => {
       putTurn(outputs, { ...active, id: 'private-turn', origin_platform_id: 'other@example.com' });
       refreshThreadSummaries('dm-session');
       signal.turn = { ...signal.turn, id: 'private-turn', platformId: 'other@example.com' };
+      expect((await activities())['__dm:dm-mg'].activity).toBe('idle');
+      source.exec("UPDATE messages_in SET status='pending' WHERE id='own'");
+      refreshThreadSummaries('dm-session');
+      expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'running', stale: false });
+      source.exec("UPDATE messages_in SET status=CASE id WHEN 'own' THEN 'completed' ELSE 'pending' END");
+      refreshThreadSummaries('dm-session');
       expect((await activities())['__dm:dm-mg'].activity).toBe('idle');
       createQuestion({
         id: 'dm-q',
@@ -260,8 +315,8 @@ describe('thread activity projection', () => {
     const source = new Database(inboundDbPath('other', 'other-session'));
     const output = new Database(outboundDbPath('other', 'other-session'));
     try {
-      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
-        VALUES('other-input',2,'chat','now','web','group:other','other-thread','{"text":"Other"}');`);
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
+        VALUES('other-input',2,'chat','now','completed','web','group:other','other-thread','{"text":"Other"}');`);
       output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
         VALUES('other-turn','running','pending','native','web','group:other','other-thread','now');`);
       refreshThreadSummaries('other-session');
@@ -306,8 +361,8 @@ describe('thread activity projection', () => {
     const source = new Database(inboundDbPath('g', 'private-session'));
     const output = new Database(outboundDbPath('g', 'private-session'));
     try {
-      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
-        VALUES('private-input',2,'chat','now','resend','bot@example.com','private-thread','{"text":"Private","sender":"other@example.com"}');`);
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
+        VALUES('private-input',2,'chat','now','completed','resend','bot@example.com','private-thread','{"text":"Private","sender":"other@example.com"}');`);
       output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
         VALUES('private-turn','running','pending','native','resend','bot@example.com','private-thread','now');`);
       refreshThreadSummaries('private-session');

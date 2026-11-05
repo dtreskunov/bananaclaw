@@ -184,8 +184,8 @@ describe('unified sync WebSocket integration', () => {
     const source = new Database(inboundDbPath('other', 'other-session'));
     const output = new Database(outboundDbPath('other', 'other-session'));
     try {
-      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
-        VALUES('other-input',2,'chat','now','web','group:other','other-thread','{"text":"Other"}');`);
+      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
+        VALUES('other-input',2,'chat','now','completed','web','group:other','other-thread','{"text":"Other"}');`);
       refreshThreadSummaries('other-session');
       await connect('g');
       expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.activity).toBe('idle');
@@ -208,7 +208,7 @@ describe('unified sync WebSocket integration', () => {
       output.close();
     }
   });
-  it('patches an unselected idle agent count when visible threads are added or removed', async () => {
+  it('patches an unselected agent count and queued activity when threads are added or removed', async () => {
     grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
     getDb().exec(`
       INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
@@ -237,7 +237,7 @@ describe('unified sync WebSocket integration', () => {
       const patch = frames.at(-1)?.global;
       if (patch?.kind !== 'update') throw new Error('Expected count patch');
       expect(patch.changes.group).toBeUndefined();
-      expect(patch.changes.agentActivity?.upserts).toEqual([{ id: 'other', activity: 'idle', threadCount: 1 }]);
+      expect(patch.changes.agentActivity?.upserts).toEqual([{ id: 'other', activity: 'running', threadCount: 1 }]);
       expect(JSON.stringify(frames.at(-1)).length).toBeLessThan(512);
     } finally {
       source.close();

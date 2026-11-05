@@ -52,7 +52,7 @@ export const INBOUND_THREAD_SUMMARY_SCHEMA =
   track(
     'messages_in',
     'route',
-    [...route, 'seq', 'timestamp', 'content', 'kind', 'status', 'process_after', 'recurrence', 'series_id'],
+    [...route, 'seq', 'timestamp', 'content', 'kind', 'status', 'process_after', 'recurrence', 'series_id', 'trigger'],
     route,
   ) +
   track('thread_titles', 'route', [...route, 'title'], route);

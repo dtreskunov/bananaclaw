@@ -35,6 +35,7 @@ interface SummaryRow extends Route {
 }
 interface InboundSummary {
   count: number;
+  pendingAt: number | null;
   last: string | null;
   first: { seq: number; title: string } | null;
   owners: { seq: number; handles: string[] }[];
@@ -149,8 +150,12 @@ function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
   const params = [route.channel_type, route.platform_id, route.thread_id];
   const where = `channel_type = ? AND COALESCE(platform_id, '') = ? AND COALESCE(thread_id, '') = ?`;
   const count = db
-    .prepare(`SELECT COUNT(*) AS count, MAX(timestamp) AS last FROM messages_in WHERE ${where}`)
-    .get(...params) as OutboundSummary;
+    .prepare(`SELECT COUNT(*) AS count, MAX(timestamp) AS last,
+      MIN(CASE WHEN status = 'pending' AND trigger = 1 AND kind != 'system'
+        THEN CASE WHEN process_after IS NULL THEN 0
+          ELSE CAST(strftime('%s', process_after) AS INTEGER) * 1000 END END) AS pendingAt
+      FROM messages_in WHERE ${where}`)
+    .get(...params) as Pick<InboundSummary, 'count' | 'last' | 'pendingAt'>;
   const first = db
     .prepare(`SELECT seq, content, platform_id FROM messages_in WHERE ${where} ORDER BY seq LIMIT 5`)
     .all(...params) as { seq: number; content: string; platform_id: string }[];
@@ -316,9 +321,10 @@ export function rebuildThreadSummaries(dataDir = DATA_DIR): void {
     for (const source of ['inbound', 'outbound'] as const) {
       const file = path.join(dataDir, 'v2-sessions', session.agent_group_id, session.id, `${source}.db`);
       fs.accessSync(file);
-      ensureSchema(file, source);
       const db = new Database(file);
       try {
+        if (source === 'inbound') db.exec('DROP TRIGGER IF EXISTS thread_summary_messages_in_update');
+        ensureSchema(file, source);
         const table = source === 'inbound' ? 'messages_in' : 'messages_out';
         const routes = db
           .prepare(
@@ -382,6 +388,21 @@ export function readSummaryTurns(sessionId: string): (Route & SummaryTurn)[] {
   });
 }
 
+function readInboundSummary(row: SummaryRow): InboundSummary {
+  const value = JSON.parse(row.value) as InboundSummary;
+  if (value.pendingAt === undefined)
+    throw new Error('Thread queue summaries require offline backfill: pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped');
+  return value;
+}
+
+export function readSummaryQueuedRoutes(sessionId: string): Route[] {
+  return sourceRows(sessionId).filter((row) => {
+    if (row.source !== 'inbound' || row.kind !== 'route') return false;
+    const { pendingAt } = readInboundSummary(row);
+    return pendingAt !== null && pendingAt <= Date.now();
+  });
+}
+
 /** Central indexed summaries only; no session DB handles, history scans or viewer cache. */
 export function readSessionThreadSummary(
   spec: ThreadSummarySpec,
@@ -400,7 +421,7 @@ export function readSessionThreadSummary(
   );
   const inbound = rows
     .filter((row) => row.kind === 'route' && row.source === 'inbound')
-    .map((row) => ({ ...row, data: JSON.parse(row.value) as InboundSummary }));
+    .map((row) => ({ ...row, data: readInboundSummary(row) }));
   const outbound = rows
     .filter((row) => row.kind === 'route' && row.source === 'outbound')
     .map((row) => ({ ...row, data: JSON.parse(row.value) as OutboundSummary }))

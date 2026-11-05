@@ -33,7 +33,6 @@
   line-height: 1;
 }
 .activity-indicator.stale .activity-indicator-question { color: var(--muted); }
-.activity-indicator.stale .activity-indicator-base { animation: none; }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .activity-indicator.running .activity-indicator-base { animation: none; }
