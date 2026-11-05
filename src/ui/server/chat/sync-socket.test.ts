@@ -17,6 +17,7 @@ import * as attention from './attention.js';
 import { revokeRole, grantRole } from '../../../modules/permissions/db/user-roles.js';
 vi.mock('./threads.js', () => ({ listThreadsForViewer: vi.fn(async () => []) }));
 import { listThreadsForViewer } from './threads.js';
+import { publishHostChange } from '../../../host-changes.js';
 
 let server: WebSocketServer;
 let token: string;
@@ -74,6 +75,16 @@ async function connect(groupId: string | null = null) {
 }
 
 describe('global sync WebSocket integration', () => {
+  it('does not rebuild metadata or scan threads for activity-only bursts', async () => {
+    await connect('g');
+    const readInteractions = vi.spyOn(attention, 'readInteractionSync');
+    for (let i = 0; i < 1000; i++) publishHostChange({ kind: 'activity', sessionId: 'session' });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(listThreads).toHaveBeenCalledOnce();
+    expect(readInteractions).not.toHaveBeenCalled();
+    expect(frames).toHaveLength(1);
+  });
+
   it('updates inactive-group question attention without rescanning the selected group', async () => {
     grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
     getDb().exec(`

@@ -29,6 +29,7 @@ import {
 import { inboundDbPath, initSessionFolder, outboundDbPath } from './session-manager.js';
 import { insertMessage } from './db/session-db.js';
 import Database from 'better-sqlite3';
+import { onHostChange, type HostChange } from './host-changes.js';
 
 const SESSION_ID = 'session-a';
 const AGENT_GROUP_ID = 'agent-a';
@@ -387,6 +388,84 @@ describe('current turn control', () => {
 });
 
 describe('session signal link', () => {
+  it('keeps live and committed trace updates activity-only, including turn observer fan-out', async () => {
+    const socket = await connect();
+    const notices: HostChange[] = [];
+    const off = onHostChange((change) => notices.push(change));
+    const turn = {
+      id: 'trace-turn',
+      origin_channel_type: 'web',
+      origin_platform_id: 'room',
+      origin_thread_id: null,
+      origin_source_session_id: null,
+      started_at: '2026-09-01T00:00:00.000Z',
+      ended_at: null,
+      phase: 'running',
+      outcome: 'pending',
+      provenance: 'native',
+      imported_from_session_id: null,
+      imported_from_turn_id: null,
+    };
+    try {
+      socket.write(
+        `${JSON.stringify({
+          v: 5,
+          type: 'durable',
+          eventId: 'trace-turn',
+          sequence: 1,
+          event: { type: 'turn.upsert', payload: turn },
+        })}\n`,
+      );
+      await waitFor(() => notices.some((change) => change.kind === 'sessions'));
+      notices.length = 0;
+      const step = { kind: 'internal', id: 'step', text: 'Working' };
+      socket.write(
+        `${JSON.stringify({
+          v: 5,
+          type: 'activity',
+          turnId: turn.id,
+          ordinal: 0,
+          timelinePosition: 100,
+          ts: '1000',
+          step,
+        })}\n`,
+      );
+      await waitFor(() => notices.length > 0);
+      expect(notices).toEqual([{ kind: 'activity', sessionId: SESSION_ID }]);
+      notices.length = 0;
+      socket.write(
+        `${JSON.stringify({
+          v: 5,
+          type: 'durable',
+          eventId: 'trace-saved',
+          sequence: 2,
+          event: {
+            type: 'activity.persist',
+            payload: {
+              turn_id: turn.id,
+              message_out_id: null,
+              ordinal: 0,
+              timeline_position: 100,
+              ts: '1000',
+              text: JSON.stringify(step),
+            },
+          },
+        })}\n`,
+      );
+      await waitFor(() => notices.length > 0);
+      expect(notices).toEqual([{ kind: 'activity', sessionId: SESSION_ID }]);
+      const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+      try {
+        expect(db.prepare('SELECT text FROM turn_activity').pluck().get()).toBe(JSON.stringify(step));
+      } finally {
+        db.close();
+      }
+    } finally {
+      off();
+      socket.destroy();
+    }
+  });
+
   it('publishes input-state changes only after their durable state is committed', async () => {
     const observed: string[] = [];
     const unsubscribe = onSessionSignal((sessionId, kind) => {

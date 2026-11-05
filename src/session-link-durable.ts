@@ -727,7 +727,7 @@ export function applyDurableRunnerEvent(
       type: frame.event.type,
       error: skippedTelemetry,
     });
-  publishHostChange({ kind: 'sessions', sessionId });
+  publishHostChange({ kind: frame.event.type === 'activity.persist' ? 'activity' : 'sessions', sessionId });
   return {
     deliveryReady,
     processingReady,

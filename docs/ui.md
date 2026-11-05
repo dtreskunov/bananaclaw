@@ -1385,6 +1385,8 @@ Committed mutation helpers invalidate metadata, including CLI operations,
 session-less approvals, session/fork changes, configuration and access changes.
 Session projection events refresh the selected group's summaries. Reads are
 coalesced for 100 ms with one in-flight async build and a bounded dirty flag.
+Live and committed activity-only events invalidate the matching conversation,
+not metadata or thread scans. Durable turn observers do not broaden these notices.
 Interaction changes refresh approvals and attention without rescanning the selected
 group's threads. Session changes invalidate thread summaries only for the affected
 group; configuration changes refresh voice capability without rescanning threads.

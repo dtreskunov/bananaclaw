@@ -122,7 +122,6 @@ export function onSessionTurnChange(listener: (sessionId: string, change: Sessio
 }
 
 function notifyTurnChange(sessionId: string, change: SessionTurnChange): void {
-  publishHostChange({ kind: 'sessions', sessionId });
   for (const listener of turnChangeListeners) {
     try {
       listener(sessionId, change);
@@ -138,6 +137,7 @@ export function confirmSessionRunnerExit(sessionId: string): void {
   if (!state) return;
   state.connected = false;
   state.turnStateReady = false;
+  publishHostChange({ kind: 'sessions', sessionId });
   notifyTurnChange(sessionId, {
     turnIds: state.activeTurn ? [state.activeTurn.id] : [],
     reason: 'runner-exited',
@@ -371,7 +371,7 @@ function stateFor(sessionId: string): SessionSignalState {
 }
 
 function emit(sessionId: string, kind: SignalKind): void {
-  if (kind !== 'heartbeat') publishHostChange({ kind: 'sessions', sessionId });
+  if (kind !== 'heartbeat') publishHostChange({ kind: kind === 'activity' ? 'activity' : 'sessions', sessionId });
   for (const listener of listeners) {
     try {
       listener(sessionId, kind);

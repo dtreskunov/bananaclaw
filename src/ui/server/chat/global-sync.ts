@@ -27,6 +27,7 @@ export function startGlobalSubscription(options: {
     },
     subscribe: (invalidate) =>
       onHostChange((change) => {
+        if (change.kind === 'activity') return;
         if (change.kind === 'configuration') {
           invalidate(change.groupId ?? undefined, false);
         } else if (change.kind === 'sessions') {
