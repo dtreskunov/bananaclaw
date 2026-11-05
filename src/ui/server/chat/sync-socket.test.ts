@@ -154,6 +154,30 @@ async function connect(
 }
 
 describe('unified sync WebSocket integration', () => {
+  it('acknowledges unchanged metadata refreshes without resnapshotting the conversation', async () => {
+    startTurn();
+    const client = await connect('g', conversation);
+    const initial = frames.find((frame) => frame.conversation)?.conversation;
+    client.send(
+      JSON.stringify({
+        kind: 'subscribe',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        subscriptionId: 2,
+        groupId: 'g',
+        conversation,
+      }),
+    );
+    await vi.waitFor(() => expect(frames.some((frame) => frame.subscriptionId === 2 && frame.global)).toBe(true));
+    expect(frames.filter((frame) => frame.conversation)).toHaveLength(1);
+    trace();
+    await vi.waitFor(() => expect(conversationView()?.turns[0].activity).toHaveLength(1));
+    expect(frames.at(-1)).toMatchObject({
+      subscriptionId: 2,
+      conversation: { kind: 'update', streamId: initial?.streamId, baseRevision: 0, revision: 1 },
+    });
+    expect(listThreads).toHaveBeenCalledTimes(2);
+  });
+
   it('streams turn activity while a metadata scan is blocked, without rescanning threads', async () => {
     startTurn();
     let finish!: (value: never[]) => void;

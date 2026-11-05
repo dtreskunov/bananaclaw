@@ -1395,6 +1395,9 @@ Session projection events refresh the selected group's summaries. Metadata reads
 bounded dirty flag. Conversation reads retain their independent 40 ms coalescing;
 a pending thread scan cannot block transcript or activity publication. Switching
 threads in the same group reuses its cached scan; explicit refresh rescans threads.
+Same-conversation refresh and visibility catch-up reread the transcript without
+resetting its stream or revisions, so pending output and settlement deltas retain
+completion cues. New selections and reconnects establish fresh snapshots.
 Live and committed activity-only events invalidate the matching conversation,
 not metadata or thread scans. Durable turn observers do not broaden these notices.
 Interaction changes refresh approvals and attention without rescanning the selected

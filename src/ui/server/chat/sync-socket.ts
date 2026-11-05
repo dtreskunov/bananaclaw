@@ -119,14 +119,18 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
       clearTimeout(subscriptionTimer);
       if (selection && message.subscriptionId <= selection.subscriptionId) return;
       authorize();
-      const refreshThreads =
-        !selection ||
-        selection.groupId !== message.groupId ||
+      const sameConversation =
+        selection?.groupId === message.groupId &&
         JSON.stringify(selection.conversation) === JSON.stringify(message.conversation);
-      stopConversation();
-      invalidateConversation = () => {};
+      const refreshThreads = !selection || selection.groupId !== message.groupId || sameConversation;
       selection = message;
       global.subscribe(message.subscriptionId, message.groupId, refreshThreads);
+      if (sameConversation) {
+        invalidateConversation();
+        return;
+      }
+      stopConversation();
+      invalidateConversation = () => {};
       const { groupId, conversation } = message;
       if (groupId && conversation) {
         const override = conversation.messagingGroupId
@@ -144,11 +148,11 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
             return () => {};
           },
           send: (frame) => {
-            if (selection !== message || stopped) return;
+            if (!selection || stopped) return;
             sendSyncFrame(ws, {
               kind: 'sync',
               protocolVersion: SYNC_PROTOCOL_VERSION,
-              subscriptionId: message.subscriptionId,
+              subscriptionId: selection.subscriptionId,
               groupId,
               conversation: frame,
             });

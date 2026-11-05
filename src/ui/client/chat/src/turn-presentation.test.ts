@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearChat, openChat } from './actions';
+import { clearChat, openChat, runSync } from './actions';
 import {
   chatTranscript,
   completedResponse,
@@ -89,6 +89,31 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('authoritative turn presentation', () => {
+  it('keeps completion scrolling when settlement arrives during metadata refresh', async () => {
+    const streamId = conversationState.value?.streamId;
+    const refreshed = runSync();
+    update({
+      ...initial,
+      messages: [
+        {
+          id: 'refresh-reply',
+          direction: 'out',
+          text: 'Done',
+          timestamp: '2026-09-29T00:00:02Z',
+          turnId: testTurn.id,
+          deliveryOrigin: 'response',
+          timelinePosition: 200,
+        },
+      ],
+      turns: [{ ...testTurn, phase: 'settled', outcome: 'replied', outputIds: ['refresh-reply'] }],
+      connection: { connected: true, activeTurnId: null },
+    });
+    await refreshed;
+    expect(conversationState.value?.streamId).toBe(streamId);
+    expect(conversationState.value?.revision).toBe(1);
+    expect(completedResponse.value).toBe('refresh-reply');
+  });
+
   it('uses undecorated wire messages directly without timestamp or file reshaping', () => {
     const message = { id: 'input', direction: 'in' as const, text: 'Hello', timestamp: '2026-11-03T00:00:00Z' };
     const view = testSnapshot({ messages: [message] }).conversation;
