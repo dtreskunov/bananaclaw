@@ -615,6 +615,7 @@ export async function openChat(
 
   batch(() => {
     groupId.value = gid;
+    threadId.value = resumeTid;
     chatMessages.value = [];
     chatReady.value = false;
     channelType.value = ct;
@@ -622,7 +623,6 @@ export async function openChat(
     canSend.value = ct === 'web' ? false : cs;
     pendingQuestions.value = [];
     if (resumeTid) {
-      threadId.value = resumeTid;
       chatLoading.value = true;
       chatStatus.value = ct === 'web' ? 'connecting\u2026' : 'loading history\u2026';
     }
@@ -644,10 +644,12 @@ export async function openChat(
     (t) => (t.channelType || 'web') === 'web' && t.title === '(new thread)' && !t.messageCount,
   );
   if (empty) {
-    threadId.value = empty.threadId;
-    messagingGroupId.value = empty.messagingGroupId || null;
-    chatLoading.value = true;
-    chatStatus.value = 'syncing\u2026';
+    batch(() => {
+      threadId.value = empty.threadId;
+      messagingGroupId.value = empty.messagingGroupId || null;
+      chatLoading.value = true;
+      chatStatus.value = 'syncing\u2026';
+    });
     writeHash();
     focusComposerSoon({ mobile: true });
     return;
@@ -685,8 +687,10 @@ export async function openChat(
     refs.newChatInFlight = false;
     return;
   }
-  threadId.value = started.threadId;
-  messagingGroupId.value = started.messagingGroupId;
+  batch(() => {
+    threadId.value = started.threadId;
+    messagingGroupId.value = started.messagingGroupId;
+  });
   threads.value = [
     {
       threadId: started.threadId,

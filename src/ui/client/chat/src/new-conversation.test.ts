@@ -5,7 +5,7 @@ import { router } from './router';
 import { chatReady, drawerOpen, groupId, groups, refs, threadId, threads, toastMessage } from './state';
 import { dismissToast } from './components/Toast';
 import type { Thread } from './types';
-import { testThread } from './conversation-test-fixtures';
+import { testSnapshot, testThread } from './conversation-test-fixtures';
 import { installSyncFixture, type SyncFixtureData } from './sync-action-test-fixtures';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
@@ -74,6 +74,34 @@ afterEach(() => {
 });
 
 describe('new conversation on startup', () => {
+  it('unsubscribes the previous conversation while a new thread is being created', async () => {
+    await selectGroup('agent');
+    const previous = sync.subscriptions.at(-1)!;
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url).endsWith('/chat/start'))
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    startNewThread();
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    expect(threadId.value).toBeNull();
+    expect(sync.subscriptions.at(-1)?.conversation).toBeNull();
+    sync.sockets[0].receiveConversation(testSnapshot({ threadId: 'latest' }), previous);
+    expect(chatReady.value).toBe(false);
+    expect(threadId.value).toBeNull();
+    finish(Response.json({ threadId: 'created', messagingGroupId: 'web-context', platformId: 'group:agent' }));
+    await vi.waitFor(() => expect(threadId.value).toBe('created'));
+    expect(sync.sockets).toHaveLength(1);
+    expect(sync.subscriptions.at(-1)?.conversation).toEqual({
+      threadId: 'created',
+      channelType: 'web',
+      messagingGroupId: 'web-context',
+    });
+  });
+
   it.each([false, true])(
     "discards another group's blank thread when switching groups (new: %s)",
     async (newConversation) => {
