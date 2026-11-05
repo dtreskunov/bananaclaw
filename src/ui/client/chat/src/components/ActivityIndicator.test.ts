@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toChildArray, type ComponentProps, type VNode } from 'preact';
 import { attentionError, attentionTargets } from '../attention-state';
-import { testThread } from '../conversation-test-fixtures';
-import { groupId } from '../state';
+import { testThread, testSnapshot, testWebSubmission, testTurn } from '../conversation-test-fixtures';
+import { groupId, threadId, channelType, messagingGroupId, pendingWebSends } from '../state';
+import { conversationState, withPendingActivity } from '../conversation-state';
+import { reconcileWebSubmissions, withWebSendState } from '../web-submissions';
 import { navigateAttention, openChat } from '../actions';
 import type { Thread } from '../types';
 import { DmRow, ThreadRow } from './ThreadsRail';
@@ -19,7 +21,75 @@ afterEach(() => {
   attentionError.value = null;
   attentionTargets.value = null;
   groupId.value = null;
+  threadId.value = null;
+  channelType.value = 'web';
+  messagingGroupId.value = null;
+  pendingWebSends.value = [];
+  conversationState.value = null;
   vi.clearAllMocks();
+});
+
+describe('immediate activity presentation', () => {
+  const idle = { activity: 'idle' as const };
+  it('shows both thread and agent busy before the send request completes, without changing metadata', () => {
+    pendingWebSends.value = [testWebSubmission];
+    const saved = testThread();
+    expect(withPendingActivity(idle, 'group').activity).toBe('running');
+    expect(withPendingActivity(saved, 'group', saved).activity).toBe('running');
+    expect(idle.activity).toBe('idle');
+    expect(saved.activity).toBe('idle');
+    const { indicator } = rowParts(ThreadRow, saved);
+    expect(indicator.props.status?.activity).toBe('idle');
+    groupId.value = 'group';
+    expect(rowParts(ThreadRow, saved).indicator.props.status?.activity).toBe('running');
+  });
+
+  it('scopes local feedback by group, thread and web channel, and clears on failure', () => {
+    pendingWebSends.value = [testWebSubmission];
+    expect(withPendingActivity(idle, 'other').activity).toBe('idle');
+    expect(withPendingActivity(idle, 'group', testThread({ threadId: 'other' })).activity).toBe('idle');
+    expect(withPendingActivity(idle, 'group', testThread({ channelType: 'resend' })).activity).toBe('idle');
+    pendingWebSends.value = [{ ...testWebSubmission, status: 'failed', error: 'Rejected' }];
+    expect(withPendingActivity(idle, 'group').activity).toBe('idle');
+  });
+
+  it('retains accepted startup feedback only for the current conversation, not indefinitely offscreen', () => {
+    pendingWebSends.value = [withWebSendState(testWebSubmission, { status: 'accepted' })];
+    expect(withPendingActivity(idle, 'group').activity).toBe('idle');
+    groupId.value = 'group';
+    threadId.value = 'thread';
+    expect(withPendingActivity(idle, 'group').activity).toBe('running');
+    groupId.value = 'other';
+    expect(withPendingActivity(idle, 'group').activity).toBe('idle');
+  });
+
+  it('hands off queued echoes and turns without an idle gap, then clears on settlement/cancellation', () => {
+    groupId.value = 'group';
+    threadId.value = 'thread';
+    const message = {
+      id: testWebSubmission.messageId, direction: 'in' as const, text: 'Queued', timestamp: '',
+      inputState: { messageId: testWebSubmission.messageId, status: 'queued' as const },
+    };
+    conversationState.value = testSnapshot({ messages: [message] });
+    expect(withPendingActivity(idle, 'group').activity).toBe('idle');
+    expect(withPendingActivity(idle, 'group', testThread({ messagingGroupId: 'other' })).activity).toBe('idle');
+    pendingWebSends.value = [withWebSendState(testWebSubmission, { status: 'accepted' })];
+    expect(withPendingActivity(idle, 'group').activity).toBe('running');
+    for (const phase of ['running', 'settled'] as const) {
+      conversationState.value = testSnapshot({ messages: [message], turns: [{ ...testTurn, phase, inputIds: [message.id] }] });
+      pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, conversationState.value.conversation, 'group');
+      expect(withPendingActivity(idle, 'group').activity).toBe(phase === 'running' ? 'running' : 'idle');
+    }
+    conversationState.value = testSnapshot({ messages: [{ ...message, inputState: { ...message.inputState, status: 'cancelled' } }] });
+    expect(withPendingActivity(idle, 'group').activity).toBe('idle');
+  });
+
+  it('preserves waiting while a local input is being submitted', () => {
+    pendingWebSends.value = [testWebSubmission];
+    expect(withPendingActivity({ activity: 'idle', waiting: true }, 'group')).toMatchObject({
+      activity: 'running', waiting: true,
+    });
+  });
 });
 
 function rowParts(Row: typeof ThreadRow, thread: Thread) {
@@ -32,6 +102,7 @@ function rowParts(Row: typeof ThreadRow, thread: Thread) {
     disabled: boolean;
     'aria-label': string;
     description: string;
+    status?: ComponentProps<typeof ActivityIndicator>['status'];
     onClick: (event: { stopPropagation: () => void }) => void;
   }>)(marker.props);
   return { row, title, indicator, meta: children.find((node) => node.props.class === 'meta')! };

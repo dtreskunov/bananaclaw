@@ -28,9 +28,11 @@ function classifySubmission(send: PendingWebSend, context: ReturnType<typeof sub
     !context.ownedIds.has(send.messageId) &&
     !hasFollowupDisposition(input?.inputState) &&
     input?.inputState?.status !== 'cancelled';
+  const awaitingOwnership = (input?.inputState?.status === 'queued' || input?.inputState?.status === 'processing') &&
+    !context.ownedIds.has(send.messageId);
   return {
     echoed: !!input,
-    retain: !input || awaitingTurn,
+    retain: !input || awaitingTurn || awaitingOwnership,
     starting: awaitingTurn && send.status !== 'failed',
   };
 }

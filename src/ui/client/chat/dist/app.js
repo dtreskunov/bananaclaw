@@ -20132,9 +20132,10 @@ function submissionContext(view) {
 function classifySubmission(send, context) {
   const input = context.inputs.get(send.messageId);
   const awaitingTurn = send.startsResponse && !context.active && !context.ownedIds.has(send.messageId) && !hasFollowupDisposition(input?.inputState) && input?.inputState?.status !== "cancelled";
+  const awaitingOwnership = (input?.inputState?.status === "queued" || input?.inputState?.status === "processing") && !context.ownedIds.has(send.messageId);
   return {
     echoed: !!input,
-    retain: !input || awaitingTurn,
+    retain: !input || awaitingTurn || awaitingOwnership,
     starting: awaitingTurn && send.status !== "failed"
   };
 }
@@ -20187,6 +20188,17 @@ function submissionPresentation(transcript, submissions, view, groupId3, threadI
 var conversationState = y3(null);
 var completedResponse = y3(null);
 var chatTranscript = y3([]);
+function withPendingActivity(status, gid, thread2) {
+  const matches2 = (tid) => !thread2 || (thread2.channelType || "web") === "web" && thread2.threadId === tid;
+  const current = gid === groupId.value && channelType.value === "web";
+  const local = pendingWebSends.value.some(
+    (send) => send.groupId === gid && send.status !== "failed" && matches2(send.threadId) && (send.status === "sending" || current && send.threadId === threadId.value)
+  );
+  const selected = conversationState.value?.conversation;
+  const view = current && selected?.threadId === threadId.value && matches2(selected.threadId) && (!thread2?.messagingGroupId || thread2.messagingGroupId === messagingGroupId.value) ? selected : null;
+  const busy = local || view?.turns.some((turn2) => turn2.phase !== "settled");
+  return busy ? { ...status, activity: "running", activityStale: void 0 } : status;
+}
 var presentedMessages = /* @__PURE__ */ new WeakMap();
 function resetConversation() {
   resetToolStops();
@@ -22448,8 +22460,9 @@ function ActivityIndicator({ status, description }) {
 
 // src/components/GroupPicker.tsx
 function activityBadge(group) {
-  const status = agentActivity.value.find((activity) => activity.id === group.id);
-  if (!status) return {};
+  const saved = agentActivity.value.find((activity) => activity.id === group.id);
+  if (!saved) return {};
+  const status = withPendingActivity(saved, group.id);
   const count = groupAttentionCount(group.id);
   const { actionable, description } = activityDetails(status, count, group.name);
   return {
@@ -22826,9 +22839,10 @@ function ThreadAttention({ thread: thread2 }) {
     messagingGroupId: thread2.messagingGroupId ?? null
   };
   const count = threadAttentionCount(location2);
-  const { actionable, description } = activityDetails(thread2, count, thread2.title);
-  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status: thread2, description });
-  return thread2.waiting ? /* @__PURE__ */ u4(
+  const status = withPendingActivity(thread2, groupId.value, thread2);
+  const { actionable, description } = activityDetails(status, count, thread2.title);
+  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status, description });
+  return status.waiting ? /* @__PURE__ */ u4(
     "button",
     {
       type: "button",

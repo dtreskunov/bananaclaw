@@ -19,6 +19,9 @@ import {
   pendingQuestions,
   pendingWebSends,
   groupId,
+  threadId,
+  channelType,
+  messagingGroupId,
   refs,
 } from './state';
 import { applyTurnState } from './stop-turn';
@@ -28,12 +31,27 @@ import { playCompletionChime, playProgressTick } from './sound';
 import { maybeNotify } from './notify';
 import { adoptSubmissionTraces, inheritActivityPanels, resetActivityTraceView } from './activity-trace-state';
 import { completedResponseId } from './turn-completion';
-import type { ChatMessage, TranscriptRow } from './types';
+import type { ChatMessage, Thread, TranscriptRow } from './types';
+import type { ActivityStatus } from '../../../shared/thread';
 import { reconcileWebSubmissions } from './web-submissions';
 
 export const conversationState = signal<ConversationSnapshot | null>(null);
 export const completedResponse = signal<string | null>(null);
 export const chatTranscript = signal<TranscriptRow[]>([]);
+
+export function withPendingActivity(status: ActivityStatus, gid: string | null, thread?: Thread): ActivityStatus {
+  const matches = (tid: string) => !thread || ((thread.channelType || 'web') === 'web' && thread.threadId === tid);
+  const current = gid === groupId.value && channelType.value === 'web';
+  const local = pendingWebSends.value.some(send =>
+    send.groupId === gid && send.status !== 'failed' && matches(send.threadId) &&
+    (send.status === 'sending' || (current && send.threadId === threadId.value)),
+  );
+  const selected = conversationState.value?.conversation;
+  const view = current && selected?.threadId === threadId.value && matches(selected.threadId) &&
+    (!thread?.messagingGroupId || thread.messagingGroupId === messagingGroupId.value) ? selected : null;
+  const busy = local || view?.turns.some(turn => turn.phase !== 'settled');
+  return busy ? { ...status, activity: 'running', activityStale: undefined } : status;
+}
 
 type WireMessage = Conversation['messages'][number];
 interface PresentedMessage {

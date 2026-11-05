@@ -22,10 +22,12 @@ import { TabBar, type TabItem, type TabExtra } from './TabBar';
 import { MobileDialog, MobileDialogItem, MobileDialogList } from './MobileDialog';
 import { ActivityIndicator, activityDetails } from './ActivityIndicator';
 import { groupAttentionCount } from '../attention-state';
+import { withPendingActivity } from '../conversation-state';
 
 function activityBadge(group: Group) {
-  const status = agentActivity.value.find((activity) => activity.id === group.id);
-  if (!status) return {};
+  const saved = agentActivity.value.find((activity) => activity.id === group.id);
+  if (!saved) return {};
+  const status = withPendingActivity(saved, group.id);
   const count = groupAttentionCount(group.id);
   const { actionable, description } = activityDetails(status, count, group.name);
   return {

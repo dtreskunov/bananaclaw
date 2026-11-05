@@ -58,6 +58,18 @@ describe('web submission presentation', () => {
     }
   });
 
+  it('retains a queued follow-up until a turn owns it without duplicating its canonical bubble', () => {
+    const submission = { ...send, startsResponse: false };
+    const message = { ...input, inputState: { ...input.inputState, queuedForNextTurn: true } };
+    const view = testSnapshot({ messages: [message] }).conversation;
+    const retained = reconcileWebSubmissions([submission], view, 'group');
+    expect(retained).toEqual([withWebSendState(submission, { status: 'accepted' })]);
+    expect(present(retained, view, [{ kind: 'message', message }])).toEqual([{ kind: 'message', message }]);
+    expect(reconcileWebSubmissions(retained, testSnapshot({
+      messages: [message], turns: [{ ...testTurn, inputIds: [message.id] }],
+    }).conversation, 'group')).toEqual([]);
+  });
+
   it('never hides genuine queued follow-ups or starts a second response behind an active turn', () => {
     const queued = { ...input, inputState: { ...input.inputState, queuedForNextTurn: true } };
     for (const view of [
@@ -65,7 +77,7 @@ describe('web submission presentation', () => {
       testSnapshot({ messages: [input], turns: [testTurn], connection: { connected: true, activeTurnId: testTurn.id } })
         .conversation,
     ]) {
-      expect(reconcileWebSubmissions([send], view, 'group')).toEqual([]);
+      expect(reconcileWebSubmissions([send], view, 'group')).toEqual([withWebSendState(send, { status: 'accepted' })]);
       const rows = present([send], view, [{ kind: 'message', message: queued }]);
       expect(rows.some((row) => row.kind === 'starting')).toBe(false);
       expect(rows[0]).not.toMatchObject({ message: { hideInitialQueuedCaption: true } });

@@ -34,9 +34,6 @@
 }
 .activity-indicator.stale .activity-indicator-question { color: var(--muted); }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .activity-indicator.running .activity-indicator-base { animation: none; }
-}
 .tab-item-badge,
 .mobile-dialog-item-badge {
   display: inline-flex;

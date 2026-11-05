@@ -71,12 +71,20 @@ steal focus on later refreshes. There is no floating attention control.
 Threads and agent names use the same leading activity icon: a subtle muted
 circle for idle, a blue running ring/spinner, and a stationary `?` overlay when
 input is waiting. Waiting does not hide simultaneous execution. Only the ring
-rotates; reduced-motion preferences stop its animation. Staleness mutes the
-indicator without freezing its running ring.
+rotates. This compact busy ring is an essential progress cue and remains
+animated even with reduced motion enabled; other reduced-motion behavior is
+unchanged. Staleness mutes the indicator without freezing its running ring.
 Waiting remains a separate native clickable control, with a larger hit target
 and visible keyboard focus. Agent tabs, the selected mobile dropdown and picker
 rows place the icon before the name, not in the secondary status line. There is
 no visible `N attn` badge, activity text label or link-styled waiting action.
+
+Web sends make both the thread and agent icons busy immediately, before the
+HTTP request completes. This presentation-only overlay uses existing pending
+submissions and hands off to queued input receipts and unfinished turns, without
+mutating server metadata. Failed or cancelled inputs clear the local overlay;
+accepted startup feedback is scoped to the current conversation so navigation
+cannot leave another agent permanently busy.
 
 Agent tabs and picker rows append `N thr` to their secondary metadata using the
 same middle-dot separator as thread message counts. The count includes every
@@ -1577,7 +1585,8 @@ the server store; HTTP acceptance does not prove a command took effect.
   database schema migration is required.
 - **Verify:** a queued thread and its agent have a spinning ring before a turn
   exists; completion clears it. Question-mark overlays remain stationary.
-  Staleness mutes but does not stop rings; reduced-motion preferences still do.
+  Staleness mutes but does not stop rings. The essential busy cue also rotates
+  under reduced motion; unrelated motion preferences are unchanged.
   Check channel ownership and selected/unselected groups.
 - **Rollback:** restore the previous matching host/browser code and restart.
   The old reader ignores the extra derived queue fact; do not overwrite newly

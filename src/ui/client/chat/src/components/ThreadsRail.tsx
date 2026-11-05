@@ -26,6 +26,7 @@ import { RelativeTime } from './RelativeTime';
 import type { Thread, SearchResult } from '../types';
 import { ActivityIndicator, activityDetails } from './ActivityIndicator';
 import { threadAttentionCount } from '../attention-state';
+import { withPendingActivity } from '../conversation-state';
 
 function ThreadAttention({ thread }: { thread: Thread }) {
   const location = {
@@ -33,9 +34,10 @@ function ThreadAttention({ thread }: { thread: Thread }) {
     channelType: thread.channelType || 'web', messagingGroupId: thread.messagingGroupId ?? null,
   };
   const count = threadAttentionCount(location);
-  const { actionable, description } = activityDetails(thread, count, thread.title);
-  const indicator = <ActivityIndicator status={thread} description={description} />;
-  return thread.waiting ? (
+  const status = withPendingActivity(thread, groupId.value, thread);
+  const { actionable, description } = activityDetails(status, count, thread.title);
+  const indicator = <ActivityIndicator status={status} description={description} />;
+  return status.waiting ? (
     <button type="button" class="activity-action activity-dot-action thread-attention"
       disabled={!actionable}
       aria-label={description}
