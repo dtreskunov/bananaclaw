@@ -556,6 +556,13 @@ reserves the larger allowance from the start. Both calls count toward the
 byte caps do not grow. Reported visible tokens are checked separately when
 reasoning usage is available.
 
+An oversized summary gets one retry against the same original source, with
+instructions targeting half the original token and byte limits. This shares
+the single output-validation retry with reasoning-only recovery, counts toward
+the request limit, and keeps the original hard size limits. Source packing
+reserves room for the longer retry instructions; no summary is truncated or
+activated unless it passes validation.
+
 MiniMax-M3.1-Flash-Preview summaries use low effort (`output_config.effort` for
 Anthropic, `reasoning_effort` for Chat Completions), without changing normal
 generation settings. This model cannot disable thinking, and thinking consumes

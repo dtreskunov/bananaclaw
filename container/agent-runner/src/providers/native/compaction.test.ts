@@ -459,6 +459,102 @@ function largeHistory(characters: number) {
   return { ...compactionOptions(conversation, protectedRef), contextWindow: 1_000_000 };
 }
 
+it('retries the reported oversized reasoning-model leaf without relaxing limits or losing source context', async () => {
+  const options = largeHistory(240_000);
+  const original = store.messages(options.conversation);
+  let firstPrompt = '';
+  let retryPrompt = '';
+  let calls = 0;
+  const result = await compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens: 512_000,
+    summarize: async (prompt, request) => {
+      calls++;
+      expect(Buffer.byteLength(prompt) + Buffer.byteLength(COMPACTION_INSTRUCTIONS) + request.maxOutputTokens)
+        .toBeLessThanOrEqual(128_000);
+      if (calls === 1) {
+        firstPrompt = prompt;
+        expect(request.maxOutputTokens).toBe(10_048);
+        expect(prompt).toContain('2048 tokens and 8192 UTF-8 bytes');
+        return { text: 'x'.repeat(6403), finishReason: 'stop', outputTokens: 2183, reasoningTokens: 22 };
+      }
+      if (prompt.includes('The previous summary exceeded')) {
+        retryPrompt = prompt;
+        expect(request.maxOutputTokens).toBe(10_048);
+        expect(prompt).toContain('at most 1024 tokens and 4096 UTF-8 bytes');
+      }
+      return { text: 'Earlier work completed; continue pending requests.', finishReason: 'stop',
+        outputTokens: 100, reasoningTokens: 22 };
+    },
+  });
+  expect(retryPrompt.slice(retryPrompt.indexOf('[Exchange ')))
+    .toBe(firstPrompt.slice(firstPrompt.indexOf('[Exchange ')));
+  expect(result.requests).toBe(result.leafChunks + 2);
+  expect(result.requests).toBe(calls);
+  expect(store.messages(options.conversation)).toEqual(original);
+  expect(JSON.stringify(store.contextMessages(options.conversation))).toContain('Current pending request');
+});
+
+it('retries oversized UTF-8 bytes even when token usage is unavailable', async () => {
+  const options = largeHistory(60_000);
+  const original = store.messages(options.conversation);
+  let calls = 0;
+  const result = await compactNativeContext({
+    ...options,
+    summarize: async (prompt) => {
+      if (++calls === 1) return '\u20ac'.repeat(10_667);
+      expect(prompt).toContain('at most 4000 tokens and 16000 UTF-8 bytes');
+      return 'Earlier work completed; continue pending requests.';
+    },
+  });
+  expect(result.requests).toBe(2);
+  expect(store.messages(options.conversation)).toEqual(original);
+});
+
+it('accepts a summary at both exact size limits without retrying', async () => {
+  const options = largeHistory(60_000);
+  let calls = 0;
+  const result = await compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens: 512_000,
+    summarize: async () => {
+      calls++;
+      return { text: 'x'.repeat(32_000), finishReason: 'stop', outputTokens: 8022, reasoningTokens: 22 };
+    },
+  });
+  expect(result.requests).toBe(1);
+  expect(calls).toBe(1);
+});
+
+it.each([
+  ['bytes', { text: 'x'.repeat(32_001), finishReason: 'stop' }],
+  ['visible tokens', { text: 'Short-looking text', finishReason: 'stop', outputTokens: 8023, reasoningTokens: 22 }],
+])('preserves history when the shorter retry still exceeds the original %s limit', async (_name, response) => {
+  const options = largeHistory(60_000);
+  const before = store.contextMessages(options.conversation);
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens: 512_000,
+    summarize: async () => { calls++; return response; },
+  })).rejects.toThrow('oversized summary');
+  expect(calls).toBe(2);
+  expect(store.contextMessages(options.conversation)).toEqual(before);
+  expect(store.messages(options.conversation)).toEqual(before);
+});
+
+it('does not retry oversized output after cancellation', async () => {
+  const options = largeHistory(60_000);
+  const controller = new AbortController();
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options, signal: controller.signal,
+    summarize: async () => {
+      calls++;
+      controller.abort(new Error('Compaction stopped'));
+      return 'x'.repeat(32_001);
+    },
+  })).rejects.toThrow('Compaction stopped');
+  expect(calls).toBe(1);
+});
+
 it('reserves reasoning and retry output without enlarging the visible summary target', async () => {
   const options = largeHistory(60_000);
   const budgets: number[] = [];

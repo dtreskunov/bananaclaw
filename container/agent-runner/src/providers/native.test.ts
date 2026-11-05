@@ -60,6 +60,7 @@ let rejectCompaction: boolean;
 type StubUsage = { prompt_tokens?: number; completion_tokens?: number };
 let scriptedUsage: StubUsage[];
 let compactionUsage: StubUsage;
+let scriptedCompactionTexts: string[];
 let reasoningOnlyCompactions: number;
 let rejectedMediaData: string[];
 let mediaRejectionStatus: number;
@@ -123,6 +124,7 @@ beforeEach(() => {
   rejectCompaction = false;
   scriptedUsage = [];
   compactionUsage = { prompt_tokens: 4, completion_tokens: 3 };
+  scriptedCompactionTexts = [];
   reasoningOnlyCompactions = 0;
   rejectedMediaData = [];
   mediaRejectionStatus = 400;
@@ -221,6 +223,7 @@ beforeEach(() => {
       }
       const scripted = isCompaction ? undefined : scriptedToolCalls.shift();
       const customUsage = isCompaction ? compactionUsage : scriptedUsage.shift();
+      const compactionText = isCompaction ? scriptedCompactionTexts.shift() : undefined;
       if (new URL(request.url).pathname.endsWith('/messages')) {
         const requestBody = requests.at(-1)!;
         const hasToolResult = JSON.stringify(requestBody.messages).includes('tool_result');
@@ -255,7 +258,7 @@ beforeEach(() => {
                 'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
                 '',
                 'event: content_block_delta',
-                'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello from direct minimax"}}',
+                `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":${JSON.stringify(compactionText ?? 'hello from direct minimax')}}}`,
                 '',
                 'event: content_block_stop',
                 'data: {"type":"content_block_stop","index":0}',
@@ -313,7 +316,7 @@ beforeEach(() => {
             '',
           ].join('\n')
         : [
-            `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(isCompaction ? 'Earlier work completed; continue pending requests without repeating tools.' : scriptedTexts.shift() ?? 'hello from stub')}},"finish_reason":null}]}`,
+            `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(isCompaction ? compactionText ?? 'Earlier work completed; continue pending requests without repeating tools.' : scriptedTexts.shift() ?? 'hello from stub')}},"finish_reason":null}]}`,
             '',
             `data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":${JSON.stringify(usage)}}`,
             '',
@@ -1508,6 +1511,31 @@ describe('NativeProvider', () => {
     }));
     expect(requests).toHaveLength(2);
   });
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'recovers an oversized summary through %s and accounts for both attempts exactly once', async protocol => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      contextOverflows = 1;
+      scriptedCompactionTexts = ['x'.repeat(32_001), 'Earlier work completed; continue pending requests.'];
+      const continuation = history();
+      const events = await collect(knownContext(), continuation);
+      expect(events.some(event => event.type === 'error')).toBe(false);
+      expect(compactions(events, 'completed')).toHaveLength(1);
+      expect(compactions(events, 'error')).toHaveLength(0);
+      const summaries = requests.filter(request => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+      expect(summaries.map(request => request.max_tokens)).toEqual([8000, 8000]);
+      expect(JSON.stringify(summaries[1].messages)).toContain('The previous summary exceeded');
+      expect(events.filter(event => event.type === 'usage_call')).toHaveLength(3);
+      expect(turnTotal(events)?.num_turns).toBe(3);
+      expect(replyTexts(events)).toEqual([[protocol === 'anthropic-messages' ? 'hello from direct minimax' : 'hello from stub']]);
+      const store = new NativeStore();
+      try {
+        expect(JSON.stringify(store.messages(continuation))).toContain('Earlier requirements '.repeat(250));
+        expect(JSON.stringify(store.contextMessages(continuation))).toContain('Earlier work completed; continue pending requests.');
+        expect(JSON.stringify(store.contextMessages(continuation))).not.toContain('x'.repeat(32_001));
+      } finally { store.close(); }
+    },
+  );
 
   it.each(['openai-chat', 'anthropic-messages'] as const)(
     'compacts at exactly 75%% between completed steps through %s without replaying tools', async (protocol) => {

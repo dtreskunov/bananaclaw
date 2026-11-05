@@ -165,6 +165,7 @@ interface SummaryBudget {
   summaryBytes: number;
   sourceBytes: number;
   instructions: string;
+  retryInstructions: string;
 }
 
 export interface CompactionRequest {
@@ -191,14 +192,18 @@ function summaryBudget(window: number, maxOutput: number, final: boolean, reason
   const instructions =
     `Summarize the following chronological ${final ? 'conversation history' : 'transcript or summary fragments'}. ` +
     `Keep the final summary text within ${outputTokens} tokens and ${summaryBytes} UTF-8 bytes.\n\n`;
+  const retryInstructions = instructions +
+    'The previous summary exceeded its size limit. Summarize the original source again more concisely, ' +
+    `aiming for at most ${Math.max(1, Math.floor(outputTokens / 2))} tokens and ${Math.floor(summaryBytes / 2)} UTF-8 bytes. ` +
+    'Preserve the essential continuation facts; return only the shorter summary.\n\n';
   // No model-specific tokenizer is available. Count UTF-8 bytes conservatively
   // and reserve additional room for protocol framing and the generated reply.
   const sourceBytes = requestTokens - retryGenerationTokens - Math.min(1024, Math.floor(requestTokens / 8)) -
-    Buffer.byteLength(COMPACTION_INSTRUCTIONS) - Buffer.byteLength(instructions);
+    Buffer.byteLength(COMPACTION_INSTRUCTIONS) - Buffer.byteLength(retryInstructions);
   if (outputTokens < 1 || sourceBytes < 256 || summaryBytes >= sourceBytes) {
     throw new Error(`Compaction request budget is too small (context window ${window}); full transcript was preserved`);
   }
-  return { outputTokens, generationTokens, retryGenerationTokens, summaryBytes, sourceBytes, instructions };
+  return { outputTokens, generationTokens, retryGenerationTokens, summaryBytes, sourceBytes, instructions, retryInstructions };
 }
 
 function splitUtf8(text: string, bytes: number): string[] {
@@ -296,6 +301,7 @@ export async function compactNativeContext(options: {
       throw new Error('Compaction fragment exceeds its request budget; full transcript was preserved');
     }
     let generationTokens = budget.generationTokens;
+    let instructions = budget.instructions;
     let retried = false;
     while (true) {
       compactSignal.throwIfAborted();
@@ -306,7 +312,7 @@ export async function compactNativeContext(options: {
       let response: string | CompactionSummary;
       const requestSignal = AbortSignal.any([compactSignal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
       try {
-        response = await options.summarize(budget.instructions + text, {
+        response = await options.summarize(instructions + text, {
           maxOutputTokens: generationTokens,
           signal: requestSignal,
         });
@@ -352,7 +358,14 @@ export async function compactNativeContext(options: {
         console.error(`[native-compaction] Retrying reasoning-only summary with ${generationTokens} generated tokens`);
         continue;
       }
-      if (!summary || bytes > budget.summaryBytes || (textTokens !== undefined && textTokens > budget.outputTokens)) {
+      const oversized = bytes > budget.summaryBytes || (textTokens !== undefined && textTokens > budget.outputTokens);
+      if (summary && oversized && !retried) {
+        retried = true;
+        instructions = budget.retryInstructions;
+        console.error('[native-compaction] Retrying oversized summary with a shorter visible-text target');
+        continue;
+      }
+      if (!summary || oversized) {
         throw new CompactionSummaryError(`Compaction returned an ${summary ? 'oversized' : 'empty'} summary (${detail}); full transcript was preserved`);
       }
       return summary;
