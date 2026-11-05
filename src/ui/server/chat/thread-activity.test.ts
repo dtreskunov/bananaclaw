@@ -61,7 +61,7 @@ async function activities(userId = 'viewer') {
   return Object.fromEntries(
     (await listThreadsForViewer(userId, 'g')).map((thread) => [
       thread.threadId,
-      { activity: thread.activity, stale: thread.activityStale === true },
+      { activity: thread.activity, ...(thread.waiting ? { waiting: true } : {}), stale: thread.activityStale === true },
     ]),
   );
 }
@@ -155,7 +155,7 @@ describe('thread activity projection', () => {
         created_at: 'now',
         input: { question: 'Choose?', responseMode: 'text', options: [] },
       });
-      expect((await activities())['__dm:dm-mg'].activity).toBe('waiting');
+      expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'idle', waiting: true, stale: false });
     } finally {
       source.close();
       outputs.close();
@@ -187,7 +187,7 @@ describe('thread activity projection', () => {
     signal.connected = true;
     expect((await activities()).a.activity).toBe('running');
   });
-  it('gives waiting precedence over execution on threads and agent groups', async () => {
+  it('preserves independent waiting and execution on threads and agent groups', async () => {
     createQuestion({
       id: 'q',
       session_id: 's',
@@ -199,16 +199,19 @@ describe('thread activity projection', () => {
       created_at: 'now',
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
-    expect((await activities()).a.activity).toBe('waiting');
+    expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
+    expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
+      { id: 'g', activity: 'idle', waiting: true },
+    ]);
     turn('turn-a', 'a', 'running');
     signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
     signal.connected = true;
-    expect((await activities()).a).toEqual({ activity: 'waiting', stale: false });
+    expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
     expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'waiting' },
+      { id: 'g', activity: 'running', waiting: true },
     ]);
     turn('turn-a', 'a', 'settled');
-    expect((await activities()).a.activity).toBe('waiting');
+    expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
     answerQuestion('q', { responseType: 'text', value: 'Done', userId: 'viewer', answeredAt: '2026-11-05T00:02:00Z' });
     expect((await activities()).a.activity).toBe('idle');
   });
@@ -217,6 +220,23 @@ describe('thread activity projection', () => {
     const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
     expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle' }]);
     expect(read).not.toHaveBeenCalled();
+  });
+  it('combines running in one thread with waiting in another without hiding stale execution', async () => {
+    createQuestion({
+      id: 'q', session_id: 's', message_out_id: 'question-output', in_reply_to: null,
+      channel_type: 'web', platform_id: 'group:g', thread_id: 'a', created_at: 'now',
+      input: { question: 'Choose?', responseMode: 'text', options: [] },
+    });
+    turn('turn-b', 'b', 'running');
+    const attention = readInteractionSync('viewer').attention;
+    const selected = await listThreadsForViewer('viewer', 'g');
+    expect(selected.find((thread) => thread.threadId === 'a')).toMatchObject({ activity: 'idle', waiting: true });
+    expect(readAgentActivity('viewer', attention, 'g', selected)).toEqual([
+      { id: 'g', activity: 'running', waiting: true, activityStale: true },
+    ]);
+    expect(readAgentActivity('viewer', attention, null, [])).toEqual([
+      { id: 'g', activity: 'running', waiting: true, activityStale: true },
+    ]);
   });
   it('reuses selected summaries and includes unselected groups without private thread leakage', async () => {
     turn('turn-a', 'a', 'running');
@@ -323,7 +343,7 @@ describe('thread activity projection', () => {
       },
     });
     expect((await activities()).a.activity).toBe('idle');
-    expect((await activities('admin')).a.activity).toBe('waiting');
+    expect((await activities('admin')).a.waiting).toBe(true);
     removeMember('viewer', 'g');
     await expect(activities()).rejects.toThrow('access denied');
   });

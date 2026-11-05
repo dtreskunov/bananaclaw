@@ -93,13 +93,13 @@ export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
   );
   return badge != null && badge !== false ? (
     <div class="mobile-dialog-item-row">
-      {item}
       {onBadgeClick ? (
         <button type="button" class="msg-action-btn mobile-dialog-item-badge" disabled={badgeDisabled}
           aria-label={badgeLabel} title={badgeLabel} onClick={onBadgeClick}>
           {badge}
         </button>
       ) : <span class="mobile-dialog-item-badge">{badge}</span>}
+      {item}
     </div>
   ) : item;
 }

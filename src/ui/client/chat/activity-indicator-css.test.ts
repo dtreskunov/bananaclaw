@@ -2,28 +2,31 @@ import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const css = fs.readFileSync(new URL('./src/components/ActivityIndicator.css', import.meta.url), 'utf8');
-const trace = fs.readFileSync(new URL('./src/components/ChatMain.css', import.meta.url), 'utf8');
 const rail = fs.readFileSync(new URL('./src/components/ThreadsRail.css', import.meta.url), 'utf8');
+const tabs = fs.readFileSync(new URL('./src/components/TabBar.css', import.meta.url), 'utf8');
+const dialog = fs.readFileSync(new URL('./src/components/MobileDialog.css', import.meta.url), 'utf8');
 
 describe('shared activity styling', () => {
-  it('matches solid 7px root trace circles, not hollow child hierarchy dots', () => {
-    expect(trace).toMatch(/\.trace-dot\s*\{\s*width: 7px; height: 7px; border-radius: 50%; background:/);
-    expect(css).toMatch(/\.activity-indicator\.dot\s*\{[^}]*width: 7px;[^}]*height: 7px;[^}]*border-radius: 50%;[^}]*background: currentColor;/);
-    expect(css).not.toMatch(/animation:|@keyframes|background:\s*var\(--surface\)/);
+  it('uses a subtle idle fill and a rotating running ring', () => {
+    expect(css).toMatch(/\.activity-indicator\.idle \.activity-indicator-base\s*\{[^}]*background: var\(--muted\);[^}]*opacity: 0.3;/);
+    expect(css).toMatch(/\.activity-indicator\.running \.activity-indicator-base\s*\{[^}]*border: 1.5px solid currentColor;[^}]*border-right-color: transparent;[^}]*animation: activity-spin/);
+    expect(css).toContain('color: var(--activity-status-running)');
+    expect(css).toContain('@keyframes activity-spin { to { transform: rotate(360deg); } }');
   });
 
-  it('uses the same queued/running tokens as the trace and keeps stale muted', () => {
-    for (const [activity, token] of [['waiting', 'queued'], ['running', 'running']]) {
-      expect(css).toContain(`.activity-indicator.${activity} { color: var(--activity-status-${token}); }`);
-      expect(trace).toContain(`--trace-status-color: var(--activity-status-${token});`);
-    }
-    expect(css).toContain('.activity-indicator.stale { color: var(--muted); }');
-    expect(css).toMatch(/:disabled\s*\{ opacity: 1; cursor: default;/);
+  it('keeps question marks stationary and stops spinning when stale or motion is reduced', () => {
+    expect(css).toMatch(/\.activity-indicator-question\s*\{[^}]*position: absolute;[^}]*color: var\(--activity-status-queued\)/);
+    expect(css).toContain('.activity-indicator.stale .activity-indicator-base { animation: none; }');
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.activity-indicator\.running \.activity-indicator-base \{ animation: none; \}/);
   });
 
-  it('spaces only rendered title markers and preserves request focus visibility', () => {
+  it('keeps leading indicators, non-link actions and visible keyboard focus', () => {
     expect(rail).toContain('.title > :is(.activity-indicator, .activity-action) { margin-right: 6px; }');
+    expect(css).not.toContain('text-decoration: underline');
     expect(css).toContain('outline: 2px solid var(--focus-ring)');
     expect(css).toContain('[data-attention-target]:focus-within { outline: 2px solid var(--warning-border)');
+    expect(tabs).not.toContain('attention-separator');
+    expect(dialog).toContain('.mobile-dialog-item-row > .mobile-dialog-item { padding-left: 40px; }');
+    expect(dialog).toContain('left: 12px; transform: translateY(-50%)');
   });
 });

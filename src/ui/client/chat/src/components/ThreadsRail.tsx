@@ -34,8 +34,8 @@ function ThreadAttention({ thread }: { thread: Thread }) {
   };
   const count = threadAttentionCount(location);
   const { actionable, description } = activityDetails(thread, count, thread.title);
-  const indicator = <ActivityIndicator status={thread} variant="dot" description={description} />;
-  return thread.activity === 'waiting' ? (
+  const indicator = <ActivityIndicator status={thread} description={description} />;
+  return thread.waiting ? (
     <button type="button" class="activity-action activity-dot-action thread-attention"
       disabled={!actionable}
       aria-label={description}

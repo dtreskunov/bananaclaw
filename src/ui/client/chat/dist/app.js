@@ -18912,7 +18912,7 @@ function accessRequestInput(raw) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 13;
+var CONVERSATION_PROTOCOL_VERSION = 14;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -20364,7 +20364,8 @@ var thread = shape({
   lastActivityAt: text,
   sessionMode: oneOf("per-thread", "shared", "agent-shared"),
   messageCount: integer,
-  activity: oneOf("idle", "running", "waiting"),
+  activity: oneOf("idle", "running"),
+  waiting: optional(bool),
   activityStale: optional(bool),
   canSend: optional(bool),
   kind: optional(oneOf("thread", "dm")),
@@ -20398,7 +20399,7 @@ var groupId2 = (value) => text(value) && value.length > 0 && value.length <= 512
 var cursor = shape({ streamId: id, revision: integer });
 var voiceInput2 = shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) });
 var groupState = shape({ threads: array(thread), voiceInput: voiceInput2 });
-var agentActivity2 = shape({ id, activity: oneOf("idle", "running", "waiting"), activityStale: optional(bool) });
+var agentActivity2 = shape({ id, activity: oneOf("idle", "running"), waiting: optional(bool), activityStale: optional(bool) });
 var globalState = shape({
   approvals: array(isConversationApproval),
   attention: isAttentionTargets,
@@ -20802,7 +20803,6 @@ function MobileDialogItem(props) {
     }
   );
   return badge != null && badge !== false ? /* @__PURE__ */ u4("div", { class: "mobile-dialog-item-row", children: [
-    item,
     onBadgeClick ? /* @__PURE__ */ u4(
       "button",
       {
@@ -20814,7 +20814,8 @@ function MobileDialogItem(props) {
         onClick: onBadgeClick,
         children: badge
       }
-    ) : /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-badge", children: badge })
+    ) : /* @__PURE__ */ u4("span", { class: "mobile-dialog-item-badge", children: badge }),
+    item
   ] }) : item;
 }
 function MobileDialogDivider() {
@@ -22297,22 +22298,21 @@ function TabBar(props) {
           items.map((it) => {
             const isActive = it.id === activeId;
             return /* @__PURE__ */ u4("div", { class: `tab-item-group${isActive ? " active" : ""}`, onClick: () => onSelect(it.id), children: [
-              /* @__PURE__ */ u4(
-                "button",
-                {
-                  type: "button",
-                  role: "tab",
-                  "aria-selected": isActive,
-                  title: it.title,
-                  class: `tab-item${isActive ? " active" : ""}${it.className ? ` ${it.className}` : ""}`,
-                  children: /* @__PURE__ */ u4("span", { class: "tab-item-heading", children: /* @__PURE__ */ u4("span", { class: "tab-item-label", children: it.label }) })
-                }
-              ),
-              it.sublabel || it.reserveSublabel || it.badge ? /* @__PURE__ */ u4("div", { class: "tab-item-status", children: [
-                /* @__PURE__ */ u4("span", { class: "tab-item-sublabel", "aria-hidden": it.sublabel ? void 0 : "true", children: it.sublabel }),
-                it.sublabel && it.badge ? /* @__PURE__ */ u4("span", { class: "attention-separator", "aria-hidden": "true", children: " \xB7 " }) : null,
-                tabBadge(it)
-              ] }) : null
+              /* @__PURE__ */ u4("div", { class: "tab-item-heading", children: [
+                tabBadge(it),
+                /* @__PURE__ */ u4(
+                  "button",
+                  {
+                    type: "button",
+                    role: "tab",
+                    "aria-selected": isActive,
+                    title: it.title,
+                    class: `tab-item${isActive ? " active" : ""}${it.className ? ` ${it.className}` : ""}`,
+                    children: /* @__PURE__ */ u4("span", { class: "tab-item-label", children: it.label })
+                  }
+                )
+              ] }),
+              it.sublabel || it.reserveSublabel ? /* @__PURE__ */ u4("div", { class: "tab-item-status", children: /* @__PURE__ */ u4("span", { class: "tab-item-sublabel", "aria-hidden": it.sublabel ? void 0 : "true", children: it.sublabel }) }) : null
             ] }, it.id);
           }),
           extras?.map((ex) => /* @__PURE__ */ u4(
@@ -22334,6 +22334,7 @@ function TabBar(props) {
       }
     ),
     /* @__PURE__ */ u4("div", { class: cls("tab-bar-dropdown-group"), children: [
+      activeItem ? tabBadge(activeItem) : null,
       /* @__PURE__ */ u4(
         "button",
         {
@@ -22348,8 +22349,7 @@ function TabBar(props) {
             /* @__PURE__ */ u4("span", { class: "tab-bar-dropdown-caret", "aria-hidden": "true", children: "\u25BE" })
           ]
         }
-      ),
-      activeItem ? tabBadge(activeItem) : null
+      )
     ] }),
     sheetOpen ? /* @__PURE__ */ u4(
       TabBarSheet,
@@ -22409,30 +22409,33 @@ function TabBarSheet(props) {
 }
 
 // src/components/ActivityIndicator.tsx
-var labels = { idle: "Idle", running: "Running", waiting: "Waiting" };
+var labels = { idle: "Idle", running: "Running" };
 function activityDetails(status, requestCount = 0, subject) {
   const stale = !!status.activityStale || !!attentionError.value;
   const label = labels[status.activity];
-  let description = stale ? `Last known activity: ${label}. Live activity status is unavailable; waiting for updates.` : `Activity: ${label}`;
-  if (status.activity === "waiting" && subject) {
+  let description = stale ? `Last known activity: ${label}. Live activity status is unavailable; waiting for updates` : `Activity: ${label}`;
+  if (status.waiting) description += ". Waiting for input";
+  if (status.waiting && subject) {
     const requests2 = `${requestCount} ${requestCount === 1 ? "request" : "requests"}`;
-    description += stale ? ` ${requestCount} last known ${requestCount === 1 ? "request" : "requests"} in ${subject}.` : requestCount > 0 ? `. ${requests2} ${requestCount === 1 ? "needs" : "need"} your input. Open oldest request in ${subject}` : `. No actionable requests available in ${subject}.`;
+    description += attentionError.value ? ` ${requestCount} last known ${requestCount === 1 ? "request" : "requests"} in ${subject}.` : requestCount > 0 ? `. ${requests2} ${requestCount === 1 ? "needs" : "need"} your input. Open oldest request in ${subject}` : `. No actionable requests available in ${subject}.`;
   }
-  return { stale, description, actionable: status.activity === "waiting" && !stale && requestCount > 0 };
+  return { stale, description, actionable: !!status.waiting && !attentionError.value && requestCount > 0 };
 }
-function ActivityIndicator({ status, variant = "label", description }) {
-  if (status.activity === "idle") return null;
+function ActivityIndicator({ status, description }) {
   const details = activityDetails(status);
   const label = description ?? details.description;
   return /* @__PURE__ */ u4(
     "span",
     {
-      class: `activity-indicator ${variant} ${status.activity}${details.stale ? " stale" : ""}`,
+      class: `activity-indicator ${status.activity}${status.waiting ? " waiting" : ""}${details.stale ? " stale" : ""}`,
       role: "status",
       "aria-live": "off",
       "aria-label": label,
       title: label,
-      children: variant === "label" ? status.activity : null
+      children: [
+        /* @__PURE__ */ u4("span", { class: "activity-indicator-base", "aria-hidden": "true" }),
+        status.waiting ? /* @__PURE__ */ u4("span", { class: "activity-indicator-question", "aria-hidden": "true", children: "?" }) : null
+      ]
     }
   );
 }
@@ -22440,14 +22443,14 @@ function ActivityIndicator({ status, variant = "label", description }) {
 // src/components/GroupPicker.tsx
 function activityBadge(group) {
   const status = agentActivity.value.find((activity) => activity.id === group.id);
-  if (!status || status.activity === "idle") return {};
+  if (!status) return {};
   const count = groupAttentionCount(group.id);
   const { actionable, description } = activityDetails(status, count, group.name);
   return {
     badge: /* @__PURE__ */ u4(ActivityIndicator, { status, description }),
     badgeLabel: description,
     badgeDisabled: !actionable,
-    onBadgeClick: status.activity === "waiting" ? () => {
+    onBadgeClick: status.waiting ? () => {
       if (actionable) void navigateAttention(group.id);
     } : void 0
   };
@@ -22816,8 +22819,8 @@ function ThreadAttention({ thread: thread2 }) {
   };
   const count = threadAttentionCount(location2);
   const { actionable, description } = activityDetails(thread2, count, thread2.title);
-  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status: thread2, variant: "dot", description });
-  return thread2.activity === "waiting" ? /* @__PURE__ */ u4(
+  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status: thread2, description });
+  return thread2.waiting ? /* @__PURE__ */ u4(
     "button",
     {
       type: "button",

@@ -110,22 +110,23 @@ export function TabBar(props: TabBarProps): JSX.Element {
           const isActive = it.id === activeId;
           return (
             <div class={`tab-item-group${isActive ? ' active' : ''}`} key={it.id} onClick={() => onSelect(it.id)}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                title={it.title}
-                class={`tab-item${isActive ? ' active' : ''}${it.className ? ` ${it.className}` : ''}`}
-              >
-                <span class="tab-item-heading"><span class="tab-item-label">{it.label}</span></span>
-              </button>
-              {it.sublabel || it.reserveSublabel || it.badge ? (
+              <div class="tab-item-heading">
+                {tabBadge(it)}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  title={it.title}
+                  class={`tab-item${isActive ? ' active' : ''}${it.className ? ` ${it.className}` : ''}`}
+                >
+                  <span class="tab-item-label">{it.label}</span>
+                </button>
+              </div>
+              {it.sublabel || it.reserveSublabel ? (
                 <div class="tab-item-status">
                   <span class="tab-item-sublabel" aria-hidden={it.sublabel ? undefined : 'true'}>
                     {it.sublabel}
                   </span>
-                  {it.sublabel && it.badge ? <span class="attention-separator" aria-hidden="true">{' \u00b7 '}</span> : null}
-                  {tabBadge(it)}
                 </div>
               ) : null}
             </div>
@@ -151,6 +152,7 @@ export function TabBar(props: TabBarProps): JSX.Element {
       </nav>
 
       <div class={cls('tab-bar-dropdown-group')}>
+        {activeItem ? tabBadge(activeItem) : null}
         <button
           type="button"
           class="tab-bar-dropdown"
@@ -162,7 +164,6 @@ export function TabBar(props: TabBarProps): JSX.Element {
           <span class="tab-bar-dropdown-label"><span class="tab-bar-dropdown-text">{dropdownLabel}</span></span>
           <span class="tab-bar-dropdown-caret" aria-hidden="true">{'\u25BE'}</span>
         </button>
-        {activeItem ? tabBadge(activeItem) : null}
       </div>
 
       {sheetOpen ? (

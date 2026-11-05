@@ -1,8 +1,9 @@
 /** Authorized thread-list entry; private routing and ownership checks stay on the host. */
-export type ThreadActivityState = 'idle' | 'running' | 'waiting';
+export type ThreadActivityState = 'idle' | 'running';
 
 export interface ActivityStatus {
   activity: ThreadActivityState;
+  waiting?: boolean;
   activityStale?: boolean;
 }
 

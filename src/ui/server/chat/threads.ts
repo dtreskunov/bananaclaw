@@ -193,7 +193,7 @@ export function withThreadAttention(
   if (!waiting.size) return threads;
   return threads.map((thread) =>
     waiting.has(JSON.stringify([thread.channelType, thread.messagingGroupId, thread.threadId]))
-      ? { ...thread, activity: 'waiting', activityStale: undefined }
+      ? { ...thread, waiting: true }
       : thread,
   );
 }
@@ -269,9 +269,9 @@ export function readAgentActivity(
     sessions.set(session.id, routes);
   }
   return groups.map((group): AgentGroupActivity => {
-    if (waiting.has(group.id)) return { id: group.id, activity: 'waiting' };
     const sessions = candidates.get(group.id);
-    if (!sessions?.size) return { id: group.id, activity: 'idle' };
+    const overlay = waiting.has(group.id) ? { waiting: true } : {};
+    if (!sessions?.size) return { id: group.id, activity: 'idle', ...overlay };
     const contexts = isElevated(userId)
       ? listAgentMessagingContexts(group.id)
       : listUserMessagingContexts(userId, group.id);
@@ -293,6 +293,7 @@ export function readAgentActivity(
     return {
       id: group.id,
       activity: running.length ? 'running' : 'idle',
+      ...overlay,
       ...(running.length && running.every((thread) => thread.activityStale) ? { activityStale: true } : {}),
     };
   });

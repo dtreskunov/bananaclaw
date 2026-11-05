@@ -63,17 +63,19 @@ Read-only references without a requesting thread or available response controls
 remain visible in the existing UI but do not inflate these actionable counts.
 
 Clicking an agent's `waiting` label opens its oldest pending request across its
-threads; clicking a thread's waiting circle opens the oldest request in that exact thread. These
+threads; clicking a thread's waiting icon opens the oldest request in that exact thread. These
 are separate native buttons, not nested inside the agent/thread selection
 control. Navigation focuses the existing question or approval card and does not
 steal focus on later refreshes. There is no floating attention control.
 
-Agent status lines use lowercase `waiting` or `running`, omitting idle. Thread
-titles have one solid 7px circle on their left for waiting or running and no
-indicator for idle. Both use the activity trace's queued/running colors and root
-dot fill style; thread circles do not pulse. Waiting remains a native clickable
-control, with a larger hit target around the small circle. Keyboard focus stays
-visible. There is no visible `N attn` badge or duplicate activity label.
+Threads and agent names use the same leading activity icon: a subtle muted
+circle for idle, a blue running ring/spinner, and a stationary `?` overlay when
+input is waiting. Waiting does not hide simultaneous execution. Only the ring
+rotates; stale execution and reduced-motion preferences stop its animation.
+Waiting remains a separate native clickable control, with a larger hit target
+and visible keyboard focus. Agent tabs, the selected mobile dropdown and picker
+rows place the icon before the name, not in the secondary status line. There is
+no visible `N attn` badge, activity text label or link-styled waiting action.
 Thread delete buttons retain their
 larger 32px target, vertical centering, hover/focus reveal and touch visibility.
 
@@ -202,15 +204,15 @@ refresh can reconcile outstanding markers after the cause is fixed. An initial
 offline backfill is required for existing installs; see
 [the upgrade procedure](#thread-summary-upgrade).
 
-Thread, DM and agent activity all use waiting > running > idle precedence.
-An actionable unanswered question/approval means waiting even while execution
-continues. Otherwise running includes stopping/finalization. Future
+Thread, DM and agent activity separates execution (`idle`/`running`) from the
+optional `waiting` overlay. An actionable unanswered question/approval adds the
+overlay even while execution continues. Running includes stopping/finalization. Future
 scheduled work does not. Shared-session execution marks only its exact origin
 conversation. Disconnected unfinished execution retains its last-known Running
 state with a stale explanation, not a fabricated completion or fourth state.
 Global disconnection likewise makes indicators stale and disables waiting actions.
-Stale state is muted and explained in accessible names/tooltips; tab text stays
-lowercase and thread indicators remain circles.
+Stale state is muted and explained in accessible names/tooltips. A current
+authorized request remains actionable when only its execution signal is stale.
 
 #### Startup recovery
 
@@ -1399,7 +1401,7 @@ existing objects. Navigation and reconnect snapshots still include full traces.
 
 Global approvals, oldest-first attention and `agentActivity` are always subscribed,
 even with no group selected. Agent activity is an ID-keyed collection of
-`{ id, activity, activityStale? }` for accessible groups, independent of the
+`{ id, activity: 'idle' | 'running', waiting?, activityStale? }` for accessible groups, independent of the
 selected conversation. Waiting comes from the same authorized attention targets
 used by navigation. Running uses only visible active route candidates from
 live state and the central summary projection, reusing selected summaries;
@@ -1551,20 +1553,21 @@ the server store; HTTP acceptance does not prove a command took effect.
   database over newly accepted messages. Before re-upgrading after writes by an
   older host, run the offline rebuild again.
 
-### Unified activity presentation upgrade
+### Activity overlay upgrade
 
-- **Detect:** protocol-12 clients display separate `N attn` badges and textual
-  thread activity, and lack the global `agentActivity` collection.
-- **Why:** waiting has precedence consistently on threads and agents; one
-  actionable indicator replaces duplicate attention/activity controls.
+- **Detect:** protocol-13 clients hide idle and replace running with waiting;
+  agent status appears as a secondary text label rather than a leading icon.
+- **Why:** independent execution and waiting state allows the same question-mark
+  overlay on either an idle circle or a running spinner.
 - **Fix:** deploy matching host and rebuilt chat assets, restart the host and
-  reload browsers for protocol 13. No DB migration, summary backfill, runner
+  reload browsers for protocol 14. No DB migration, summary backfill, runner
   rebuild or credential changes are needed after the thread-summary upgrade.
-- **Verify:** waiting wins while a turn is running; idle threads have no marker;
-  waiting/running thread circles precede their title and match trace dot colors
-  and fill. Agent tabs/mobile picker show only lowercase waiting/running, omit
-  idle and update while unselected. Waiting opens the oldest actionable request;
-  staleness disables actions without fabricating idle. Test desktop/mobile,
+- **Verify:** idle circles are visible and subtle; running rings rotate, with a
+  stationary `?` on either base when waiting. Icons precede thread and agent
+  names, including the selected dropdown and mobile picker. Unselected agents
+  update via small patches. Waiting opens the oldest actionable request;
+  disconnection disables actions without fabricating idle, while stale execution
+  alone does not disable a current request. Test desktop/mobile, reduced motion,
   permissions/revocation, small agent-only patches and reconnect recovery.
 - **Rollback:** redeploy the previous matching host and chat assets, restart and
   reload browsers. The maintained summary projection is unchanged; do not

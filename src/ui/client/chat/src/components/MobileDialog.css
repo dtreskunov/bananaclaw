@@ -103,8 +103,8 @@
 }
 .mobile-dialog-item.active .mobile-dialog-item-label { font-weight: 700; }
 .mobile-dialog-item-row { position: relative; }
-.mobile-dialog-item-row > .mobile-dialog-item { padding-right: 76px; }
-.mobile-dialog-item-badge { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); }
+.mobile-dialog-item-row > .mobile-dialog-item { padding-left: 40px; }
+.mobile-dialog-item-badge { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); }
 .mobile-dialog-item-sublabel {
   grid-column: 1;
   grid-row: 2;

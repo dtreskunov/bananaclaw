@@ -386,7 +386,7 @@ describe('unified sync WebSocket integration', () => {
         },
       ]),
     );
-    expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.activity).toBe('waiting');
+    expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.waiting).toBe(true);
     expect(listThreads).toHaveBeenCalledTimes(2);
   });
 

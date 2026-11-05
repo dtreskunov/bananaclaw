@@ -2,16 +2,49 @@
   flex: none;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 14px;
+  height: 14px;
   color: var(--muted);
 }
 .activity-indicator.running { color: var(--activity-status-running); }
-.activity-indicator.waiting { color: var(--activity-status-queued); }
 .activity-indicator.stale { color: var(--muted); }
-.activity-indicator.dot {
-  width: 7px;
-  height: 7px;
+.activity-indicator-base {
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: currentColor;
+}
+.activity-indicator.idle .activity-indicator-base {
+  background: var(--muted);
+  opacity: 0.3;
+}
+.activity-indicator.running .activity-indicator-base {
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: activity-spin 0.8s linear infinite;
+}
+.activity-indicator-question {
+  position: absolute;
+  color: var(--activity-status-queued);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.activity-indicator.stale .activity-indicator-question { color: var(--muted); }
+.activity-indicator.stale .activity-indicator-base { animation: none; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .activity-indicator.running .activity-indicator-base { animation: none; }
+}
+.tab-item-badge,
+.mobile-dialog-item-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
 }
 .activity-action,
 .msg-action-btn:has(> .activity-indicator) {
@@ -33,7 +66,7 @@
 .activity-action:hover:not(:disabled),
 .msg-action-btn:has(> .activity-indicator):hover:not(:disabled) {
   background: transparent;
-  text-decoration: underline;
+  opacity: 0.8;
 }
 .activity-action:focus-visible,
 .msg-action-btn:has(> .activity-indicator):focus-visible {

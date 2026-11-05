@@ -87,16 +87,30 @@ describe('incremental metadata projections', () => {
     };
     const next = {
       ...before.data,
-      agentActivity: [before.data.agentActivity[0], { id: 'other', activity: 'waiting' as const }],
+      agentActivity: [before.data.agentActivity[0], { id: 'other', activity: 'running' as const, waiting: true }],
     };
     const changes = wire(diffGlobal(before, next, 'g'));
-    expect(changes).toEqual({ agentActivity: { upserts: [{ id: 'other', activity: 'waiting' }], removeIds: [] } });
+    expect(changes).toEqual({ agentActivity: { upserts: [{ id: 'other', activity: 'running', waiting: true }], removeIds: [] } });
     const reduced = reduceGlobal(before, { ...patch(data), changes }, 'g');
     expect(reduced.data).toEqual(next);
     expect(reduced.data.group).toBe(before.data.group);
     expect(JSON.stringify(changes).length).toBeLessThan(128);
+    const cleared = { ...next, agentActivity: before.data.agentActivity };
+    const clearedChanges = diffGlobal(reduced, cleared, 'g');
+    expect(clearedChanges.agentActivity?.upserts).toEqual([{ id: 'other', activity: 'running' }]);
+    expect(reduceGlobal(reduced, {
+      kind: 'update', streamId: reduced.streamId, baseRevision: 1, revision: 2, changes: clearedChanges,
+    }, 'g').data).toEqual(cleared);
     const removed = diffGlobal(reduced, { ...next, agentActivity: [next.agentActivity[0]] }, 'g');
     expect(removed.agentActivity?.removeIds).toEqual(['other']);
+  });
+  it.each([
+    { activity: 'waiting' }, { activity: 'running', waiting: 'yes' },
+  ])('rejects obsolete or malformed overlay status %j', (status) => {
+    expect(() => parseSyncFrame({
+      kind: 'sync', protocolVersion: SYNC_PROTOCOL_VERSION, groupId: null, subscriptionId: 1,
+      global: { ...patch(data), changes: { agentActivity: { upserts: [{ id: 'g', ...status }], removeIds: [] } } },
+    })).toThrow('Invalid');
   });
   it('rejects invalid or duplicate agent status records without replacing metadata', () => {
     expect(() =>
@@ -106,7 +120,7 @@ describe('incremental metadata projections', () => {
           ...data,
           agentActivity: [
             { id: 'g', activity: 'idle' },
-            { id: 'g', activity: 'waiting' },
+            { id: 'g', activity: 'idle', waiting: true },
           ],
         }),
         'g',

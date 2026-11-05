@@ -25,14 +25,14 @@ import { groupAttentionCount } from '../attention-state';
 
 function activityBadge(group: Group) {
   const status = agentActivity.value.find((activity) => activity.id === group.id);
-  if (!status || status.activity === 'idle') return {};
+  if (!status) return {};
   const count = groupAttentionCount(group.id);
   const { actionable, description } = activityDetails(status, count, group.name);
   return {
     badge: <ActivityIndicator status={status} description={description} />,
     badgeLabel: description,
     badgeDisabled: !actionable,
-    onBadgeClick: status.activity === 'waiting'
+    onBadgeClick: status.waiting
       ? () => { if (actionable) void navigateAttention(group.id); }
       : undefined,
   };

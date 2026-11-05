@@ -1328,12 +1328,12 @@ header .mobile-only {
   position: relative;
 }
 .mobile-dialog-item-row > .mobile-dialog-item {
-  padding-right: 76px;
+  padding-left: 40px;
 }
 .mobile-dialog-item-badge {
   position: absolute;
   top: 50%;
-  right: 12px;
+  left: 12px;
   transform: translateY(-50%);
 }
 .mobile-dialog-item-sublabel {
@@ -1525,7 +1525,7 @@ nav.tab-bar-strip.group-strip {
   padding-bottom: 7px;
   z-index: 1;
 }
-.tab-item-group > .tab-item {
+.tab-item-heading > .tab-item {
   min-height: 0;
   padding: 0;
   margin: 0;
@@ -1533,7 +1533,7 @@ nav.tab-bar-strip.group-strip {
   background: transparent;
   color: inherit;
 }
-.tab-item-group > .tab-item:hover {
+.tab-item-heading > .tab-item:hover {
   background: transparent;
   color: inherit;
 }
@@ -1547,12 +1547,6 @@ nav.tab-bar-strip.group-strip {
   line-height: 1.2;
   letter-spacing: 0.01em;
   color: var(--muted);
-}
-.attention-separator {
-  flex: none;
-  color: var(--muted);
-  font-weight: 400;
-  white-space: pre;
 }
 .tab-item > .tab-item-sublabel {
   min-height: 1.2em;
@@ -1656,22 +1650,63 @@ nav.tab-bar-strip.group-strip {
   flex: none;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 14px;
+  height: 14px;
   color: var(--muted);
 }
 .activity-indicator.running {
   color: var(--activity-status-running);
 }
-.activity-indicator.waiting {
-  color: var(--activity-status-queued);
-}
 .activity-indicator.stale {
   color: var(--muted);
 }
-.activity-indicator.dot {
-  width: 7px;
-  height: 7px;
+.activity-indicator-base {
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: currentColor;
+}
+.activity-indicator.idle .activity-indicator-base {
+  background: var(--muted);
+  opacity: 0.3;
+}
+.activity-indicator.running .activity-indicator-base {
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: activity-spin 0.8s linear infinite;
+}
+.activity-indicator-question {
+  position: absolute;
+  color: var(--activity-status-queued);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.activity-indicator.stale .activity-indicator-question {
+  color: var(--muted);
+}
+.activity-indicator.stale .activity-indicator-base {
+  animation: none;
+}
+@keyframes activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-indicator.running .activity-indicator-base {
+    animation: none;
+  }
+}
+.tab-item-badge,
+.mobile-dialog-item-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
 }
 .activity-action,
 .msg-action-btn:has(> .activity-indicator) {
@@ -1693,7 +1728,7 @@ nav.tab-bar-strip.group-strip {
 .activity-action:hover:not(:disabled),
 .msg-action-btn:has(> .activity-indicator):hover:not(:disabled) {
   background: transparent;
-  text-decoration: underline;
+  opacity: 0.8;
 }
 .activity-action:focus-visible,
 .msg-action-btn:has(> .activity-indicator):focus-visible {
