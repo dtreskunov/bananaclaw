@@ -155,6 +155,38 @@ afterEach(() => {
 });
 
 describe('GET /api/groups', () => {
+  it('serializes epoch activity timestamps as ISO strings for browser startup', async () => {
+    seedUser('web:owner');
+    grantRole({
+      user_id: 'web:owner',
+      role: 'owner',
+      agent_group_id: null,
+      granted_by: null,
+      granted_at: now(),
+    });
+    const db = getDb();
+    for (const id of ['active', 'never-active']) {
+      db.prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, id, id, toEpoch(now()));
+    }
+    const latest = '2026-11-06T03:00:00.123Z';
+    db.prepare(
+      `INSERT INTO sessions(id,agent_group_id,created_at,last_active)
+      VALUES('older','active',?,?),('newer','active',?,?)`,
+    ).run(toEpoch(now()), toEpoch('2026-11-05T12:00:00.000Z'), toEpoch(now()), toEpoch(latest));
+    mockUserId = 'web:owner';
+
+    const res = await call('GET', '/ui/chat/api/groups');
+    expect(res.status()).toBe(200);
+    const body = res.body() as { groups: Array<{ id: string; lastActivityAt: string | null }> };
+    expect(Object.fromEntries(body.groups.map((group) => [group.id, group.lastActivityAt]))).toEqual({
+      active: latest,
+      'never-active': null,
+    });
+    for (const group of body.groups) {
+      if (group.lastActivityAt) expect(group.lastActivityAt.includes('T')).toBe(true);
+    }
+  });
+
   it('marks only groups requiring system-wide access as elevated-only', async () => {
     seedUser('web:admin');
     for (const [id, name] of [

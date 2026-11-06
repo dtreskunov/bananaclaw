@@ -11,6 +11,9 @@ Maintained SQL instants use INTEGER UTC epoch milliseconds; API and session-link
 records retain strings. All stores are version-gated, including optional native
 provider state and the search index. Existing stores require the
 [explicit offline cutover](db-storage-cutover.md), never startup conversion.
+The groups API's `lastActivityAt` remains an ISO string or null, including
+timestamps selected through SQL aggregates; stored integers must not leak into
+browser startup data.
 
 ---
 

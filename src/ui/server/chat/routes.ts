@@ -13,6 +13,7 @@ import Router from 'find-my-way';
 import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
+import { fromEpoch } from '../../../db/time.js';
 import { getInteraction, legacyInteractionExpired } from '../../../db/interactions.js';
 import { log } from '../../../log.js';
 import {
@@ -148,32 +149,49 @@ function on(method: FmwMethod, route: string, handler: RouteHandler): void {
   router.on(method, route, handler as any);
 }
 
-on('POST', '/api/groups/:groupId/chat/:threadId/read', authed(async (ctx, userId, params) => {
-  let body: unknown;
-  try { body = await readJsonBody(ctx.req, 4096); }
-  catch (error) {
-    if (error instanceof SyntaxError) return json(ctx, 400, { error: 'invalid_json' });
-    if (error instanceof Error && error.message === 'body_too_large') return json(ctx, 413, { error: 'body_too_large' });
-    throw error;
-  }
-  if (!isReadCursor(body)) return json(ctx, 400, { error: 'invalid_read_cursor' });
-  const channelType = ctx.url.searchParams.get('channel');
-  const messagingGroupId = ctx.url.searchParams.get('mg');
-  if (!!channelType !== !!messagingGroupId) return json(ctx, 400, { error: 'invalid_context' });
-  try {
-    acknowledgeRead(userId, params.groupId, params.threadId, { sessionId: body.sessionId, key: body.key },
-      channelType && messagingGroupId ? { channelType, messagingGroupId } : undefined);
-    return json(ctx, 200, { ok: true });
-  } catch (error) {
-    if (error instanceof ReadStateError) return json(ctx, error.status, { error: error.code });
-    throw error;
-  }
-}));
+on(
+  'POST',
+  '/api/groups/:groupId/chat/:threadId/read',
+  authed(async (ctx, userId, params) => {
+    let body: unknown;
+    try {
+      body = await readJsonBody(ctx.req, 4096);
+    } catch (error) {
+      if (error instanceof SyntaxError) return json(ctx, 400, { error: 'invalid_json' });
+      if (error instanceof Error && error.message === 'body_too_large')
+        return json(ctx, 413, { error: 'body_too_large' });
+      throw error;
+    }
+    if (!isReadCursor(body)) return json(ctx, 400, { error: 'invalid_read_cursor' });
+    const channelType = ctx.url.searchParams.get('channel');
+    const messagingGroupId = ctx.url.searchParams.get('mg');
+    if (!!channelType !== !!messagingGroupId) return json(ctx, 400, { error: 'invalid_context' });
+    try {
+      acknowledgeRead(
+        userId,
+        params.groupId,
+        params.threadId,
+        { sessionId: body.sessionId, key: body.key },
+        channelType && messagingGroupId ? { channelType, messagingGroupId } : undefined,
+      );
+      return json(ctx, 200, { ok: true });
+    } catch (error) {
+      if (error instanceof ReadStateError) return json(ctx, error.status, { error: error.code });
+      throw error;
+    }
+  }),
+);
 
-on('GET', '/api/unread', authed(async (ctx, userId) => {
-  const state = await readGlobalSync(userId, null);
-  return json(ctx, 200, { unreadThreadCount: state.agentActivity.reduce((sum, group) => sum + (group.unreadThreadCount ?? 0), 0) });
-}));
+on(
+  'GET',
+  '/api/unread',
+  authed(async (ctx, userId) => {
+    const state = await readGlobalSync(userId, null);
+    return json(ctx, 200, {
+      unreadThreadCount: state.agentActivity.reduce((sum, group) => sum + (group.unreadThreadCount ?? 0), 0),
+    });
+  }),
+);
 
 /** Wrap a handler that requires an authenticated session; injects userId.
  *
@@ -489,12 +507,12 @@ async function handleCreatePrivateWebSession(
 function handleGroups(ctx: Ctx, userId: string): void {
   const accessible = listAccessibleAgentGroups(userId);
   // Cheap per-group last-activity lookup so the dropdown can sort by recency.
-  type Row = { agent_group_id: string; last_active: string | null };
+  type Row = { agent_group_id: string; last_active: number | null };
   const rows = getDb()
     .prepare('SELECT agent_group_id, MAX(last_active) AS last_active FROM sessions GROUP BY agent_group_id')
     .all() as Row[];
   const lastByGroup = new Map<string, string | null>();
-  for (const r of rows) lastByGroup.set(r.agent_group_id, r.last_active);
+  for (const r of rows) lastByGroup.set(r.agent_group_id, fromEpoch(r.last_active));
   const groups = accessible.map((g) => ({
     id: g.id,
     name: g.name,
