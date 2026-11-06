@@ -1,6 +1,5 @@
 import type { Database } from 'bun:sqlite';
 import { toEpoch, decodeTimes } from './time.js';
-import { epochSchema } from './storage-lifecycle.js';
 
 // Mirrored in the host's src/db/turns.ts; neither runtime imports the other.
 export type TurnPhase = 'running' | 'stopping' | 'settling' | 'settled';
@@ -34,15 +33,15 @@ export interface TurnInputRow {
   association: 'consumed' | 'applied' | 'reply';
 }
 
-export const TURN_SCHEMA = epochSchema(`
+export const TURN_SCHEMA = `
 CREATE TABLE IF NOT EXISTS turns (
   id TEXT PRIMARY KEY NOT NULL CHECK (length(id) > 0),
   origin_channel_type TEXT,
   origin_platform_id TEXT,
   origin_thread_id TEXT,
   origin_source_session_id TEXT,
-  started_at TEXT,
-  ended_at TEXT,
+  started_at INTEGER CHECK (started_at IS NULL OR typeof(started_at)='integer'),
+  ended_at INTEGER CHECK (ended_at IS NULL OR typeof(ended_at)='integer'),
   phase TEXT NOT NULL CHECK (phase IN ('running', 'stopping', 'settling', 'settled')),
   outcome TEXT NOT NULL CHECK (outcome IN ('pending', 'replied', 'warning', 'silent', 'stopped', 'failed', 'unknown', 'interrupted')),
   provenance TEXT NOT NULL CHECK (provenance IN ('native', 'backfill', 'fork')),
@@ -57,20 +56,20 @@ CREATE TABLE IF NOT EXISTS turn_inputs (
   PRIMARY KEY (turn_id, message_in_id)
 );
 CREATE INDEX IF NOT EXISTS idx_turn_inputs_message ON turn_inputs(message_in_id);
-`);
+`;
 
-export const TURN_ACTIVITY_SCHEMA = epochSchema(`
+export const TURN_ACTIVITY_SCHEMA = `
 CREATE TABLE IF NOT EXISTS turn_activity (
   message_out_id TEXT,
   ordinal INTEGER NOT NULL,
-  ts TEXT NOT NULL,
+  ts INTEGER CHECK (ts IS NULL OR typeof(ts)='integer') NOT NULL,
   text TEXT NOT NULL,
   turn_id TEXT REFERENCES turns(id),
   timeline_position INTEGER NOT NULL CHECK (timeline_position > 0 AND timeline_position <= 9007199254740991),
   PRIMARY KEY (message_out_id, ordinal),
   CHECK (message_out_id IS NOT NULL OR turn_id IS NOT NULL)
 );
-`);
+`;
 
 export const TURN_INDEX_SCHEMA = `
 CREATE INDEX IF NOT EXISTS idx_messages_out_turn ON messages_out(turn_id);
@@ -81,7 +80,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_activity_unanchored
 `;
 
 export function getTurn(db: Database, id: string): TurnRow | undefined {
-  return decodeTimes<TurnRow | undefined>(db.query('SELECT * FROM turns WHERE id = ?').get(id) ?? undefined, ['started_at', 'ended_at']);
+  return decodeTimes<TurnRow | undefined>(db.query('SELECT * FROM turns WHERE id = ?').get(id) ?? undefined, [
+    'started_at',
+    'ended_at',
+  ]);
 }
 
 /** Storage upsert; callers own lifecycle validation and runner journal triggers. */

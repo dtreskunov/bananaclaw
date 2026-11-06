@@ -13,8 +13,7 @@ import {
   getContainerConfig,
   updateContainerConfigScalars,
 } from '../../../db/container-configs.js';
-import { migrations, runMigrations } from '../../../db/migrations/index.js';
-import { convertStoreTimes } from '../../../db/storage-lifecycle.js';
+import { runMigrations } from '../../../db/migrations/index.js';
 import { readEnvFile } from '../../../env.js';
 import { log } from '../../../log.js';
 import {
@@ -30,19 +29,11 @@ beforeEach(() => {
   vi.stubEnv('DEFAULT_VOICE_INPUT_BACKEND', '');
   defaultVoiceInputBackend();
   const db = initTestDb();
-  runMigrations(
-    db,
-    migrations.filter(
-      (migration) => migration.name !== 'voice-input-backend' && migration.name !== 'drop-legacy-transcription-config',
-    ),
-  );
+  runMigrations(db);
   db.exec(`
-    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', '2026-01-01T00:00:00.000Z');
-    INSERT INTO container_configs (agent_group_id, voice_mode, transcription_model, updated_at)
-    VALUES ('g', 'audio', 'legacy/audio-model', '2026-01-01T00:00:00.000Z');
+    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 1767225600000);
+    INSERT INTO container_configs (agent_group_id, updated_at) VALUES ('g', 1767225600000);
   `);
-  runMigrations(db, [...migrations]);
-  convertStoreTimes(db);
 });
 
 afterEach(() => {
@@ -52,7 +43,7 @@ afterEach(() => {
 });
 
 describe('host voice input configuration', () => {
-  it('migrates legacy rows to the server default and removes audio-note configuration', () => {
+  it('initializes server-default voice settings without retired audio-note columns', () => {
     runMigrations(getDb());
     expect(getContainerConfig('g')).toMatchObject({
       voice_input_backend: null,

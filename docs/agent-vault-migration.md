@@ -8,10 +8,11 @@ operator explicitly waived the remaining seven-day acceptance window on
 groups had cut over. The historical sections below are audit evidence, not
 instructions to run the removed importer or backend-switching CLI.
 
-The retirement implementation is committed, but deployment is paused at the
-operator's request pending the unrelated appearance/OAuth UI work. Migration
-048, live environment cleanup and retirement of old generated host artifacts
-must run only during the approved safe deployment window.
+The retirement is included in the current canonical central baseline.
+Migration 048 is historical and remains available in the archived cutover
+revision `905c08ad6`; it is not replayed for new databases. Older installations
+must complete the [archived offline cutover](db-storage-cutover.md) during an
+approved maintenance window before deploying current code.
 
 ### Detect / migrate / verify / rollback
 

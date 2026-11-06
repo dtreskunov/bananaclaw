@@ -21,11 +21,9 @@ import {
   extractInboundText,
   indexMessage,
   initSearchDb,
-  migrateSearchStorage,
   searchMessages,
   type IndexableMessage,
 } from './search-index.js';
-
 
 function inspectIndex<T>(read: (connection: Database.Database) => T): T {
   const connection = new Database(path.join(TEST_DATA_DIR, 'search.db'));
@@ -49,45 +47,6 @@ function occurrence(overrides: Partial<IndexableMessage> = {}): IndexableMessage
     text: 'searchable needle',
     ...overrides,
   };
-}
-
-function createLegacyIndex(): void {
-  closeSearchDb();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  inspectIndex((connection) =>
-    connection.exec(`
-    CREATE TABLE message_index (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      agent_group_id TEXT NOT NULL,
-      messaging_group_id TEXT,
-      channel_type TEXT,
-      thread_id TEXT,
-      direction TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      text TEXT NOT NULL,
-      sender_user_id TEXT
-    );
-    CREATE INDEX idx_mi_agent_group ON message_index(agent_group_id);
-    CREATE INDEX idx_mi_messaging_group ON message_index(messaging_group_id);
-    CREATE INDEX idx_mi_session ON message_index(session_id);
-    CREATE VIRTUAL TABLE message_fts USING fts5(text, content=message_index, content_rowid=rowid);
-    CREATE TRIGGER mi_ai AFTER INSERT ON message_index BEGIN
-      INSERT INTO message_fts(rowid, text) VALUES (new.rowid, new.text);
-    END;
-    CREATE TRIGGER mi_ad AFTER DELETE ON message_index BEGIN
-      INSERT INTO message_fts(message_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-    END;
-    CREATE TRIGGER mi_au AFTER UPDATE ON message_index BEGIN
-      INSERT INTO message_fts(message_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-      INSERT INTO message_fts(rowid, text) VALUES (new.rowid, new.text);
-    END;
-    INSERT INTO message_index VALUES
-      ('shared', 'session-a', 'agent', 'inbox', 'web', 'thread-a', 'in', '2026-07-22 00:00:00', 'legacy needle', 'sender'),
-      ('reply', 'session-b', 'other-agent', NULL, 'telegram', NULL, 'out', '2026-07-22 00:01:00', 'archived token', NULL);
-  `),
-  );
 }
 
 function addMessage(
@@ -119,6 +78,40 @@ beforeEach(() => {
 });
 
 describe('search occurrence identity', () => {
+  it('initializes the current schema directly and reopens without rewriting stable FTS rows', () => {
+    indexMessage(occurrence());
+    const before = inspectIndex((connection) => ({
+      version: connection.pragma('user_version', { simple: true }),
+      rows: connection.prepare('SELECT rowid,* FROM message_index').all(),
+    }));
+    expect(before.version).toBe(2);
+    closeSearchDb();
+    initSearchDb();
+    expect(
+      inspectIndex((connection) => ({
+        version: connection.pragma('user_version', { simple: true }),
+        rows: connection.prepare('SELECT rowid,* FROM message_index').all(),
+      })),
+    ).toEqual(before);
+    expect(searchMessages('need*', { agentGroupId: 'agent' })).toHaveLength(1);
+  });
+
+  it.each([0, 1, 99])('refuses populated unsupported version %s without replacing its data', (version) => {
+    indexMessage(occurrence());
+    closeSearchDb();
+    const before = inspectIndex((connection) => {
+      connection.pragma(`user_version=${version}`);
+      return connection.prepare('SELECT rowid,* FROM message_index').all();
+    });
+    expect(() => initSearchDb()).toThrow(`Unsupported search storage version ${version}`);
+    expect(
+      inspectIndex((connection) => ({
+        version: connection.pragma('user_version', { simple: true }),
+        rows: connection.prepare('SELECT rowid,* FROM message_index').all(),
+      })),
+    ).toEqual({ version, rows: before });
+  });
+
   it('independently indexes duplicate public IDs across agents, sessions and directions', () => {
     const messages = [
       occurrence(),
@@ -143,119 +136,18 @@ describe('search occurrence identity', () => {
     expect(log.warn).not.toHaveBeenCalled();
   });
 
-  describe('search schema migration', () => {
-    it('transactionally preserves all legacy entries and rebuilds actual FTS lookup', () => {
-      createLegacyIndex();
-      const before = inspectIndex((connection) => {
-        // Simulate an old index with stale FTS contents: migration must read the source table.
-        connection.exec("INSERT INTO message_fts(message_fts) VALUES ('delete-all')");
-        return (connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all() as Record<string, unknown>[])
-          .map(row => ({ ...row, timestamp: parseTimestamp(row.timestamp as string) }));
-      });
-
-      expect(() => initSearchDb()).toThrow('stop host AND runners');
-      inspectIndex(migrateSearchStorage);
-      initSearchDb();
-
-      expect(
-        inspectIndex((connection) => connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all()),
-      ).toEqual(before);
-      expect(inspectIndex((connection) => connection.pragma('user_version', { simple: true }))).toBe(2);
-      expect(searchMessages('need*', { agentGroupId: 'agent' })).toMatchObject([
-        { messageId: 'shared', sessionId: 'session-a', direction: 'in', snippet: 'legacy >>>needle<<<' },
-      ]);
-      expect(searchMessages('archiv*', { agentGroupId: 'other-agent' })).toMatchObject([
-        { messageId: 'reply', sessionId: 'session-b', direction: 'out', snippet: '>>>archived<<< token' },
-      ]);
-      expect(log.warn).not.toHaveBeenCalled();
-
-      indexMessage(occurrence());
-      indexMessage(occurrence({ sessionId: 'fork', threadId: 'fork-thread' }));
-      indexMessage(occurrence({ sessionId: 'fork', threadId: 'fork-thread' }));
-      indexMessage(occurrence({ id: 'shared', direction: 'out' }));
-      expect(searchMessages('need*', { agentGroupId: 'agent' })).toHaveLength(3);
-      const migrated = inspectIndex((connection) =>
-        connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all(),
-      );
-      closeSearchDb();
-      initSearchDb();
-      expect(
-        inspectIndex((connection) => connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all()),
-      ).toEqual(migrated);
-      expect(log.warn).not.toHaveBeenCalled();
-    });
-
-    it('rolls back the complete legacy schema and rows if a row cannot migrate', () => {
-      createLegacyIndex();
-      inspectIndex((connection) =>
-        connection.exec(`
-        INSERT INTO message_index
-          (id, session_id, agent_group_id, direction, timestamp, text)
-        VALUES (NULL, 'invalid-session', 'agent', 'in', '2026-07-22 00:00:00', 'preserve invalid row');
-      `),
-      );
-      const before = inspectIndex((connection) => ({
-        schema: connection.prepare('SELECT name, sql FROM sqlite_master ORDER BY name').all(),
-        rows: connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all(),
-      }));
-
-      expect(() => inspectIndex(migrateSearchStorage)).toThrow('NOT NULL');
-
-      expect(
-        inspectIndex((connection) => ({
-          schema: connection.prepare('SELECT name, sql FROM sqlite_master ORDER BY name').all(),
-          rows: connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all(),
-        })),
-      ).toEqual(before);
-      expect(inspectIndex((connection) => connection.pragma('user_version', { simple: true }))).toBe(0);
-      expect(
-        inspectIndex((connection) =>
-          connection.prepare("SELECT rowid FROM message_fts WHERE message_fts MATCH 'need*'").all(),
-        ),
-      ).toHaveLength(1);
-      inspectIndex((connection) => connection.exec('DELETE FROM message_index WHERE id IS NULL'));
-      inspectIndex(migrateSearchStorage);
-      initSearchDb();
-      expect(searchMessages('need*', { agentGroupId: 'agent' })).toHaveLength(1);
-    });
-
-    it('rejects unknown schema versions without replacing existing entries', () => {
-      createLegacyIndex();
-      inspectIndex((connection) => connection.pragma('user_version = 99'));
-      expect(() => initSearchDb()).toThrow('Unsupported search storage version 99');
-      expect(
-        inspectIndex((connection) => connection.prepare('SELECT id FROM message_index ORDER BY id').all()),
-      ).toEqual([{ id: 'reply' }, { id: 'shared' }]);
-      expect(inspectIndex((connection) => connection.pragma('user_version', { simple: true }))).toBe(99);
-      inspectIndex((connection) => connection.pragma('user_version = 0'));
-      inspectIndex(migrateSearchStorage);
-      initSearchDb();
-      expect(searchMessages('need*', { agentGroupId: 'agent' })).toHaveLength(1);
-    });
-
-    it('rejects an unfamiliar unversioned schema without discarding it', () => {
-      createLegacyIndex();
-      inspectIndex((connection) => connection.exec('ALTER TABLE message_index ADD COLUMN custom_data TEXT'));
-      expect(() => inspectIndex(migrateSearchStorage)).toThrow('Unrecognized unversioned search index schema');
-      expect(
-        inspectIndex((connection) => connection.prepare('SELECT count(*) AS count FROM message_index').get()),
-      ).toEqual({
-        count: 2,
-      });
-
-      expect(inspectIndex((connection) => connection.pragma('user_version', { simple: true }))).toBe(0);
-    });
-  });
-
   it('stores and returns exact numeric epoch timestamps without internal string conversion', () => {
     indexMessage(occurrence({ id: 'later', timestamp: parseTimestamp('2026-07-22T02:00:00.124+02:00') }));
     indexMessage(occurrence({ id: 'earlier', timestamp: parseTimestamp('2026-07-22T00:00:00.123Z') }));
-    expect(searchMessages('need*', { agentGroupId: 'agent' }).map(row => [row.messageId, row.timestamp])).toEqual([
-      ['later', parseTimestamp('2026-07-22T00:00:00.124Z')], ['earlier', parseTimestamp('2026-07-22T00:00:00.123Z')],
+    expect(searchMessages('need*', { agentGroupId: 'agent' }).map((row) => [row.messageId, row.timestamp])).toEqual([
+      ['later', parseTimestamp('2026-07-22T00:00:00.124Z')],
+      ['earlier', parseTimestamp('2026-07-22T00:00:00.123Z')],
     ]);
-    expect(inspectIndex(connection => connection.prepare(
-      'SELECT DISTINCT typeof(timestamp) AS type FROM message_index',
-    ).all())).toEqual([{ type: 'integer' }]);
+    expect(
+      inspectIndex((connection) =>
+        connection.prepare('SELECT DISTINCT typeof(timestamp) AS type FROM message_index').all(),
+      ),
+    ).toEqual([{ type: 'integer' }]);
   });
 
   it('edits and deletes only the selected occurrence, preserving its stable FTS rowid', () => {

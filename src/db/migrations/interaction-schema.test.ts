@@ -1,9 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { closeDb, initTestDb } from '../connection.js';
 import { createApproval, getApproval } from '../approvals.js';
-import { migrations, runMigrations } from './index.js';
-import { migration049 } from './049-interactions.js';
-import { convertStoreTimes } from '../storage-lifecycle.js';
+import { runMigrations } from './index.js';
 
 afterEach(closeDb);
 
@@ -35,17 +33,3 @@ it('creates one public lifecycle and private progress without mirrored status or
   expect(() => db.exec("UPDATE interactions SET status='approved'")).toThrow('CHECK');
   expect(getApproval('c')?.input.action).toBe('install_packages');
 });
-
-it.each(['questions', 'pending_questions', 'approvals', 'pending_approvals', 'approval_history', 'approval_workflows'])(
-  'refuses existing %s storage without runtime conversion or record loss',
-  (table) => {
-    const db = initTestDb();
-    runMigrations(db, migrations.slice(0, migrations.indexOf(migration049)));
-    convertStoreTimes(db);
-    db.exec(`CREATE TABLE ${table}(id TEXT); INSERT INTO ${table} VALUES('preserved')`);
-    expect(() => runMigrations(db)).toThrow('explicit offline cutover');
-    expect(db.prepare(`SELECT id FROM ${table}`).all()).toEqual([{ id: 'preserved' }]);
-    expect(db.prepare("SELECT name FROM sqlite_master WHERE name='interactions'").get()).toBeUndefined();
-    expect(db.prepare('SELECT name FROM schema_version WHERE name=?').get(migration049.name)).toBeUndefined();
-  },
-);

@@ -9,7 +9,7 @@
 import { randomUUID } from 'crypto';
 
 import { getDb } from '../db/connection.js';
-import { INSTANT_COLUMNS } from '../db/storage-lifecycle.js';
+import { INSTANT_COLUMNS } from '../db/time.js';
 import { parseTimestamp } from '../time.js';
 
 import { register } from './registry.js';

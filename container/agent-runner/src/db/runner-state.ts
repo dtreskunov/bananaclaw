@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA, TURN_SCHEMA } from './turns.js';
-import { epochSchema, assertStorageVersion, STORAGE_VERSION, EPOCH_NOW_SQL } from './storage-lifecycle.js';
+import { assertStorageVersion, STORAGE_VERSION, EPOCH_NOW_SQL } from './storage-lifecycle.js';
 
 export interface PendingRunnerEvent {
   event_id: string;
@@ -23,22 +23,22 @@ export function ensureRunnerStateSchema(db: Database): void {
 }
 
 function applyRunnerStateSchema(db: Database): void {
-  db.exec(epochSchema(TURN_SCHEMA));
-  db.exec(epochSchema(TURN_ACTIVITY_SCHEMA));
+  db.exec(TURN_SCHEMA);
+  db.exec(TURN_ACTIVITY_SCHEMA);
   const columns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{ name: string; notnull: number }>;
   if (!columns.some((column) => column.name === 'timeline_position' && column.notnull === 1)) {
     throw new Error(
       'Unsupported activity-order schema: turn_activity.timeline_position must be NOT NULL. See docs/ui.md#activity-order-storage.',
     );
   }
-  db.exec(epochSchema(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS messages_in (
       id TEXT PRIMARY KEY,
       seq INTEGER UNIQUE,
       kind TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
+      timestamp INTEGER CHECK (timestamp IS NULL OR typeof(timestamp)='integer') NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
-      process_after TEXT,
+      process_after INTEGER CHECK (process_after IS NULL OR typeof(process_after)='integer'),
       recurrence TEXT,
       series_id TEXT,
       tries INTEGER NOT NULL DEFAULT 0,
@@ -76,7 +76,7 @@ function applyRunnerStateSchema(db: Database): void {
       provider TEXT NOT NULL,
       anchor_ref TEXT,
       digest TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at INTEGER CHECK (created_at IS NULL OR typeof(created_at)='integer') NOT NULL
     );
     CREATE TABLE IF NOT EXISTS thread_titles (
       channel_type TEXT NOT NULL,
@@ -86,7 +86,7 @@ function applyRunnerStateSchema(db: Database): void {
       source TEXT NOT NULL DEFAULT 'model',
       request_message_id TEXT NOT NULL,
       published INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL,
+      updated_at INTEGER CHECK (updated_at IS NULL OR typeof(updated_at)='integer') NOT NULL,
       PRIMARY KEY (channel_type, platform_id, thread_id)
     );
     CREATE TABLE IF NOT EXISTS host_state (
@@ -102,8 +102,8 @@ function applyRunnerStateSchema(db: Database): void {
       id TEXT PRIMARY KEY,
       seq INTEGER UNIQUE,
       in_reply_to TEXT,
-      timestamp TEXT NOT NULL,
-      deliver_after TEXT,
+      timestamp INTEGER CHECK (timestamp IS NULL OR typeof(timestamp)='integer') NOT NULL,
+      deliver_after INTEGER CHECK (deliver_after IS NULL OR typeof(deliver_after)='integer'),
       recurrence TEXT,
       kind TEXT NOT NULL,
       platform_id TEXT,
@@ -115,7 +115,7 @@ function applyRunnerStateSchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS processing_ack (
       message_id TEXT PRIMARY KEY,
       status TEXT NOT NULL,
-      status_changed TEXT NOT NULL
+      status_changed INTEGER CHECK (status_changed IS NULL OR typeof(status_changed)='integer') NOT NULL
     );
     CREATE TABLE IF NOT EXISTS claimed_inputs (
       message_id TEXT PRIMARY KEY
@@ -127,7 +127,7 @@ function applyRunnerStateSchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS session_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at INTEGER CHECK (updated_at IS NULL OR typeof(updated_at)='integer') NOT NULL
     );
     INSERT INTO timeline_clock (id, position)
     SELECT 1, COALESCE(MAX(position), 0) FROM (
@@ -145,15 +145,15 @@ function applyRunnerStateSchema(db: Database): void {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       current_tool TEXT,
       tool_declared_timeout_ms INTEGER,
-      tool_started_at TEXT,
-      updated_at TEXT NOT NULL
+      tool_started_at INTEGER CHECK (tool_started_at IS NULL OR typeof(tool_started_at)='integer'),
+      updated_at INTEGER CHECK (updated_at IS NULL OR typeof(updated_at)='integer') NOT NULL
     );
     CREATE TABLE IF NOT EXISTS turn_checkpoints (
       message_out_id TEXT PRIMARY KEY,
       provider TEXT NOT NULL,
       continuation TEXT NOT NULL,
       provider_turn_ref TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at INTEGER CHECK (created_at IS NULL OR typeof(created_at)='integer') NOT NULL
     );
     CREATE TABLE IF NOT EXISTS turn_usage (
       id TEXT PRIMARY KEY,
@@ -172,15 +172,15 @@ function applyRunnerStateSchema(db: Database): void {
       context_window INTEGER,
       max_output_tokens INTEGER,
       context_tokens INTEGER,
-      timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+      timestamp INTEGER CHECK (timestamp IS NULL OR typeof(timestamp)='integer') NOT NULL DEFAULT (${EPOCH_NOW_SQL})
     );
     CREATE TABLE IF NOT EXISTS task_attempts (
       task_message_id TEXT PRIMARY KEY,
       series_id TEXT NOT NULL,
       trigger_source TEXT NOT NULL,
       status TEXT NOT NULL,
-      started_at TEXT NOT NULL,
-      completed_at TEXT,
+      started_at INTEGER CHECK (started_at IS NULL OR typeof(started_at)='integer') NOT NULL,
+      completed_at INTEGER CHECK (completed_at IS NULL OR typeof(completed_at)='integer'),
       duration_ms INTEGER,
       exit_code INTEGER,
       signal TEXT,
@@ -197,7 +197,7 @@ function applyRunnerStateSchema(db: Database): void {
       event_id TEXT NOT NULL UNIQUE,
       event_type TEXT NOT NULL,
       payload TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at INTEGER CHECK (created_at IS NULL OR typeof(created_at)='integer') NOT NULL
     );
 
     CREATE TRIGGER IF NOT EXISTS journal_message_out_insert
@@ -206,7 +206,7 @@ function applyRunnerStateSchema(db: Database): void {
         'message.upsert',
         `json_object(
         'id', NEW.id, 'seq', NEW.seq, 'in_reply_to', NEW.in_reply_to,
-        'timestamp', NEW.timestamp, 'deliver_after', NEW.deliver_after,
+        'timestamp', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.timestamp/1000.0, 'unixepoch'), 'deliver_after', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.deliver_after/1000.0, 'unixepoch'),
         'recurrence', NEW.recurrence, 'kind', NEW.kind,
         'platform_id', NEW.platform_id, 'channel_type', NEW.channel_type,
         'thread_id', NEW.thread_id, 'content', NEW.content, 'turn_id', NEW.turn_id
@@ -220,7 +220,7 @@ function applyRunnerStateSchema(db: Database): void {
         'processing.upsert',
         `json_object(
         'message_id', NEW.message_id, 'status', NEW.status,
-        'status_changed', NEW.status_changed
+        'status_changed', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.status_changed/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -230,7 +230,7 @@ function applyRunnerStateSchema(db: Database): void {
         'processing.upsert',
         `json_object(
         'message_id', NEW.message_id, 'status', NEW.status,
-        'status_changed', NEW.status_changed
+        'status_changed', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.status_changed/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -244,7 +244,7 @@ function applyRunnerStateSchema(db: Database): void {
       ${enqueue(
         'state.upsert',
         `json_object(
-        'key', NEW.key, 'value', NEW.value, 'updated_at', NEW.updated_at
+        'key', NEW.key, 'value', NEW.value, 'updated_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -253,7 +253,7 @@ function applyRunnerStateSchema(db: Database): void {
       ${enqueue(
         'state.upsert',
         `json_object(
-        'key', NEW.key, 'value', NEW.value, 'updated_at', NEW.updated_at
+        'key', NEW.key, 'value', NEW.value, 'updated_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -269,7 +269,7 @@ function applyRunnerStateSchema(db: Database): void {
         `json_object(
         'id', NEW.id, 'current_tool', NEW.current_tool,
         'tool_declared_timeout_ms', NEW.tool_declared_timeout_ms,
-        'tool_started_at', NEW.tool_started_at, 'updated_at', NEW.updated_at
+        'tool_started_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.tool_started_at/1000.0, 'unixepoch'), 'updated_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -280,7 +280,7 @@ function applyRunnerStateSchema(db: Database): void {
         `json_object(
         'id', NEW.id, 'current_tool', NEW.current_tool,
         'tool_declared_timeout_ms', NEW.tool_declared_timeout_ms,
-        'tool_started_at', NEW.tool_started_at, 'updated_at', NEW.updated_at
+        'tool_started_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.tool_started_at/1000.0, 'unixepoch'), 'updated_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -292,7 +292,7 @@ function applyRunnerStateSchema(db: Database): void {
         `json_object(
         'message_out_id', NEW.message_out_id, 'provider', NEW.provider,
         'continuation', NEW.continuation, 'provider_turn_ref', NEW.provider_turn_ref,
-        'created_at', NEW.created_at
+        'created_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.created_at/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -303,7 +303,7 @@ function applyRunnerStateSchema(db: Database): void {
         `json_object(
         'message_out_id', NEW.message_out_id, 'provider', NEW.provider,
         'continuation', NEW.continuation, 'provider_turn_ref', NEW.provider_turn_ref,
-        'created_at', NEW.created_at
+        'created_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.created_at/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -314,7 +314,7 @@ function applyRunnerStateSchema(db: Database): void {
         'activity.persist',
         `json_object(
         'message_out_id', NEW.message_out_id, 'ordinal', NEW.ordinal,
-        'ts', NEW.ts, 'text', NEW.text, 'turn_id', NEW.turn_id,
+        'ts', CAST(NEW.ts AS TEXT), 'text', NEW.text, 'turn_id', NEW.turn_id,
         'timeline_position', NEW.timeline_position
       )`,
       )}
@@ -325,7 +325,7 @@ function applyRunnerStateSchema(db: Database): void {
         'activity.persist',
         `json_object(
         'message_out_id', NEW.message_out_id, 'ordinal', NEW.ordinal,
-        'ts', NEW.ts, 'text', NEW.text, 'turn_id', NEW.turn_id,
+        'ts', CAST(NEW.ts AS TEXT), 'text', NEW.text, 'turn_id', NEW.turn_id,
         'timeline_position', NEW.timeline_position
       )`,
       )}
@@ -343,7 +343,7 @@ function applyRunnerStateSchema(db: Database): void {
         'num_turns', NEW.num_turns, 'duration_ms', NEW.duration_ms,
         'duration_api_ms', NEW.duration_api_ms, 'model', NEW.model,
         'context_window', NEW.context_window, 'max_output_tokens', NEW.max_output_tokens,
-        'context_tokens', NEW.context_tokens, 'timestamp', NEW.timestamp
+        'context_tokens', NEW.context_tokens, 'timestamp', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.timestamp/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -359,7 +359,7 @@ function applyRunnerStateSchema(db: Database): void {
         'num_turns', NEW.num_turns, 'duration_ms', NEW.duration_ms,
         'duration_api_ms', NEW.duration_api_ms, 'model', NEW.model,
         'context_window', NEW.context_window, 'max_output_tokens', NEW.max_output_tokens,
-        'context_tokens', NEW.context_tokens, 'timestamp', NEW.timestamp
+        'context_tokens', NEW.context_tokens, 'timestamp', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.timestamp/1000.0, 'unixepoch')
       )`,
       )}
     END;
@@ -371,7 +371,7 @@ function applyRunnerStateSchema(db: Database): void {
         `json_object(
         'task_message_id', NEW.task_message_id, 'series_id', NEW.series_id,
         'trigger_source', NEW.trigger_source, 'status', NEW.status,
-        'started_at', NEW.started_at, 'completed_at', NEW.completed_at,
+        'started_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.started_at/1000.0, 'unixepoch'), 'completed_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.completed_at/1000.0, 'unixepoch'),
         'duration_ms', NEW.duration_ms, 'exit_code', NEW.exit_code,
         'signal', NEW.signal, 'stdout', NEW.stdout, 'stderr', NEW.stderr,
         'error', NEW.error, 'wake_agent', NEW.wake_agent,
@@ -386,7 +386,7 @@ function applyRunnerStateSchema(db: Database): void {
         `json_object(
         'task_message_id', NEW.task_message_id, 'series_id', NEW.series_id,
         'trigger_source', NEW.trigger_source, 'status', NEW.status,
-        'started_at', NEW.started_at, 'completed_at', NEW.completed_at,
+        'started_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.started_at/1000.0, 'unixepoch'), 'completed_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.completed_at/1000.0, 'unixepoch'),
         'duration_ms', NEW.duration_ms, 'exit_code', NEW.exit_code,
         'signal', NEW.signal, 'stdout', NEW.stdout, 'stderr', NEW.stderr,
         'error', NEW.error, 'wake_agent', NEW.wake_agent,
@@ -394,10 +394,10 @@ function applyRunnerStateSchema(db: Database): void {
       )`,
       )}
     END;
-  `));
+  `);
   db.exec(TURN_INDEX_SCHEMA);
   for (const operation of ['INSERT', 'UPDATE']) {
-    db.exec(epochSchema(`
+    db.exec(`
       CREATE TRIGGER IF NOT EXISTS journal_turn_${operation.toLowerCase()}
       AFTER ${operation} ON turns BEGIN
         ${enqueue(
@@ -406,15 +406,15 @@ function applyRunnerStateSchema(db: Database): void {
           'id', NEW.id, 'origin_channel_type', NEW.origin_channel_type,
           'origin_platform_id', NEW.origin_platform_id, 'origin_thread_id', NEW.origin_thread_id,
           'origin_source_session_id', NEW.origin_source_session_id,
-          'started_at', NEW.started_at, 'ended_at', NEW.ended_at, 'phase', NEW.phase,
+          'started_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.started_at/1000.0, 'unixepoch'), 'ended_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.ended_at/1000.0, 'unixepoch'), 'phase', NEW.phase,
           'outcome', NEW.outcome, 'provenance', NEW.provenance,
           'imported_from_session_id', NEW.imported_from_session_id,
           'imported_from_turn_id', NEW.imported_from_turn_id)`,
         )}
       END;
-    `));
+    `);
   }
-  db.exec(epochSchema(`
+  db.exec(`
     CREATE TRIGGER IF NOT EXISTS journal_turn_input_insert AFTER INSERT ON turn_inputs BEGIN
       ${enqueue(
         'turn-input.upsert',
@@ -422,7 +422,7 @@ function applyRunnerStateSchema(db: Database): void {
         'message_in_id', NEW.message_in_id, 'association', NEW.association)`,
       )}
     END;
-  `));
+  `);
 }
 
 export function listPendingRunnerEvents(db: Database, limit = 32): PendingRunnerEvent[] {

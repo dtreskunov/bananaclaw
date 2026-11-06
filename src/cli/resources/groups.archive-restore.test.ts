@@ -171,6 +171,25 @@ async function restore(folder: string, withSessions = false) {
 }
 
 describe('ncl groups archive ↔ restore round trip', () => {
+  it('rejects legacy ISO archive records without inserting rows or renaming files', async () => {
+    const refs = seedGroup('iso-archive', 'iso-archive');
+    expect((await archive(refs.id)).ok).toBe(true);
+    const filename = path.join(TEST_GROUPS_DIR, 'iso-archive~', 'archive.json');
+    const dump = JSON.parse(
+      fs.readFileSync(filename, 'utf8'),
+    ) as import('../../modules/archive/archive-group.js').ArchiveDump;
+    dump.agent_group.created_at = '2026-01-01T00:00:00.000Z';
+    const contents = JSON.stringify(dump);
+    fs.writeFileSync(filename, contents);
+    const result = await restore('iso-archive', true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('Invalid epoch-millisecond timestamp');
+    expect(getDb().prepare('SELECT id FROM agent_groups WHERE id=?').get(refs.id)).toBeUndefined();
+    expect(getDb().prepare('SELECT id FROM sessions WHERE id=?').get(refs.sessionId)).toBeUndefined();
+    expect(fs.readFileSync(filename, 'utf8')).toBe(contents);
+    expect(fs.existsSync(path.join(TEST_GROUPS_DIR, 'iso-archive'))).toBe(false);
+  });
+
   it('cancels pending approvals and restores finalized account records without private recovery or retry', async () => {
     const refs = seedGroup('audit', 'audit');
     for (const id of ['pending', 'failed']) {
@@ -321,7 +340,7 @@ describe('ncl groups archive ↔ restore round trip', () => {
     expect(db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get()).toEqual(approval);
   });
 
-  it('restores legacy v3 ISO dates through the import codec without losing epoch zero', async () => {
+  it('restores numeric archive dates without losing epoch zero or null', async () => {
     const refs = seedGroup('ag-legacy-iso', 'legacy-iso');
     const db = getDb();
     db.prepare('UPDATE agent_groups SET created_at=0 WHERE id=?').run(refs.id);
@@ -333,10 +352,6 @@ describe('ncl groups archive ↔ restore round trip', () => {
     expect(dump.agent_group.created_at).toBe(0);
     expect(dump.container_config.updated_at).toBe(0);
     expect(dump.sessions[0].last_active).toBeNull();
-    dump.agent_group.created_at = '1970-01-01T00:00:00.000Z';
-    dump.container_config.updated_at = '1970-01-01T00:00:00.000Z';
-    dump.sessions[0].created_at = '1970-01-01T00:00:00.000Z';
-    fs.writeFileSync(archivePath, JSON.stringify(dump));
     expect((await restore('legacy-iso', true)).ok).toBe(true);
     expect(db.prepare('SELECT created_at FROM agent_groups WHERE id=?').get(refs.id)).toEqual({ created_at: 0 });
     expect(db.prepare('SELECT updated_at FROM container_configs WHERE agent_group_id=?').get(refs.id)).toEqual({
@@ -358,7 +373,7 @@ describe('ncl groups archive ↔ restore round trip', () => {
     const result = await restore('invalid-date');
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected invalid timestamp rejection');
-    expect(result.error.message).toMatch(/Invalid timestamp/);
+    expect(result.error.message).toContain('Invalid epoch-millisecond timestamp');
     expect(getDb().prepare('SELECT id FROM agent_groups WHERE id=?').get(refs.id)).toBeUndefined();
     expect(fs.existsSync(archivePath)).toBe(true);
   });

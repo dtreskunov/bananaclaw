@@ -1,7 +1,7 @@
 /** Central DDL is authoritative in migrations; these are the host session stores. */
 import { TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA, TURN_SCHEMA } from './turns.js';
 import { INBOUND_THREAD_SUMMARY_SCHEMA, OUTBOUND_THREAD_SUMMARY_SCHEMA } from './thread-summary-schema.js';
-import { epochSchema } from './storage-lifecycle.js';
+import { EPOCH_NOW_SQL } from './storage-lifecycle.js';
 
 /**
  * Session DB schemas — split into two files so each has exactly one writer.
@@ -12,7 +12,7 @@ import { epochSchema } from './storage-lifecycle.js';
  */
 
 /** Host-owned: inbound messages + delivery tracking + destination map. */
-export const INBOUND_SCHEMA = epochSchema(`
+export const INBOUND_SCHEMA = `
 CREATE TABLE IF NOT EXISTS host_sequence (
   id        INTEGER PRIMARY KEY CHECK (id = 1),
   last_even INTEGER NOT NULL CHECK (last_even >= 0 AND last_even % 2 = 0)
@@ -23,9 +23,9 @@ CREATE TABLE IF NOT EXISTS messages_in (
   id             TEXT PRIMARY KEY,
   seq            INTEGER UNIQUE,
   kind           TEXT NOT NULL,
-  timestamp      TEXT NOT NULL,
+  timestamp INTEGER CHECK (timestamp IS NULL OR typeof(timestamp)='integer') NOT NULL,
   status         TEXT DEFAULT 'pending',
-  process_after  TEXT,
+  process_after INTEGER CHECK (process_after IS NULL OR typeof(process_after)='integer'),
   recurrence     TEXT,
   series_id      TEXT,
   tries          INTEGER DEFAULT 0,
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS delivered (
   message_out_id      TEXT PRIMARY KEY,
   platform_message_id TEXT,
   status              TEXT NOT NULL DEFAULT 'delivered',
-  delivered_at        TEXT NOT NULL
+  delivered_at INTEGER CHECK (delivered_at IS NULL OR typeof(delivered_at)='integer') NOT NULL
 );
 
 -- Destination map for this session's agent.
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS thread_titles (
   source             TEXT NOT NULL DEFAULT 'model',
   request_message_id TEXT NOT NULL,
   published          INTEGER NOT NULL DEFAULT 0,
-  updated_at         TEXT NOT NULL,
+  updated_at INTEGER CHECK (updated_at IS NULL OR typeof(updated_at)='integer') NOT NULL,
   PRIMARY KEY (channel_type, platform_id, thread_id)
 );
 
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS fork_origin (
   provider            TEXT NOT NULL,
   anchor_ref          TEXT,
   digest              TEXT NOT NULL,
-  created_at          TEXT NOT NULL
+  created_at INTEGER CHECK (created_at IS NULL OR typeof(created_at)='integer') NOT NULL
 );
 
 -- Ordered host-to-runner journal. The host is the sole writer and removes a
@@ -141,14 +141,14 @@ CREATE TABLE IF NOT EXISTS pending_host_events (
   event_id   TEXT NOT NULL UNIQUE,
   event_type TEXT NOT NULL,
   payload    TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at INTEGER CHECK (created_at IS NULL OR typeof(created_at)='integer') NOT NULL
 );
 
 CREATE TRIGGER IF NOT EXISTS journal_host_sequence_update
 AFTER UPDATE OF last_even ON host_sequence BEGIN
   INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
   VALUES (lower(hex(randomblob(16))), 'sequence.floor',
-    json_object('seq', NEW.last_even), datetime('now'));
+    json_object('seq', NEW.last_even), ${EPOCH_NOW_SQL});
 END;
 
 CREATE TRIGGER IF NOT EXISTS journal_message_in_insert
@@ -156,14 +156,14 @@ AFTER INSERT ON messages_in BEGIN
   INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
   VALUES (lower(hex(randomblob(16))), 'message.upsert', json_object(
     'id', NEW.id, 'seq', NEW.seq, 'kind', NEW.kind,
-    'timestamp', NEW.timestamp, 'status', NEW.status,
-    'process_after', NEW.process_after, 'recurrence', NEW.recurrence,
+    'timestamp', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.timestamp/1000.0, 'unixepoch'), 'status', NEW.status,
+    'process_after', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.process_after/1000.0, 'unixepoch'), 'recurrence', NEW.recurrence,
     'series_id', NEW.series_id, 'tries', NEW.tries, 'trigger', NEW.trigger,
     'platform_id', NEW.platform_id, 'channel_type', NEW.channel_type,
     'thread_id', NEW.thread_id, 'content_hex', hex(CAST(NEW.content AS BLOB)),
     'source_session_id', NEW.source_session_id, 'on_wake', NEW.on_wake,
     'sender_user_id', NEW.sender_user_id, 'sender_identity', NEW.sender_identity
-  ), datetime('now'));
+  ), ${EPOCH_NOW_SQL});
 END;
 
 CREATE TRIGGER IF NOT EXISTS journal_message_in_update
@@ -171,21 +171,21 @@ AFTER UPDATE ON messages_in BEGIN
   INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
   VALUES (lower(hex(randomblob(16))), 'message.upsert', json_object(
     'id', NEW.id, 'seq', NEW.seq, 'kind', NEW.kind,
-    'timestamp', NEW.timestamp, 'status', NEW.status,
-    'process_after', NEW.process_after, 'recurrence', NEW.recurrence,
+    'timestamp', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.timestamp/1000.0, 'unixepoch'), 'status', NEW.status,
+    'process_after', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.process_after/1000.0, 'unixepoch'), 'recurrence', NEW.recurrence,
     'series_id', NEW.series_id, 'tries', NEW.tries, 'trigger', NEW.trigger,
     'platform_id', NEW.platform_id, 'channel_type', NEW.channel_type,
     'thread_id', NEW.thread_id, 'content_hex', hex(CAST(NEW.content AS BLOB)),
     'source_session_id', NEW.source_session_id, 'on_wake', NEW.on_wake,
     'sender_user_id', NEW.sender_user_id, 'sender_identity', NEW.sender_identity
-  ), datetime('now'));
+  ), ${EPOCH_NOW_SQL});
 END;
 
 CREATE TRIGGER IF NOT EXISTS journal_message_in_delete
 AFTER DELETE ON messages_in BEGIN
   INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
   VALUES (lower(hex(randomblob(16))), 'message.delete',
-    json_object('id', OLD.id), datetime('now'));
+    json_object('id', OLD.id), ${EPOCH_NOW_SQL});
 END;
 
 CREATE TRIGGER IF NOT EXISTS journal_fork_origin_insert
@@ -194,8 +194,8 @@ AFTER INSERT ON fork_origin BEGIN
   VALUES (lower(hex(randomblob(16))), 'fork.upsert', json_object(
     'id', NEW.id, 'parent_session_id', NEW.parent_session_id,
     'parent_continuation', NEW.parent_continuation, 'provider', NEW.provider,
-    'anchor_ref', NEW.anchor_ref, 'digest', NEW.digest, 'created_at', NEW.created_at
-  ), datetime('now'));
+    'anchor_ref', NEW.anchor_ref, 'digest', NEW.digest, 'created_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.created_at/1000.0, 'unixepoch')
+  ), ${EPOCH_NOW_SQL});
 END;
 
 CREATE TRIGGER IF NOT EXISTS journal_fork_origin_update
@@ -204,8 +204,8 @@ AFTER UPDATE ON fork_origin BEGIN
   VALUES (lower(hex(randomblob(16))), 'fork.upsert', json_object(
     'id', NEW.id, 'parent_session_id', NEW.parent_session_id,
     'parent_continuation', NEW.parent_continuation, 'provider', NEW.provider,
-    'anchor_ref', NEW.anchor_ref, 'digest', NEW.digest, 'created_at', NEW.created_at
-  ), datetime('now'));
+    'anchor_ref', NEW.anchor_ref, 'digest', NEW.digest, 'created_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.created_at/1000.0, 'unixepoch')
+  ), ${EPOCH_NOW_SQL});
 END;
 
 CREATE TRIGGER IF NOT EXISTS journal_thread_title_insert
@@ -215,8 +215,8 @@ AFTER INSERT ON thread_titles BEGIN
     'channel_type', NEW.channel_type, 'platform_id', NEW.platform_id,
     'thread_id', NEW.thread_id, 'title', NEW.title, 'source', NEW.source,
     'request_message_id', NEW.request_message_id, 'published', NEW.published,
-    'updated_at', NEW.updated_at
-  ), datetime('now'));
+    'updated_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at/1000.0, 'unixepoch')
+  ), ${EPOCH_NOW_SQL});
 END;
 
 CREATE TRIGGER IF NOT EXISTS journal_thread_title_update
@@ -226,8 +226,8 @@ AFTER UPDATE ON thread_titles BEGIN
     'channel_type', NEW.channel_type, 'platform_id', NEW.platform_id,
     'thread_id', NEW.thread_id, 'title', NEW.title, 'source', NEW.source,
     'request_message_id', NEW.request_message_id, 'published', NEW.published,
-    'updated_at', NEW.updated_at
-  ), datetime('now'));
+    'updated_at', strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at/1000.0, 'unixepoch')
+  ), ${EPOCH_NOW_SQL});
 END;
 
 CREATE TRIGGER IF NOT EXISTS journal_thread_title_delete
@@ -236,10 +236,10 @@ AFTER DELETE ON thread_titles BEGIN
   VALUES (lower(hex(randomblob(16))), 'thread-title.delete', json_object(
     'channel_type', OLD.channel_type, 'platform_id', OLD.platform_id,
     'thread_id', OLD.thread_id
-  ), datetime('now'));
+  ), ${EPOCH_NOW_SQL});
 END;
 ${INBOUND_THREAD_SUMMARY_SCHEMA}
-`);
+`;
 
 /** Host-owned projection of durable runner output and state. */
 const OUTBOUND_BASE_SCHEMA = `
@@ -247,8 +247,8 @@ CREATE TABLE IF NOT EXISTS messages_out (
   id             TEXT PRIMARY KEY,
   seq            INTEGER UNIQUE,
   in_reply_to    TEXT,
-  timestamp      TEXT NOT NULL,
-  deliver_after  TEXT,
+  timestamp INTEGER CHECK (timestamp IS NULL OR typeof(timestamp)='integer') NOT NULL,
+  deliver_after INTEGER CHECK (deliver_after IS NULL OR typeof(deliver_after)='integer'),
   recurrence     TEXT,
   kind           TEXT NOT NULL,
   platform_id    TEXT,
@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS messages_out (
 CREATE TABLE IF NOT EXISTS processing_ack (
   message_id     TEXT PRIMARY KEY,
   status         TEXT NOT NULL,
-  status_changed TEXT NOT NULL
+  status_changed INTEGER CHECK (status_changed IS NULL OR typeof(status_changed)='integer') NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_out_delivery_order ON messages_out(timestamp,id);
 
@@ -274,7 +274,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_out_delivery_order ON messages_out(times
 CREATE TABLE IF NOT EXISTS session_state (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at INTEGER CHECK (updated_at IS NULL OR typeof(updated_at)='integer') NOT NULL
 );
 
 -- Current tool-in-flight state. Single-row table (id=1). Runner events update
@@ -285,8 +285,8 @@ CREATE TABLE IF NOT EXISTS container_state (
   id                       INTEGER PRIMARY KEY CHECK (id = 1),
   current_tool             TEXT,
   tool_declared_timeout_ms INTEGER,
-  tool_started_at          TEXT,
-  updated_at               TEXT NOT NULL
+  tool_started_at INTEGER CHECK (tool_started_at IS NULL OR typeof(tool_started_at)='integer'),
+  updated_at INTEGER CHECK (updated_at IS NULL OR typeof(updated_at)='integer') NOT NULL
 );
 
 -- Provider continuation metadata for forking a thread at an outbound turn.
@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS turn_checkpoints (
   provider          TEXT NOT NULL,
   continuation      TEXT NOT NULL,
   provider_turn_ref TEXT NOT NULL,
-  created_at        TEXT NOT NULL
+  created_at INTEGER CHECK (created_at IS NULL OR typeof(created_at)='integer') NOT NULL
 );
 
 -- Ordered progress trace persisted at turn end for historical display.
@@ -319,7 +319,7 @@ CREATE TABLE IF NOT EXISTS turn_usage (
   context_window      INTEGER,
   max_output_tokens   INTEGER,
   context_tokens      INTEGER,
-  timestamp           TEXT NOT NULL DEFAULT (datetime('now'))
+  timestamp INTEGER CHECK (timestamp IS NULL OR typeof(timestamp)='integer') NOT NULL DEFAULT (${EPOCH_NOW_SQL})
 );
 
 -- Durable outcome for each scheduled-task occurrence. The task message ID is
@@ -330,8 +330,8 @@ CREATE TABLE IF NOT EXISTS task_attempts (
   series_id        TEXT NOT NULL,
   trigger_source   TEXT NOT NULL,
   status           TEXT NOT NULL,
-  started_at       TEXT NOT NULL,
-  completed_at     TEXT,
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER CHECK (completed_at IS NULL OR typeof(completed_at)='integer'),
   duration_ms      INTEGER,
   exit_code        INTEGER,
   signal           TEXT,
@@ -349,8 +349,8 @@ CREATE TABLE IF NOT EXISTS applied_runner_events (
   sequence   INTEGER NOT NULL UNIQUE,
   event_type TEXT NOT NULL,
   event_digest TEXT NOT NULL,
-  applied_at TEXT NOT NULL
+  applied_at INTEGER CHECK (applied_at IS NULL OR typeof(applied_at)='integer') NOT NULL
 );
 `;
 
-export const OUTBOUND_SCHEMA = epochSchema(TURN_SCHEMA + OUTBOUND_BASE_SCHEMA + TURN_INDEX_SCHEMA + OUTBOUND_THREAD_SUMMARY_SCHEMA);
+export const OUTBOUND_SCHEMA = TURN_SCHEMA + OUTBOUND_BASE_SCHEMA + TURN_INDEX_SCHEMA + OUTBOUND_THREAD_SUMMARY_SCHEMA;

@@ -12,7 +12,6 @@ import path from 'path';
 
 import { DATA_DIR } from './config.js';
 import { log } from './log.js';
-import { epochSchema, legacyEpoch } from './db/storage-lifecycle.js';
 import { epochMs } from './time.js';
 
 // ---------------------------------------------------------------------------
@@ -20,20 +19,7 @@ import { epochMs } from './time.js';
 // ---------------------------------------------------------------------------
 
 const SEARCH_SCHEMA_VERSION = 2;
-const MESSAGE_COLUMNS = [
-  'id',
-  'session_id',
-  'agent_group_id',
-  'messaging_group_id',
-  'channel_type',
-  'thread_id',
-  'direction',
-  'timestamp',
-  'text',
-  'sender_user_id',
-];
-
-const SEARCH_SCHEMA = epochSchema(`
+const SEARCH_SCHEMA = `
   CREATE TABLE message_index (
     rowid              INTEGER PRIMARY KEY,
     id                 TEXT NOT NULL,
@@ -43,7 +29,7 @@ const SEARCH_SCHEMA = epochSchema(`
     channel_type       TEXT,
     thread_id          TEXT,
     direction          TEXT NOT NULL,  -- 'in' | 'out'
-    timestamp          TEXT NOT NULL,
+    timestamp INTEGER CHECK (timestamp IS NULL OR typeof(timestamp)='integer') NOT NULL,
     text               TEXT NOT NULL,
     sender_user_id     TEXT,
     UNIQUE(session_id, direction, id)
@@ -72,7 +58,7 @@ const SEARCH_SCHEMA = epochSchema(`
     INSERT INTO message_fts(message_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
     INSERT INTO message_fts(rowid, text) VALUES (new.rowid, new.text);
   END;
-`);
+`;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -133,68 +119,6 @@ function getSearchDb(): Database.Database {
   return db;
 }
 
-/** Explicit offline upgrade; runtime startup never converts an existing index. */
-export function migrateSearchStorage(connection: Database.Database): number | null {
-  return connection
-    .transaction(() => {
-      const version = connection.pragma('user_version', { simple: true }) as number;
-      if (version === SEARCH_SCHEMA_VERSION) return null;
-      if (version !== 0 && version !== 1) throw new Error(`Unsupported search index schema version: ${version}`);
-
-      const columns = connection.pragma('table_info(message_index)') as Array<{
-        name: string;
-        type: string;
-        pk: number;
-      }>;
-      let migratedRows: number | null = null;
-      let legacyRows: Record<string, unknown>[] = [];
-      if (columns.length > 0) {
-        // Only the deployed legacy and version-1 occurrence schemas are migratable.
-        // Never replace an unfamiliar schema or rely on its potentially stale FTS rowids.
-        if (
-          (version === 0 && (columns.length !== MESSAGE_COLUMNS.length || columns.some(
-            (column, i) =>
-              column.name !== MESSAGE_COLUMNS[i] ||
-              column.type.toUpperCase() !== 'TEXT' ||
-              column.pk !== (i === 0 ? 1 : 0),
-          ))) || (version === 1 && (columns.length !== MESSAGE_COLUMNS.length + 1 ||
-            columns[0].name !== 'rowid' || columns[0].type.toUpperCase() !== 'INTEGER' ||
-            MESSAGE_COLUMNS.some((name, i) => columns[i + 1].name !== name)))
-        ) {
-          throw new Error('Unrecognized unversioned search index schema; existing data left intact');
-        }
-        migratedRows = (connection.prepare('SELECT count(*) AS count FROM message_index').get() as { count: number })
-          .count;
-        legacyRows = connection.prepare('SELECT rowid, * FROM message_index').all() as Record<string, unknown>[];
-        for (const row of legacyRows) row.timestamp = legacyEpoch(row.timestamp);
-        connection.exec(`
-          DROP TRIGGER IF EXISTS mi_ai;
-          DROP TRIGGER IF EXISTS mi_ad;
-          DROP TRIGGER IF EXISTS mi_au;
-          DROP TABLE IF EXISTS message_fts;
-          DROP INDEX IF EXISTS idx_mi_agent_group;
-          DROP INDEX IF EXISTS idx_mi_messaging_group;
-          DROP INDEX IF EXISTS idx_mi_session;
-          ALTER TABLE message_index RENAME TO message_index_legacy;
-        `);
-      }
-
-      connection.exec(SEARCH_SCHEMA);
-      if (migratedRows !== null) {
-        const names = ['rowid', ...MESSAGE_COLUMNS];
-        const insert = connection.prepare(`INSERT INTO message_index (${names}) VALUES (${names.map(() => '?')})`);
-        for (const row of legacyRows) insert.run(...names.map(name => row[name]));
-        connection.exec('DROP TABLE message_index_legacy');
-        const count = connection.prepare('SELECT count(*) AS n FROM message_index').get() as { n: number };
-        if (count.n !== migratedRows) throw new Error('Search conversion changed row counts');
-        connection.exec("INSERT INTO message_fts(message_fts,rank) VALUES('integrity-check',1)");
-      }
-      connection.pragma(`user_version = ${SEARCH_SCHEMA_VERSION}`);
-      return migratedRows;
-    })
-    .immediate();
-}
-
 /**
  * Open (or create) the search index. Called once during host startup.
  */
@@ -206,10 +130,15 @@ export function initSearchDb(): void {
     connection.pragma('busy_timeout = 5000');
     connection.pragma('journal_mode = WAL');
     const version = connection.pragma('user_version', { simple: true });
-    if (version === 0 && !connection.prepare("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").get())
-      migrateSearchStorage(connection);
-    else if (version !== SEARCH_SCHEMA_VERSION)
-      throw new Error(`Unsupported search storage version ${version}; stop host AND runners and follow docs/db-storage-cutover.md`);
+    if (version === 0 && !connection.prepare("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").get()) {
+      connection.transaction(() => {
+        connection.exec(SEARCH_SCHEMA);
+        connection.pragma(`user_version=${SEARCH_SCHEMA_VERSION}`);
+      })();
+    } else if (version !== SEARCH_SCHEMA_VERSION)
+      throw new Error(
+        `Unsupported search storage version ${version}; stop host AND runners and follow docs/db-storage-cutover.md`,
+      );
     db = connection;
   } catch (err) {
     connection.close();

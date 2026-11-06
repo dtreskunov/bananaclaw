@@ -8,7 +8,6 @@
 import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import { ensureRunnerStateSchema } from './runner-state.js';
-import { epochSchema } from './storage-lifecycle.js';
 
 const DEFAULT_RUNNER_STATE_PATH = '/workspace/runner-state/runner-state.db';
 const MAX_DECLARED_TOOL_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -38,7 +37,10 @@ export function getOutboundDb(): Database {
       db.exec('PRAGMA foreign_keys = ON');
       ensureRunnerStateSchema(db);
       _outbound = db;
-    } catch (error) { db.close(); throw error; }
+    } catch (error) {
+      db.close();
+      throw error;
+    }
   }
   return _outbound;
 }
@@ -106,14 +108,14 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
   _testMode = true;
   _inbound = new Database(':memory:');
   _inbound.exec('PRAGMA foreign_keys = ON');
-  _inbound.exec(epochSchema(`
+  _inbound.exec(`
     CREATE TABLE messages_in (
       id             TEXT PRIMARY KEY,
       seq            INTEGER UNIQUE,
       kind           TEXT NOT NULL,
-      timestamp      TEXT NOT NULL,
+      timestamp INTEGER CHECK (timestamp IS NULL OR typeof(timestamp)='integer') NOT NULL,
       status         TEXT DEFAULT 'pending',
-      process_after  TEXT,
+      process_after INTEGER CHECK (process_after IS NULL OR typeof(process_after)='integer'),
       recurrence     TEXT,
       series_id      TEXT,
       tries          INTEGER DEFAULT 0,
@@ -137,7 +139,7 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
       message_out_id      TEXT PRIMARY KEY,
       platform_message_id TEXT,
       status              TEXT NOT NULL DEFAULT 'delivered',
-      delivered_at        TEXT NOT NULL
+      delivered_at INTEGER CHECK (delivered_at IS NULL OR typeof(delivered_at)='integer') NOT NULL
     );
     CREATE TABLE destinations (
       name            TEXT PRIMARY KEY,
@@ -161,7 +163,7 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
       source             TEXT NOT NULL DEFAULT 'model',
       request_message_id TEXT NOT NULL,
       published          INTEGER NOT NULL DEFAULT 0,
-      updated_at         TEXT NOT NULL,
+      updated_at INTEGER CHECK (updated_at IS NULL OR typeof(updated_at)='integer') NOT NULL,
       PRIMARY KEY (channel_type, platform_id, thread_id)
     );
     CREATE TABLE fork_origin (
@@ -171,9 +173,9 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
       provider            TEXT,
       anchor_ref          TEXT,
       digest              TEXT NOT NULL,
-      created_at          TEXT NOT NULL
+      created_at INTEGER CHECK (created_at IS NULL OR typeof(created_at)='integer') NOT NULL
     );
-  `));
+  `);
 
   _outbound = new Database(':memory:');
   _outbound.exec('PRAGMA foreign_keys = ON');

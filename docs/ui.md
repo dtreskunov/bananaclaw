@@ -321,11 +321,10 @@ cancellations affect only the selected occurrence.
 
 Search storage now requires `PRAGMA user_version = 2`, with checked INTEGER
 UTC epoch-millisecond timestamps and ISO strings in search results. The host
-refuses older populated indexes rather than rebuilding them at startup. The
-[explicit offline cutover](db-storage-cutover.md) upgrades both the legacy
-unversioned `id TEXT PRIMARY KEY` schema and the version-1 occurrence schema,
-preserving every entry/rowid and rebuilding FTS. Preflight rejects invalid dates;
-failed verification leaves originals intact and backups are retained.
+refuses older populated indexes rather than rebuilding them at startup. Empty
+indexes initialize the current schema directly. Older indexes require the
+[archived offline cutover](db-storage-cutover.md); normal runtime no longer
+contains legacy conversion or schema-rewriting code.
 
 The legacy global ID constraint already suppressed some occurrences, so those
 cannot be recovered from the search index alone. To restore occurrences still
@@ -1698,8 +1697,10 @@ the server store; HTTP acceptance does not prove a command took effect.
 - **Fix:** stop the host and back up the central and host-owned session
   databases. With matching new code, run
   `pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped`.
-  Migration 051 creates the publication index, read watermarks and private user
-  baselines; the explicit rebuild seeds existing content as read once. Build
+  The current central baseline includes the publication index, read watermarks
+  and private user baselines; the explicit rebuild seeds existing content as
+  read once. Older storage must first complete the
+  [archived timestamp cutover](db-storage-cutover.md). Build
   and restart the host/chat assets and reload protocol-15 clients, activating
   the updated service worker. No runner image or credential changes are needed.
 - **Verify:** unread survives restart and differs between users; reading in one

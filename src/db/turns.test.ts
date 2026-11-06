@@ -4,7 +4,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { OUTBOUND_SCHEMA } from './schema.js';
-import { epochSchema } from './storage-lifecycle.js';
 import {
   assertActivityOrderSchema,
   getTurnAssociations,
@@ -58,10 +57,8 @@ describe('durable turn schema', () => {
   it('keeps host and runner SQL contracts identical without cross-runtime imports', () => {
     const runner = fs.readFileSync(path.join(process.cwd(), 'container/agent-runner/src/db/turns.ts'), 'utf8');
     for (const [name, sql] of Object.entries({ TURN_SCHEMA, TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA })) {
-      const template = runner.match(
-        new RegExp('export const ' + name + ' = (?:epochSchema\\()?`([\\s\\S]*?)`\\)?;'),
-      )?.[1];
-      expect(template === undefined ? undefined : epochSchema(template)).toBe(sql);
+      const template = runner.match(new RegExp('export const ' + name + ' = `([\\s\\S]*?)`;'))?.[1];
+      expect(template).toBe(sql);
     }
   });
 

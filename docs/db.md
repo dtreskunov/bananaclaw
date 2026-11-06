@@ -26,9 +26,10 @@ explicit stopped-host rebuild before deploying numeric-host code:
 This reconstructs only derived projections from the already-integer session
 stores; durable messages, journals and timestamp columns do not need another
 cutover. Startup/readers refuse the older projection shape rather than silently
-coercing it. Legacy catalog/pairing/breaker JSON and archives are decoded only
-at their file/import boundaries; current in-memory records and new writes are
-numeric. Keep central and metadata backups for rollback, and rebuild summaries
+coercing it. Legacy catalog/pairing/breaker JSON is decoded only at file-read
+boundaries; current in-memory records and new writes are numeric. Group archives
+must already contain numeric dates; legacy string-date archives are rejected
+without conversion or filesystem changes. Keep central and metadata backups for rollback, and rebuild summaries
 with the matching previous code if rolling back the host.
 
 ---
@@ -37,12 +38,12 @@ with the matching previous code if rolling back the host.
 
 NanoClaw uses **four kinds of SQLite database**, all on the host filesystem:
 
-| DB                   | Location                                                         | Writer    | Readers                            | Purpose                                                  |
-| -------------------- | ---------------------------------------------------------------- | --------- | ---------------------------------- | -------------------------------------------------------- |
-| **Central**          | `data/v2.db`                                                     | host      | host                               | Identity, permissions, routing, wiring — the admin plane |
-| **Session inbound**  | `data/v2-sessions/<agent_group_id>/<session_id>/inbound.db`      | host      | host                               | Durable host messages, routing, and host event journal   |
-| **Session outbound** | `data/v2-sessions/<agent_group_id>/<session_id>/outbound.db`     | host      | host                               | Durable runner output projected by the host              |
-| **Runner state**     | `data/v2-sessions/<agent_group_id>/<session_id>/runner-state/runner-state.db` | container | container                | Local bidirectional projection + runner event journal    |
+| DB                   | Location                                                                      | Writer    | Readers   | Purpose                                                  |
+| -------------------- | ----------------------------------------------------------------------------- | --------- | --------- | -------------------------------------------------------- |
+| **Central**          | `data/v2.db`                                                                  | host      | host      | Identity, permissions, routing, wiring — the admin plane |
+| **Session inbound**  | `data/v2-sessions/<agent_group_id>/<session_id>/inbound.db`                   | host      | host      | Durable host messages, routing, and host event journal   |
+| **Session outbound** | `data/v2-sessions/<agent_group_id>/<session_id>/outbound.db`                  | host      | host      | Durable runner output projected by the host              |
+| **Runner state**     | `data/v2-sessions/<agent_group_id>/<session_id>/runner-state/runner-state.db` | container | container | Local bidirectional projection + runner event journal    |
 
 **Single-writer rule.** Every SQLite file has exactly one writer. The host writes
 the central, inbound, and outbound stores. The container writes only
@@ -85,18 +86,18 @@ and paths live in `src/session-link.ts`.
 
 ## 3. Central vs. session: what goes where
 
-| Kind of data                   | Where                               | Why                                                        |
-| ------------------------------ | ----------------------------------- | ---------------------------------------------------------- |
-| Identities, roles, memberships | central                             | Stable, cross-session, rarely written                      |
-| Channel wiring, routing rules  | central                             | Admin plane                                                |
-| Destination ACL                | central (+ projection per session)  | Source of truth centrally; fast local lookup per session   |
-| Session registry (ids, status) | central                             | Host orchestrates lifecycle                                |
-| Approvals & durable questions  | central                             | Survive container restarts, admin-visible                  |
-| Dropped-message audit          | central                             | Global ops view                                            |
-| Inbound messages, retry state  | session `inbound.db`                | Per-session workload; host is sole writer                  |
-| Outbound messages, agent state | session `outbound.db`               | Host applies acknowledged runner events                    |
-| Delivery outcome               | session `inbound.db` (`delivered`)  | Host writes and resolves edit/reaction targets             |
-| Processing status              | runner journal → host `outbound.db` | Container can't write to `inbound.db`                      |
+| Kind of data                   | Where                               | Why                                                      |
+| ------------------------------ | ----------------------------------- | -------------------------------------------------------- |
+| Identities, roles, memberships | central                             | Stable, cross-session, rarely written                    |
+| Channel wiring, routing rules  | central                             | Admin plane                                              |
+| Destination ACL                | central (+ projection per session)  | Source of truth centrally; fast local lookup per session |
+| Session registry (ids, status) | central                             | Host orchestrates lifecycle                              |
+| Approvals & durable questions  | central                             | Survive container restarts, admin-visible                |
+| Dropped-message audit          | central                             | Global ops view                                          |
+| Inbound messages, retry state  | session `inbound.db`                | Per-session workload; host is sole writer                |
+| Outbound messages, agent state | session `outbound.db`               | Host applies acknowledged runner events                  |
+| Delivery outcome               | session `inbound.db` (`delivered`)  | Host writes and resolves edit/reaction targets           |
+| Processing status              | runner journal → host `outbound.db` | Container can't write to `inbound.db`                    |
 
 Heuristic: if the value is a message, routing projection, or runtime ack, it goes per-session. Everything else is central.
 
@@ -127,12 +128,12 @@ session schema to stopped host session DBs to install those additive indexes.
    host-owned; `runner-state.db` is runner-owned. No SQLite file has cross-boundary writers.
 2. **Seq parity.** Even = host, odd = container. Disjoint namespace across both tables lets the agent reference any message by `seq` alone. Details in [db-session.md §3](db-session.md#3-sequence-numbering-invariant).
 3. **Projection pattern.** Host messages, destinations, and routing are
-  journaled in `inbound.db` and projected into `runner-state.db` over the link.
+   journaled in `inbound.db` and projected into `runner-state.db` over the link.
 4. **Acknowledged bidirectional channel.** Each side journals durable mutations
-  and ACKs only after the other side commits them locally.
+   and ACKs only after the other side commits them locally.
 5. **One live-status channel.** A private per-session Unix socket replaces the
    former signal files and avoids serializing live UI updates behind DB writes.
-6. **Explicit storage lifecycle.** Central migrations define central DDL; fresh
+6. **Explicit storage lifecycle.** A canonical baseline initializes central DDL; fresh
    session/runner/native stores create the current complete shape. Existing old
    stores fail version checks and require stopped-host/stopped-runner cutover.
 7. **ACL = row existence.** `agent_destinations` membership is itself the permission — no separate `permissions` table.
@@ -141,26 +142,26 @@ session schema to stopped host session DBs to install those additive indexes.
 
 ## 6. Readers & writers — at a glance
 
-| Table                    | DB       | Writer(s)                                              | Reader(s)                                      |
-| ------------------------ | -------- | ------------------------------------------------------ | ---------------------------------------------- |
-| `agent_groups`           | central  | `src/db/agent-groups.ts`                               | session resolver, delivery, router             |
-| `messaging_groups`       | central  | `src/db/messaging-groups.ts`, channel setup            | router, delivery, session resolver             |
-| `messaging_group_agents` | central  | `src/db/messaging-groups.ts`                           | router                                         |
-| `users`                  | central  | `src/db/users.ts`, auth flows                          | permission checks                              |
-| `user_roles`             | central  | `src/db/user-roles.ts`                                 | `src/access.ts`, all permission gates          |
-| `agent_group_members`    | central  | `src/db/agent-group-members.ts`                        | membership checks                              |
-| `user_dms`               | central  | `src/user-dm.ts` (`ensureUserDm`)                      | approval + pairing delivery                    |
-| `sessions`               | central  | `src/db/sessions.ts`, `src/session-manager.ts`         | delivery, sweep, container runner              |
-| `interactions` | central | `src/db/interactions.ts`, specialized question/approval mutations | authorized conversation projection, operation handlers |
-| `agent_destinations`     | central  | `src/db/agent-destinations.ts`, migration 004 backfill | `writeDestinations()`, delivery ACL            |
-| `interaction_progress` | central | `src/modules/approvals/workflows.ts` | private account selection/recovery only; never public |
-| `unregistered_senders`   | central  | `src/db/dropped-messages.ts`                           | ops tooling                                    |
-| `chat_sdk_*`             | central  | `src/state-sqlite.ts`                                  | Chat SDK bridge                                |
-| `schema_version`         | central  | `src/db/migrations/index.ts`                           | migration runner                               |
-| `messages_in`            | inbound  | `src/db/session-db.ts`                                 | `container/agent-runner/src/db/messages-in.ts` |
-| `delivered`              | inbound  | `src/db/session-db.ts` (`markDelivered`)               | container edit/reaction targeting              |
-| `destinations`           | inbound  | `writeDestinations()` in `src/session-manager.ts`      | container routing / ACL                        |
-| `session_routing`        | inbound  | `writeSessionRouting()` in `src/session-manager.ts`    | container `send_message` defaults              |
-| `messages_out`           | outbound | `container/agent-runner/src/db/messages-out.ts`        | `src/delivery.ts` poll loop                    |
-| `processing_ack`         | outbound | `container/agent-runner/src/db/messages-in.ts`         | `src/host-sweep.ts` (`syncProcessingAcks`)     |
-| `session_state`          | outbound | `container/agent-runner/src/db/session-state.ts`       | container on startup                           |
+| Table                    | DB       | Writer(s)                                                         | Reader(s)                                              |
+| ------------------------ | -------- | ----------------------------------------------------------------- | ------------------------------------------------------ |
+| `agent_groups`           | central  | `src/db/agent-groups.ts`                                          | session resolver, delivery, router                     |
+| `messaging_groups`       | central  | `src/db/messaging-groups.ts`, channel setup                       | router, delivery, session resolver                     |
+| `messaging_group_agents` | central  | `src/db/messaging-groups.ts`                                      | router                                                 |
+| `users`                  | central  | `src/db/users.ts`, auth flows                                     | permission checks                                      |
+| `user_roles`             | central  | `src/db/user-roles.ts`                                            | `src/access.ts`, all permission gates                  |
+| `agent_group_members`    | central  | `src/db/agent-group-members.ts`                                   | membership checks                                      |
+| `user_dms`               | central  | `src/user-dm.ts` (`ensureUserDm`)                                 | approval + pairing delivery                            |
+| `sessions`               | central  | `src/db/sessions.ts`, `src/session-manager.ts`                    | delivery, sweep, container runner                      |
+| `interactions`           | central  | `src/db/interactions.ts`, specialized question/approval mutations | authorized conversation projection, operation handlers |
+| `agent_destinations`     | central  | `src/modules/agent-to-agent/db/agent-destinations.ts`             | `writeDestinations()`, delivery ACL                    |
+| `interaction_progress`   | central  | `src/modules/approvals/workflows.ts`                              | private account selection/recovery only; never public  |
+| `unregistered_senders`   | central  | `src/db/dropped-messages.ts`                                      | ops tooling                                            |
+| `chat_sdk_*`             | central  | `src/state-sqlite.ts`                                             | Chat SDK bridge                                        |
+| `schema_version`         | central  | `src/db/migrations/index.ts`                                      | migration runner                                       |
+| `messages_in`            | inbound  | `src/db/session-db.ts`                                            | `container/agent-runner/src/db/messages-in.ts`         |
+| `delivered`              | inbound  | `src/db/session-db.ts` (`markDelivered`)                          | container edit/reaction targeting                      |
+| `destinations`           | inbound  | `writeDestinations()` in `src/session-manager.ts`                 | container routing / ACL                                |
+| `session_routing`        | inbound  | `writeSessionRouting()` in `src/session-manager.ts`               | container `send_message` defaults                      |
+| `messages_out`           | outbound | `container/agent-runner/src/db/messages-out.ts`                   | `src/delivery.ts` poll loop                            |
+| `processing_ack`         | outbound | `container/agent-runner/src/db/messages-in.ts`                    | `src/host-sweep.ts` (`syncProcessingAcks`)             |
+| `session_state`          | outbound | `container/agent-runner/src/db/session-state.ts`                  | container on startup                                   |

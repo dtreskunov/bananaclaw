@@ -1,4 +1,4 @@
-import { INSTANT_COLUMNS } from '../db/storage-lifecycle.js';
+import { INSTANT_COLUMNS } from '../db/time.js';
 import { formatTimestamp } from '../time.js';
 
 const CLI_DATE_FIELDS = new Set([...INSTANT_COLUMNS, 'createdAt', 'expiresAt', 'resolvedAt']);

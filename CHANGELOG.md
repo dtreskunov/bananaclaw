@@ -21,6 +21,17 @@ All notable changes to NanoClaw will be documented in this file.
   startup data or mutations are admitted. No DB conversion or agent restart
   is needed. See [upgrade, verification and rollback](docs/ui.md#ui-timestamp-upgrade).
 
+- **Post-cutover database cleanup.** Fresh stores initialize direct integer
+  schemas; historical central rebuilds, runtime DDL rewriting and one-time
+  conversion tools are retired. Current-version stores keep their data and
+  migration history. Older installations must first use the
+  [archived cutover revision](docs/db-storage-cutover.md); version checks,
+  external timestamp boundaries, durable journals and rollback backups remain.
+
+- **[BREAKING] Retire legacy archive date conversion.** Group restore accepts
+  current numeric archive rows only; string-date archives fail without changing
+  records or renaming folders. See [format detection and rollback](docs/db-storage-cutover.md).
+
 - **[BREAKING]** SQLite maintained time instants now use checked INTEGER UTC
   epoch milliseconds across central, session, runner, native-provider and search
   stores. Existing stores require the explicit stopped-host/stopped-runner

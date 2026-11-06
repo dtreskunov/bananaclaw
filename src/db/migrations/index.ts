@@ -1,210 +1,72 @@
+import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 import { log } from '../../log.js';
-import { migration001 } from './001-initial.js';
-import { migration002 } from './002-chat-sdk-state.js';
-import { moduleAgentToAgentDestinations } from './module-agent-to-agent-destinations.js';
-import { moduleAgentToAgentDestinationsCreatedBy } from './module-agent-to-agent-destinations-created-by.js';
-import { migration008 } from './008-dropped-messages.js';
-import { migration009 } from './009-drop-pending-credentials.js';
-import { migration010 } from './010-engage-modes.js';
-import { migration011 } from './011-pending-sender-approvals.js';
-import { migration012 } from './012-channel-registration.js';
-import { migration013 } from './013-approval-render-metadata.js';
-import { migration014 } from './014-container-configs.js';
-import { migration015 } from './015-cli-scope.js';
-import { migration016 } from './016-ui.js';
-import { migration017 } from './017-ui-download-tokens.js';
-import { migration018 } from './018-identities.js';
-import { migration019 } from './019-web-identities.js';
-import { migration020 } from './020-oidc-and-approvals.js';
-import { migration021 } from './021-identity-link-challenges.js';
-import { migration022 } from './022-push-subscriptions.js';
-import { migration023 } from './023-unregistered-senders-uuid.js';
-import { migration024 } from './024-pending-user-approvals-partial-unique.js';
-import { migration025 } from './025-site-website.js';
-import { migration026 } from './026-user-onboarded.js';
-import { migration027 } from './027-messaging-group-instance.js';
-import { migration029 } from './029-shared-web-chats.js';
-import { migration030 } from './030-shared-web-destinations.js';
-import { migration031 } from './031-ui-private-web-sessions.js';
-import { migration032 } from './032-agent-email.js';
-import { migration033 } from './033-thread-forks.js';
-import { migration034 } from './034-voice-input-backend.js';
-import { migration035 } from './035-drop-legacy-transcription-config.js';
-import { moduleContainerConfigsDisabledSkills } from './module-container-configs-disabled-skills.js';
-import { moduleContainerConfigsPip } from './module-container-configs-pip.js';
-import { moduleContainerConfigsVoiceMode } from './module-container-configs-voice-mode.js';
-import { moduleContainerConfigsTranscriptionModel } from './module-container-configs-transcription-model.js';
-import { moduleContainerConfigsModelParams } from './module-container-configs-model-params.js';
-import { moduleContainerConfigsSmallModel } from './module-container-configs-small-model.js';
-import { moduleContainerConfigsUpstreamProvider } from './module-container-configs-upstream-provider.js';
-import { moduleContainerConfigsCredentialBackend } from './module-container-configs-credential-backend.js';
-import { moduleResendThreadRoots } from './module-resend-thread-roots.js';
-import { moduleCredentialConnections } from './module-credential-connections.js';
-import { migration044 } from './044-agent-vault-default.js';
-import { migration048 } from './048-agent-vault-only.js';
-import { migration049 } from './049-interactions.js';
-import { migration050 } from './050-thread-summaries.js';
-import { migration051 } from './051-conversation-reads.js';
-import { migration052 } from './052-integrity.js';
-import { migration053 } from './053-query-indexes.js';
-import { migration054 } from './054-domain-integrity.js';
+import { CENTRAL_BASELINE_MIGRATION_NAMES, CENTRAL_SCHEMA_SQL } from '../central-schema.js';
+import { assertStorageVersion, STORAGE_VERSION } from '../storage-lifecycle.js';
 import { transaction } from '../transaction.js';
-import { assertStorageVersion, convertStoreTimes, STORAGE_VERSION } from '../storage-lifecycle.js';
 
 export interface Migration {
-  version: number;
   name: string;
   up: (db: Database.Database) => void;
-  /**
-   * Run with foreign_keys=OFF. Required for table recreates (SQLite can't
-   * drop a table-level UNIQUE without DROP+RENAME, and DROP fails FK
-   * integrity when child rows exist — see migration 011's header).
-   * PRAGMA foreign_keys is a no-op inside a transaction, so the runner
-   * toggles it around the transaction and runs PRAGMA foreign_key_check
-   * inside it, so violations roll the migration back.
-   */
+  /** Table rebuilds need FK enforcement disabled outside their transaction. */
   disableForeignKeys?: boolean;
 }
 
-export const migrations: Migration[] = [
-  migration001,
-  migration002,
-  moduleAgentToAgentDestinations,
-  moduleAgentToAgentDestinationsCreatedBy,
-  migration008,
-  migration009,
-  migration010,
-  migration011,
-  migration012,
-  migration013,
-  migration014,
-  migration015,
-  migration016,
-  migration017,
-  migration018,
-  migration019,
-  migration020,
-  migration021,
-  migration022,
-  migration023,
-  migration024,
-  migration025,
-  migration026,
-  migration027,
-  migration029,
-  migration030,
-  migration031,
-  migration032,
-  migration033,
-  moduleResendThreadRoots,
-  moduleContainerConfigsPip,
-  moduleContainerConfigsVoiceMode,
-  moduleContainerConfigsTranscriptionModel,
-  moduleContainerConfigsModelParams,
-  moduleContainerConfigsSmallModel,
-  moduleContainerConfigsUpstreamProvider,
-  moduleContainerConfigsDisabledSkills,
-  migration034,
-  migration035,
-  moduleContainerConfigsCredentialBackend,
-  moduleCredentialConnections,
-  migration044,
-  migration048,
-  migration049,
-  migration050,
-  migration051,
-  migration052,
-  migration053,
-  migration054,
-];
-
-/** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a
- *  parent-table recreate (child tables aren't touched), so this JSON identity
- *  is a reliable before/after diff key. */
-interface FkViolation {
-  table: string;
-  rowid: number | null;
-  parent: string;
-  fkid: number;
-}
-
-const fkIdentity = (v: FkViolation): string =>
-  JSON.stringify({ table: v.table, rowid: v.rowid, parent: v.parent, fkid: v.fkid });
+/** Append future named migrations here, in application order. */
+export const migrations: Migration[] = [];
 
 export function runMigrations(db: Database.Database, list: Migration[] = migrations): void {
-  const managed = list === migrations;
-  const fresh = managed && db.pragma('user_version', { simple: true }) === 0;
-  if (managed) assertStorageVersion(db, 'central', true);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version INTEGER PRIMARY KEY,
-      name    TEXT NOT NULL,
-      applied TEXT NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_schema_version_name ON schema_version(name);
-  `);
+  if (db.inTransaction) throw new Error('Central migrations must own their transaction');
+  assertStorageVersion(db, 'central', true);
+  db.pragma('foreign_keys = ON');
 
-  // Uniqueness is keyed on `name`, not `version`. This lets module
-  // migrations (added later by install skills) pick arbitrary version
-  // numbers without coordinating across modules. `version` stays on
-  // the Migration object as an ordering hint within the barrel array;
-  // the stored `version` column is auto-assigned at insert time as an
-  // applied-order number.
-  const applied = new Set<string>(
-    (db.prepare('SELECT name FROM schema_version').all() as { name: string }[]).map((r) => r.name),
+  if (db.pragma('user_version', { simple: true }) === 0) {
+    transaction(db, () => {
+      db.exec(CENTRAL_SCHEMA_SQL);
+      db.prepare('INSERT INTO credential_gateway_identity(id,installation_id) VALUES(1,?)').run(randomUUID());
+      db.exec('INSERT INTO thread_summary_meta(id,ready,unread_ready) VALUES(1,1,1)');
+      const record = db.prepare('INSERT INTO schema_version(version,name,applied) VALUES(?,?,?)');
+      const appliedAt = Date.now();
+      for (const [index, name] of [...CENTRAL_BASELINE_MIGRATION_NAMES, 'central-baseline-v1'].entries()) {
+        record.run(index + 1, name, appliedAt);
+      }
+      db.pragma(`user_version = ${STORAGE_VERSION}`);
+    })();
+  }
+
+  const applied = new Set(
+    (db.prepare('SELECT name FROM schema_version').all() as { name: string }[]).map((row) => row.name),
   );
-  const pending = list.filter((m) => !applied.has(m.name));
-  if (pending.length === 0) return;
-
-  log.info('Running migrations', { count: pending.length });
-
-  for (const m of pending) {
-    // Table recreates need FK enforcement off for the DROP+RENAME window.
-    // The pragma must be toggled OUTSIDE the transaction (it's a silent
-    // no-op inside one); foreign_key_check runs INSIDE so a violating
-    // recreate rolls back atomically with nothing committed.
-    if (m.disableForeignKeys) db.pragma('foreign_keys = OFF');
+  for (const migration of list) {
+    if (applied.has(migration.name)) continue;
+    if (migration.disableForeignKeys) db.pragma('foreign_keys = OFF');
     try {
       transaction(db, () => {
-        // Snapshot violations BEFORE up() runs: live DBs can carry latent
-        // FK orphans (e.g. parents deleted through a FK-OFF sqlite3 CLI
-        // session — ensureUserDm tolerates exactly this at runtime). The
-        // migration must only fail for violations it INTRODUCED; throwing
-        // on pre-existing ones would crash-loop the host at every boot
-        // (runMigrations runs on startup) until manual DB surgery.
-        const preexisting = m.disableForeignKeys
-          ? new Set((db.pragma('foreign_key_check') as FkViolation[]).map(fkIdentity))
-          : null;
-        m.up(db);
-        if (m.disableForeignKeys && preexisting) {
-          const violations = db.pragma('foreign_key_check') as FkViolation[];
-          const introduced = violations.filter((v) => !preexisting.has(fkIdentity(v)));
-          const carried = violations.length - introduced.length;
-          if (carried > 0) {
-            log.warn('Pre-existing FK violations carried through migration (not introduced by it)', {
-              migration: m.name,
-              count: carried,
-            });
-          }
-          if (introduced.length > 0) {
-            throw new Error(`migration ${m.name} left FK violations: ${JSON.stringify(introduced.slice(0, 5))}`);
+        const preexisting = new Set(
+          migration.disableForeignKeys
+            ? (db.pragma('foreign_key_check') as unknown[]).map((row) => JSON.stringify(row))
+            : [],
+        );
+        migration.up(db);
+        if (migration.disableForeignKeys) {
+          const introduced = (db.pragma('foreign_key_check') as unknown[]).filter(
+            (row) => !preexisting.has(JSON.stringify(row)),
+          );
+          if (introduced.length) {
+            throw new Error(
+              `migration ${migration.name} left FK violations: ${JSON.stringify(introduced.slice(0, 5))}`,
+            );
           }
         }
-        const next = (
-          db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS v FROM schema_version').get() as { v: number }
-        ).v;
-        db.prepare('INSERT INTO schema_version (version, name, applied) VALUES (?, ?, ?)').run(
-          next,
-          m.name,
-          db.pragma('user_version', { simple: true }) === STORAGE_VERSION ? Date.now() : new Date().toISOString(),
-        );
+        db.prepare(
+          'INSERT INTO schema_version(version,name,applied) SELECT COALESCE(MAX(version),0)+1,?,? FROM schema_version',
+        ).run(migration.name, Date.now());
       })();
+      applied.add(migration.name);
     } finally {
-      if (m.disableForeignKeys) db.pragma('foreign_keys = ON');
+      if (migration.disableForeignKeys) db.pragma('foreign_keys = ON');
     }
-    log.info('Migration applied', { name: m.name });
+    log.info('Migration applied', { name: migration.name });
   }
-  if (fresh) convertStoreTimes(db);
 }
