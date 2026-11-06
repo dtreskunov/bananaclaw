@@ -18,6 +18,7 @@ registerResource({
       access: 'open',
       description: 'List retained approval interactions; filter --status pending for decisions awaiting a response.',
       handler: async (args) => {
+        if ('expires_at' in args) throw new Error('Interaction expiry filters are no longer supported');
         const selected = Object.entries(args).filter(([key]) => filters.includes(key));
         return queryInteractions<Approval>(
           `SELECT * FROM interactions WHERE kind!='question'
