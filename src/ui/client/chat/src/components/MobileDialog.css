@@ -103,12 +103,13 @@
 }
 .mobile-dialog-item.active .mobile-dialog-item-label { font-weight: 700; }
 .mobile-dialog-item-row { position: relative; }
-.mobile-dialog-item-row > .mobile-dialog-item { padding-left: 40px; }
-.mobile-dialog-item-badge { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); }
+.mobile-dialog-item-row .mobile-dialog-item-sublabel { padding-left: 20px; }
+.mobile-dialog-item-row > .mobile-dialog-item-badge { position: absolute; bottom: 10px; left: 12px; min-width: 14px; min-height: 14px; }
 .mobile-dialog-item-sublabel {
   grid-column: 1;
   grid-row: 2;
   min-width: 0;
+  min-height: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--muted);

@@ -20,6 +20,11 @@
   background: var(--muted);
   opacity: 0.3;
 }
+.activity-indicator.idle:not(.waiting) .activity-indicator-base {
+  width: 6px;
+  height: 6px;
+  opacity: 0.2;
+}
 .activity-indicator.running .activity-indicator-base {
   border: 1.5px solid currentColor;
   border-right-color: transparent;

@@ -119,7 +119,6 @@ export function ThreadRow({ t }: { t: Thread }) {
       onClick={onOpen}
     >
       <div class="title">
-        <ThreadAttention thread={t} />
         {origin
           ? <span
               class={'fork-pill' + (origin.deleted ? ' orphan' : '')}
@@ -150,6 +149,7 @@ export function ThreadRow({ t }: { t: Thread }) {
         ) : null}
       </div>
       <div class="meta">
+        <ThreadAttention thread={t} />
         <span><RelativeTime ts={t.lastActivityAt} />{subTrailer}{costStr}</span>
       </div>
       <div class="thread-actions">
@@ -172,11 +172,11 @@ export function DmRow({ t }: { t: Thread }) {
   return (
     <div class={'thread dm' + (active ? ' active' : '') + (t.unread ? ' is-unread' : '')} data-id={t.threadId} onClick={onOpen}>
       <div class="title">
-        <ThreadAttention thread={t} />
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
         <span class="title-text">{t.unread ? <span class="unread-label">Unread. </span> : null}{meta.label}</span>
       </div>
       <div class="meta">
+        <ThreadAttention thread={t} />
         <span>
           <RelativeTime ts={t.lastActivityAt} />
           {t.counterparty ? ' \u00b7 ' + t.counterparty : ''}

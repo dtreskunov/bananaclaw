@@ -109,7 +109,8 @@ function rowParts(Row: typeof ThreadRow, thread: Thread) {
   const row = Row({ t: thread });
   const children = toChildArray(row.props.children) as VNode<{ class?: string }>[];
   const title = children.find((node) => node.props.class === 'title')!;
-  const marker = toChildArray(title.props.children)[0] as VNode<{ thread: Thread }>;
+  const meta = children.find((node) => node.props.class === 'meta')!;
+  const marker = toChildArray(meta.props.children)[0] as VNode<{ thread: Thread }>;
   const indicator = (
     marker.type as (props: { thread: Thread }) => VNode<{
       children: VNode<ComponentProps<typeof ActivityIndicator>>;
@@ -120,7 +121,7 @@ function rowParts(Row: typeof ThreadRow, thread: Thread) {
       onClick: (event: { stopPropagation: () => void }) => void;
     }>
   )(marker.props);
-  return { row, title, indicator, meta: children.find((node) => node.props.class === 'meta')! };
+  return { row, title, indicator, meta };
 }
 
 describe('shared activity presentation', () => {
@@ -161,15 +162,23 @@ describe('shared activity presentation', () => {
   });
 });
 
-describe.each([ThreadRow, DmRow])('thread/DM title activity (%s)', (Row) => {
+describe.each([ThreadRow, DmRow])('thread/DM status activity (%s)', (Row) => {
   it.each([
     { activity: 'idle' as const },
     { activity: 'running' as const },
     { activity: 'idle' as const, waiting: true },
     { activity: 'running' as const, waiting: true },
-  ])('places $activity/$waiting before lineage/channel/title, never in metadata', (status) => {
-    const { indicator, meta } = rowParts(Row, testThread(status));
-    expect(toChildArray(meta.props.children)).toHaveLength(1);
+  ])('places $activity/$waiting before the time/count metadata, not in the title', (status) => {
+    const { indicator, title, meta } = rowParts(Row, testThread(status));
+    const [marker, metadata] = toChildArray(meta.props.children) as [VNode<{ thread: Thread }>, VNode];
+    expect(marker.props.thread).toMatchObject(status);
+    expect(metadata.type).toBe('span');
+    expect(toChildArray(meta.props.children)).toHaveLength(2);
+    expect(
+      toChildArray(title.props.children).some(
+        (child) => typeof child === 'object' && child !== null && child.type === marker.type,
+      ),
+    ).toBe(false);
     const component = (status.waiting ? indicator.props.children : indicator) as VNode<
       ComponentProps<typeof ActivityIndicator>
     >;

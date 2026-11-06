@@ -1327,19 +1327,21 @@ header .mobile-only {
 .mobile-dialog-item-row {
   position: relative;
 }
-.mobile-dialog-item-row > .mobile-dialog-item {
-  padding-left: 40px;
+.mobile-dialog-item-row .mobile-dialog-item-sublabel {
+  padding-left: 20px;
 }
-.mobile-dialog-item-badge {
+.mobile-dialog-item-row > .mobile-dialog-item-badge {
   position: absolute;
-  top: 50%;
+  bottom: 10px;
   left: 12px;
-  transform: translateY(-50%);
+  min-width: 14px;
+  min-height: 14px;
 }
 .mobile-dialog-item-sublabel {
   grid-column: 1;
   grid-row: 2;
   min-width: 0;
+  min-height: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--muted);
@@ -1541,12 +1543,19 @@ nav.tab-bar-strip.group-strip {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 1.2em;
+  gap: 4px;
+  min-height: 14px;
   font-size: var(--font-2xs);
   font-weight: 400;
   line-height: 1.2;
   letter-spacing: 0.01em;
   color: var(--muted);
+}
+.tab-item-status > .tab-item-badge,
+.tab-bar-dropdown-group > .tab-item-badge {
+  min-width: 14px;
+  min-height: 14px;
+  flex: none;
 }
 .tab-item > .tab-item-sublabel {
   min-height: 1.2em;
@@ -1593,7 +1602,13 @@ nav.tab-bar-strip.group-strip {
   .tab-bar-dropdown-group {
     display: flex;
     align-items: center;
-    gap: 4px;
+    position: relative;
+  }
+  .tab-bar-dropdown-group > .tab-item-badge {
+    position: absolute;
+    left: 10px;
+    bottom: 4px;
+    z-index: 1;
   }
   .tab-bar-dropdown {
     display: inline-flex;
@@ -1615,11 +1630,29 @@ nav.tab-bar-strip.group-strip {
   .tab-bar-dropdown:hover {
     background: var(--wash);
   }
+  .tab-bar-dropdown-content {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-self: stretch;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+  .tab-bar-dropdown-status {
+    display: flex;
+    align-items: center;
+    min-height: 14px;
+    font-size: var(--font-2xs);
+    line-height: 1.2;
+  }
+  .tab-bar-dropdown-status.has-badge {
+    padding-left: 18px;
+  }
   .tab-bar-dropdown-label {
     display: flex;
     align-items: center;
     gap: 4px;
-    flex: 1;
     min-width: 0;
     font-size: var(--font-lg);
     font-weight: 600;
@@ -1671,6 +1704,11 @@ nav.tab-bar-strip.group-strip {
 .activity-indicator.idle .activity-indicator-base {
   background: var(--muted);
   opacity: 0.3;
+}
+.activity-indicator.idle:not(.waiting) .activity-indicator-base {
+  width: 6px;
+  height: 6px;
+  opacity: 0.2;
 }
 .activity-indicator.running .activity-indicator-base {
   border: 1.5px solid currentColor;
@@ -1936,9 +1974,6 @@ nav.tab-bar-strip.group-strip {
   align-items: center;
   min-width: 0;
 }
-.threads-rail .thread .title > :is(.activity-indicator, .activity-action) {
-  margin-right: 6px;
-}
 .threads-rail .thread .title .title-text {
   min-width: 0;
   flex: 0 1 auto;
@@ -1951,11 +1986,12 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
   display: flex;
   align-items: center;
+  gap: 6px;
   font-size: var(--font-xs);
   color: var(--muted);
   margin-top: 2px;
 }
-.threads-rail .thread .meta > span:not(.attention-separator) {
+.threads-rail .thread .meta > span:not(.activity-indicator) {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;

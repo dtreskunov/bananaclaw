@@ -14,27 +14,40 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('leading tab indicators', () => {
-  it('places waiting before the name without nesting action buttons or changing selection', () => {
+describe('status-line tab indicators', () => {
+  it('places waiting before metadata without nesting action buttons or changing selection', () => {
     const select = vi.fn();
     const badge = vi.fn();
     const root = TabBar({
-      ariaLabel: 'Agents', activeId: 'g', onSelect: select,
-      items: [{
-        id: 'g', label: 'Group', sublabel: 'just now', badge: '?',
-        badgeLabel: 'Open oldest request in Group', onBadgeClick: badge,
-      }],
+      ariaLabel: 'Agents',
+      activeId: 'g',
+      onSelect: select,
+      items: [
+        {
+          id: 'g',
+          label: 'Group',
+          sublabel: 'just now',
+          badge: '?',
+          badgeLabel: 'Open oldest request in Group',
+          onBadgeClick: badge,
+        },
+      ],
     });
     const [nav, dropdown] = root.props.children;
     const group = nav.props.children[0][0];
     const [heading, status] = group.props.children;
-    const [action, tab] = heading.props.children;
+    const tab = heading.props.children;
+    const [action, metadata] = status.props.children;
     expect(action.type).toBe('button');
     expect(tab.props.role).toBe('tab');
     expect(tab.props.children.props.children).toBe('Group');
-    expect(status.props.children.props.children).toBe('just now');
+    expect(metadata.props.children).toBe('just now');
     expect(dropdown.props.children[0].props['aria-label']).toBe('Open oldest request in Group');
     expect(dropdown.props.children[1].props['aria-haspopup']).toBe('dialog');
+    const [dropdownLabel, dropdownStatus] = dropdown.props.children[1].props.children[0].props.children;
+    expect(dropdownLabel.props.children.props.children).toBe('Group');
+    expect(dropdownStatus.props.class).toBe('tab-bar-dropdown-status has-badge');
+    expect(dropdownStatus.props.children.props.children).toBe('just now');
     const event = { stopPropagation: vi.fn() };
     action.props.onClick(event);
     expect(badge).toHaveBeenCalledOnce();
@@ -48,7 +61,9 @@ describe('leading tab indicators', () => {
     hooks.sheetOpen = true;
     const badge = vi.fn();
     const root = TabBar({
-      ariaLabel: 'Agents', activeId: 'g', onSelect: vi.fn(),
+      ariaLabel: 'Agents',
+      activeId: 'g',
+      onSelect: vi.fn(),
       items: [{ id: 'g', label: 'Group', badge: '?', onBadgeClick: badge }],
     });
     const sheet = root.props.children[2];
@@ -59,26 +74,36 @@ describe('leading tab indicators', () => {
     expect(badge).toHaveBeenCalledOnce();
   });
 
-  it('places mobile waiting icons before the row button with independent disabled state', () => {
+  it('keeps mobile waiting icons independent and reserves their status row without metadata', () => {
     const item = MobileDialogItem({
-      label: 'Group', badge: '?', badgeLabel: 'Last known waiting',
-      onBadgeClick: vi.fn(), badgeDisabled: true,
+      label: 'Group',
+      badge: '?',
+      badgeLabel: 'Last known waiting',
+      onBadgeClick: vi.fn(),
+      badgeDisabled: true,
     });
     expect(item.type).toBe('div');
     expect(toChildArray(item.props.children)).toMatchObject([
       { type: 'button', props: { disabled: true, 'aria-label': 'Last known waiting' } },
       { type: 'button', props: { class: 'mobile-dialog-item' } },
     ]);
+    const selection = toChildArray(item.props.children)[1] as ReturnType<typeof MobileDialogItem>;
+    expect(selection.props.children[1].props.class).toBe('mobile-dialog-item-sublabel');
   });
 
-  it('keeps idle/running passive before names in desktop, dropdown and mobile sheet', () => {
+  it('keeps idle/running passive in desktop, dropdown and mobile sheet status rows', () => {
     hooks.sheetOpen = true;
     const root = TabBar({
-      ariaLabel: 'Agents', activeId: 'g', onSelect: vi.fn(),
+      ariaLabel: 'Agents',
+      activeId: 'g',
+      onSelect: vi.fn(),
       items: [{ id: 'g', label: 'Group', badge: 'icon' }],
     });
     const [nav, dropdown, sheet] = root.props.children;
-    expect(nav.props.children[0][0].props.children[0].props.children[0].type).toBe('span');
+    const [heading, status] = nav.props.children[0][0].props.children;
+    expect(heading.props.children.type).toBe('button');
+    expect(status.props.children[0].type).toBe('span');
+    expect(status.props.children[0].props.children).toBe('icon');
     expect(dropdown.props.children[0].type).toBe('span');
     const dialog = sheet.type(sheet.props);
     const item = dialog.props.children.props.children[0][0];
@@ -86,14 +111,20 @@ describe('leading tab indicators', () => {
     expect(toChildArray(row.props.children)[0]).toMatchObject({ type: 'span', props: { children: 'icon' } });
   });
 
-  it('shows selected admin-only activity before the mobile dropdown without a desktop tab', () => {
+  it('shows selected admin-only activity in the mobile dropdown status without a desktop tab', () => {
     const root = TabBar({
-      ariaLabel: 'Agents', activeId: 'admin', onSelect: vi.fn(), items: [],
+      ariaLabel: 'Agents',
+      activeId: 'admin',
+      onSelect: vi.fn(),
+      items: [],
       mobileFallbackItem: { id: 'admin', label: 'Admin agent', badge: '?', onBadgeClick: vi.fn() },
     });
     const [nav, dropdown] = root.props.children;
     expect(nav.props.children[0]).toHaveLength(0);
     expect(dropdown.props.children[0].props.children).toBe('?');
     expect(dropdown.props.children[1].type).toBe('button');
+    expect(dropdown.props.children[1].props.children[0].props.children[1].props.class).toBe(
+      'tab-bar-dropdown-status has-badge',
+    );
   });
 });

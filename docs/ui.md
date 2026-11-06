@@ -84,15 +84,18 @@ are separate native buttons, not nested inside the agent/thread selection
 control. Navigation focuses the existing question or approval card and does not
 steal focus on later refreshes. There is no floating attention control.
 
-Threads and agent names use the same leading activity icon: a subtle muted
-circle for idle, a blue running ring/spinner, and a stationary `?` overlay when
-input is waiting. Waiting does not hide simultaneous execution. Only the ring
+Threads and agents use the same activity icon: a subtle muted
+dot for idle, a blue running ring/spinner, and a stationary `?` overlay when
+input is waiting. Idle-only dots are smaller and fainter than waiting indicators.
+Waiting does not hide simultaneous execution. Only the ring
 rotates. This compact busy ring is an essential progress cue and remains
 animated even with reduced motion enabled; other reduced-motion behavior is
 unchanged. Staleness mutes the indicator without freezing its running ring.
 Waiting remains a separate native clickable control, with a larger hit target
 and visible keyboard focus. Agent tabs, the selected mobile dropdown and picker
-rows place the icon before the name, not in the secondary status line. There is
+rows, including thread and DM rows, place the icon in the secondary status line
+before the relative activity time and message/thread counts. Channel, branch
+and scheduled-task badges stay beside thread titles. There is
 no visible `N attn` badge, activity text label or link-styled waiting action.
 
 Web sends make both the thread and agent icons busy immediately, before the

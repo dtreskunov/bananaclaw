@@ -78,7 +78,9 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
   color: inherit;
 }
 .tab-item-heading > .tab-item:hover { background: transparent; color: inherit; }
-.tab-item-status { display: flex; align-items: center; justify-content: center; min-height: 1.2em; font-size: var(--font-2xs); font-weight: 400; line-height: 1.2; letter-spacing: 0.01em; color: var(--muted); }
+.tab-item-status { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 14px; font-size: var(--font-2xs); font-weight: 400; line-height: 1.2; letter-spacing: 0.01em; color: var(--muted); }
+.tab-item-status > .tab-item-badge,
+.tab-bar-dropdown-group > .tab-item-badge { min-width: 14px; min-height: 14px; flex: none; }
 .tab-item > .tab-item-sublabel { min-height: 1.2em; display: flex; align-items: center; }
 .tab-item-label {
   font-size: var(--font-base);
@@ -109,7 +111,8 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
 /* ---- Mobile: hide the strip, show the dropdown button ---- */
 @media (max-width: 720px) {
   .tab-bar-strip { display: none; }
-  .tab-bar-dropdown-group { display: flex; align-items: center; gap: 4px; }
+  .tab-bar-dropdown-group { display: flex; align-items: center; position: relative; }
+  .tab-bar-dropdown-group > .tab-item-badge { position: absolute; left: 10px; bottom: 4px; z-index: 1; }
 
   .tab-bar-dropdown {
     display: inline-flex;
@@ -129,11 +132,13 @@ nav.tab-bar-strip.group-strip { margin-bottom: -9px; }
     flex: 1;
   }
   .tab-bar-dropdown:hover { background: var(--wash); }
+  .tab-bar-dropdown-content { display: flex; flex-direction: column; justify-content: space-between; align-self: stretch; gap: 2px; flex: 1; min-width: 0; }
+  .tab-bar-dropdown-status { display: flex; align-items: center; min-height: 14px; font-size: var(--font-2xs); line-height: 1.2; }
+  .tab-bar-dropdown-status.has-badge { padding-left: 18px; }
   .tab-bar-dropdown-label {
     display: flex;
     align-items: center;
     gap: 4px;
-    flex: 1;
     min-width: 0;
     font-size: var(--font-lg);
     font-weight: 600;

@@ -61,7 +61,7 @@ interface TabBarProps {
 function tabBadge(item: TabItem) {
   if (item.badge == null || item.badge === false) return null;
   return item.onBadgeClick ? (
-    <button type="button" class="msg-action-btn tab-item-badge" disabled={item.badgeDisabled}
+    <button type="button" class="msg-action-btn tab-item-badge activity-dot-action" disabled={item.badgeDisabled}
       aria-label={item.badgeLabel} title={item.badgeLabel}
       onClick={(event) => { event.stopPropagation(); item.onBadgeClick?.(); }}>
       {item.badge}
@@ -111,7 +111,6 @@ export function TabBar(props: TabBarProps): JSX.Element {
           return (
             <div class={`tab-item-group${isActive ? ' active' : ''}`} key={it.id} onClick={() => onSelect(it.id)}>
               <div class="tab-item-heading">
-                {tabBadge(it)}
                 <button
                   type="button"
                   role="tab"
@@ -122,8 +121,9 @@ export function TabBar(props: TabBarProps): JSX.Element {
                   <span class="tab-item-label">{it.label}</span>
                 </button>
               </div>
-              {it.sublabel || it.reserveSublabel ? (
+              {it.badge || it.sublabel || it.reserveSublabel ? (
                 <div class="tab-item-status">
+                  {tabBadge(it)}
                   <span class="tab-item-sublabel" aria-hidden={it.sublabel ? undefined : 'true'}>
                     {it.sublabel}
                   </span>
@@ -161,7 +161,14 @@ export function TabBar(props: TabBarProps): JSX.Element {
           aria-expanded={sheetOpen}
           onClick={() => setSheetOpen(true)}
         >
-          <span class="tab-bar-dropdown-label"><span class="tab-bar-dropdown-text">{dropdownLabel}</span></span>
+          <span class="tab-bar-dropdown-content">
+            <span class="tab-bar-dropdown-label"><span class="tab-bar-dropdown-text">{dropdownLabel}</span></span>
+            {activeItem?.badge || activeItem?.sublabel ? (
+              <span class={`tab-bar-dropdown-status${activeItem.badge ? ' has-badge' : ''}`}>
+                <span class="tab-item-sublabel">{activeItem.sublabel}</span>
+              </span>
+            ) : null}
+          </span>
           <span class="tab-bar-dropdown-caret" aria-hidden="true">{'\u25BE'}</span>
         </button>
       </div>
