@@ -22475,7 +22475,7 @@ function ActivityIndicator({ status, description }) {
       title: label,
       children: [
         /* @__PURE__ */ u4("span", { class: "activity-indicator-base", "aria-hidden": "true" }),
-        status.waiting ? /* @__PURE__ */ u4("span", { class: "activity-indicator-question", "aria-hidden": "true", children: "?" }) : null
+        status.waiting ? /* @__PURE__ */ u4("span", { class: "activity-indicator-dot", "aria-hidden": "true" }) : null
       ]
     }
   );

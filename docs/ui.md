@@ -105,8 +105,9 @@ control. Navigation focuses the existing question or approval card and does not
 steal focus on later refreshes. There is no floating attention control.
 
 Threads and agents use the same activity icon: a subtle muted
-dot for idle, a blue running ring/spinner, and a stationary `?` overlay when
-input is waiting. Idle-only dots are smaller and fainter than waiting indicators.
+dot for idle, a blue running ring/spinner, and a stationary amber dot when
+input is waiting. Idle and waiting dots are both 6px, small enough to fit inside
+the running ring; idle dots are fainter. Idle waiting shows only the amber dot.
 Waiting does not hide simultaneous execution. Only the ring
 rotates. This compact busy ring is an essential progress cue and remains
 animated even with reduced motion enabled; other reduced-motion behavior is
@@ -1808,13 +1809,14 @@ the server store; HTTP acceptance does not prove a command took effect.
 
 - **Detect:** protocol-13 clients hide idle and replace running with waiting;
   agent status appears as a secondary text label rather than a leading icon.
-- **Why:** independent execution and waiting state allows the same question-mark
-  overlay on either an idle circle or a running spinner.
+- **Why:** independent execution and waiting state allows the same waiting dot
+  with or without a running spinner.
 - **Fix:** deploy matching host and rebuilt chat assets, restart the host and
   reload browsers for protocol 14. No DB migration, summary backfill, runner
   rebuild or credential changes are needed after the thread-summary upgrade.
-- **Verify:** idle circles are visible and subtle; running rings rotate, with a
-  stationary `?` on either base when waiting. Icons precede thread and agent
+- **Verify:** idle dots are visible and subtle; running rings rotate, with a
+  stationary amber dot inside when waiting. Idle and waiting dots are the same
+  size. Icons precede thread and agent
   names, including the selected dropdown and mobile picker. Unselected agents
   update via small patches. Waiting opens the oldest actionable request;
   disconnection disables actions without fabricating idle, while stale execution

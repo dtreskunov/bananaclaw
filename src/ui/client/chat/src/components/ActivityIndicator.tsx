@@ -37,7 +37,7 @@ export function ActivityIndicator({ status, description }: {
       title={label}
     >
       <span class="activity-indicator-base" aria-hidden="true" />
-      {status.waiting ? <span class="activity-indicator-question" aria-hidden="true">?</span> : null}
+      {status.waiting ? <span class="activity-indicator-dot" aria-hidden="true" /> : null}
     </span>
   );
 }

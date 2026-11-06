@@ -135,13 +135,15 @@ describe('shared activity presentation', () => {
     ]);
   });
 
-  it.each(['idle', 'running'] as const)('overlays a stationary question mark on %s when waiting', (activity) => {
+  it.each(['idle', 'running'] as const)('overlays a stationary dot on %s when waiting', (activity) => {
     const node = ActivityIndicator({ status: { activity, waiting: true } })!;
     expect(node.props.class).toBe(`activity-indicator ${activity} waiting`);
     expect(toChildArray(node.props.children)).toMatchObject([
       { props: { class: 'activity-indicator-base' } },
-      { props: { class: 'activity-indicator-question', children: '?', 'aria-hidden': 'true' } },
+      { type: 'span', props: { class: 'activity-indicator-dot', 'aria-hidden': 'true' } },
     ]);
+    const dot = toChildArray(node.props.children)[1] as VNode;
+    expect(toChildArray(dot.props.children)).toEqual([]);
     expect(node.props['aria-label']).toContain('Waiting for input');
   });
 

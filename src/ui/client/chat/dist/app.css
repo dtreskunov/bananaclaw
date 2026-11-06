@@ -1701,13 +1701,13 @@ nav.tab-bar-strip.group-strip {
   height: 12px;
   border-radius: 50%;
 }
-.activity-indicator.idle .activity-indicator-base {
-  background: var(--muted);
-  opacity: 0.3;
-}
-.activity-indicator.idle:not(.waiting) .activity-indicator-base {
+.activity-indicator.idle .activity-indicator-base,
+.activity-indicator-dot {
   width: 6px;
   height: 6px;
+}
+.activity-indicator.idle:not(.waiting) .activity-indicator-base {
+  background: var(--muted);
   opacity: 0.2;
 }
 .activity-indicator.running .activity-indicator-base {
@@ -1715,14 +1715,13 @@ nav.tab-bar-strip.group-strip {
   border-right-color: transparent;
   animation: activity-spin 0.8s linear infinite;
 }
-.activity-indicator-question {
+.activity-indicator-dot {
   position: absolute;
+  border-radius: 50%;
+  background: currentColor;
   color: var(--activity-status-queued);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
 }
-.activity-indicator.stale .activity-indicator-question {
+.activity-indicator.stale .activity-indicator-dot {
   color: var(--muted);
 }
 @keyframes activity-spin {
