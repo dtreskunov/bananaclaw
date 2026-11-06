@@ -426,6 +426,20 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(events)).not.toContain('PRIVATE_');
   });
 
+  it.each([401, 403])('names the API host and credential action for HTTP %i', async status => {
+    apiFailures = [{
+      status, message: 'Unauthorized',
+      body: { error: { message: 'Unauthorized' }, private: 'PRIVATE_RESPONSE' },
+    }];
+    const events = await collect(new NativeProvider({ model: 'local/stub' }));
+    expect(requests).toHaveLength(1);
+    expect(events).toContainEqual({
+      type: 'error', retryable: false,
+      message: `Unauthorized (HTTP ${status} · ${new URL(requestUrls[0]).host}). Check Credentials and this agent's access.`,
+    });
+    expect(JSON.stringify(events)).not.toContain('PRIVATE_RESPONSE');
+  });
+
   it.each([
     undefined,
     {},

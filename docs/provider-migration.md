@@ -9,6 +9,13 @@ NanoClaw's runtime does not migrate anything when you switch. Provider-neutral s
 1. **The target provider is installed** — run its `/add-<provider>` skill and rebuild the container image (`./container/build.sh`). If the provider isn't installed (or the name is a typo), the container fails at boot and the host surfaces its last words in the logs: look for `Container exited non-zero` with a `stderrTail` like `Unknown provider: codexx. Registered: claude, codex`.
 2. **Auth is configured** — each provider documents its own auth in its install skill (for Codex: a ChatGPT-subscription or API-key secret in the Agent Vault vault).
 
+In Agent Settings, the model fields show the effective API hostname and a
+**Credentials** shortcut for supported HTTPS transports. The shortcut opens your
+existing matching connection, or prefills a new connection's API URL pattern and
+authentication method, without discarding model edits. Keys remain personal;
+grant the agent access explicitly using the existing Credentials table.
+Native HTTP 401/403 errors also name the destination host.
+
 ## Switching
 
 ```bash

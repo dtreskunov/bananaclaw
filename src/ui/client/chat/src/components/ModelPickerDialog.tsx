@@ -15,6 +15,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { JSX } from 'preact';
 import { isMobile } from '../state';
 import { MobileDialog } from './MobileDialog';
+import { CredentialsContent } from './CredentialsPage';
+import { credentialRequest, errorMessage } from './CredentialsApi';
+import { showToast } from './Toast';
+import type { AccessRequirements } from '../../../../shared/access-authentication';
 
 // ── types ─────────────────────────────────────────────────────────────────
 
@@ -44,6 +48,7 @@ interface ModelsResponse {
 export interface ModelPickerDialogProps {
   /** Current model value (bare id). */
   value: string | null;
+  fallbackValue?: string | null;
   /** Provider to fetch models for. */
   provider: string | null;
   /** Placeholder text when no model is selected. */
@@ -170,6 +175,7 @@ function fetchModels(url: string): Promise<{ ok: boolean; data: ModelsResponse }
 
 export function ModelPickerDialog({
   value,
+  fallbackValue,
   provider,
   placeholder,
   disabled,
@@ -183,6 +189,24 @@ export function ModelPickerDialog({
   const [models, setModels] = useState<ModelSuggestion[]>([]);
   const [source, setSource] = useState<ModelsResponse['source']>('unavailable');
   const [loading, setLoading] = useState(false);
+  const [connection, setConnection] = useState<AccessRequirements | null>(null);
+  const [editingConnection, setEditingConnection] = useState<AccessRequirements | null>(null);
+  const effectiveModel = value || fallbackValue;
+
+  useEffect(() => {
+    setConnection(null);
+    if (!provider || !effectiveModel) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ provider, model: effectiveModel });
+    void credentialRequest<{ connection: AccessRequirements | null }>(
+      `${apiBasePath}/model-connection?${params}`, 'GET', undefined, controller.signal,
+    ).then(({ connection }) => {
+      if (!controller.signal.aborted) setConnection(connection);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) showToast(errorMessage(error), 'err');
+    });
+    return () => controller.abort();
+  }, [provider, effectiveModel, apiBasePath]);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -358,6 +382,13 @@ export function ModelPickerDialog({
         </span>
         <span class="mpd-trigger-icon">▾</span>
       </button>
+      {connection ? <p class="group-admin-help">
+        API: <span title={connection.resource_url}>{new URL(connection.resource_url).host}</span>
+        {' · '}<button type="button" class="ga-cred-link" disabled={disabled}
+          onClick={() => setEditingConnection(connection)}>Credentials</button>
+      </p> : null}
+      {editingConnection ? <CredentialsContent
+        initialRequest={editingConnection} onClose={() => setEditingConnection(null)} /> : null}
 
       {/* Dialog */}
       {open && (

@@ -239,6 +239,16 @@ export async function listNativeModels(filter?: ModelsDevFilter): Promise<Models
   return listModelsDevModels(filter, isNativeCompatible, nativeInputModalities);
 }
 
+export async function modelEndpoint(upstream: string, modelId: string): Promise<{ api?: string; npm?: string } | null> {
+  const provider = (await fetchModelsDev())?.[upstream];
+  if (!provider) return null;
+  const model = provider.models?.[modelId];
+  return {
+    api: model?.provider?.api ?? provider.api,
+    npm: model?.provider?.npm ?? provider.npm,
+  };
+}
+
 /**
  * Infer the upstream provider from a canonical wire id.
  *

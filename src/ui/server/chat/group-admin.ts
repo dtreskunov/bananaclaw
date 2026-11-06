@@ -75,6 +75,7 @@ import { recordAdminAction } from './audit.js';
 import { listImages } from './image-catalog.js';
 import { bareIdForResponse, dbValueFromBareId, getModelDetails, listModelsForProvider } from './models-catalog.js';
 import { resolveUpstreamForWireId } from './models-dev-catalog.js';
+import { getModelConnection } from './model-connection.js';
 import { listAvailableSkills, type AvailableSkill } from './skill-catalog.js';
 import { groupSkillRoots } from '../../../skills/registry.js';
 import { McpAuthenticationError, parseMcpAuthentication } from '../../shared/mcp-authentication.js';
@@ -219,6 +220,16 @@ async function dispatch(
   }
 
   if (rest === '/models' && method === 'GET') return handleListModels(req, res);
+  if (rest === '/model-connection' && method === 'GET') {
+    const params = new URL(req.url || '/', 'http://localhost').searchParams;
+    const provider = params.get('provider') || '';
+    const model = params.get('model') || '';
+    if (!VALID_PROVIDERS.includes(provider) || !model) throw new BadRequest('provider and model are required');
+    writeJson(res, 200, {
+      connection: await getModelConnection(provider, model, getContainerConfig(gid)?.upstream_provider),
+    });
+    return;
+  }
   if (rest === '/images' && method === 'GET') return handleListImages(res);
 
   writeJson(res, 404, { error: 'not_found' });

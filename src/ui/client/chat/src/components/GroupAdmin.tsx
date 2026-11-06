@@ -710,6 +710,7 @@ function SettingsTab({
           <Field label="Model">
             <ModelPickerDialog
               value={draft.model}
+              fallbackValue={defaultModel}
               provider={effectiveProvider}
               placeholder={defaultModel ? `default: ${defaultModel}` : 'pick or type a model id'}
               disabled={busy}

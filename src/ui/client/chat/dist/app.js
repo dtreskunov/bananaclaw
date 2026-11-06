@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
+// node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
+  "node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
+// node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
+  "node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
+// node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
+// node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
+// node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
+// node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
+// node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
+// node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
+// node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
+// node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
+// node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
+// node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
+// node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
+// node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
+// node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
+// node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
+// node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
+// node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
+// node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
+// node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
+// node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
+// node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
+// node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
+// node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
+// node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
+// node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
+// node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
+// node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
+// node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
+// node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
+// node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
+// node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
+// node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
+// node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
+// node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
+// node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
+// node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
+// node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
+// node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
+  "node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
+// node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
+// node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
+// node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
+// node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -16651,7 +16651,7 @@ function clearApprovalMessage(approvalId) {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
+// node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -20424,7 +20424,7 @@ function openChat() {
   if (location.hash === "#credentials") location.hash = "";
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -23348,7 +23348,7 @@ function ThreadsRail() {
   );
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
+// node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -28452,6 +28452,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
           }
         ) : null,
         /* @__PURE__ */ u4(MessageText, { text: m6.text, md }),
+        systemNotice && /\bHTTP (?:401|403)\b/.test(m6.text) ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => openCredentials(), children: "Credentials" }) : null,
         singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
           singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
           /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
@@ -30344,7 +30345,7 @@ function FilePreviewDialog({ expanded, title, onClose, children }) {
   );
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
+// node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 
@@ -32639,6 +32640,232 @@ function Combobox({
   ] });
 }
 
+// src/components/CredentialsPage.tsx
+function CredentialsPage() {
+  return credentialsOpen.value ? /* @__PURE__ */ u4(CredentialsContent, {}) : null;
+}
+function CredentialsContent({ agent, initialRequest, onClose = openChat } = {}) {
+  const { data, error, loading, refresh } = useCredentialResource(credentialsPath());
+  const [view, setView] = h2("credentials");
+  const [dialog, setDialog] = h2(null);
+  const [tableVersion, setTableVersion] = h2(0);
+  const [request, setRequest] = h2(initialRequest);
+  const signIn = useConnectionSignIn(() => void refresh());
+  const intent = agent || initialRequest ? null : credentialsIntent.value;
+  y2(() => {
+    if (!request || !data) return;
+    const url = new URL(request.resource_url);
+    const matches2 = data.connections.filter((connection2) => connection2.services.some((service) => serviceMatchesResource({ ...service, enabled: true }, request.resource_url) || serviceMatchesResource({ host: url.host, path: url.pathname, https_only: true }, serviceDestination(service))));
+    if (matches2.length < 2) setDialog(matches2.length ? { kind: "edit", id: matches2[0].id } : { kind: "edit", accessRequest: request });
+    setRequest(void 0);
+  }, [request, data]);
+  y2(() => {
+    if (agent) return;
+    if (!intent || !data) return;
+    setView("credentials");
+    if (intent.create) setDialog({ kind: "connect", resourceUrl: intent.resourceUrl });
+    else if (intent.connectionId) {
+      const connection2 = data.connections.find((item) => item.id === intent.connectionId);
+      if (connection2) {
+        setDialog({ kind: "edit", id: connection2.id });
+      } else {
+        showToast("Ask the credential owner to manage this connection.");
+      }
+    }
+    credentialsIntent.value = null;
+  }, [intent, data]);
+  y2(() => {
+    if (agent) return;
+    const key = (event) => {
+      if (event.key === "Escape" && !dialog) onClose();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [dialog, agent]);
+  const connections = data?.connections ?? [];
+  const reviewing = !agent && !initialRequest && !!accessApprovalId.value;
+  const close = () => setDialog(null);
+  const reload = () => {
+    setTableVersion((value) => value + 1);
+    void refresh();
+  };
+  const tableGroups = agent ? [data?.groups.find((group) => group.id === agent.id) ?? { id: agent.id, name: "This agent", canAdmin: false }] : data?.groups ?? [];
+  const content = /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4(
+      "div",
+      {
+        class: agent ? "ga-cred" : "credentials-page settings-body",
+        id: agent ? "agent-credentials" : "credentials-page",
+        role: "region",
+        "aria-label": agent ? "Agent credentials" : "Personal credentials",
+        children: [
+          !agent && !initialRequest && accessApprovalId.value ? /* @__PURE__ */ u4(AccessRequestRedirect, { id: accessApprovalId.value }) : null,
+          /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
+            !agent && !reviewing ? /* @__PURE__ */ u4("div", { class: "credentials-toolbar", children: [
+              /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: [
+                /* @__PURE__ */ u4(
+                  "button",
+                  {
+                    type: "button",
+                    class: view === "credentials" ? "active" : "",
+                    "aria-current": view === "credentials" ? "page" : void 0,
+                    onClick: () => setView("credentials"),
+                    children: "Credentials"
+                  }
+                ),
+                /* @__PURE__ */ u4(
+                  "button",
+                  {
+                    type: "button",
+                    class: view === "apps" ? "active" : "",
+                    "aria-current": view === "apps" ? "page" : void 0,
+                    onClick: () => setView("apps"),
+                    children: "OAuth apps"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ u4("div", { class: "credentials-row-actions", children: view === "credentials" ? /* @__PURE__ */ u4(k, { children: /* @__PURE__ */ u4(CredentialAction, { label: "Add credential", disabled: loading || !!signIn.waiting, onClick: () => setDialog({ kind: "edit" }), children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }) }) }) : /* @__PURE__ */ u4(CredentialAction, { label: "Add OAuth app", disabled: loading, onClick: () => setDialog({ kind: "app" }), children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }) }) })
+            ] }) : null,
+            signIn.waiting ? /* @__PURE__ */ u4("div", { class: "ga-cred-banner", role: "status", "aria-live": "polite", children: [
+              /* @__PURE__ */ u4("span", { class: "ga-cred-spinner", "aria-hidden": "true" }),
+              /* @__PURE__ */ u4("span", { class: "ga-cred-banner-text", children: [
+                "Finish signing in to ",
+                signIn.waiting.label,
+                "."
+              ] }),
+              /* @__PURE__ */ u4(CredentialAction, { label: "Open sign-in window", onClick: signIn.reopen, children: /* @__PURE__ */ u4(ExternalLinkIcon, {}) }),
+              /* @__PURE__ */ u4(CredentialAction, { label: "Stop waiting", onClick: signIn.stop, children: /* @__PURE__ */ u4(CloseIcon, {}) })
+            ] }) : null,
+            loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading credentials\u2026" }) : null,
+            /* @__PURE__ */ u4(ErrorNotice, { message: error ? `Couldn't load credentials: ${error}` : "" }),
+            error ? /* @__PURE__ */ u4("button", { type: "button", onClick: reload, children: "Try again" }) : null,
+            data && !error && !reviewing ? /* @__PURE__ */ u4(k, { children: [
+              view === "credentials" ? connections.length ? /* @__PURE__ */ u4(
+                CredentialsTable,
+                {
+                  connections,
+                  groups: tableGroups,
+                  apps: data.apps,
+                  onlyGroup: agent?.id,
+                  busy: loading || !!signIn.waiting,
+                  onEdit: (connection2) => setDialog({ kind: "edit", id: connection2.id }),
+                  onConnect: (connection2) => setDialog({ kind: "connect", connection: connection2 }),
+                  onAction: (connection2, action) => setDialog({ kind: "action", connection: connection2, action }),
+                  onSaved: refresh
+                },
+                tableVersion
+              ) : !loading ? agent ? /* @__PURE__ */ u4("div", { children: [
+                /* @__PURE__ */ u4("p", { children: "No personal credentials yet. Add a connection, then explicitly grant this agent access." }),
+                /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Open My Credentials" })
+              ] }) : /* @__PURE__ */ u4("p", { children: "No credentials yet." }) : null : null,
+              !agent && view === "apps" ? /* @__PURE__ */ u4("section", { class: "credentials-apps", "aria-label": "OAuth apps", children: data.apps.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.apps.map((app) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
+                /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
+                  /* @__PURE__ */ u4("strong", { children: app.label }),
+                  /* @__PURE__ */ u4("span", { class: "muted", children: displayDestination(app.issuer) })
+                ] }),
+                app.source === "user" || data.canEditInstall ? /* @__PURE__ */ u4(
+                  CredentialAction,
+                  {
+                    label: `Edit ${app.label} OAuth app`,
+                    disabled: loading,
+                    onClick: () => setDialog({ kind: "app", app }),
+                    children: /* @__PURE__ */ u4(EditIcon, {})
+                  }
+                ) : null
+              ] }, `${app.source}:${app.id}`)) }) : /* @__PURE__ */ u4("p", { children: "No OAuth apps configured." }) }) : null
+            ] }) : null
+          ] })
+        ]
+      }
+    ),
+    dialog?.kind === "edit" && data ? /* @__PURE__ */ u4(
+      ConnectionEditor,
+      {
+        id: dialog.id,
+        resourceUrl: dialog.resourceUrl,
+        apps: data.apps,
+        accessRequest: dialog.accessRequest,
+        onStart: signIn.start,
+        onClose: close,
+        onSaved: () => void refresh()
+      }
+    ) : null,
+    dialog?.kind === "connect" && data ? dialog.connection ? /* @__PURE__ */ u4(ReconnectLatest, { id: dialog.connection.id, apps: data.apps, onStart: signIn.start, onClose: close, onSaved: () => void refresh() }) : /* @__PURE__ */ u4(
+      ConnectionEditor,
+      {
+        initialKind: "mcp_oauth",
+        apps: data.apps,
+        resourceUrl: dialog.resourceUrl,
+        onStart: signIn.start,
+        onClose: close,
+        onSaved: () => void refresh()
+      }
+    ) : null,
+    dialog?.kind === "action" && data ? /* @__PURE__ */ u4(
+      ConnectionActionDialog,
+      {
+        connection: dialog.connection,
+        action: dialog.action,
+        onClose: close,
+        onSaved: () => void refresh()
+      }
+    ) : null,
+    dialog?.kind === "app" && data ? /* @__PURE__ */ u4(
+      OAuthAppDialog,
+      {
+        app: dialog.app,
+        canEditInstall: data.canEditInstall,
+        onClose: close,
+        onSaved: () => void refresh()
+      }
+    ) : null
+  ] });
+  const Dialog = initialRequest ? ModalDialog : MobileDialog;
+  return agent ? content : /* @__PURE__ */ u4(
+    Dialog,
+    {
+      title: "My Credentials",
+      ariaLabel: "My Credentials",
+      onClose,
+      onBack: isMobile.value ? () => {
+        onClose();
+        if (!initialRequest) returnToUserMenu(credentialsOpen);
+      } : void 0,
+      backLabel: initialRequest ? "Back to agent settings" : "Back to account menu",
+      maxWidth: "1100px",
+      className: "credentials-dialog",
+      children: content
+    }
+  );
+}
+function AccessRequestRedirect({ id: id2 }) {
+  const request = useCredentialResource(credentialsPath(`/access-requests/${encodeURIComponent(id2)}`));
+  const origin = request.data?.origin;
+  const href = origin ? approvalThreadHref(origin) : null;
+  y2(() => {
+    if (!href) return;
+    clearAccessApproval();
+    credentialsOpen.value = false;
+    location.hash = href;
+  }, [href]);
+  return /* @__PURE__ */ u4("div", { role: "status", children: [
+    request.loading ? /* @__PURE__ */ u4("p", { children: "Opening the request in your chat\u2026" }) : null,
+    /* @__PURE__ */ u4(ErrorNotice, { message: request.error }),
+    request.error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void request.refresh(), children: "Try again" }) : href ? /* @__PURE__ */ u4("a", { href, children: "Open requesting chat" }) : !request.loading ? /* @__PURE__ */ u4("p", { children: "The requesting chat is no longer available." }) : null
+  ] });
+}
+function ReconnectLatest(props) {
+  const { data, error, loading, refresh } = useCredentialResource(connectionPath(props.id));
+  if (!data || loading || error) return /* @__PURE__ */ u4("div", { class: "ga-cred-callout", role: "status", children: [
+    loading ? /* @__PURE__ */ u4("p", { children: "Loading reconnect details\u2026" }) : /* @__PURE__ */ u4(k, { children: [
+      /* @__PURE__ */ u4(ErrorNotice, { message: error }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Retry" })
+    ] }),
+    /* @__PURE__ */ u4("button", { type: "button", onClick: props.onClose, children: "Cancel" })
+  ] });
+  return /* @__PURE__ */ u4(OAuthConnectionDialog, { ...props, connection: data });
+}
+
 // src/components/ModelPickerDialog.tsx
 var COST_TIERS = [
   { id: "free", label: "Free", test: (m6) => (m6.inputCostPerMTok ?? 0) === 0 && (m6.outputCostPerMTok ?? 0) === 0 },
@@ -32709,6 +32936,7 @@ function fetchModels(url) {
 }
 function ModelPickerDialog({
   value,
+  fallbackValue,
   provider,
   placeholder,
   disabled,
@@ -32722,6 +32950,26 @@ function ModelPickerDialog({
   const [models, setModels] = h2([]);
   const [source, setSource] = h2("unavailable");
   const [loading, setLoading] = h2(false);
+  const [connection2, setConnection] = h2(null);
+  const [editingConnection, setEditingConnection] = h2(null);
+  const effectiveModel = value || fallbackValue;
+  y2(() => {
+    setConnection(null);
+    if (!provider || !effectiveModel) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ provider, model: effectiveModel });
+    void credentialRequest(
+      `${apiBasePath}/model-connection?${params}`,
+      "GET",
+      void 0,
+      controller.signal
+    ).then(({ connection: connection3 }) => {
+      if (!controller.signal.aborted) setConnection(connection3);
+    }).catch((error) => {
+      if (!controller.signal.aborted) showToast(errorMessage(error), "err");
+    });
+    return () => controller.abort();
+  }, [provider, effectiveModel, apiBasePath]);
   const [search, setSearch] = h2("");
   const [selectedInputMods, setSelectedInputMods] = h2(/* @__PURE__ */ new Set());
   const [selectedOutputMods, setSelectedOutputMods] = h2(/* @__PURE__ */ new Set());
@@ -32856,6 +33104,28 @@ function ModelPickerDialog({
         ]
       }
     ),
+    connection2 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: [
+      "API: ",
+      /* @__PURE__ */ u4("span", { title: connection2.resource_url, children: new URL(connection2.resource_url).host }),
+      " \xB7 ",
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "ga-cred-link",
+          disabled,
+          onClick: () => setEditingConnection(connection2),
+          children: "Credentials"
+        }
+      )
+    ] }) : null,
+    editingConnection ? /* @__PURE__ */ u4(
+      CredentialsContent,
+      {
+        initialRequest: editingConnection,
+        onClose: () => setEditingConnection(null)
+      }
+    ) : null,
     open && /* @__PURE__ */ u4(
       MobileDialog,
       {
@@ -33223,222 +33493,6 @@ function UserPicker({
     ) }, u5.userId)) }) : null,
     !searching && q5 && visible.length === 0 ? /* @__PURE__ */ u4("p", { class: "muted", children: "No matches." }) : null
   ] });
-}
-
-// src/components/CredentialsPage.tsx
-function CredentialsPage() {
-  return credentialsOpen.value ? /* @__PURE__ */ u4(CredentialsContent, {}) : null;
-}
-function CredentialsContent({ agent } = {}) {
-  const { data, error, loading, refresh } = useCredentialResource(credentialsPath());
-  const [view, setView] = h2("credentials");
-  const [dialog, setDialog] = h2(null);
-  const [tableVersion, setTableVersion] = h2(0);
-  const signIn = useConnectionSignIn(() => void refresh());
-  const intent = agent ? null : credentialsIntent.value;
-  y2(() => {
-    if (agent) return;
-    if (!intent || !data) return;
-    setView("credentials");
-    if (intent.create) setDialog({ kind: "connect", resourceUrl: intent.resourceUrl });
-    else if (intent.connectionId) {
-      const connection2 = data.connections.find((item) => item.id === intent.connectionId);
-      if (connection2) {
-        setDialog({ kind: "edit", id: connection2.id });
-      } else {
-        showToast("Ask the credential owner to manage this connection.");
-      }
-    }
-    credentialsIntent.value = null;
-  }, [intent, data]);
-  y2(() => {
-    if (agent) return;
-    const key = (event) => {
-      if (event.key === "Escape" && !dialog) openChat();
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [dialog, agent]);
-  const connections = data?.connections ?? [];
-  const reviewing = !agent && !!accessApprovalId.value;
-  const close = () => setDialog(null);
-  const reload = () => {
-    setTableVersion((value) => value + 1);
-    void refresh();
-  };
-  const tableGroups = agent ? [data?.groups.find((group) => group.id === agent.id) ?? { id: agent.id, name: "This agent", canAdmin: false }] : data?.groups ?? [];
-  const content = /* @__PURE__ */ u4(k, { children: [
-    /* @__PURE__ */ u4(
-      "div",
-      {
-        class: agent ? "ga-cred" : "credentials-page settings-body",
-        id: agent ? "agent-credentials" : "credentials-page",
-        role: "region",
-        "aria-label": agent ? "Agent credentials" : "Personal credentials",
-        children: [
-          !agent && accessApprovalId.value ? /* @__PURE__ */ u4(AccessRequestRedirect, { id: accessApprovalId.value }) : null,
-          /* @__PURE__ */ u4("section", { class: "ga-cred", children: [
-            !agent && !reviewing ? /* @__PURE__ */ u4("div", { class: "credentials-toolbar", children: [
-              /* @__PURE__ */ u4("nav", { class: "ga-cred-segments", "aria-label": "Credentials sections", children: [
-                /* @__PURE__ */ u4(
-                  "button",
-                  {
-                    type: "button",
-                    class: view === "credentials" ? "active" : "",
-                    "aria-current": view === "credentials" ? "page" : void 0,
-                    onClick: () => setView("credentials"),
-                    children: "Credentials"
-                  }
-                ),
-                /* @__PURE__ */ u4(
-                  "button",
-                  {
-                    type: "button",
-                    class: view === "apps" ? "active" : "",
-                    "aria-current": view === "apps" ? "page" : void 0,
-                    onClick: () => setView("apps"),
-                    children: "OAuth apps"
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ u4("div", { class: "credentials-row-actions", children: view === "credentials" ? /* @__PURE__ */ u4(k, { children: /* @__PURE__ */ u4(CredentialAction, { label: "Add credential", disabled: loading || !!signIn.waiting, onClick: () => setDialog({ kind: "edit" }), children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }) }) }) : /* @__PURE__ */ u4(CredentialAction, { label: "Add OAuth app", disabled: loading, onClick: () => setDialog({ kind: "app" }), children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" }) }) })
-            ] }) : null,
-            signIn.waiting ? /* @__PURE__ */ u4("div", { class: "ga-cred-banner", role: "status", "aria-live": "polite", children: [
-              /* @__PURE__ */ u4("span", { class: "ga-cred-spinner", "aria-hidden": "true" }),
-              /* @__PURE__ */ u4("span", { class: "ga-cred-banner-text", children: [
-                "Finish signing in to ",
-                signIn.waiting.label,
-                "."
-              ] }),
-              /* @__PURE__ */ u4(CredentialAction, { label: "Open sign-in window", onClick: signIn.reopen, children: /* @__PURE__ */ u4(ExternalLinkIcon, {}) }),
-              /* @__PURE__ */ u4(CredentialAction, { label: "Stop waiting", onClick: signIn.stop, children: /* @__PURE__ */ u4(CloseIcon, {}) })
-            ] }) : null,
-            loading ? /* @__PURE__ */ u4("p", { role: "status", children: "Loading credentials\u2026" }) : null,
-            /* @__PURE__ */ u4(ErrorNotice, { message: error ? `Couldn't load credentials: ${error}` : "" }),
-            error ? /* @__PURE__ */ u4("button", { type: "button", onClick: reload, children: "Try again" }) : null,
-            data && !error && !reviewing ? /* @__PURE__ */ u4(k, { children: [
-              view === "credentials" ? connections.length ? /* @__PURE__ */ u4(
-                CredentialsTable,
-                {
-                  connections,
-                  groups: tableGroups,
-                  apps: data.apps,
-                  onlyGroup: agent?.id,
-                  busy: loading || !!signIn.waiting,
-                  onEdit: (connection2) => setDialog({ kind: "edit", id: connection2.id }),
-                  onConnect: (connection2) => setDialog({ kind: "connect", connection: connection2 }),
-                  onAction: (connection2, action) => setDialog({ kind: "action", connection: connection2, action }),
-                  onSaved: refresh
-                },
-                tableVersion
-              ) : !loading ? agent ? /* @__PURE__ */ u4("div", { children: [
-                /* @__PURE__ */ u4("p", { children: "No personal credentials yet. Add a connection, then explicitly grant this agent access." }),
-                /* @__PURE__ */ u4("button", { type: "button", onClick: () => openCredentials(), children: "Open My Credentials" })
-              ] }) : /* @__PURE__ */ u4("p", { children: "No credentials yet." }) : null : null,
-              !agent && view === "apps" ? /* @__PURE__ */ u4("section", { class: "credentials-apps", "aria-label": "OAuth apps", children: data.apps.length ? /* @__PURE__ */ u4("ul", { class: "ga-cred-list", children: data.apps.map((app) => /* @__PURE__ */ u4("li", { class: "ga-cred-item", children: [
-                /* @__PURE__ */ u4("div", { class: "ga-cred-item-main", children: [
-                  /* @__PURE__ */ u4("strong", { children: app.label }),
-                  /* @__PURE__ */ u4("span", { class: "muted", children: displayDestination(app.issuer) })
-                ] }),
-                app.source === "user" || data.canEditInstall ? /* @__PURE__ */ u4(
-                  CredentialAction,
-                  {
-                    label: `Edit ${app.label} OAuth app`,
-                    disabled: loading,
-                    onClick: () => setDialog({ kind: "app", app }),
-                    children: /* @__PURE__ */ u4(EditIcon, {})
-                  }
-                ) : null
-              ] }, `${app.source}:${app.id}`)) }) : /* @__PURE__ */ u4("p", { children: "No OAuth apps configured." }) }) : null
-            ] }) : null
-          ] })
-        ]
-      }
-    ),
-    dialog?.kind === "edit" && data ? /* @__PURE__ */ u4(
-      ConnectionEditor,
-      {
-        id: dialog.id,
-        resourceUrl: dialog.resourceUrl,
-        apps: data.apps,
-        onStart: signIn.start,
-        onClose: close,
-        onSaved: () => void refresh()
-      }
-    ) : null,
-    dialog?.kind === "connect" && data ? dialog.connection ? /* @__PURE__ */ u4(ReconnectLatest, { id: dialog.connection.id, apps: data.apps, onStart: signIn.start, onClose: close, onSaved: () => void refresh() }) : /* @__PURE__ */ u4(
-      ConnectionEditor,
-      {
-        initialKind: "mcp_oauth",
-        apps: data.apps,
-        resourceUrl: dialog.resourceUrl,
-        onStart: signIn.start,
-        onClose: close,
-        onSaved: () => void refresh()
-      }
-    ) : null,
-    dialog?.kind === "action" && data ? /* @__PURE__ */ u4(
-      ConnectionActionDialog,
-      {
-        connection: dialog.connection,
-        action: dialog.action,
-        onClose: close,
-        onSaved: () => void refresh()
-      }
-    ) : null,
-    dialog?.kind === "app" && data ? /* @__PURE__ */ u4(
-      OAuthAppDialog,
-      {
-        app: dialog.app,
-        canEditInstall: data.canEditInstall,
-        onClose: close,
-        onSaved: () => void refresh()
-      }
-    ) : null
-  ] });
-  return agent ? content : /* @__PURE__ */ u4(
-    MobileDialog,
-    {
-      title: "My Credentials",
-      ariaLabel: "My Credentials",
-      onClose: openChat,
-      onBack: isMobile.value ? () => {
-        openChat();
-        returnToUserMenu(credentialsOpen);
-      } : void 0,
-      backLabel: "Back to account menu",
-      maxWidth: "1100px",
-      className: "credentials-dialog",
-      children: content
-    }
-  );
-}
-function AccessRequestRedirect({ id: id2 }) {
-  const request = useCredentialResource(credentialsPath(`/access-requests/${encodeURIComponent(id2)}`));
-  const origin = request.data?.origin;
-  const href = origin ? approvalThreadHref(origin) : null;
-  y2(() => {
-    if (!href) return;
-    clearAccessApproval();
-    credentialsOpen.value = false;
-    location.hash = href;
-  }, [href]);
-  return /* @__PURE__ */ u4("div", { role: "status", children: [
-    request.loading ? /* @__PURE__ */ u4("p", { children: "Opening the request in your chat\u2026" }) : null,
-    /* @__PURE__ */ u4(ErrorNotice, { message: request.error }),
-    request.error ? /* @__PURE__ */ u4("button", { type: "button", onClick: () => void request.refresh(), children: "Try again" }) : href ? /* @__PURE__ */ u4("a", { href, children: "Open requesting chat" }) : !request.loading ? /* @__PURE__ */ u4("p", { children: "The requesting chat is no longer available." }) : null
-  ] });
-}
-function ReconnectLatest(props) {
-  const { data, error, loading, refresh } = useCredentialResource(connectionPath(props.id));
-  if (!data || loading || error) return /* @__PURE__ */ u4("div", { class: "ga-cred-callout", role: "status", children: [
-    loading ? /* @__PURE__ */ u4("p", { children: "Loading reconnect details\u2026" }) : /* @__PURE__ */ u4(k, { children: [
-      /* @__PURE__ */ u4(ErrorNotice, { message: error }),
-      /* @__PURE__ */ u4("button", { type: "button", onClick: () => void refresh(), children: "Retry" })
-    ] }),
-    /* @__PURE__ */ u4("button", { type: "button", onClick: props.onClose, children: "Cancel" })
-  ] });
-  return /* @__PURE__ */ u4(OAuthConnectionDialog, { ...props, connection: data });
 }
 
 // src/components/GroupCredentialAccess.tsx
@@ -36181,6 +36235,7 @@ function SettingsTab({
         ModelPickerDialog,
         {
           value: draft.model,
+          fallbackValue: defaultModel,
           provider: effectiveProvider,
           placeholder: defaultModel ? `default: ${defaultModel}` : "pick or type a model id",
           disabled: busy,

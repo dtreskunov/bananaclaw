@@ -76,6 +76,7 @@ import { attachDensityReflow } from '../density-reflow';
 import { attachScrollEdges } from '../scroll-edges';
 import { revealLatestActivity } from '../activity-trace-scroll';
 import { showToast } from './Toast';
+import { openCredentials } from '../credentials-navigation';
 import { attachReadTracking } from '../read-state';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingApprovalDto, PendingWebSend, Thread, TranscriptRow, TurnUsage } from '../types';
@@ -820,6 +821,8 @@ function Message(
           />
         : null}
       <MessageText text={m.text} md={md} />
+      {systemNotice && /\bHTTP (?:401|403)\b/.test(m.text)
+        ? <button type="button" class="ga-cred-link" onClick={() => openCredentials()}>Credentials</button> : null}
       {singleFile && singleMediaKind
         ? (
           <div class="inline-media">

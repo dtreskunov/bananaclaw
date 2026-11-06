@@ -7,16 +7,19 @@ import type { ApprovalOrigin } from '../../../../shared/approval';
 import { credentialsOpen, isMobile } from '../state';
 import { returnToUserMenu } from '../actions';
 import { MobileDialog } from './MobileDialog';
+import { ModalDialog } from './ModalDialog';
 import { CloseIcon, EditIcon, ExternalLinkIcon } from './ActionIcons';
 import { connectionPath, credentialsPath, type AppInfo, type Connection, type CredentialsOverview } from './CredentialsApi';
 import { ErrorNotice, useConnectionSignIn, useCredentialResource } from './CredentialsParts';
 import { ConnectionActionDialog, ConnectionEditor, OAuthAppDialog, OAuthConnectionDialog } from './CredentialsDialogs';
 import { CredentialAction, CredentialsTable } from './CredentialsTable';
 import { showToast } from './Toast';
-import { displayDestination } from './credential-presentation';
+import { displayDestination, serviceDestination } from './credential-presentation';
+import type { AccessRequirements } from '../../../../shared/access-authentication';
+import { serviceMatchesResource } from '../../../../shared/credential-matching';
 
 type Dialog =
-  | { kind: 'edit'; id?: string; resourceUrl?: string }
+  | { kind: 'edit'; id?: string; resourceUrl?: string; accessRequest?: AccessRequirements }
   | { kind: 'connect'; connection?: Connection; resourceUrl?: string }
   | { kind: 'action'; connection: Connection; action: 'disable' | 'enable' | 'delete' }
   | { kind: 'app'; app?: AppInfo };
@@ -25,15 +28,29 @@ export function CredentialsPage(): JSX.Element | null {
   return credentialsOpen.value ? <CredentialsContent /> : null;
 }
 
-export function CredentialsContent({ agent }: {
+export function CredentialsContent({ agent, initialRequest, onClose = openChat }: {
   agent?: { id: string };
+  initialRequest?: AccessRequirements;
+  onClose?: () => void;
 } = {}): JSX.Element {
   const { data, error, loading, refresh } = useCredentialResource<CredentialsOverview>(credentialsPath());
   const [view, setView] = useState<'credentials' | 'apps'>('credentials');
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [tableVersion, setTableVersion] = useState(0);
+  const [request, setRequest] = useState(initialRequest);
   const signIn = useConnectionSignIn(() => void refresh());
-  const intent = agent ? null : credentialsIntent.value;
+  const intent = agent || initialRequest ? null : credentialsIntent.value;
+  useEffect(() => {
+    if (!request || !data) return;
+    const url = new URL(request.resource_url);
+    const matches = data.connections.filter(connection => connection.services.some(service =>
+      serviceMatchesResource({ ...service, enabled: true }, request.resource_url) ||
+      serviceMatchesResource({ host: url.host, path: url.pathname, https_only: true }, serviceDestination(service))));
+    if (matches.length < 2) setDialog(matches.length
+      ? { kind: 'edit', id: matches[0].id }
+      : { kind: 'edit', accessRequest: request });
+    setRequest(undefined);
+  }, [request, data]);
   useEffect(() => {
     if (agent) return;
     if (!intent || !data) return;
@@ -52,13 +69,13 @@ export function CredentialsContent({ agent }: {
   useEffect(() => {
     if (agent) return;
     const key = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && !dialog) openChat();
+      if (event.key === 'Escape' && !dialog) onClose();
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [dialog, agent]);
   const connections = data?.connections ?? [];
-  const reviewing = !agent && !!accessApprovalId.value;
+  const reviewing = !agent && !initialRequest && !!accessApprovalId.value;
   const close = (): void => setDialog(null);
   const reload = (): void => { setTableVersion((value) => value + 1); void refresh(); };
   const tableGroups = agent ? [data?.groups.find((group) => group.id === agent.id) ??
@@ -66,7 +83,7 @@ export function CredentialsContent({ agent }: {
   const content = <>
     <div class={agent ? 'ga-cred' : 'credentials-page settings-body'} id={agent ? 'agent-credentials' : 'credentials-page'}
       role="region" aria-label={agent ? 'Agent credentials' : 'Personal credentials'}>
-      {!agent && accessApprovalId.value ? <AccessRequestRedirect id={accessApprovalId.value} /> : null}
+      {!agent && !initialRequest && accessApprovalId.value ? <AccessRequestRedirect id={accessApprovalId.value} /> : null}
       <section class="ga-cred">
         {!agent && !reviewing ? <div class="credentials-toolbar">
           <nav class="ga-cred-segments" aria-label="Credentials sections">
@@ -116,6 +133,7 @@ export function CredentialsContent({ agent }: {
       </section>
     </div>
     {dialog?.kind === 'edit' && data ? <ConnectionEditor id={dialog.id} resourceUrl={dialog.resourceUrl} apps={data.apps}
+      accessRequest={dialog.accessRequest}
       onStart={signIn.start} onClose={close} onSaved={() => void refresh()} /> : null}
     {dialog?.kind === 'connect' && data ? dialog.connection
       ? <ReconnectLatest id={dialog.connection.id} apps={data.apps} onStart={signIn.start} onClose={close} onSaved={() => void refresh()} />
@@ -127,9 +145,10 @@ export function CredentialsContent({ agent }: {
     {dialog?.kind === 'app' && data ? <OAuthAppDialog app={dialog.app} canEditInstall={data.canEditInstall}
       onClose={close} onSaved={() => void refresh()} /> : null}
   </>;
-  return agent ? content : <MobileDialog title="My Credentials" ariaLabel="My Credentials" onClose={openChat}
-    onBack={isMobile.value ? () => { openChat(); returnToUserMenu(credentialsOpen); } : undefined}
-    backLabel="Back to account menu" maxWidth="1100px" className="credentials-dialog">{content}</MobileDialog>;
+  const Dialog = initialRequest ? ModalDialog : MobileDialog;
+  return agent ? content : <Dialog title="My Credentials" ariaLabel="My Credentials" onClose={onClose}
+    onBack={isMobile.value ? () => { onClose(); if (!initialRequest) returnToUserMenu(credentialsOpen); } : undefined}
+    backLabel={initialRequest ? 'Back to agent settings' : 'Back to account menu'} maxWidth="1100px" className="credentials-dialog">{content}</Dialog>;
 }
 
 export function AccessRequestRedirect({ id }: { id: string }) {

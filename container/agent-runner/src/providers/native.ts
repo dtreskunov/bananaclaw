@@ -65,6 +65,10 @@ function parseErrorBody(text: unknown): Record<string, unknown> {
 function providerErrorMessage(error: unknown): string {
   if (RetryError.isInstance(error) && APICallError.isInstance(error.lastError)) error = error.lastError;
   const message = errorMessage(error);
+  if (APICallError.isInstance(error) && (error.statusCode === 401 || error.statusCode === 403)) {
+    const host = URL.parse(error.url)?.host;
+    return `${message} (HTTP ${error.statusCode}${host ? ` · ${host}` : ''}). Check Credentials and this agent's access.`;
+  }
   if (!APICallError.isInstance(error) || message !== 'Provider returned error') return message;
   const status = error.statusCode ? ` (HTTP ${error.statusCode})` : '';
   const { metadata } = parseErrorBody(error.responseBody);
