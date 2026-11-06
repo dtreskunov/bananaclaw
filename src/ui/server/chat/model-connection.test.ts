@@ -104,6 +104,23 @@ describe('model credential destination', () => {
     );
   });
 
+  it('matches OpenCode file fallback when a process override is empty', async () => {
+    config.file = { OPENCODE_PROVIDER: 'nvidia', OPENCODE_BASE_URL: 'https://file.test/v1' };
+    vi.stubEnv('OPENCODE_BASE_URL', '');
+    const { getModelConnection } = await import('./model-connection.js');
+    expect((await getModelConnection('opencode', 'nvidia/new-model'))?.resource_url).toBe('https://file.test/v1/*');
+  });
+
+  it('matches native suppression of a file override when its process setting is empty', async () => {
+    config.file = { NATIVE_BASE_URL: 'https://file.test/v1', NATIVE_PROTOCOL: 'anthropic-messages' };
+    vi.stubEnv('NATIVE_BASE_URL', '');
+    const { getModelConnection } = await import('./model-connection.js');
+    expect(await getModelConnection('native', 'nvidia/minimaxai/minimax-m3.1-flash')).toEqual({
+      resource_url: 'https://integrate.api.nvidia.com/v1/*',
+      authentication: { type: 'bearer' },
+    });
+  });
+
   it('respects Claude custom endpoints only when the host adapter is installed', async () => {
     config.file = { ANTHROPIC_BASE_URL: 'https://custom.test/anthropic/' };
     const { getModelConnection } = await import('./model-connection.js');

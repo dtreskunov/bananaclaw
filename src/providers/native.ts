@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { readEnvFile } from '../env.js';
+import { providerRuntimeEnv } from './runtime-env.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 import { cloneNativeSessionState } from './native-fork-snapshot.js';
 
@@ -19,15 +19,11 @@ function mergeNoProxy(current: string | undefined, additions: string): string {
 registerProviderContainerConfig(
   'native',
   (context) => {
-    const fileEnv = readEnvFile(['NATIVE_BASE_URL', 'NATIVE_MODEL', 'NATIVE_PROTOCOL']);
     const env: Record<string, string> = {
       NO_PROXY: mergeNoProxy(context.hostEnv.NO_PROXY, '127.0.0.1,localhost,models.dev,.models.dev'),
       no_proxy: mergeNoProxy(context.hostEnv.no_proxy, '127.0.0.1,localhost,models.dev,.models.dev'),
+      ...providerRuntimeEnv('native', context.hostEnv),
     };
-    for (const name of ['NATIVE_BASE_URL', 'NATIVE_MODEL', 'NATIVE_PROTOCOL'] as const) {
-      const value = context.hostEnv[name] ?? fileEnv[name];
-      if (value) env[name] = value;
-    }
     const stateDir = path.join(context.sessionDir, 'native-state');
     fs.mkdirSync(stateDir, { recursive: true });
     return {

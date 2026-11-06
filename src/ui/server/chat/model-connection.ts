@@ -1,6 +1,6 @@
-import { readEnvFile } from '../../../env.js';
 import { log } from '../../../log.js';
 import { getProviderContainerConfig } from '../../../providers/provider-container-registry.js';
+import { providerRuntimeEnv } from '../../../providers/runtime-env.js';
 import type { AccessRequirements } from '../../shared/access-authentication.js';
 import { isNativeCompatible, modelEndpoint, resolveUpstreamForWireId } from './models-dev-catalog.js';
 
@@ -9,22 +9,17 @@ export async function getModelConnection(
   wireId: string,
   upstreamProvider?: string | null,
 ): Promise<AccessRequirements | null> {
-  if (!['native', 'opencode', 'claude'].includes(provider)) return null;
-  const file = readEnvFile([
-    'NATIVE_BASE_URL',
-    'NATIVE_PROTOCOL',
-    'OPENCODE_BASE_URL',
-    'OPENCODE_PROVIDER',
-    'ANTHROPIC_BASE_URL',
-  ]);
-  const env = (key: string) => process.env[key] ?? file[key];
-  const nativeOverride = provider === 'native' ? env('NATIVE_BASE_URL') : undefined;
-  const resolved = provider === 'claude' || nativeOverride ? null : await resolveUpstreamForWireId(wireId);
-  if (provider === 'native' && !nativeOverride && !resolved) return null;
-  const upstream =
-    provider === 'claude'
-      ? 'anthropic'
-      : (resolved?.upstream ?? upstreamProvider ?? env('OPENCODE_PROVIDER') ?? 'anthropic');
+  if (provider !== 'native' && provider !== 'opencode' && provider !== 'claude') return null;
+  let resolved = provider === 'opencode' ? await resolveUpstreamForWireId(wireId) : null;
+  const env = providerRuntimeEnv(provider, process.env, {
+    upstreamProvider: resolved?.upstream ?? upstreamProvider ?? undefined,
+  });
+  const nativeOverride = env.NATIVE_BASE_URL;
+  if (provider === 'native' && !nativeOverride) {
+    resolved = await resolveUpstreamForWireId(wireId);
+    if (!resolved) return null;
+  }
+  const upstream = provider === 'claude' ? 'anthropic' : (resolved?.upstream ?? env.OPENCODE_PROVIDER ?? 'anthropic');
   const modelId = resolved?.modelId ?? (wireId.startsWith(`${upstream}/`) ? wireId.slice(upstream.length + 1) : wireId);
   const endpoint =
     provider === 'claude'
@@ -32,18 +27,16 @@ export async function getModelConnection(
       : nativeOverride
         ? null
         : await modelEndpoint(upstream, modelId);
-  let baseURL = nativeOverride ?? endpoint?.api;
+  let baseURL = nativeOverride ?? env.OPENCODE_BASE_URL ?? endpoint?.api;
   let npm = endpoint?.npm ?? '@ai-sdk/openai-compatible';
   if (nativeOverride) {
-    const protocol = env('NATIVE_PROTOCOL');
+    const protocol = env.NATIVE_PROTOCOL;
     if (protocol && protocol !== 'openai-chat' && protocol !== 'anthropic-messages')
       throw new Error(`Unsupported NATIVE_PROTOCOL: ${protocol}`);
     npm = protocol === 'anthropic-messages' ? '@ai-sdk/anthropic' : '@ai-sdk/openai-compatible';
   }
-  // Saving a catalog selection sets the group upstream, which drops OpenCode's fleet base URL.
-  if (provider === 'opencode' && !resolved && !upstreamProvider) baseURL = env('OPENCODE_BASE_URL') || baseURL;
   const claudeOverride =
-    provider === 'claude' && getProviderContainerConfig('claude') ? file.ANTHROPIC_BASE_URL : undefined;
+    provider === 'claude' && getProviderContainerConfig('claude') ? env.ANTHROPIC_BASE_URL : undefined;
   if (claudeOverride) baseURL = `${claudeOverride.replace(/\/+$/, '')}/v1`;
   if (!baseURL) return null;
   const url = URL.parse(baseURL);

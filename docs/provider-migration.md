@@ -15,6 +15,8 @@ existing matching connection, or prefills a new connection's API URL pattern and
 authentication method, without discarding model edits. Keys remain personal;
 grant the agent access explicitly using the existing Credentials table.
 Native HTTP 401/403 errors also name the destination host.
+The shortcut and container setup share the host-side provider environment resolver,
+including group overrides that discard another gateway's inherited endpoint.
 
 ## Switching
 

@@ -14,15 +14,7 @@
  *   - ANTHROPIC_AUTH_TOKEN=placeholder — so the SDK adds an
  *     Authorization: Bearer header for Agent Vault to overwrite
  */
-import { readEnvFile } from '../env.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
+import { providerRuntimeEnv } from './runtime-env.js';
 
-registerProviderContainerConfig('claude', () => {
-  const dotenv = readEnvFile(['ANTHROPIC_BASE_URL']);
-  const env: Record<string, string> = {};
-  if (dotenv.ANTHROPIC_BASE_URL) {
-    env.ANTHROPIC_BASE_URL = dotenv.ANTHROPIC_BASE_URL;
-    env.ANTHROPIC_AUTH_TOKEN = 'placeholder';
-  }
-  return { env };
-});
+registerProviderContainerConfig('claude', () => ({ env: providerRuntimeEnv('claude', process.env) }));
