@@ -6,8 +6,8 @@ import { queryInteractions, legacyInteractionExpired } from '../../../db/interac
 import { outboundTimelinePosition } from '../../../input-timeline.js';
 import { conversationTimeline } from './conversation-timeline.js';
 import { approvalTranscript } from './approval-transcript.js';
-import { getTurnInputs, type TurnRow } from '../../../db/turns.js';
-import { readTurnMetadata } from '../../../session-link-durable.js';
+import type { TurnInputRow, TurnRow } from '../../../db/turns.js';
+import { readTurnMetadataForTurns } from '../../../session-link-durable.js';
 import { getSessionTurnSignals } from '../../../session-link.js';
 import { openOutboundDb } from '../../../session-manager.js';
 import type {
@@ -22,10 +22,37 @@ import { resolveTurnContext, routeMatches, type TurnContext } from './conversati
 import { renderedReadCursor } from './read-state.js';
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
-type StoredTurn = Omit<TurnRow, 'started_at' | 'ended_at'> & {
-  started_at: number | null;
-  ended_at: number | null;
-};
+
+function append<K, V>(groups: Map<K, V[]>, key: K, value: V): void {
+  const group = groups.get(key);
+  if (group) group.push(value);
+  else groups.set(key, [value]);
+}
+
+function rowsByTurn<T extends { turn_id: string | null }>(
+  db: Database.Database | null,
+  table: 'turn_activity' | 'turn_usage' | 'turn_inputs',
+  scope: { turns: string; owned: string; outputs: string },
+): (turnId: string) => T[] {
+  const groups = new Map<string | null, T[]>();
+  const order = { turn_activity: 'ordinal', turn_usage: 'id', turn_inputs: 'message_in_id' };
+  const anchored =
+    table === 'turn_inputs'
+      ? ''
+      : 'AND (record.turn_id IN (SELECT value FROM json_each(@owned)) OR record.message_out_id IN (SELECT value FROM json_each(@outputs)))';
+  const rows = db
+    ? (db
+        .prepare(
+          `SELECT record.* FROM json_each(@turns) visible JOIN ${table} record ON record.turn_id=visible.value
+       ${anchored} ORDER BY record.turn_id, record.${order[table]}`,
+        )
+        .all(scope) as T[])
+    : [];
+  for (const row of rows) {
+    append(groups, row.turn_id, row);
+  }
+  return (turnId) => groups.get(turnId) ?? [];
+}
 
 function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
   const value: Record<string, unknown> = {};
@@ -50,21 +77,16 @@ function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
 
 /** When the earliest submission answered by the turn arrived, never before the previous turn ended. */
 function turnRequestedAt(
-  turn: StoredTurn,
-  previous: StoredTurn | undefined,
+  turn: TurnRow,
+  previous: TurnRow | undefined,
   inputIds: string[],
-  messages: ConversationMessage[],
+  inputTimes: ReadonlyMap<string, number>,
 ): number | null {
-  const startedAt = turn.started_at ?? NaN;
-  if (!Number.isFinite(startedAt)) return null;
-  const submitted = messages
-    .filter((m) => m.direction === 'in' && inputIds.includes(m.id))
-    .map((m) => m.timestamp)
-    .filter(Number.isFinite);
-  if (!submitted.length) return null;
-  const previousEnd = previous?.ended_at ?? NaN;
-  const floor = Number.isFinite(previousEnd) && previousEnd <= startedAt ? previousEnd : -Infinity;
-  return Math.min(startedAt, Math.max(floor, Math.min(...submitted)));
+  const submitted = inputIds.reduce((earliest, id) => Math.min(earliest, inputTimes.get(id)!), Infinity);
+  if (turn.started_at === null || submitted === Infinity) return null;
+  const previousEnd = previous?.ended_at;
+  const floor = previousEnd != null && previousEnd <= turn.started_at ? previousEnd : -Infinity;
+  return Math.min(turn.started_at, Math.max(floor, submitted));
 }
 
 /** Pure synchronous read of host-owned state. The host is the only writer and cannot
@@ -79,27 +101,33 @@ export function projectConversation(
   signals: Signals,
   approvals: ConversationApproval[] = [],
 ): Conversation {
-  const records = outDb ? (outDb.prepare('SELECT * FROM turns ORDER BY started_at, id').all() as StoredTurn[]) : [];
+  const records = outDb ? (outDb.prepare('SELECT * FROM turns ORDER BY started_at, id').all() as TurnRow[]) : [];
   const byId = new Map(records.map((turn) => [turn.id, turn]));
   for (const message of history) {
     if (message.turnId && !byId.has(message.turnId)) throw new Error('Missing conversation turn association');
   }
-  const owns = (turn: StoredTurn) =>
+  const owns = (turn: TurnRow) =>
     routeMatches(context, turn.origin_channel_type, turn.origin_platform_id, turn.origin_thread_id);
-  const unknown = (turn: StoredTurn) =>
+  const unknown = (turn: TurnRow) =>
     turn.provenance !== 'native' && turn.origin_channel_type === null && turn.origin_platform_id === null;
   const visibleQuestions = questions.filter((q) => routeMatches(context, q.channel_type, q.platform_id, q.thread_id));
-  const questionAnchors = new Map(
-    visibleQuestions.map((q) => [
-      q.message_out_id,
-      outDb?.prepare('SELECT turn_id, content, timestamp FROM messages_out WHERE id = ?').get(q.message_out_id) as
-        | { turn_id: string | null; content: string; timestamp: number }
-        | undefined,
-    ]),
-  );
+  const visibleQuestionIds = new Set(visibleQuestions.map((q) => q.id));
+  const anchors = outDb
+    ? (outDb
+        .prepare(
+          'SELECT message.* FROM json_each(?) visible JOIN messages_out message ON message.id=visible.value ORDER BY visible.key',
+        )
+        .all(JSON.stringify(visibleQuestions.map((q) => q.message_out_id))) as Array<{
+        id: string;
+        turn_id: string | null;
+        content: string;
+        timestamp: number;
+      }>)
+    : [];
+  const questionAnchors = new Map(anchors.map((anchor) => [anchor.id, anchor]));
   const messages: ConversationMessage[] = history
     .filter((message) => {
-      if (message.questionId && !visibleQuestions.some((question) => question.id === message.questionId)) return false;
+      if (message.questionId && !visibleQuestionIds.has(message.questionId)) return false;
       const turn = message.turnId ? byId.get(message.turnId) : undefined;
       return !(turn && turn.phase !== 'settled' && message.deliveryOrigin === 'response');
     })
@@ -113,40 +141,60 @@ export function projectConversation(
       return message;
     });
   const visibleOutputIds = new Set(messages.filter((m) => m.direction === 'out').map((m) => m.id));
-  for (const id of questionAnchors.keys()) visibleOutputIds.add(id);
-  const visibleInputIds = new Set(messages.filter((m) => m.direction === 'in').map((m) => m.id));
+  const outputsByTurn = new Map<string, string[]>();
+  const inputTimes = new Map<string, number>();
+  for (const message of messages) {
+    if (message.direction === 'in') {
+      inputTimes.set(message.id, Math.min(inputTimes.get(message.id) ?? Infinity, message.timestamp));
+    } else if (message.turnId) {
+      append(outputsByTurn, message.turnId, message.id);
+    }
+  }
+  for (const question of visibleQuestions) visibleOutputIds.add(question.message_out_id);
+  for (const [id, anchor] of questionAnchors) {
+    if (anchor.turn_id) {
+      append(outputsByTurn, anchor.turn_id, id);
+    }
+  }
+  const visibleTurns = records
+    .map((turn, index) => ({ turn, index, owned: owns(turn) }))
+    .filter(({ turn, owned }) => owned || (unknown(turn) && outputsByTurn.has(turn.id)));
+  const turnIdsJson = JSON.stringify(visibleTurns.map(({ turn }) => turn.id));
+  const ownedTurnIds = visibleTurns.filter(({ owned }) => owned).map(({ turn }) => turn.id);
+  const scope = {
+    turns: turnIdsJson,
+    owned: JSON.stringify(ownedTurnIds),
+    outputs: JSON.stringify([...visibleOutputIds]),
+  };
+  const activityByTurn = rowsByTurn<{
+    turn_id: string;
+    message_out_id: string | null;
+    ordinal: number;
+    ts: number;
+    text: string;
+    timeline_position: number;
+  }>(outDb, 'turn_activity', scope);
+  const usageByTurn = rowsByTurn<Record<string, unknown> & { turn_id: string }>(outDb, 'turn_usage', scope);
+  const inputsByTurn = rowsByTurn<TurnInputRow>(outDb, 'turn_inputs', scope);
+  const metadataByTurn = readTurnMetadataForTurns(outDb, ownedTurnIds);
+  const liveActivityByTurn = new Map<string, Signals['activity']>();
+  for (const line of signals.activity) append(liveActivityByTurn, line.turnId, line);
   const turns: ConversationTurn[] = [];
-  for (const [index, turn] of records.entries()) {
-    const owned = owns(turn);
-    const outputs = [
-      ...messages.filter((m) => m.turnId === turn.id && m.direction === 'out').map((m) => m.id),
-      ...[...questionAnchors].filter(([, anchor]) => anchor?.turn_id === turn.id).map(([id]) => id),
-    ];
-    if (!owned && !(unknown(turn) && outputs.length)) continue;
-    const activity = outDb!
-      .prepare(
-        'SELECT message_out_id, ordinal, ts, text, timeline_position FROM turn_activity WHERE turn_id = ? ORDER BY ordinal',
-      )
-      .all(turn.id) as Array<{
-      message_out_id: string | null;
-      ordinal: number;
-      ts: number;
-      text: string;
-      timeline_position: number;
-    }>;
+  for (const { turn, index, owned } of visibleTurns) {
+    const outputs = outputsByTurn.get(turn.id) ?? [];
+    const activity = activityByTurn(turn.id);
     const trace = new Map<number, ConversationTurn['activity'][number]>();
     for (const line of activity) {
-      if (owned || (line.message_out_id !== null && visibleOutputIds.has(line.message_out_id)))
-        trace.set(line.ordinal, {
-          ordinal: line.ordinal,
-          ts: line.ts,
-          text: line.text,
-          timelinePosition: line.timeline_position,
-        });
+      trace.set(line.ordinal, {
+        ordinal: line.ordinal,
+        ts: line.ts,
+        text: line.text,
+        timelinePosition: line.timeline_position,
+      });
     }
     if (owned && turn.phase !== 'settled') {
-      for (const line of signals.activity) {
-        if (line.turnId === turn.id && !trace.has(line.ordinal))
+      for (const line of liveActivityByTurn.get(turn.id) ?? []) {
+        if (!trace.has(line.ordinal))
           trace.set(line.ordinal, {
             ordinal: line.ordinal,
             ts: line.ts,
@@ -155,47 +203,38 @@ export function projectConversation(
           });
       }
     }
-    const usage = (
-      outDb!.prepare('SELECT * FROM turn_usage WHERE turn_id = ? ORDER BY id').all(turn.id) as Array<
-        Record<string, unknown>
-      >
-    )
-      .filter((row) => owned || visibleOutputIds.has(String(row.message_out_id)))
-      .map((row) => ({ id: String(row.id), value: usageValue(row) }));
-    const metadata = owned ? readTurnMetadata(outDb!, turn.id) : undefined;
-    const inputIds = getTurnInputs(outDb!, turn.id)
+    const usage = usageByTurn(turn.id).map((row) => ({ id: String(row.id), value: usageValue(row) }));
+    const metadata = metadataByTurn.get(turn.id);
+    const inputIds = inputsByTurn(turn.id)
       .map((r) => publicInboundMessageId(r.message_in_id, groupId))
-      .filter((id) => visibleInputIds.has(id));
+      .filter((id) => inputTimes.has(id));
+    let status: ConversationTurn['metadata']['status'] = 'provisional';
+    let durationMs: number | null = null;
+    if (turn.phase === 'settled') {
+      if (metadata?.final) {
+        status = metadata.status;
+        durationMs = metadata.durationMs;
+      } else {
+        status = usage.length ? 'partial' : 'unavailable';
+        // Native terminal timestamps take precedence over stale checkpoint durations.
+        if (turn.provenance !== 'native') durationMs = usage.at(-1)?.value.duration_ms ?? null;
+      }
+    }
     turns.push({
       id: turn.id,
       phase: turn.phase,
       outcome: turn.outcome,
       startedAt: turn.started_at,
-      requestedAt: turnRequestedAt(turn, records[index - 1], inputIds, messages),
+      requestedAt: turnRequestedAt(turn, records[index - 1], inputIds, inputTimes),
       endedAt: turn.ended_at,
       inputIds,
       outputIds: outputs,
       activity: reduceConversationActivity([...trace.values()].sort((a, b) => a.ordinal - b.ordinal)),
       usage,
       metadata: {
-        status:
-          turn.phase !== 'settled'
-            ? 'provisional'
-            : metadata?.final
-              ? metadata.status
-              : usage.length
-                ? 'partial'
-                : 'unavailable',
+        status,
         model: metadata?.model ?? usage.at(-1)?.value.model ?? null,
-        // Without final metadata, native turns use their terminal timestamps rather than a stale checkpoint.
-        durationMs:
-          turn.phase !== 'settled'
-            ? null
-            : metadata?.final
-              ? metadata.durationMs
-              : turn.provenance === 'native'
-                ? null
-                : (usage.at(-1)?.value.duration_ms ?? null),
+        durationMs,
       },
     });
   }

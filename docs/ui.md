@@ -41,6 +41,13 @@ Each emitted line is parsed once. Traces retain the first ordinal, timestamp
 and timeline position, plus unrecognized imported history; channel labels
 continue to omit unrecognized activity.
 
+Conversation projection indexes visible messages, question anchors and live
+activity once, then reads selected turns' activity, usage, inputs and metadata
+in batches. Its six scoped projection queries do not grow with the turn count.
+Unknown imported turns still expose only already-visible anchors; another
+route's metadata is neither decoded nor exposed. Numeric input timestamps
+retain epoch zero and the existing previous-turn waiting-time clamp.
+
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 

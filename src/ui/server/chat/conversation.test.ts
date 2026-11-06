@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OUTBOUND_SCHEMA } from '../../../db/schema.js';
 import { linkTurnInput, putTurn, type TurnRow } from '../../../db/turns.js';
 import {
@@ -61,6 +61,85 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('authoritative conversation projection', () => {
+  it('uses a constant number of scoped queries as the conversation grows', () => {
+    const history: ConversationMessage[] = [];
+    for (let index = 0; index < 80; index++) {
+      const id = `batch-${String(index).padStart(3, '0')}`;
+      putTurn(db, { ...turn, id, phase: 'settled', outcome: 'replied', started_at: index, ended_at: index + 1 });
+      linkTurnInput(db, { turn_id: id, message_in_id: `${id}-in`, association: 'consumed' });
+      history.push({ id: `${id}-in`, direction: 'in', timestamp: index, text: id });
+      history.push({ ...output, id: `${id}-out`, turnId: id });
+      db.prepare('INSERT INTO turn_activity(turn_id,ordinal,ts,text,timeline_position) VALUES(?,0,?,?,100)').run(
+        id,
+        index,
+        id,
+      );
+      db.prepare('INSERT INTO turn_usage(id,turn_id,input_tokens) VALUES(?,?,?)').run(id, id, index);
+      db.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,0)').run(
+        `turn-metadata:${id}`,
+        JSON.stringify({ turnId: id, durationMs: index, model: id, usageId: id, status: 'final', final: true }),
+      );
+    }
+    const prepare = vi.spyOn(db, 'prepare');
+    try {
+      const view = read(history);
+      expect(prepare).toHaveBeenCalledTimes(6);
+      expect(view.turns).toHaveLength(81);
+      for (const projected of view.turns.filter((entry) => entry.id.startsWith('batch-'))) {
+        expect(projected.inputIds).toEqual([`${projected.id}-in`]);
+        expect(projected.outputIds).toEqual([`${projected.id}-out`]);
+        expect(projected.activity[0].text).toBe(projected.id);
+        expect(projected.usage[0].id).toBe(projected.id);
+        expect(projected.metadata.model).toBe(projected.id);
+      }
+    } finally {
+      prepare.mockRestore();
+    }
+  });
+
+  it('keeps epoch-zero request times, earliest duplicate submissions and nullable starts', () => {
+    linkTurnInput(db, { turn_id: turn.id, message_in_id: 'input', association: 'consumed' });
+    putTurn(db, { ...turn, id: 'previous', started_at: -1000, ended_at: -250 });
+    putTurn(db, { ...turn, started_at: 0 });
+    const input = (timestamp: number): ConversationMessage => ({ id: 'input', direction: 'in', timestamp, text: '' });
+    const requested = (history: ConversationMessage[]) =>
+      read(history).turns.find((entry) => entry.id === turn.id)?.requestedAt;
+    expect(requested([input(0)])).toBe(0);
+    expect(requested([input(0), input(-500)])).toBe(-250);
+    putTurn(db, { ...turn, id: 'previous', started_at: -1000, ended_at: 10 });
+    expect(requested([input(-500)])).toBe(-500);
+    expect(requested([])).toBeNull();
+    putTurn(db, { ...turn, started_at: null });
+    expect(requested([input(0)])).toBeNull();
+  });
+
+  it('does not read or decode malformed metadata belonging to another route', () => {
+    putTurn(db, { ...turn, id: 'private', phase: 'settled', origin_thread_id: 'private' });
+    db.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,0)').run(
+      'turn-metadata:private',
+      '{malformed',
+    );
+    expect(read().turns.map((entry) => entry.id)).toEqual([turn.id]);
+  });
+
+  it('does not mistake an unanchored usage row for an output whose literal id is null', () => {
+    putTurn(db, {
+      ...turn,
+      phase: 'settled',
+      provenance: 'backfill',
+      origin_channel_type: null,
+      origin_platform_id: null,
+    });
+    db.prepare('INSERT INTO turn_usage(id,turn_id,message_out_id,cost_usd) VALUES(?,?,?,?)').run(
+      'visible',
+      turn.id,
+      'null',
+      0.1,
+    );
+    db.prepare('INSERT INTO turn_usage(id,turn_id,cost_usd) VALUES(?,?,?)').run('unanchored', turn.id, 10);
+    expect(read([{ ...output, id: 'null' }]).turns[0].usage.map((row) => row.id)).toEqual(['visible']);
+  });
+
   it('reuses authorized message bodies and only copies to remove off-route turn associations', () => {
     putTurn(db, { ...turn, phase: 'settled', outcome: 'replied' });
     expect(read([output]).messages[0]).toBe(output);

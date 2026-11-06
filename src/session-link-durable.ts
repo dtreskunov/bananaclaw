@@ -62,6 +62,19 @@ export function readTurnMetadata(db: Database.Database, turnId: string): TurnMet
   return row ? (JSON.parse(row.value) as TurnMetadata) : undefined;
 }
 
+export function readTurnMetadataForTurns(
+  db: Database.Database | null,
+  turnIds: readonly string[],
+): Map<string, TurnMetadata> {
+  if (!db) return new Map();
+  const rows = db
+    .prepare(
+      "SELECT visible.value AS turn_id, state.value FROM json_each(?) visible JOIN session_state state ON state.key = 'turn-metadata:' || visible.value",
+    )
+    .all(JSON.stringify(turnIds)) as { turn_id: string; value: string }[];
+  return new Map(rows.map((row) => [row.turn_id, JSON.parse(row.value) as TurnMetadata]));
+}
+
 function dbPath(agentGroupId: string, sessionId: string, name: 'inbound.db' | 'outbound.db'): string {
   return path.join(DATA_DIR, 'v2-sessions', agentGroupId, sessionId, name);
 }
