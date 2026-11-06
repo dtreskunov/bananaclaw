@@ -94,7 +94,7 @@ unchanged. Staleness mutes the indicator without freezing its running ring.
 Waiting remains a separate native clickable control, with a larger hit target
 and visible keyboard focus. Agent tabs, the selected mobile dropdown and picker
 rows, including thread and DM rows, place the icon in the secondary status line
-before the relative activity time and message/thread counts. Channel, branch
+before the relative activity time and message/thread counts. Channel
 and scheduled-task badges stay beside thread titles. There is
 no visible `N attn` badge, activity text label or link-styled waiting action.
 
@@ -121,8 +121,9 @@ timestamp, unread/activity state, tasks and actions.
 
 Indentation stops after three levels without hiding deeper conversations.
 Forks whose parent is deleted or absent from the authorized channel listing
-remain top-level rows, retaining their existing lineage hint. Search results
-remain flat, and the existing channel-section toggles are unchanged.
+remain top-level rows. The rail uses tree connectors without fork glyphs or
+branch-count badges. Search results remain flat, and the existing
+channel-section toggles are unchanged.
 This is presentation-only; fork storage and deletion behavior do not change.
 
 ### Unread conversations

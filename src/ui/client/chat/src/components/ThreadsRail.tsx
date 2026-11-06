@@ -110,8 +110,6 @@ export function ThreadRow({ t, guides = [] }: { t: Thread; guides?: boolean[] })
     if (!ok) return;
     await deleteThread(t);
   };
-  const origin = t.forkedFrom;
-  const branchCount = t.forkChildren?.length ?? 0;
   return (
     <div
       class={'thread' + (active ? ' active' : '') + (guides.length ? ' branch' : '') + (t.unread ? ' is-unread' : '')}
@@ -130,22 +128,8 @@ export function ThreadRow({ t, guides = [] }: { t: Thread; guides?: boolean[] })
         </span>
       ) : null}
       <div class="title">
-        {origin
-          ? <span
-              class={'fork-pill' + (origin.deleted ? ' orphan' : '')}
-              title={origin.deleted
-                ? 'Branched from a thread that has since been deleted'
-                : `Branched from "${origin.title || 'another thread'}"`}
-            >{'\u2442'}</span>
-          : null}
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
         <span class="title-text">{t.unread ? <span class="unread-label">Unread. </span> : null}{t.title}</span>
-        {branchCount > 0
-          ? <span
-              class="fork-count"
-              title={`${branchCount} ${branchCount === 1 ? 'branch was' : 'branches were'} started from this thread`}
-            >{'\u2442'}{' '}{branchCount}</span>
-          : null}
         {head ? (
           <button
             type="button"

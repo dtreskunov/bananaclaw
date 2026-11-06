@@ -22,7 +22,11 @@ afterEach(() => {
 });
 
 describe('thread family rendering', () => {
-  const root = testThread({ threadId: 'root', lastActivityAt: epochMs(10) });
+  const root = testThread({
+    threadId: 'root',
+    lastActivityAt: epochMs(10),
+    forkChildren: [{ threadId: 'branch', messageId: 'message', title: 'New approach' }],
+  });
   const branch = testThread({
     threadId: 'branch',
     title: 'New approach',
@@ -50,7 +54,7 @@ describe('thread family rendering', () => {
     expect(rows[0].props.t).toBe(dm);
   });
 
-  it('preserves active/unread state, row timestamps, branch hints and navigation', () => {
+  it('preserves active/unread state, row timestamps, tree guides and navigation', () => {
     groupId.value = 'group';
     threadId.value = branch.threadId;
     const row = ThreadRow({ t: branch, guides: [true, false] });
@@ -63,8 +67,6 @@ describe('thread family rendering', () => {
       'thread-tree-guide continues',
       'thread-tree-guide elbow',
     ]);
-    const title = children.find((node) => node.props.class === 'title')!;
-    expect((toChildArray(title.props.children) as ElementNode[])[0].props.title).toBe('Branched from "Original"');
     const meta = children.find((node) => node.props.class === 'meta')!;
     const timestamp = (toChildArray(meta.props.children) as ElementNode[])[1];
     expect((toChildArray(timestamp.props.children) as ElementNode[])[0]).toMatchObject({
@@ -75,7 +77,7 @@ describe('thread family rendering', () => {
     expect(openChat).toHaveBeenCalledExactlyOnceWith('group', 'branch', null);
   });
 
-  it('leaves unavailable/deleted-parent forks at root indentation with their lineage hint intact', () => {
+  it('leaves unavailable/deleted-parent forks at root indentation', () => {
     const orphan = testThread({ ...branch, forkedFrom: { ...branch.forkedFrom!, deleted: true } });
     const rows = toChildArray(ThreadList({ items: [orphan] }).props.children) as VNode<
       ComponentProps<typeof ThreadRow>
@@ -83,10 +85,19 @@ describe('thread family rendering', () => {
     const row = ThreadRow(rows[0].props);
     expect(row.props.class).not.toContain(' branch');
     expect(row.props.style).toEqual({ '--thread-depth': 0 });
+  });
+
+  it.each([
+    { kind: 'parent', t: root },
+    { kind: 'branch', t: branch },
+    { kind: 'orphan', t: testThread({ ...branch, forkedFrom: { ...branch.forkedFrom!, deleted: true } }) },
+  ])('omits fork glyphs and counts from $kind titles', ({ t }) => {
+    const row = ThreadRow({ t });
     const title = (toChildArray(row.props.children) as ElementNode[]).find((node) => node.props.class === 'title')!;
-    expect((toChildArray(title.props.children) as ElementNode[])[0].props).toMatchObject({
-      class: 'fork-pill orphan',
-      title: 'Branched from a thread that has since been deleted',
+    const children = toChildArray(title.props.children) as ElementNode[];
+    expect(children).toHaveLength(1);
+    expect(children[0].props).toMatchObject({
+      class: 'title-text',
     });
   });
 });

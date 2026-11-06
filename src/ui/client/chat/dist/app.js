@@ -22981,8 +22981,6 @@ This also cancels its outstanding approval requests. Already applied changes are
     if (!ok) return;
     await deleteThread(t4);
   };
-  const origin = t4.forkedFrom;
-  const branchCount = t4.forkChildren?.length ?? 0;
   return /* @__PURE__ */ u4(
     "div",
     {
@@ -22999,31 +22997,11 @@ This also cancels its outstanding approval requests. Already applied changes are
           i5
         )) }) : null,
         /* @__PURE__ */ u4("div", { class: "title", children: [
-          origin ? /* @__PURE__ */ u4(
-            "span",
-            {
-              class: "fork-pill" + (origin.deleted ? " orphan" : ""),
-              title: origin.deleted ? "Branched from a thread that has since been deleted" : `Branched from "${origin.title || "another thread"}"`,
-              children: "\u2442"
-            }
-          ) : null,
           ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
           /* @__PURE__ */ u4("span", { class: "title-text", children: [
             t4.unread ? /* @__PURE__ */ u4("span", { class: "unread-label", children: "Unread. " }) : null,
             t4.title
           ] }),
-          branchCount > 0 ? /* @__PURE__ */ u4(
-            "span",
-            {
-              class: "fork-count",
-              title: `${branchCount} ${branchCount === 1 ? "branch was" : "branches were"} started from this thread`,
-              children: [
-                "\u2442",
-                " ",
-                branchCount
-              ]
-            }
-          ) : null,
           head ? /* @__PURE__ */ u4(
             "button",
             {
