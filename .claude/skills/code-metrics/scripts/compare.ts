@@ -28,8 +28,10 @@ interface SourceFile {
 }
 
 interface MeasuredFile extends SourceFile, Metrics {
-  test: boolean;
+  category: CodeCategory;
 }
+
+export type CodeCategory = 'production' | 'tests' | 'tooling';
 
 export interface Options {
   staged?: boolean;
@@ -43,7 +45,9 @@ export interface Options {
 const extensions = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const excludedDirectory = /(?:^|\/)(?:dist|node_modules|vendor|coverage|build)(?:\/|$)/;
 const testPath =
-  /(?:^|\/)(?:__tests__|tests|fixtures|test-fixtures|test-utils|test-helpers)(?:\/|$)|[.-](?:test|spec|fixture|fixtures)(?:[.-]|$)|(?:^|\/)vitest(?:\.|$)/;
+  /(?:^|\/)(?:__tests__|__fixtures__|__mocks__|tests?|fixtures?|mocks?|test-fixtures|test-utils|test-helpers)(?:\/|$)|(?:^|\/|[.-])(?:test|spec|fixtures?|mocks?|test-utils|test-helpers)(?:[.-]|$)/;
+const toolingPath =
+  /(?:^|\/)(?:scripts|setup|\.claude|\.github|\.githooks|\.husky)(?:\/|$)|(?:^|\/)(?:eslint|vitest|vite|webpack|rollup|esbuild|prettier|babel|postcss|tailwind|playwright)(?:\.[^/]+)?\.config\.[^/]+$/;
 const functionTypes = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
 const parserPackage: unknown = createRequire(import.meta.url)('typescript-eslint/package.json');
 if (
@@ -57,6 +61,13 @@ if (
 const versions = { eslint: Linter.version, parser: parserPackage.version, typescript: ts.version };
 const cacheVersion = `v1-${versions.eslint}-${versions.parser}-${versions.typescript}`;
 const linter = new Linter();
+
+export function classifyFile(file: string): CodeCategory {
+  if (testPath.test(file)) return 'tests';
+  if (toolingPath.test(file)) return 'tooling';
+  if (file.startsWith('src/') || file.startsWith('container/agent-runner/src/')) return 'production';
+  return 'tooling';
+}
 
 export function measureSource(text: string, filename: string): Metrics {
   let loc: number | undefined;
@@ -233,21 +244,21 @@ export function summarize(files: Metrics[]) {
 function component(file: string): string {
   if (file.startsWith('src/ui/')) return 'UI';
   if (file.startsWith('src/')) return 'Host';
-  if (file.startsWith('container/agent-runner/')) return 'Agent runner';
-  if (file.startsWith('setup/')) return 'Setup';
-  return 'Other tooling / skills';
+  if (file.startsWith('container/agent-runner/src/')) return 'Agent runner';
+  throw new Error(`Unrecognized production source tree: ${file}`);
 }
 
 function snapshot(label: string, revision: string | null, files: MeasuredFile[]) {
-  const production = files.filter((file) => !file.test);
+  const production = files.filter((file) => file.category === 'production');
   return {
     label,
     revision,
     all: summarize(files),
     production: summarize(production),
-    tests: summarize(files.filter((file) => file.test)),
+    tests: summarize(files.filter((file) => file.category === 'tests')),
+    tooling: summarize(files.filter((file) => file.category === 'tooling')),
     components: Object.fromEntries(
-      [...new Set(files.map((file) => component(file.file)))]
+      [...new Set(production.map((file) => component(file.file)))]
         .sort()
         .map((name) => [name, summarize(production.filter((file) => component(file.file) === name))]),
     ),
@@ -316,7 +327,7 @@ export function compare(options: Options = {}, cwd = process.cwd(), now = new Da
     entries.map((file): MeasuredFile => {
       const metrics = measured.get(key(file));
       if (!metrics) throw new Error(`Missing metrics for ${file.file}`);
-      return { ...file, ...metrics, test: testPath.test(file.file) };
+      return { ...file, ...metrics, category: classifyFile(file.file) };
     }),
   );
   const snapshots = [
@@ -333,7 +344,8 @@ export function compare(options: Options = {}, cwd = process.cwd(), now = new Da
       const current = newFiles.get(file);
       return {
         file,
-        test: current?.test ?? old?.test ?? false,
+        beforeCategory: old?.category ?? null,
+        afterCategory: current?.category ?? null,
         before: summarize(old ? [old] : []),
         after: summarize(current ? [current] : []),
       };
@@ -343,7 +355,13 @@ export function compare(options: Options = {}, cwd = process.cwd(), now = new Da
       scope: 'Git-tracked TS/JS regular files; generated build/dist, dependencies, vendor and coverage excluded.',
       loc: 'Nonblank physical lines containing a non-comment parser token.',
       complexity: 'ESLint classic cyclomatic complexity, function nodes only; implicit class paths excluded.',
-      testClassification: testPath.source,
+      classificationVersion: 2,
+      classification: {
+        production: 'Runtime source under src/ and container/agent-runner/src/, excluding tests/support and tooling.',
+        tests: testPath.source,
+        tooling: 'Setup, scripts, skills, build/lint/test configuration, and other non-runtime roots.',
+        toolingPattern: toolingPath.source,
+      },
       versions,
       cutoff,
     },
@@ -363,9 +381,12 @@ export function formatReport(report: ReturnType<typeof compare>): string {
   const [before, after] = report.snapshots;
   const rows: [string, number | null, number | null, number?][] = [
     ['Total LOC', before.all.loc, after.all.loc],
-    ['Non-test LOC', before.production.loc, after.production.loc],
+    ['Production LOC', before.production.loc, after.production.loc],
     ['Test/support LOC', before.tests.loc, after.tests.loc],
-    ['Non-test total complexity', before.production.complexity, after.production.complexity],
+    ['Tooling/setup LOC', before.tooling.loc, after.tooling.loc],
+    ['Production total complexity', before.production.complexity, after.production.complexity],
+    ['Test/support total complexity', before.tests.complexity, after.tests.complexity],
+    ['Tooling/setup total complexity', before.tooling.complexity, after.tooling.complexity],
     ['Average complexity/function', before.production.average, after.production.average, 2],
     ['95th-percentile complexity', before.production.p95, after.production.p95],
     ['Functions with complexity >20', before.production.above20, after.production.above20],
@@ -376,6 +397,7 @@ export function formatReport(report: ReturnType<typeof compare>): string {
     `Before: ${before.label}`,
     `After: ${after.label}`,
     'Scope: tracked TS/JS; comments, blanks and generated bundles excluded.',
+    'Production: runtime host/UI and agent-runner source only; tests/support and tooling are separate.',
     '',
     '| Metric | Before | After | Change |',
     '|---|---:|---:|---:|',
@@ -384,7 +406,7 @@ export function formatReport(report: ReturnType<typeof compare>): string {
         `| ${name} | ${a?.toFixed(decimals) ?? 'n/a'} | ${b?.toFixed(decimals) ?? 'n/a'} | ${a === null || b === null ? 'n/a' : delta(a, b, decimals)} |`,
     ),
     '',
-    'Non-test components:',
+    'Production components:',
     '| Component | LOC change | Complexity change |',
     '|---|---:|---:|',
   ];
@@ -393,9 +415,9 @@ export function formatReport(report: ReturnType<typeof compare>): string {
     const b = after.components[name] ?? summarize([]);
     lines.push(`| ${name} | ${delta(a.loc, b.loc)} | ${delta(a.complexity, b.complexity)} |`);
   }
-  lines.push('', 'Largest changed non-test files (moves may appear as additions/deletions):');
+  lines.push('', 'Largest changed production files (moves may appear as additions/deletions):');
   const changes = report.changes
-    .filter((file) => !file.test)
+    .filter((file) => file.beforeCategory === 'production' || file.afterCategory === 'production')
     .sort(
       (a, b) =>
         Math.abs(b.after.complexity - b.before.complexity) - Math.abs(a.after.complexity - a.before.complexity) ||
@@ -407,7 +429,7 @@ export function formatReport(report: ReturnType<typeof compare>): string {
     );
   }
   if (!changes.length) lines.push('- None.');
-  lines.push('', 'Target non-test hotspots (not necessarily changed):');
+  lines.push('', 'Target production hotspots (not necessarily changed):');
   for (const fn of after.hotspots.slice(0, 5)) lines.push(`- ${fn.file}:${fn.line} ${fn.name}: ${fn.complexity}`);
   lines.push(
     '',

@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { load } from 'js-yaml';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { compare, formatReport, measureSource, parseArgs, summarize } from '../scripts/compare.js';
+import { classifyFile, compare, formatReport, measureSource, parseArgs, summarize } from '../scripts/compare.js';
 
 const temporaryRepos: string[] = [];
 
@@ -133,6 +133,53 @@ describe('source measurement', () => {
   });
 });
 
+describe('source-role classification', () => {
+  it.each([
+    'src/index.ts',
+    'src/config.ts',
+    'src/cli/client.ts',
+    'src/skills/registry.ts',
+    'src/db/migrations/001-initial.ts',
+    'src/ui/client/chat/src/components/App.tsx',
+    'src/ui/client/chat/sw.js',
+    'src/ui/client/chat/voice-worklet.js',
+    'container/agent-runner/src/providers/native.ts',
+  ])('keeps runtime code in production: %s', (file) => {
+    expect(classifyFile(file)).toBe('production');
+  });
+
+  it.each([
+    '.claude/skills/code-metrics/scripts/compare.ts',
+    '.claude/skills/add-dashboard/resources/dashboard-pusher.ts',
+    'setup/verify.ts',
+    'scripts/init-first-agent.ts',
+    'container/agent-runner/scripts/sdk-signal-probe.ts',
+    'src/ui/scripts/mint-magic.ts',
+    'src/ui/client/chat/vite.config.ts',
+    'eslint.config.js',
+    'vitest.skills.config.ts',
+    'other/new-module.ts',
+  ])('does not count developer and operational tooling as production: %s', (file) => {
+    expect(classifyFile(file)).toBe('tooling');
+  });
+
+  it.each([
+    'src/main.test.ts',
+    'src/test.ts',
+    'src/test-helpers/create.ts',
+    'src/__tests__/example.ts',
+    'src/__fixtures__/example.ts',
+    'src/__mocks__/example.ts',
+    'src/ui/client/chat/fixtures/turn-status.tsx',
+    'src/ui/client/chat/src/conversation-test-fixtures.ts',
+    'container/agent-runner/src/providers/mock.ts',
+    'setup/verify.test.ts',
+    '.claude/skills/code-metrics/tests/compare.test.ts',
+  ])('prioritizes tests/support inside every source root: %s', (file) => {
+    expect(classifyFile(file)).toBe('tests');
+  });
+});
+
 describe('Git snapshots and persistent cache', () => {
   it('measures partially staged content, not unstaged or untracked source', () => {
     const root = repository();
@@ -185,6 +232,44 @@ describe('Git snapshots and persistent cache', () => {
     write(root, 'src/main.test.ts', 'export function answer() { return 42; }\n');
     git(root, ['add', '.']);
     expect(compare({ staged: true }, root).cache).toMatchObject({ hits: 1, misses: 1 });
+  });
+
+  it('partitions every metric and keeps cached tooling-only additions out of production', () => {
+    const root = repository();
+    const source = 'export function answer() { return 1; }\n';
+    compare({ staged: true }, root);
+    write(root, '.claude/skills/code-metrics/scripts/compare.ts', source);
+    write(root, 'setup/install.ts', source);
+    write(root, 'scripts/helper.ts', source);
+    write(root, 'vitest.config.ts', source);
+    write(root, 'src/ui/scripts/probe.ts', source);
+    write(root, 'src/main.test.ts', source);
+    git(root, ['add', '.']);
+    const report = compare({ staged: true }, root);
+    const [before, after] = report.snapshots;
+    expect(report.cache).toMatchObject({ hits: 1, misses: 0 });
+    expect(after.production).toEqual(before.production);
+    expect(after.tests).toMatchObject({ files: 1, loc: 1, complexity: 1 });
+    expect(after.tooling).toMatchObject({ files: 5, loc: 5, complexity: 5 });
+    expect(after.hotspots.map((fn) => fn.file)).toEqual(['src/main.ts']);
+    expect(Object.keys(after.components)).toEqual(['Host']);
+    for (const snapshot of report.snapshots) {
+      for (const metric of ['files', 'loc', 'functions', 'complexity'] as const) {
+        expect(snapshot.production[metric] + snapshot.tests[metric] + snapshot.tooling[metric]).toBe(
+          snapshot.all[metric],
+        );
+      }
+    }
+    expect(report.methodology.classificationVersion).toBe(2);
+    expect(report.changes.find((file) => file.file === 'scripts/helper.ts')).toMatchObject({
+      beforeCategory: null,
+      afterCategory: 'tooling',
+    });
+    const text = formatReport(report);
+    expect(text).toContain('| Production total complexity | 1 | 1 |');
+    expect(text).toContain('| Tooling/setup total complexity | 0 | 5 |');
+    expect(text).not.toContain('Non-test');
+    expect(text.split('Largest changed production files')[1]).not.toContain('scripts/helper.ts');
   });
 
   it('invalidates analyzer versions, rejects corrupt data, and supports bypassing cache', () => {

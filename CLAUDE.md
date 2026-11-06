@@ -239,8 +239,10 @@ the final intended changes and before every commit, run:
 pnpm exec tsx .claude/skills/code-metrics/scripts/compare.ts --staged
 ```
 
-Compare HEAD with the staged index only, summarize the LOC and complexity deltas
-and notable hotspots, and surface any analysis errors. Rerun if staged content
+Compare HEAD with the staged index only, summarize production LOC/complexity
+deltas and hotspots, report tests/support and tooling/setup separately, and
+surface any analysis errors. Non-test code is not automatically production code;
+coding-agent skills and metrics utilities are tooling. Rerun if staged content
 changes, including after restaging hook-generated edits. This report does not
 replace tests or impose a complexity threshold. Historical/week-over-week
 comparisons are available separately through the skill.
