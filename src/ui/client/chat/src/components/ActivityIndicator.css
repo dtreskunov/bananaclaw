@@ -21,7 +21,7 @@
   width: 6px;
   height: 6px;
 }
-.activity-indicator.idle:not(.waiting) .activity-indicator-base {
+.activity-indicator.idle:not(.waiting):not(.unread) .activity-indicator-base {
   background: var(--muted);
   opacity: 0.2;
 }
@@ -34,9 +34,12 @@
   position: absolute;
   border-radius: 50%;
   background: currentColor;
+  color: var(--activity-status-running);
+}
+.activity-indicator.waiting .activity-indicator-dot {
   color: var(--activity-status-queued);
 }
-.activity-indicator.stale .activity-indicator-dot { color: var(--muted); }
+.activity-indicator.stale.waiting .activity-indicator-dot { color: var(--muted); }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
 .tab-item-badge,
 .mobile-dialog-item-badge {
@@ -84,19 +87,6 @@
 .is-unread .tab-item-label,
 .is-unread .tab-bar-dropdown-text,
 .is-unread .mobile-dialog-item-label { font-weight: 700; }
-.is-unread .title-text::after,
-.is-unread .tab-item-label::after,
-.is-unread .tab-bar-dropdown-text::after,
-.is-unread .mobile-dialog-item-label::after {
-  content: '';
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--activity-status-running);
-  vertical-align: middle;
-}
 .unread-label {
   position: absolute;
   width: 1px;

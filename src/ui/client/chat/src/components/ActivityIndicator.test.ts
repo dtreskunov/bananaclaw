@@ -154,6 +154,25 @@ describe('shared activity presentation', () => {
     expect(node.props.title).toBe(node.props['aria-label']);
   });
 
+  it.each([
+    { activity: 'idle' as const },
+    { activity: 'running' as const },
+    { activity: 'idle' as const, waiting: true },
+    { activity: 'running' as const, waiting: true },
+    { activity: 'idle' as const, activityStale: true },
+    { activity: 'running' as const, activityStale: true },
+  ])('shares one centered dot for unread $activity/$waiting/$activityStale', (status) => {
+    const node = ActivityIndicator({ status, unread: true })!;
+    expect(node.props.class).toContain(' unread');
+    expect(node.props['aria-label']).toBe(`Unread. ${activityDetails(status).description}`);
+    expect(node.props.title).toBe(node.props['aria-label']);
+    expect(toChildArray(node.props.children)).toMatchObject([
+      { props: { class: 'activity-indicator-base' } },
+      { props: { class: 'activity-indicator-dot', 'aria-hidden': 'true' } },
+    ]);
+    expect(toChildArray(node.props.children)).toHaveLength(2);
+  });
+
   it('uses shared sync connectivity without replacing last-known activity', () => {
     attentionError.value = 'Connection lost';
     const status = { activity: 'running' } as const;
@@ -165,6 +184,16 @@ describe('shared activity presentation', () => {
 });
 
 describe.each([ThreadRow, DmRow])('thread/DM status activity (%s)', (Row) => {
+  it.each([false, true])('passes unread state to the status indicator while waiting=%s', (waiting) => {
+    const { indicator } = rowParts(Row, testThread({ unread: true, waiting }));
+    const component = (waiting ? indicator.props.children : indicator) as VNode<
+      ComponentProps<typeof ActivityIndicator>
+    >;
+    expect(component.type).toBe(ActivityIndicator);
+    expect(component.props.unread).toBe(true);
+    expect(ActivityIndicator(component.props).props.class).toContain(' unread');
+  });
+
   it.each([
     { activity: 'idle' as const },
     { activity: 'running' as const },

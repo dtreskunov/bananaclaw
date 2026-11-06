@@ -164,10 +164,14 @@ stored titles cannot be reconstructed automatically.
 
 ### Unread conversations
 
-Unread is per user and orthogonal to execution/waiting. Bold names and a small
-trailing dot identify unread threads and agent groups across desktop, dropdown
-and picker presentations. Agent summaries contain `unreadThreadCount`, counting
-visible conversations rather than messages.
+Unread is per user and orthogonal to execution/waiting. Bold names and a blue
+dot identify unread threads and agent groups across desktop, dropdown and picker
+presentations. The dot occupies the same centered status position and 6px size
+as idle and waiting dots, inside the spinner when running. Waiting takes
+precedence over unread in that shared position; names stay bold until read.
+Stale activity does not mute the independent unread dot.
+Agent summaries contain `unreadThreadCount`, counting visible conversations
+rather than messages.
 
 Unread includes newly published messages/files and routed question/approval
 cards. Own inputs, edits, reactions and trace/runtime updates do not count.

@@ -22,22 +22,23 @@ export function activityDetails(status: ActivityStatus, requestCount = 0, subjec
   return { stale, description, actionable: !!status.waiting && !attentionError.value && requestCount > 0 };
 }
 
-export function ActivityIndicator({ status, description }: {
+export function ActivityIndicator({ status, description, unread = false }: {
   status: ActivityStatus;
   description?: string;
+  unread?: boolean;
 }) {
   const details = activityDetails(status);
-  const label = description ?? details.description;
+  const label = `${unread ? 'Unread. ' : ''}${description ?? details.description}`;
   return (
     <span
-      class={`activity-indicator ${status.activity}${status.waiting ? ' waiting' : ''}${details.stale ? ' stale' : ''}`}
+      class={`activity-indicator ${status.activity}${status.waiting ? ' waiting' : ''}${unread ? ' unread' : ''}${details.stale ? ' stale' : ''}`}
       role="status"
       aria-live="off"
       aria-label={label}
       title={label}
     >
       <span class="activity-indicator-base" aria-hidden="true" />
-      {status.waiting ? <span class="activity-indicator-dot" aria-hidden="true" /> : null}
+      {status.waiting || unread ? <span class="activity-indicator-dot" aria-hidden="true" /> : null}
     </span>
   );
 }

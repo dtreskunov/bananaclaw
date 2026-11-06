@@ -55,7 +55,7 @@ function ThreadAttention({ thread }: { thread: Thread }) {
   const count = threadAttentionCount(location);
   const status = withPendingActivity(thread, groupId.value, thread);
   const { actionable, description } = activityDetails(status, count, thread.title);
-  const indicator = <ActivityIndicator status={status} description={description} />;
+  const indicator = <ActivityIndicator status={status} description={description} unread={thread.unread} />;
   return status.waiting ? (
     <button type="button" class="activity-action activity-dot-action thread-attention"
       disabled={!actionable}

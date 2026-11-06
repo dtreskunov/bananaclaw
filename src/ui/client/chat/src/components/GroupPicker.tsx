@@ -31,7 +31,7 @@ function activityBadge(group: Group) {
   const count = groupAttentionCount(group.id);
   const { actionable, description } = activityDetails(status, count, group.name);
   return {
-    badge: <ActivityIndicator status={status} description={description} />,
+    badge: <ActivityIndicator status={status} description={description} unread={!!saved.unreadThreadCount} />,
     badgeLabel: description,
     badgeDisabled: !actionable,
     onBadgeClick: status.waiting

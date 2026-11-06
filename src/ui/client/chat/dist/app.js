@@ -22462,20 +22462,20 @@ function activityDetails(status, requestCount = 0, subject) {
   }
   return { stale, description, actionable: !!status.waiting && !attentionError.value && requestCount > 0 };
 }
-function ActivityIndicator({ status, description }) {
+function ActivityIndicator({ status, description, unread = false }) {
   const details = activityDetails(status);
-  const label = description ?? details.description;
+  const label = `${unread ? "Unread. " : ""}${description ?? details.description}`;
   return /* @__PURE__ */ u4(
     "span",
     {
-      class: `activity-indicator ${status.activity}${status.waiting ? " waiting" : ""}${details.stale ? " stale" : ""}`,
+      class: `activity-indicator ${status.activity}${status.waiting ? " waiting" : ""}${unread ? " unread" : ""}${details.stale ? " stale" : ""}`,
       role: "status",
       "aria-live": "off",
       "aria-label": label,
       title: label,
       children: [
         /* @__PURE__ */ u4("span", { class: "activity-indicator-base", "aria-hidden": "true" }),
-        status.waiting ? /* @__PURE__ */ u4("span", { class: "activity-indicator-dot", "aria-hidden": "true" }) : null
+        status.waiting || unread ? /* @__PURE__ */ u4("span", { class: "activity-indicator-dot", "aria-hidden": "true" }) : null
       ]
     }
   );
@@ -22489,7 +22489,7 @@ function activityBadge(group) {
   const count = groupAttentionCount(group.id);
   const { actionable, description } = activityDetails(status, count, group.name);
   return {
-    badge: /* @__PURE__ */ u4(ActivityIndicator, { status, description }),
+    badge: /* @__PURE__ */ u4(ActivityIndicator, { status, description, unread: !!saved.unreadThreadCount }),
     badgeLabel: description,
     badgeDisabled: !actionable,
     onBadgeClick: status.waiting ? () => {
@@ -22971,7 +22971,7 @@ function ThreadAttention({ thread: thread2 }) {
   const count = threadAttentionCount(location2);
   const status = withPendingActivity(thread2, groupId.value, thread2);
   const { actionable, description } = activityDetails(status, count, thread2.title);
-  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status, description });
+  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status, description, unread: thread2.unread });
   return status.waiting ? /* @__PURE__ */ u4(
     "button",
     {

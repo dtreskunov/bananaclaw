@@ -73,6 +73,21 @@ function mix(fg: string, bg: string, fraction: number): string {
 }
 
 describe('theme CSS contract', () => {
+  it('shares centered 6px status dots, with waiting taking precedence over unread', () => {
+    const css = read('./components/ActivityIndicator.css');
+    const size = css.match(
+      /\.activity-indicator\.idle \.activity-indicator-base,\s*\.activity-indicator-dot \{([^}]+)\}/,
+    )?.[1];
+    expect(size).toContain('width: 6px');
+    expect(size).toContain('height: 6px');
+    const dot = css.match(/(?:^|\})\s*\.activity-indicator-dot \{([^}]+)\}/)?.[1];
+    expect(dot).toContain('position: absolute');
+    expect(dot).toContain('color: var(--activity-status-running)');
+    expect(css).toContain('.activity-indicator.waiting .activity-indicator-dot');
+    expect(css).toContain('.activity-indicator.stale.waiting .activity-indicator-dot');
+    expect(css).not.toMatch(/\.is-unread [^{]+::after/);
+  });
+
   it('centers single-line text within the control height without changing multiline padding', () => {
     const css = read('./components/ComposerInput.css');
     const singleLine = css.match(/\.composer-input-wrap:not\(\.multi-line\) textarea \{([^}]+)\}/)?.[1];

@@ -45,9 +45,11 @@ describe('agent activity status', () => {
     expect(item.className).toContain('is-unread');
     expect(item.title).toContain('2 unread conversations');
     expect(item.badge.props.status.waiting).toBe(true);
+    expect(item.badge.props.unread).toBe(true);
     groups.value = [{ ...groups.value[0], elevatedOnly: true }];
     groupId.value = 'g';
     expect(GroupStrip()!.props.mobileFallbackItem.className).toContain('is-unread');
+    expect(GroupStrip()!.props.mobileFallbackItem.badge.props.unread).toBe(true);
   });
   it('joins thread counts to last activity with the same dot separator as thread metadata', () => {
     waitingGroup();
@@ -143,7 +145,7 @@ describe('agent activity status', () => {
 describe.each(['all', 'non-members'] as const)('agent picker (%s)', (mode) => {
   it('reuses activity icons and oldest-request navigation, retaining normal row selection', () => {
     waitingGroup();
-    agentActivity.value = [{ id: 'g', activity: 'idle', waiting: true, threadCount: 3 }];
+    agentActivity.value = [{ id: 'g', activity: 'idle', waiting: true, threadCount: 3, unreadThreadCount: 1 }];
     if (mode === 'non-members') {
       isElevatedUser.value = true;
       groups.value = [{ ...groups.value[0], elevatedOnly: true }];
@@ -154,6 +156,7 @@ describe.each(['all', 'non-members'] as const)('agent picker (%s)', (mode) => {
     expect(dialog.props.title).toBe(mode === 'non-members' ? 'More agents' : 'Agent groups');
     const row = dialog.props.children.props.children[0];
     expect(row.props.badge.type).toBe(ActivityIndicator);
+    expect(row.props.badge.props.unread).toBe(true);
     expect(row.props.sublabel).toMatch(/ \u00b7 3 thr$/);
     expect(row.props.badgeLabel).toContain('Open oldest request in Group');
     expect(row.props.badgeDisabled).toBe(false);
