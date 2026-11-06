@@ -485,13 +485,127 @@ function largeHistory(characters: number) {
   return { ...compactionOptions(conversation, protectedRef), contextWindow: 1_000_000 };
 }
 
+describe('compaction deadlines', () => {
+  let deadlines: Array<{ ms: number; controller: AbortController }>;
+  let timeout: ReturnType<typeof spyOn<typeof AbortSignal, 'timeout'>>;
+
+  beforeEach(() => {
+    deadlines = [];
+    timeout = spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
+      const controller = new AbortController();
+      deadlines.push({ ms, controller });
+      return controller.signal;
+    });
+  });
+  afterEach(() => timeout.mockRestore());
+
+  it('allows five minutes per request within one fifteen-minute overall deadline', async () => {
+    const options = largeHistory(120_000);
+    const result = await compactNativeContext({
+      ...options, summarize: async () => 'Completed earlier work; continue pending requests.',
+    });
+    expect(result.requests).toBe(2);
+    expect(deadlines.map(deadline => deadline.ms)).toEqual([900_000, 300_000, 300_000]);
+  });
+
+  it.each([false, true])('preserves history after a request timeout, including late responses (late=%s)', async late => {
+    const options = largeHistory(60_000);
+    const before = store.contextMessages(options.conversation);
+    let calls = 0;
+    await expect(compactNativeContext({
+      ...options,
+      summarize: async (_prompt, request) => {
+        calls++;
+        deadlines[1].controller.abort(new DOMException('Expired', 'TimeoutError'));
+        if (!late) request.signal.throwIfAborted();
+        return 'A late summary must not be activated.';
+      },
+    })).rejects.toThrow('Compaction summary request 1 timed out after 300 seconds; full transcript was preserved');
+    expect(calls).toBe(1);
+    expect(store.contextMessages(options.conversation)).toEqual(before);
+    expect(store.messages(options.conversation)).toEqual(before);
+  });
+
+  it('reports the overall deadline during reduction without activating partial summaries', async () => {
+    const options = largeHistory(120_000);
+    const before = store.contextMessages(options.conversation);
+    let calls = 0;
+    await expect(compactNativeContext({
+      ...options,
+      summarize: async (_prompt, request) => {
+        if (++calls === 2) {
+          deadlines[0].controller.abort(new DOMException('Expired', 'TimeoutError'));
+          request.signal.throwIfAborted();
+        }
+        return 'Completed earlier work; continue pending requests.';
+      },
+    })).rejects.toThrow('Compaction timed out after 900 seconds overall (2 model requests started); full transcript was preserved');
+    expect(calls).toBe(2);
+    expect(deadlines.map(deadline => deadline.ms)).toEqual([900_000, 300_000, 300_000]);
+    expect(store.contextMessages(options.conversation)).toEqual(before);
+    expect(store.messages(options.conversation)).toEqual(before);
+  });
+
+  it('cancels the sibling request when a parallel summary times out', async () => {
+    const options = largeHistory(240_000);
+    const before = store.contextMessages(options.conversation);
+    let calls = 0;
+    let cancelled = false;
+    await expect(compactNativeContext({
+      ...options,
+      summarize: async (_prompt, request) => {
+        if (++calls === 1) {
+          await Bun.sleep(1);
+          deadlines[1].controller.abort(new DOMException('Expired', 'TimeoutError'));
+        } else {
+          await new Promise<void>(resolve => request.signal.addEventListener('abort', () => {
+            cancelled = true;
+            resolve();
+          }, { once: true }));
+        }
+        request.signal.throwIfAborted();
+        return 'Never activated';
+      },
+    })).rejects.toThrow('Compaction summary request 1 timed out after 300 seconds');
+    expect(calls).toBe(2);
+    expect(cancelled).toBe(true);
+    expect(store.contextMessages(options.conversation)).toEqual(before);
+  });
+
+  it('preserves a user cancellation that happens before the overall deadline', async () => {
+    const options = largeHistory(60_000);
+    const before = store.contextMessages(options.conversation);
+    const controller = new AbortController();
+    await expect(compactNativeContext({
+      ...options, signal: controller.signal,
+      summarize: async (_prompt, request) => {
+        controller.abort(new Error('Stopped by user'));
+        deadlines[0].controller.abort(new DOMException('Expired', 'TimeoutError'));
+        request.signal.throwIfAborted();
+        return 'Never activated';
+      },
+    })).rejects.toThrow('Stopped by user');
+    expect(store.contextMessages(options.conversation)).toEqual(before);
+  });
+
+  it('preserves an upstream timeout error when neither local deadline has expired', async () => {
+    const options = largeHistory(60_000);
+    const before = store.contextMessages(options.conversation);
+    await expect(compactNativeContext({
+      ...options,
+      summarize: async () => { throw new DOMException('Upstream deadline expired', 'TimeoutError'); },
+    })).rejects.toThrow('Upstream deadline expired');
+    expect(deadlines.every(deadline => !deadline.controller.signal.aborted)).toBe(true);
+    expect(store.contextMessages(options.conversation)).toEqual(before);
+  });
+});
+
 it.each([
   ['original response', 8740, 2521, 39],
   ['shorter retry response', 7625, 2067, 13],
-] as const)('enforces the leaf token limit after the %s without losing source context', async (_name, bytes, outputTokens, reasoningTokens) => {
+] as const)('compresses the complete %s with reasoning room and unchanged visible limits', async (_name, bytes, outputTokens, reasoningTokens) => {
   const options = largeHistory(240_000);
   const original = store.messages(options.conversation);
-  let firstPrompt = '';
   let retryPrompt = '';
   let calls = 0;
   const result = await compactNativeContext({
@@ -501,22 +615,22 @@ it.each([
       expect(Buffer.byteLength(prompt) + Buffer.byteLength(COMPACTION_INSTRUCTIONS) + request.maxOutputTokens)
         .toBeLessThanOrEqual(128_000);
       if (calls === 1) {
-        firstPrompt = prompt;
         expect(request.maxOutputTokens).toBe(10_048);
         expect(prompt).toContain('2048 tokens and 8192 UTF-8 bytes');
         return { text: 'x'.repeat(bytes), finishReason: 'stop', outputTokens, reasoningTokens };
       }
       if (prompt.includes('The previous summary exceeded')) {
         retryPrompt = prompt;
-        expect(request.maxOutputTokens).toBe(2048);
+        expect(request.maxOutputTokens).toBe(10_048);
         expect(prompt).toContain('at most 1024 tokens and 4096 UTF-8 bytes');
+        expect(prompt.endsWith('x'.repeat(bytes))).toBe(true);
       }
       return { text: 'Earlier work completed; continue pending requests.', finishReason: 'stop',
         outputTokens: 100, reasoningTokens: 22 };
     },
   });
-  expect(retryPrompt.slice(retryPrompt.indexOf('[Exchange ')))
-    .toBe(firstPrompt.slice(firstPrompt.indexOf('[Exchange ')));
+  expect(retryPrompt).toContain('Compress the following completed summary');
+  expect(retryPrompt).not.toContain('[Exchange ');
   expect(result.requests).toBe(result.leafChunks + 2);
   expect(result.requests).toBe(calls);
   expect(store.messages(options.conversation)).toEqual(original);
@@ -584,7 +698,7 @@ it('does not retry oversized output after cancellation', async () => {
   expect(calls).toBe(1);
 });
 
-it.each([false, true])('rejects a nonempty length-limited summary with oversized retry=%s', async retry => {
+it.each([false, true])('rejects persistent nonempty length-limited summaries with oversized retry=%s', async retry => {
   const options = largeHistory(60_000);
   const before = store.contextMessages(options.conversation);
   let calls = 0;
@@ -594,14 +708,68 @@ it.each([false, true])('rejects a nonempty length-limited summary with oversized
       if (++calls === 1 && retry) {
         return { text: 'x'.repeat(32_001), finishReason: 'stop', outputTokens: 8100, reasoningTokens: 22 };
       }
-      expect(request.maxOutputTokens).toBe(retry ? 8000 : 16_000);
+      expect(request.maxOutputTokens).toBe(retry || calls === 1 ? 16_000 : 24_000);
       return { text: 'Earlier actions completed, but the remaining constraints are',
-        finishReason: 'length', outputTokens: request.maxOutputTokens, reasoningTokens: retry ? 22 : 8022 };
+        finishReason: 'length', outputTokens: request.maxOutputTokens, reasoningTokens: request.maxOutputTokens - 1000 };
     },
   })).rejects.toThrow('truncated summary');
-  expect(calls).toBe(retry ? 2 : 1);
+  expect(calls).toBe(2);
   expect(store.contextMessages(options.conversation)).toEqual(before);
   expect(store.messages(options.conversation)).toEqual(before);
+});
+
+it('recovers the NVIDIA 256K leaf sequence without spending the visible allowance on reasoning', async () => {
+  const options = { ...largeHistory(240_000), contextWindow: 262_144, reasoning: true, maxOutputTokens: 262_144 };
+  const original = store.messages(options.conversation);
+  let calls = 0;
+  let compressed = false;
+  const result = await compactNativeContext({
+    ...options,
+    summarize: async (prompt, request) => {
+      calls++;
+      expect(Buffer.byteLength(prompt) + Buffer.byteLength(COMPACTION_INSTRUCTIONS) + request.maxOutputTokens)
+        .toBeLessThanOrEqual(65_536);
+      if (calls === 2) {
+        expect(request.maxOutputTokens).toBe(6144);
+        return { text: 'x'.repeat(7801), finishReason: 'stop', outputTokens: 3816, reasoningTokens: 1300 };
+      }
+      if (prompt.includes('The previous summary exceeded')) {
+        compressed = true;
+        expect(request.maxOutputTokens).toBe(6144);
+        expect(prompt.endsWith('x'.repeat(7801))).toBe(true);
+        return { text: 'x'.repeat(3512), finishReason: 'stop', outputTokens: 2048, reasoningTokens: 907 };
+      }
+      return { text: 'Completed earlier work; continue pending requests.', finishReason: 'stop',
+        outputTokens: 100, reasoningTokens: 22 };
+    },
+  });
+  expect(compressed).toBe(true);
+  expect(result.requests).toBe(result.leafChunks + 2);
+  expect(result.requests).toBe(calls);
+  expect(store.messages(options.conversation)).toEqual(original);
+  expect(JSON.stringify(store.contextMessages(options.conversation))).toContain('Current pending request');
+});
+
+it('retries a nonempty reasoning-limited summary against its original source instead of compressing incomplete text', async () => {
+  const options = largeHistory(60_000);
+  const original = store.messages(options.conversation);
+  const prompts: string[] = [];
+  const budgets: number[] = [];
+  const result = await compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens: 512_000,
+    summarize: async (prompt, request) => {
+      prompts.push(prompt);
+      budgets.push(request.maxOutputTokens);
+      return prompts.length === 1
+        ? { text: 'Incomplete continuation facts', finishReason: 'length', outputTokens: 16_000, reasoningTokens: 15_000 }
+        : { text: 'Completed earlier work; continue pending requests.', finishReason: 'stop', outputTokens: 100, reasoningTokens: 22 };
+    },
+  });
+  expect(budgets).toEqual([16_000, 24_000]);
+  expect(prompts[1]).toBe(prompts[0]);
+  expect(prompts[1]).not.toContain('Incomplete continuation facts');
+  expect(result.requests).toBe(2);
+  expect(store.messages(options.conversation)).toEqual(original);
 });
 
 it('reserves reasoning and retry output without enlarging the visible summary target', async () => {

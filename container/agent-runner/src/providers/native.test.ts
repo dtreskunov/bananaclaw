@@ -1623,8 +1623,10 @@ describe('NativeProvider', () => {
       expect(compactions(events, 'completed')).toHaveLength(1);
       expect(compactions(events, 'error')).toHaveLength(0);
       const summaries = requests.filter(request => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
-      expect(summaries.map(request => request.max_tokens)).toEqual([reasoning ? 16_000 : 8000, 8000]);
+      expect(summaries.map(request => request.max_tokens)).toEqual(reasoning ? [16_000, 16_000] : [8000, 8000]);
       expect(JSON.stringify(summaries[1].messages)).toContain('The previous summary exceeded');
+      expect(JSON.stringify(summaries[1].messages)).toContain('x'.repeat(32_001));
+      expect(JSON.stringify(summaries[1].messages)).not.toContain('Earlier requirements '.repeat(250));
       expect(events.filter(event => event.type === 'usage_call')).toHaveLength(3);
       expect(turnTotal(events)?.num_turns).toBe(3);
       expect(replyTexts(events)).toEqual([[protocol === 'anthropic-messages' ? 'hello from direct minimax' : 'hello from stub']]);

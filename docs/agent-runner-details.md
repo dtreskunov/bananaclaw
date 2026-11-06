@@ -556,23 +556,26 @@ text must also fit a byte cap of four times its requested visible output tokens.
 
 For catalog-declared reasoning models (and MiniMax-M3.1-Flash-Preview even when
 metadata is unavailable), generation allowances include an additional reasoning
-reserve: at most 8,192 tokens or one-sixteenth of the request budget. An empty,
-length-limited response reporting reasoning gets one retry with twice that
-reserve, provided the model output cap permits an increase. Source packing
+reserve: at most 8,192 tokens or one-sixteenth of the request budget. A
+length-limited response reporting reasoning, whether empty or partial, gets
+one retry against the original source with twice that reserve, provided the
+model output cap permits an increase. Incomplete text is never used as a
+replacement for that source. Source packing
 reserves the larger allowance from the start. Both calls count toward the
 64-request limit and share the overall deadline; visible summary targets and
 byte caps do not grow. Reported visible tokens are checked separately when
 reasoning usage is available.
 
-An oversized summary gets one retry against the same original source, with
-instructions targeting half the original token and byte limits. The retry's
-total generation allowance, including reasoning, is capped at the original
-visible token limit rather than retaining the extra reasoning reserve. This
-shares the single output-validation retry with reasoning-only recovery, counts
-toward the request limit, and keeps the original hard size limits. Source
-packing reserves room for the longer retry instructions. Nonempty responses
-that reach their generation limit are rejected as truncated, not activated;
-the full transcript remains unchanged.
+A completed oversized summary that fits the request budget gets one compression
+retry using that summary as input, rather than regenerating from the much larger
+original source. Instructions target half the original token and byte limits.
+The retry retains its reasoning reserve: the visible-text limit is not a total
+generation limit for reasoning models. This shares the single output-validation
+retry with reasoning-limited recovery, counts toward the request limit, and
+keeps the original hard visible size limits. Source packing reserves room for
+the longer retry instructions. Truncated responses are never activated, even
+when their visible text fits; after unsuccessful recovery the full transcript
+and active context remain unchanged.
 
 MiniMax-M3.1-Flash-Preview summaries use low effort (`output_config.effort` for
 Anthropic, `reasoning_effort` for Chat Completions), without changing normal
@@ -582,8 +585,13 @@ Summary diagnostics record request number, finish reason, output/reasoning
 tokens, visible bytes and limits, never transcript or reasoning content.
 Empty, oversized and truncated failures have distinct messages with these measurements.
 
-Each compaction has a five-minute deadline, 60-second request timeouts, at most
+Each compaction has a fifteen-minute overall deadline, five-minute request timeouts, at most
 32 leaf chunks, and at most 64 model requests, counting rejections and reduction.
+Request timeouts cover the whole summary call, not just idle time. Errors name
+the request number and five-minute limit, or the fifteen-minute overall limit;
+user cancellation and upstream errors remain distinct. All fragments, retries
+and reductions share the overall deadline. Timed-out work cancels sibling
+requests and never activates a partial or late summary.
 There are no hidden SDK retries. A context-specific summarizer rejection splits
 the offending request and summarizes its ordered fragments within the same
 limits; other provider errors are surfaced without splitting. Work exceeding

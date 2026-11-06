@@ -4,10 +4,10 @@ import { boundToolResults, exchangeGroups } from './tool-results.js';
 
 export const MAX_COMPACTION_ATTEMPTS = 2;
 export const COMPACTION_THRESHOLD = 0.75;
-export const COMPACTION_TIMEOUT_MS = 300_000;
+export const COMPACTION_TIMEOUT_MS = 900_000;
 export const MAX_COMPACTION_LEAVES = 32;
 export const MAX_COMPACTION_REQUESTS = 64;
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 300_000;
 const MAX_REQUEST_TOKENS = 128_000;
 const SUMMARY_BYTES_PER_TOKEN = 4;
 export const COMPACTION_INSTRUCTIONS =
@@ -207,7 +207,7 @@ function summaryBudget(window: number, maxOutput: number, final: boolean, reason
     `Summarize the following chronological ${final ? 'conversation history' : 'transcript or summary fragments'}. ` +
     `Keep the final summary text within ${outputTokens} tokens and ${summaryBytes} UTF-8 bytes.\n\n`;
   const retryInstructions = instructions +
-    'The previous summary exceeded its size limit. Summarize the original source again more concisely, ' +
+    'The previous summary exceeded its size limit. Compress the following completed summary more concisely, ' +
     `aiming for at most ${Math.max(1, Math.floor(outputTokens / 2))} tokens and ${Math.floor(summaryBytes / 2)} UTF-8 bytes. ` +
     'Preserve the essential continuation facts; return only the shorter summary.\n\n';
   // No model-specific tokenizer is available. Count UTF-8 bytes conservatively
@@ -306,11 +306,22 @@ export async function compactNativeContext(options: {
     );
   }
   const cancellation = new AbortController();
-  const compactSignal = AbortSignal.any([signal, cancellation.signal, AbortSignal.timeout(COMPACTION_TIMEOUT_MS)]);
+  const deadlineSignal = AbortSignal.timeout(COMPACTION_TIMEOUT_MS);
+  const compactSignal = AbortSignal.any([signal, cancellation.signal, deadlineSignal]);
   let requests = 0;
 
-  async function summarize(text: string, budget: SummaryBudget, leaf: boolean): Promise<string> {
+  function checkCompactionSignal(): void {
+    if (deadlineSignal.aborted && compactSignal.reason === deadlineSignal.reason) {
+      throw new Error(
+        `Compaction timed out after ${COMPACTION_TIMEOUT_MS / 1000} seconds overall ` +
+        `(${requests} model requests started); full transcript was preserved`,
+      );
+    }
     compactSignal.throwIfAborted();
+  }
+
+  async function summarize(text: string, budget: SummaryBudget, leaf: boolean): Promise<string> {
+    checkCompactionSignal();
     if (Buffer.byteLength(text) > budget.sourceBytes) {
       throw new Error('Compaction fragment exceeds its request budget; full transcript was preserved');
     }
@@ -318,13 +329,14 @@ export async function compactNativeContext(options: {
     let instructions = budget.instructions;
     let retried = false;
     while (true) {
-      compactSignal.throwIfAborted();
+      checkCompactionSignal();
       if (requests >= MAX_COMPACTION_REQUESTS) {
         throw new Error(`Compaction exceeds the ${MAX_COMPACTION_REQUESTS}-request budget; full transcript was preserved`);
       }
       const requestId = ++requests;
       let response: string | CompactionSummary;
-      const requestSignal = AbortSignal.any([compactSignal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
+      const requestDeadlineSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+      const requestSignal = AbortSignal.any([compactSignal, requestDeadlineSignal]);
       try {
         response = await options.summarize(instructions + text, {
           maxOutputTokens: generationTokens,
@@ -332,7 +344,13 @@ export async function compactNativeContext(options: {
         });
         requestSignal.throwIfAborted();
       } catch (error) {
-        compactSignal.throwIfAborted();
+        checkCompactionSignal();
+        if (requestDeadlineSignal.aborted && requestSignal.reason === requestDeadlineSignal.reason) {
+          throw new Error(
+            `Compaction summary request ${requestId} timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds; ` +
+            'full transcript was preserved',
+          );
+        }
         if (!isContextOverflow(error)) throw error;
         const halfBytes = Math.floor(Buffer.byteLength(text) / 2);
         if (halfBytes < 256) throw error;
@@ -354,7 +372,7 @@ export async function compactNativeContext(options: {
         }
         return summarize(combined, budget, false);
       }
-      compactSignal.throwIfAborted();
+      checkCompactionSignal();
       const result: CompactionSummary = typeof response === 'string' ? { text: response } : response;
       const summary = result.text.trim();
       const bytes = Buffer.byteLength(summary);
@@ -365,24 +383,25 @@ export async function compactNativeContext(options: {
         `summary_tokens=${textTokens ?? 'unknown'}/${budget.outputTokens}, ` +
         `summary_bytes=${bytes}/${budget.summaryBytes}, generation_limit=${generationTokens}`;
       console.error(`[native-compaction] Summary ${leaf ? 'transcript' : 'reduction'} response: ${detail}`);
-      if (!summary && !retried && result.finishReason === 'length' && (result.reasoningTokens ?? 0) > 0 &&
+      if (!retried && result.finishReason === 'length' && (result.reasoningTokens ?? 0) > 0 &&
         generationTokens < budget.retryGenerationTokens) {
         retried = true;
         generationTokens = budget.retryGenerationTokens;
-        console.error(`[native-compaction] Retrying reasoning-only summary with ${generationTokens} generated tokens`);
+        console.error(`[native-compaction] Retrying reasoning-limited summary with ${generationTokens} generated tokens`);
         continue;
       }
       const oversized = bytes > budget.summaryBytes || (textTokens !== undefined && textTokens > budget.outputTokens);
-      if (summary && oversized && !retried) {
+      const truncated = result.finishReason === 'length';
+      if (summary && oversized && !truncated && !retried && bytes <= budget.sourceBytes) {
         retried = true;
         instructions = budget.retryInstructions;
-        generationTokens = budget.outputTokens;
-        console.error(`[native-compaction] Retrying oversized summary with a shorter target and ${generationTokens} generated tokens`);
+        text = summary;
+        leaf = false;
+        console.error(`[native-compaction] Compressing completed oversized summary with a shorter target and ${generationTokens} generated tokens`);
         continue;
       }
-      const truncated = result.finishReason === 'length';
       if (!summary || oversized || truncated) {
-        const reason = !summary ? 'an empty' : oversized ? 'an oversized' : 'a truncated';
+        const reason = !summary ? 'an empty' : truncated ? 'a truncated' : 'an oversized';
         throw new CompactionSummaryError(`Compaction returned ${reason} summary (${detail}); full transcript was preserved`);
       }
       return summary;
@@ -396,7 +415,7 @@ export async function compactNativeContext(options: {
     const worker = async () => {
       try {
         while (next < texts.length) {
-          compactSignal.throwIfAborted();
+          checkCompactionSignal();
           const index = next++;
           results[index] = await summarize(texts[index], leafBudget, leaf);
         }
@@ -408,7 +427,7 @@ export async function compactNativeContext(options: {
     };
     await Promise.allSettled(Array.from({ length: Math.min(2, texts.length) }, worker));
     if (failure) throw failure.error;
-    compactSignal.throwIfAborted();
+    checkCompactionSignal();
     return results;
   }
 
@@ -431,7 +450,7 @@ export async function compactNativeContext(options: {
       summaries = await summarizeAll(groups, false);
     }
   }
-  compactSignal.throwIfAborted();
+  checkCompactionSignal();
   if (Buffer.byteLength(summary) >= sourceBytes) {
     throw new Error('Compaction did not reduce context; full transcript was preserved');
   }
