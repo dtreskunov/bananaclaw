@@ -61,6 +61,12 @@ Task detail lists use one nullable-thread query and one indexed attempt batch,
 limited to the ten newest attempts per selected series. Missing or incompatible
 task storage is an error, not a successful empty task list.
 
+Chat route methods have one exhaustive policy table, after group authorization.
+Context query parameters are parsed once; stop/edit/send still reject invalid
+context at their existing validation stage, preserving body-error precedence.
+Task session lookup uses the same authorized conversation resolver, including
+synthetic-DM/messaging-group binding.
+
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 

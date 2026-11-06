@@ -228,6 +228,23 @@ export function matchChatPath(pathname: string):
   return null;
 }
 
+const CHAT_METHODS: Record<NonNullable<ReturnType<typeof matchChatPath>>['kind'], readonly string[]> = {
+  start: ['POST'],
+  warmup: ['POST'],
+  send: ['POST'],
+  stop: ['POST'],
+  'stop-tool': ['POST'],
+  'edit-input': ['PATCH', 'DELETE'],
+  threads: ['GET'],
+  search: ['GET'],
+  tasks: ['GET'],
+  'task-action': ['POST'],
+  'task-update': ['PATCH'],
+  delete: ['DELETE'],
+  fork: ['POST'],
+  attachment: ['GET', 'HEAD'],
+};
+
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     'Content-Type': 'application/json',
@@ -360,12 +377,18 @@ export async function handleChatRequest(
     writeJson(res, 404, { error: 'group_not_found' });
     return true;
   }
+  if (!CHAT_METHODS[m.kind].includes(req.method ?? '')) {
+    writeJson(res, 405, { error: 'method_not_allowed' });
+    return true;
+  }
+  const params = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
+  const channel = params.get('channel') || undefined;
+  const messagingGroup = params.get('mg') || undefined;
+  const override = channel && messagingGroup ? { channelType: channel, messagingGroupId: messagingGroup } : undefined;
+  const invalidContext =
+    params.has('channel') !== params.has('mg') || params.has('sessionId') || (params.has('channel') && !override);
 
   if (m.kind === 'start') {
-    if (req.method !== 'POST') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     const messagingGroupId = ensureWebMessagingGroup(m.groupId);
     const threadId = crypto.randomUUID();
     writeJson(res, 200, {
@@ -377,15 +400,11 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'warmup') {
-    if (req.method !== 'POST') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     if (!m.threadId || m.threadId.length > 256 || /[\0/]/.test(m.threadId) || m.threadId.startsWith('__dm:')) {
       writeJson(res, 400, { error: 'invalid_thread_id' });
       return true;
     }
-    if (new URLSearchParams((req.url || '').split('?')[1] || '').size > 0) {
+    if (params.size > 0) {
       writeJson(res, 400, { error: 'invalid_context' });
       return true;
     }
@@ -416,10 +435,6 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'edit-input') {
-    if (req.method !== 'PATCH' && req.method !== 'DELETE') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     let body: unknown;
     try {
       body = await readJsonBody(req, 256 * 1024);
@@ -448,16 +463,11 @@ export async function handleChatRequest(
       writeJson(res, 400, { error: 'invalid_body' });
       return true;
     }
-    const query = new URLSearchParams((req.url || '').split('?')[1] || '');
-    if (
-      query.has('channel') !== query.has('mg') ||
-      query.has('sessionId') ||
-      (query.has('channel') && (!query.get('channel') || !query.get('mg')))
-    ) {
+    if (invalidContext) {
       writeJson(res, 400, { error: 'invalid_context' });
       return true;
     }
-    const context = resolveTurnContext(userId, m.groupId, m.threadId, taskOverride(req));
+    const context = resolveTurnContext(userId, m.groupId, m.threadId, override);
     if (!context?.canSend || context.channelType !== WEB_CHANNEL_TYPE) {
       writeJson(res, 403, { error: 'forbidden' });
       return true;
@@ -493,10 +503,6 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'stop' || m.kind === 'stop-tool') {
-    if (req.method !== 'POST') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     let body: unknown;
     try {
       body = await readJsonBody(req, 4096);
@@ -520,16 +526,11 @@ export async function handleChatRequest(
       writeJson(res, 400, { error: 'invalid_tool_call' });
       return true;
     }
-    const query = new URLSearchParams((req.url || '').split('?')[1] || '');
-    if (
-      query.has('channel') !== query.has('mg') ||
-      query.has('sessionId') ||
-      (query.has('channel') && (!query.get('channel') || !query.get('mg')))
-    ) {
+    if (invalidContext) {
       writeJson(res, 400, { error: 'invalid_context' });
       return true;
     }
-    const context = resolveTurnContext(userId, m.groupId, m.threadId, taskOverride(req));
+    const context = resolveTurnContext(userId, m.groupId, m.threadId, override);
     if (!context || !context.canSend) {
       writeJson(res, 403, { error: 'forbidden' });
       return true;
@@ -569,10 +570,6 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'send') {
-    if (req.method !== 'POST') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     const ctype = (req.headers['content-type'] || '').toLowerCase();
     let text = '';
     let clientMessageId: unknown;
@@ -633,15 +630,12 @@ export async function handleChatRequest(
     // through that channel's adapter.deliver instead of the web inbound
     // path. The web case stays separate because web has no platform-side
     // delivery — the agent's reply IS the platform message.
-    const q = new URLSearchParams((req.url || '').split('?')[1] || '');
-    const qChannel = q.get('channel') || undefined;
-    const qMg = q.get('mg') || undefined;
-    if (q.has('channel') !== q.has('mg') || q.has('sessionId') || (q.has('channel') && (!qChannel || !qMg))) {
+    if (invalidContext) {
       writeJson(res, 400, { error: 'invalid_context' });
       return true;
     }
 
-    if (qChannel && qMg && qChannel !== WEB_CHANNEL_TYPE) {
+    if (override && override.channelType !== WEB_CHANNEL_TYPE) {
       if (inputHandling) {
         writeJson(res, 400, { error: 'invalid_input_handling_context' });
         return true;
@@ -651,8 +645,8 @@ export async function handleChatRequest(
           userId,
           agentGroupId: m.groupId,
           threadId: m.threadId,
-          channelType: qChannel,
-          messagingGroupId: qMg,
+          channelType: override.channelType,
+          messagingGroupId: override.messagingGroupId,
           text,
           attachments,
         });
@@ -660,7 +654,7 @@ export async function handleChatRequest(
       } catch (err) {
         const code = (err as Error).message;
         const status = code.startsWith('http_') ? Number(code.slice(5)) : 500;
-        log.warn('cross-channel chat send failed', { userId, groupId: m.groupId, channel: qChannel, err });
+        log.warn('cross-channel chat send failed', { userId, groupId: m.groupId, channel: override.channelType, err });
         writeJson(res, Number.isFinite(status) ? status : 500, {
           error: code || 'send_failed',
           detail: (err as { detail?: string }).detail,
@@ -670,7 +664,7 @@ export async function handleChatRequest(
     }
 
     ensureWebMessagingGroup(m.groupId);
-    const context = resolveTurnContext(userId, m.groupId, m.threadId, taskOverride(req));
+    const context = resolveTurnContext(userId, m.groupId, m.threadId, override);
     if (!context?.canSend || context.channelType !== WEB_CHANNEL_TYPE) {
       writeJson(res, 403, { error: 'forbidden' });
       return true;
@@ -714,19 +708,11 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'attachment') {
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     serveInboundAttachment(req, res, m.groupId, m.threadId, m.attachmentPath);
     return true;
   }
 
   if (m.kind === 'threads') {
-    if (req.method !== 'GET') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     try {
       // Elevated users (owner/global admin) see every thread in the
       // group; everyone else sees only their own.
@@ -740,12 +726,7 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'search') {
-    if (req.method !== 'GET') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
-    const q = new URLSearchParams((req.url || '').split('?')[1] || '');
-    const query = q.get('q') || '';
+    const query = params.get('q') || '';
     if (!query.trim()) {
       writeJson(res, 200, { results: [] });
       return true;
@@ -770,21 +751,16 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'delete') {
-    if (req.method !== 'DELETE') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     if (!hasAdminPrivilege(userId, m.groupId)) {
       writeJson(res, 403, { error: 'forbidden' });
       return true;
     }
     try {
-      const params = new URLSearchParams((req.url || '').split('?')[1] || '');
       const result = deleteChatThread(
         userId,
         m.groupId,
         m.threadId,
-        taskOverride(req),
+        override,
         params.get('cascade') === '1',
         params.get('cancelApprovals') === '1',
       );
@@ -805,10 +781,6 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'fork') {
-    if (req.method !== 'POST') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     let body: unknown;
     try {
       body = await readJsonBody(req);
@@ -822,7 +794,7 @@ export async function handleChatRequest(
       return true;
     }
     try {
-      const result = forkChatThread(userId, m.groupId, m.threadId, atMessageId, taskOverride(req));
+      const result = forkChatThread(userId, m.groupId, m.threadId, atMessageId, override);
       writeJson(res, 200, {
         threadId: result.threadId,
         sessionId: result.sessionId,
@@ -842,11 +814,7 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'tasks') {
-    if (req.method !== 'GET') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
-    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, taskOverride(req));
+    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, override);
     if (!r) {
       writeJson(res, 200, { tasks: [], timezone: TIMEZONE });
       return true;
@@ -862,11 +830,7 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'task-action') {
-    if (req.method !== 'POST') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
-    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, taskOverride(req));
+    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, override);
     if (!r) {
       writeJson(res, 404, { error: 'thread_not_found' });
       return true;
@@ -923,10 +887,6 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'task-update') {
-    if (req.method !== 'PATCH') {
-      writeJson(res, 405, { error: 'method_not_allowed' });
-      return true;
-    }
     let body: unknown;
     try {
       body = await readJsonBody(req);
@@ -979,7 +939,7 @@ export async function handleChatRequest(
       writeJson(res, 400, { error: 'no_fields' });
       return true;
     }
-    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, taskOverride(req));
+    const r = resolveThreadSessionForTasks(userId, m.groupId, m.threadId, override);
     if (!r) {
       writeJson(res, 404, { error: 'thread_not_found' });
       return true;
@@ -1418,14 +1378,6 @@ async function isValidCron(expr: string): Promise<boolean> {
   }
 }
 
-/** `?channel=&mg=` override for locating a non-web thread's session. */
-function taskOverride(req: http.IncomingMessage): { channelType: string; messagingGroupId: string } | undefined {
-  const q = new URLSearchParams((req.url || '').split('?')[1] || '');
-  const channel = q.get('channel') || undefined;
-  const mg = q.get('mg') || undefined;
-  return channel && mg ? { channelType: channel, messagingGroupId: mg } : undefined;
-}
-
 /**
  * Resolve the session backing a chat thread for task management. Mirrors the
  * ownership/DM scoping of readChatHistory so a user can only reach tasks in
@@ -1437,13 +1389,10 @@ function resolveThreadSessionForTasks(
   threadId: string,
   override: { channelType: string; messagingGroupId: string } | undefined,
 ): { sessionId: string; channelType: string; isDm: boolean } | null {
-  const elevated = isElevated(userId);
-  const target = resolveTargetMessagingGroup(userId, groupId, override, elevated);
-  if (!target) return null;
-  const isDm = threadId.startsWith('__dm:');
-  const session = resolveSessionForMode(groupId, target.messagingGroupId, target.sessionMode, isDm ? '' : threadId);
-  if (!session) return null;
-  return { sessionId: session.id, channelType: target.channelType, isDm };
+  const context = resolveTurnContext(userId, groupId, threadId, override);
+  return context?.sessionId
+    ? { sessionId: context.sessionId, channelType: context.channelType, isDm: context.threadId === null }
+    : null;
 }
 
 /** Read full detail of the live (pending/paused) tasks in a thread's session. */

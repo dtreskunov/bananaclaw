@@ -114,6 +114,65 @@ afterEach(() => {
 });
 
 describe('POST chat task run', () => {
+  it.each([
+    'start',
+    'threads',
+    'search',
+    `${THREAD_ID}/warmup`,
+    `${THREAD_ID}/send`,
+    `${THREAD_ID}/stop`,
+    `${THREAD_ID}/stop-tool`,
+    `${THREAD_ID}/messages/input`,
+    `${THREAD_ID}/tasks`,
+    `${THREAD_ID}/tasks/${SERIES_ID}`,
+    `${THREAD_ID}/tasks/${SERIES_ID}/run`,
+    THREAD_ID,
+    `${THREAD_ID}/fork`,
+    `${THREAD_ID}/attachments/inbox/file.txt`,
+  ])('rejects unsupported methods for %s before performing route work', async (suffix) => {
+    const pathname = `/api/groups/${GROUP_ID}/chat/${suffix}`;
+    const req = Readable.from([]) as http.IncomingMessage;
+    req.method = 'OPTIONS';
+    req.url = pathname;
+    const captured = makeRes();
+    expect(await handleChatRequest(req, captured.res, pathname, USER_ID)).toBe(true);
+    await captured.done;
+    expect(captured.status()).toBe(405);
+    expect(JSON.parse(captured.body())).toEqual({ error: 'method_not_allowed' });
+  });
+
+  it('keeps authorization ahead of method rejection', async () => {
+    const pathname = `/api/groups/${GROUP_ID}/chat/start`;
+    const req = Readable.from([]) as http.IncomingMessage;
+    req.method = 'OPTIONS';
+    req.url = pathname;
+    const captured = makeRes();
+    await handleChatRequest(req, captured.res, pathname, 'outsider');
+    await captured.done;
+    expect(captured.status()).toBe(403);
+  });
+
+  it('binds synthetic task DM identifiers to the same messaging group as conversation reads', async () => {
+    getDb().prepare('UPDATE sessions SET thread_id=NULL WHERE id=?').run(SESSION_ID);
+    const db = new Database(inboundDbPath(GROUP_ID, SESSION_ID));
+    db.prepare('UPDATE messages_in SET thread_id=NULL WHERE id=?').run(SERIES_ID);
+    db.close();
+    for (const [thread, expected] of [
+      [`__dm:${MESSAGING_GROUP_ID}`, 1],
+      ['__dm:another-group', 0],
+    ] as const) {
+      const pathname = `/api/groups/${GROUP_ID}/chat/${thread}/tasks`;
+      const req = Readable.from([]) as http.IncomingMessage;
+      req.method = 'GET';
+      req.url = pathname;
+      const captured = makeRes();
+      await handleChatRequest(req, captured.res, pathname, USER_ID);
+      await captured.done;
+      expect(captured.status()).toBe(200);
+      expect(JSON.parse(captured.body()).tasks).toHaveLength(expected);
+    }
+  });
+
   it('batches exactly ten newest attempts per visible series using the series index', async () => {
     const inbound = new Database(inboundDbPath(GROUP_ID, SESSION_ID));
     inbound
