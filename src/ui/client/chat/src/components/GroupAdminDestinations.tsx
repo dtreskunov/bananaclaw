@@ -35,7 +35,7 @@ interface DestinationDto {
   channelType: string | null;
   platformId: string | null;
   reverseLink: { localName: string; viewerCanRemove: boolean } | null;
-  createdAt: string;
+  createdAt: number;
   createdBy: string | null;
 }
 

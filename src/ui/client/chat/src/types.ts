@@ -2,6 +2,7 @@
 import type { InputHandling } from '../../../shared/input-state';
 import type { ModelTime } from '../../../shared/activity-presentation';
 import type { ThreadSummary } from '../../../shared/thread';
+import type { EpochMs } from '../../../shared/time';
 import type {
   ConversationMessage,
   ConversationQuestion,
@@ -29,7 +30,7 @@ export interface Group {
    * non-web mg matching one of their identities) in this group.
    */
   hasContent?: boolean;
-  lastActivityAt?: string;
+  lastActivityAt: EpochMs | null;
 }
 
 /** Local presentation may precede a session or use an implicit messaging-group context. */
@@ -100,11 +101,10 @@ export type MessageReaction = NonNullable<ConversationMessage['reactions']>[numb
 /** Non-chat timeline marker (e.g. a scheduled task firing). */
 export type TimelineEvent = NonNullable<ConversationMessage['event']>;
 
-/** One step of a turn's activity trace: emit-time timestamp (epoch ms as a
- *  string) plus the whole progress text. */
+/** One step of a turn's activity trace: emit-time timestamp plus progress text. */
 export interface ActivityLine {
   ordinal?: number;
-  ts: string;
+  ts: EpochMs | null;
   text: string;
   modelTime?: ModelTime;
 }
@@ -116,7 +116,7 @@ export interface SearchResult {
   channelType: string | null;
   messagingGroupId: string | null;
   direction: string;
-  timestamp: string;
+  timestamp: EpochMs;
   snippet: string;
   rank: number;
 }
@@ -126,7 +126,7 @@ export interface TreeEntry {
   name: string;
   type: 'file' | 'dir';
   size?: number;
-  mtime?: string;
+  mtime?: EpochMs;
   tier?: 'member' | 'admin';
 }
 
@@ -141,7 +141,7 @@ export interface PreviewBlock {
   ext?: string;
   name?: string;
   size?: number | null;
-  mtime?: string | null;
+  mtime?: EpochMs | null;
   path?: string;
   // Version token for the currently-loaded file. Sent as `ifMatch` on save
   // so an in-browser edit only lands if the file hasn't changed underneath.
@@ -193,7 +193,7 @@ export interface ChatSendPacket {
   readonly clientMessageId: string;
   readonly text: string;
   readonly files: readonly PendingFile[];
-  readonly timestamp: string;
+  readonly timestamp: EpochMs;
   readonly inputHandling?: InputHandling;
   readonly startsResponse: boolean;
 }

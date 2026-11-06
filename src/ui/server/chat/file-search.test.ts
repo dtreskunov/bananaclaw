@@ -99,9 +99,9 @@ describe('compareEntriesByDate', () => {
   it('sorts newest first, then path, with missing dates last', () => {
     const entries = [
       { path: 'missing', mtime: null },
-      { path: 'same-b', mtime: '2026-02-01T00:00:00.000Z' },
-      { path: 'newest', mtime: '2026-03-01T00:00:00.000Z' },
-      { path: 'same-a', mtime: '2026-02-01T00:00:00.000Z' },
+      { path: 'same-b', mtime: 1769904000000 },
+      { path: 'newest', mtime: 1772323200000 },
+      { path: 'same-a', mtime: 1769904000000 },
     ];
 
     expect(entries.sort(compareEntriesByDate).map((entry) => entry.path)).toEqual([

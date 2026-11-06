@@ -1,6 +1,6 @@
 /** Activity timestamps are epoch milliseconds; missing legacy values are not epoch zero. */
-export function activityTimestamp(ts: string): number {
-  return ts.trim() ? Number(ts) : NaN;
+export function activityTimestamp(ts: number | null): number {
+  return ts ?? NaN;
 }
 
 /** Union of execution intervals; an Infinity end leaves a live tail from `since`. */

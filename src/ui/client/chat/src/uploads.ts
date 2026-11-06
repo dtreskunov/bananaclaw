@@ -10,7 +10,8 @@ import {
   pinnedContext,
   fileSearchOpen,
 } from './state';
-import { postJson } from './api';
+import { postJson, UiProtocolError, UI_RELOAD_EVENT } from './api';
+import { UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../../shared/time';
 import { closePreview, loadTree, navFile, navTree, selectFile } from './actions';
 import { displayWorkspacePath, parentPath } from './utils';
 import { requestInput, requestConfirm } from './components/PromptModal';
@@ -98,12 +99,12 @@ function dropPinned(paths: string[]): void {
 interface WriteFileResponse extends ApiError {
   ok?: boolean;
   size?: number;
-  mtime?: string;
+  mtime?: number;
   etag?: string;
 }
 
-export type SaveResult = { ok: true; size?: number; mtime?: string; etag?: string } | { conflict: true; etag?: string };
-export type CreateResult = { ok: true; size?: number; mtime?: string; etag?: string } | { exists: true };
+export type SaveResult = { ok: true; size?: number; mtime?: number; etag?: string } | { conflict: true; etag?: string };
+export type CreateResult = { ok: true; size?: number; mtime?: number; etag?: string } | { exists: true };
 
 /**
  * Overwrite an existing file's text content. When `ifMatch` is supplied it is
@@ -358,10 +359,21 @@ function uploadOne(idx: number, mode: string): Promise<void> {
     const xhr = new XMLHttpRequest();
     const url = `api/groups/${groupId.value}/upload?path=${encodeURIComponent(uploadDirectory)}&mode=${encodeURIComponent(mode)}`;
     xhr.open('POST', url);
+    xhr.setRequestHeader(UI_PROTOCOL_HEADER, String(UI_TIMESTAMP_PROTOCOL_VERSION));
     xhr.upload.onprogress = (ev: ProgressEvent) => {
       if (ev.lengthComputable) updateItem(idx, { pct: (ev.loaded / ev.total) * 100 });
     };
     xhr.onload = () => {
+      if (
+        xhr.status >= 200 &&
+        xhr.status < 300 &&
+        xhr.getResponseHeader(UI_PROTOCOL_HEADER) !== String(UI_TIMESTAMP_PROTOCOL_VERSION)
+      ) {
+        window.dispatchEvent(new Event(UI_RELOAD_EVENT));
+        updateItem(idx, { status: 'error', statusText: new UiProtocolError().message });
+        resolve();
+        return;
+      }
       let body: UploadResponse = {};
       try {
         body = JSON.parse(xhr.responseText || '{}') as UploadResponse;

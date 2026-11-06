@@ -4,6 +4,14 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Numeric UI timestamps.** UI-owned REST/sync records and browser
+  state use checked UTC epoch milliseconds, including message/activity,
+  turn/request, task, group and file timestamps. Date strings are parsed only
+  at provider/runner or local-input boundaries; absent dates are null.
+  Deploy matching host/UI protocol 16; stale clients must reload before
+  startup data or mutations are admitted. No DB conversion or agent restart
+  is needed. See [upgrade, verification and rollback](docs/ui.md#ui-timestamp-upgrade).
+
 - **[BREAKING]** SQLite maintained time instants now use checked INTEGER UTC
   epoch milliseconds across central, session, runner, native-provider and search
   stores. Existing stores require the explicit stopped-host/stopped-runner

@@ -22,13 +22,13 @@ const turn: ConversationTurn = {
   activity: [
     {
       ordinal: 0,
-      ts: '9000',
+      ts: 9000,
       text: '{"kind":"tool","id":"first","tool":"bash","status":"completed"}',
       timelinePosition: 100,
     },
     {
       ordinal: 1,
-      ts: '5000',
+      ts: 5000,
       text: JSON.stringify({
         kind: 'tool',
         id: 'question-call',
@@ -40,7 +40,7 @@ const turn: ConversationTurn = {
     },
     {
       ordinal: 2,
-      ts: '1000',
+      ts: 1000,
       text: '{"kind":"tool","id":"last","tool":"read","status":"completed"}',
       timelinePosition: 300,
     },
@@ -69,7 +69,7 @@ describe('whole-turn activity presentation', () => {
   it('represents every builtin call once without appending a synthetic completion entry', () => {
     const activity = [...BUILTIN_TOOL_PRESENTATIONS.keys()].map((tool, ordinal) => ({
       ordinal,
-      ts: String(ordinal),
+      ts: ordinal,
       timelinePosition: ordinal,
       text: JSON.stringify({ kind: 'tool', id: `call-${ordinal}`, tool: `nanoclaw.${tool}`, status: 'completed' }),
     }));
@@ -87,7 +87,7 @@ describe('whole-turn activity presentation', () => {
   it.each(['replied', 'failed', 'unknown', 'pending'] as const)(
     'retains only recorded activities after %s settlement without changing the journal',
     (outcome) => {
-      const settled = { ...turn, phase: 'settled' as const, outcome, endedAt: '2026-10-04T19:01:00Z' };
+      const settled = { ...turn, phase: 'settled' as const, outcome, endedAt: 1791140460000 };
       const before = JSON.stringify(settled);
       const lines = conversationActivity(settled);
       expect(lines).toEqual(settled.activity);
@@ -110,14 +110,14 @@ describe('whole-turn activity presentation', () => {
         ...turn,
         phase: 'settled' as const,
         outcome,
-        endedAt: '1970-01-01T00:00:00.500Z',
+        endedAt: 500,
         activity: [...turn.activity].reverse(),
       };
       const before = JSON.stringify(settled);
       const lines = conversationActivity(settled);
       expect(lines.slice(0, -1)).toEqual(turn.activity);
       expect(lines.at(-1)).toEqual({
-        ts: '500',
+        ts: 500,
         text: JSON.stringify({
           kind: 'notification',
           id: 'ui:outcome:turn',
@@ -137,7 +137,7 @@ describe('whole-turn activity presentation', () => {
   it('offers an outcome for an outputless settled turn without inventing a timestamp or recorded step', () => {
     const lines = conversationActivity({ ...turn, phase: 'settled', outcome: 'silent', activity: [] });
     expect(lines).toHaveLength(1);
-    expect(lines[0].ts).toBe('');
+    expect(lines[0].ts).toBeNull();
     expect(lines[0]).not.toHaveProperty('ordinal');
     expect(parseStep(lines[0].text).text).toBe('No reply');
     expect(activityStepCount(lines)).toBe(0);
@@ -146,7 +146,7 @@ describe('whole-turn activity presentation', () => {
   it('reuses a recorded stop notification, including when it belongs to another trace segment', () => {
     const stop = {
       ordinal: 3,
-      ts: '10000',
+      ts: 10000,
       timelinePosition: 400,
       text: JSON.stringify({ kind: 'notification', id: 'stopped:turn', text: 'Stopped by user.' }),
     };
@@ -168,7 +168,7 @@ describe('whole-turn activity presentation', () => {
   it.each(['running', 'stopping', 'settling', 'settled'] as const)(
     'does not retain historical Thinking while %s or change the journal',
     (phase) => {
-      const startedAt = '2026-10-05T20:07:00Z';
+      const startedAt = Date.parse('2026-10-05T20:07:00Z');
       const value = { ...turn, phase, startedAt };
       const before = JSON.stringify(value);
       const lines = conversationActivity(value);
@@ -183,13 +183,13 @@ describe('model time', () => {
   const t0 = Date.parse('2026-09-29T00:00:00Z');
   const tool = (ordinal: number, at: number, status: string, durationMs?: number) => ({
     ordinal,
-    ts: String(t0 + at),
+    ts: t0 + at,
     text: JSON.stringify({ kind: 'tool', id: `t${ordinal}`, tool: 'bash', status, durationMs }),
     timelinePosition: ordinal,
   });
   const call = (ordinal: number, endAt: number, durationMs: number) => ({
     ordinal,
-    ts: String(t0 + endAt),
+    ts: t0 + endAt,
     text: JSON.stringify({ kind: 'model', id: `m${ordinal}`, durationMs }),
     timelinePosition: ordinal,
   });
@@ -198,13 +198,13 @@ describe('model time', () => {
     partial: Partial<ConversationTurn> = {},
   ): ConversationTurn => ({
     ...turn,
-    startedAt: new Date(t0).toISOString(),
+    startedAt: t0,
     activity,
     ...partial,
   });
   const settle = (activity: ConversationTurn['activity'], endAt: number) =>
-    timed(activity, { phase: 'settled', outcome: 'replied', endedAt: new Date(t0 + endAt).toISOString() });
-  it.each(['', ' \n', 'unknown'])('does not end preparation on an unplaced model call %j', (ts) => {
+    timed(activity, { phase: 'settled', outcome: 'replied', endedAt: t0 + endAt });
+  it.each([NaN, Infinity, -Infinity])('does not end preparation on an unplaced model call %j', (ts) => {
     const activity = [{ ...call(0, 1000, 500), ts }];
     const value = timed(activity);
     const times = turnModelTime(value);
@@ -279,9 +279,9 @@ describe('model time', () => {
   });
 
   it('times preparation from runner pickup; queueing before it counts only toward the turn total', () => {
-    const queued = timed([call(0, 1000, 0)], { requestedAt: new Date(t0 - 2000).toISOString() });
+    const queued = timed([call(0, 1000, 0)], { requestedAt: t0 - 2000 });
     const [start] = withModelTime(queued, queued.activity, turnModelTime(queued), true);
-    expect(start.ts).toBe(String(t0));
+    expect(start.ts).toBe(t0);
     expect(parseStep(start.text).durationMs).toBe(1000);
     expect(turnRequestedAt(queued)).toBe(t0 - 2000);
     expect(turnRequestedAt({ ...queued, requestedAt: null })).toBe(t0);

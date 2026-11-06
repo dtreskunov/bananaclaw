@@ -98,7 +98,12 @@ function makeReq(
   return {
     method,
     url,
-    headers: { host: 'localhost', 'content-type': 'application/json', ...(opts.headers ?? {}) },
+    headers: {
+      'x-nanoclaw-ui-protocol': '16',
+      host: 'localhost',
+      'content-type': 'application/json',
+      ...(opts.headers ?? {}),
+    },
     socket: { remoteAddress: '127.0.0.1' },
     [Symbol.asyncIterator]() {
       return {
@@ -133,7 +138,9 @@ const FOLDER = 'write-group';
 const ADMIN = 'web:admin';
 
 function seedUser(id: string): void {
-  getDb().prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`).run(id, id, toEpoch(NOW()));
+  getDb()
+    .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`)
+    .run(id, id, toEpoch(NOW()));
 }
 
 function seedGroup(): void {
@@ -175,7 +182,7 @@ describe('file API origin policy', () => {
     writeFile('state.json', '{"n":1}');
 
     const response = await call('GET', `/api/groups/${GID}/files/state.json`, {
-      headers: { origin: 'https://write.pages.test' },
+      headers: { 'x-nanoclaw-ui-protocol': '16', origin: 'https://write.pages.test' },
     });
 
     expect(response.status()).toBe(200);
@@ -184,6 +191,7 @@ describe('file API origin policy', () => {
 
     const preflight = await call('OPTIONS', `/api/groups/${GID}/write`, {
       headers: {
+        'x-nanoclaw-ui-protocol': '16',
         origin: 'https://write.pages.test',
         'access-control-request-method': 'POST',
         'access-control-request-headers': 'content-type, if-match',
@@ -253,7 +261,7 @@ describe('file write optimistic concurrency', () => {
 
     const w = await call('POST', `/api/groups/${GID}/write`, {
       body: { path: 'state.json', content: 'my-clobber' },
-      headers: { 'if-match': staleEtag },
+      headers: { 'x-nanoclaw-ui-protocol': '16', 'if-match': staleEtag },
     });
     expect(w.status()).toBe(412);
     expect((w.body() as { error: string }).error).toBe('precondition_failed');
@@ -270,7 +278,7 @@ describe('file write optimistic concurrency', () => {
     const etag = (meta.body() as { etag: string }).etag;
     const w = await call('POST', `/api/groups/${GID}/write`, {
       body: { path: 'state.json', content: 'next' },
-      headers: { 'if-match': etag },
+      headers: { 'x-nanoclaw-ui-protocol': '16', 'if-match': etag },
     });
     expect(w.status()).toBe(200);
     expect(readFile('state.json')).toBe('next');
@@ -280,7 +288,7 @@ describe('file write optimistic concurrency', () => {
     writeFile('state.json', 'orig');
     const w = await call('POST', `/api/groups/${GID}/write`, {
       body: { path: 'state.json', content: 'star' },
-      headers: { 'if-match': '*' },
+      headers: { 'x-nanoclaw-ui-protocol': '16', 'if-match': '*' },
     });
     expect(w.status()).toBe(200);
     expect(readFile('state.json')).toBe('star');

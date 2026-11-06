@@ -1,6 +1,7 @@
 import './PrivateWebView.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { forwardedFragment } from '../private-web-fragment';
+import { protocolFetch } from '../api';
 
 interface Props {
   groupId: string;
@@ -12,7 +13,7 @@ interface Props {
 
 interface IssuedSession {
   url: string;
-  expiresAt: string | null;
+  expiresAt: number | null;
 }
 
 export function PrivateWebView({ groupId, path, title, fragment }: Props) {
@@ -26,7 +27,7 @@ export function PrivateWebView({ groupId, path, title, fragment }: Props) {
     const controller = new AbortController();
     setUrl(null);
     setError(null);
-    fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId)}/private-web-session`, {
+    protocolFetch(`/ui/chat/api/groups/${encodeURIComponent(groupId)}/private-web-session`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },

@@ -19,7 +19,6 @@ import {
   navigateAttention,
 } from '../actions';
 import { requestChoice, requestConfirm } from './PromptModal';
-import { tsKey } from '../utils';
 import { Pane } from './Pane';
 import { TrashIcon } from './ActionIcons';
 import { RelativeTime } from './RelativeTime';
@@ -66,7 +65,7 @@ export function ThreadRow({ t }: { t: Thread }) {
     ? [
         lt!.length > 1 ? `${lt!.length} scheduled tasks` : (head.paused ? 'Paused scheduled task' : 'Live scheduled task'),
         head.recurrence ? `recurs ${head.recurrence}` : null,
-        head.nextRunAt ? `next ${new Date(head.nextRunAt).toLocaleString()}` : null,
+        head.nextRunAt != null ? `next ${new Date(head.nextRunAt).toLocaleString()}` : null,
         head.summary,
       ].filter(Boolean).join(' · ')
     : undefined;
@@ -199,10 +198,10 @@ function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[
   const expanded = ct === 'web' || open;
   const meta = channelMeta(ct);
   const totalMsgs = items.reduce((sum, t) => sum + (t.messageCount || 0), 0);
-  const lastActivityAt = items.reduce((latest, t) => {
-    const ts = t.lastActivityAt || '';
-    return ts > latest ? ts : latest;
-  }, '');
+  const lastActivityAt = items.reduce<number | null>((latest, t) => {
+    const ts = t.lastActivityAt;
+    return ts !== null && (latest === null || ts > latest) ? ts : latest;
+  }, null);
   const handles = Array.from(new Set(items.map((t) => t.counterparty).filter((h): h is string => !!h)));
   const handleStr = handles.length === 0
     ? ''
@@ -223,7 +222,7 @@ function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[
             <span class="ch-pill" aria-hidden="true">{meta.icon}</span>
             <span class="label">{meta.label}</span>
             <span class="count">
-              {lastActivityAt ? <><RelativeTime ts={lastActivityAt} />{' \u00b7 '}</> : null}
+              {lastActivityAt != null ? <><RelativeTime ts={lastActivityAt} />{' \u00b7 '}</> : null}
               {items.length} threads {'\u00b7'} {totalMsgs} msg
             </span>
           </span>
@@ -351,7 +350,7 @@ export function ThreadsRail() {
       return a.label.localeCompare(b.label);
     });
   for (const s of sections) {
-    s.items.sort((a, b) => tsKey(b.lastActivityAt) - tsKey(a.lastActivityAt));
+    s.items.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
   }
 
   const runSearch = (): void => {

@@ -2,12 +2,12 @@
 import './styles/global.css';
 import { render } from 'preact';
 import { batch } from '@preact/signals';
-import { api, UnauthorizedError } from './api';
+import { UnauthorizedError, UiProtocolError, UI_RELOAD_EVENT } from './api';
 import { BRAND } from './brand';
-import { loadStartupData, type StartupState } from './startup';
-import { me, currentUserId, groups, settingsOpen, chatLoading, isElevatedUser } from './state';
+import { loadBootstrap, loadStartupData, type StartupState } from './startup';
+import { me, currentUserId, groups, settingsOpen, chatLoading, chatReady, chatReloadRequired, isElevatedUser } from './state';
 import { App } from './components/App';
-import { initNotif, shouldShowIosInstallHint } from './notify';
+import { initNotif, shouldShowIosInstallHint, showClientReloadPrompt, requestClientReload } from './notify';
 import { initSound } from './sound';
 import { initInstall } from './install';
 import { initBadge } from './badge';
@@ -19,10 +19,7 @@ import { router } from './router';
 import { installLivenessHandlers, startSync } from './actions';
 import { observeTableScrollEdges } from './table-scroll';
 import { fitVisualViewport } from './viewport-fit';
-import type { Group } from './types';
-
-interface MeResponse { displayName?: string; userId: string; isElevated?: boolean }
-interface GroupsResponse { groups: Group[] }
+import { sortGroups } from './utils';
 
 function StartupScreen({ state }: { state: StartupState }) {
   const title = {
@@ -36,26 +33,12 @@ function StartupScreen({ state }: { state: StartupState }) {
       {state.kind === 'error'
         ? <>
             <p class="startup-error" role="alert">{state.message}</p>
-            <p>Check your connection and try again.</p>
-            <button type="button" onClick={state.retry}>Try again</button>
+            <p>{state.reloadRequired ? 'Reload to get the current app version.' : 'Check your connection and try again.'}</p>
+            <button type="button" onClick={state.retry}>{state.reloadRequired ? 'Reload' : 'Try again'}</button>
           </>
         : <p>Please wait.</p>}
     </div>
   );
-}
-
-function sortGroups(list: Group[]): Group[] {
-  return list.slice().sort((a, b) => {
-    const parseTs = (s: string | undefined): number => {
-      if (!s) return 0;
-      const norm = s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
-      return Date.parse(norm) || 0;
-    };
-    const ta = parseTs(a.lastActivityAt);
-    const tb = parseTs(b.lastActivityAt);
-    if (tb !== ta) return tb - ta;
-    return a.name.localeCompare(b.name);
-  });
 }
 
 function setupViewportFit(): void {
@@ -105,6 +88,13 @@ async function init(): Promise<void> {
   const app = document.getElementById('app');
   if (!app) throw new Error('Chat app root is missing');
   initAppearance((message) => showToast(message, 'err'));
+  window.addEventListener(UI_RELOAD_EVENT, () => {
+    batch(() => {
+      chatReady.value = false;
+      chatReloadRequired.value = true;
+    });
+    showClientReloadPrompt('App version changed');
+  });
   initNotif();
   initSound();
   initInstall();
@@ -114,11 +104,9 @@ async function init(): Promise<void> {
   applyPanelClasses();
   maybeShowIosInstallHint();
   const [meRes, groupsRes] = await loadStartupData(
-    (signal) => Promise.all([
-      api<MeResponse>('api/me', { signal }),
-      api<GroupsResponse>('api/groups', { signal }),
-    ]),
+    loadBootstrap,
     (state) => render(<StartupScreen state={state} />, app),
+    requestClientReload,
   );
   batch(() => {
     me.value = meRes.displayName || meRes.userId;
@@ -180,7 +168,7 @@ function handleShareTarget(): void {
 }
 
 init().catch((err) => {
-  if (err instanceof UnauthorizedError) return;
+  if (err instanceof UnauthorizedError || err instanceof UiProtocolError) return;
   console.error('App initialization failed', err);
   const app = document.getElementById('app');
   if (app) render(<StartupScreen state={{

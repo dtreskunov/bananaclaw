@@ -1,3 +1,4 @@
+import { uiHeaders } from './api-test-fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'preact';
 
@@ -21,19 +22,19 @@ const previous: RefreshedCatalog = {
   repo: 'https://github.com/example/skills.git',
   ref: 'main',
   commit: 'old-commit',
-  refreshedAt: '2026-09-23T12:00:00.000Z',
-  lastRefreshAttemptAt: '2026-09-23T12:00:00.000Z',
+  refreshedAt: 1790164800000,
+  lastRefreshAttemptAt: 1790164800000,
   lastRefreshError: null,
 };
 const refreshed: RefreshedCatalog = {
   ...previous,
   commit: 'new-commit',
-  refreshedAt: '2026-09-23T13:00:00.000Z',
-  lastRefreshAttemptAt: '2026-09-23T13:00:00.000Z',
+  refreshedAt: 1790168400000,
+  lastRefreshAttemptAt: 1790168400000,
 };
 
 function response(body: unknown, status = 200): Response {
-  return { ok: status === 200, status, json: async () => body } as Response;
+  return { headers: uiHeaders, ok: status === 200, status, json: async () => body } as Response;
 }
 
 function deferredResponse() {

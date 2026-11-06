@@ -1,3 +1,4 @@
+import { uiHeaders } from '../api-test-fixtures';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { effect } from '@preact/signals';
 import { isValidElement } from 'preact';
@@ -237,7 +238,7 @@ beforeEach(() => {
     id: 'message',
     text: 'Original',
     files: [{ filename: 'instructions.txt', size: 0 }],
-    timestamp: '1',
+    timestamp: 1,
     direction: 'in',
     canEditPending: true,
     inputState: { messageId: 'message', status: 'queued', queuedForNextTurn: true },
@@ -260,7 +261,12 @@ beforeEach(() => {
     'fetch',
     vi
       .fn()
-      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, id: 'message', text: 'Revision' }) }),
+      .mockResolvedValue({
+        headers: uiHeaders,
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, id: 'message', text: 'Revision' }),
+      }),
   );
   vi.mocked(sendChat).mockReset();
   vi.mocked(warmChat).mockClear();
@@ -499,7 +505,7 @@ describe('main composer pending edits', () => {
       id: 'previous-reply',
       direction: 'out',
       text: 'Earlier reply',
-      timestamp: '2026-09-28T00:00:00Z',
+      timestamp: 1790553600000,
     };
     applyConversationFrame(testSnapshot({ messages: [history] }), 'thread');
     pendingWebSends.value = [testWebSubmission];
@@ -805,7 +811,7 @@ describe('main composer pending edits', () => {
     answeredAt: null,
     threadId: 'thread',
     agentGroupId: 'group',
-    createdAt: '2026-10-05T17:00:00Z',
+    createdAt: 1791219600000,
     response: null,
   };
 
@@ -980,7 +986,7 @@ describe('main composer pending edits', () => {
           direction: 'in',
           questionResponseType: 'skipped',
           text: 'Question skipped',
-          timestamp: 'later',
+          timestamp: 1791219660000,
         },
       });
       expect(bubble.props.children.props.dangerouslySetInnerHTML.__html).toBe(
@@ -1096,7 +1102,7 @@ describe('main composer pending edits', () => {
             id: 'message',
             direction: 'in',
             text: 'Revision',
-            timestamp: '1',
+            timestamp: 1,
             files: [{ filename: 'instructions.txt', size: 1 }],
             inputState: message.inputState,
           },
@@ -1157,7 +1163,7 @@ describe('main composer pending edits', () => {
     chatMessages.value = [
       { ...message, inputState: { messageId: 'message', status: 'applied' }, canEditPending: false },
     ];
-    const conflict = { ok: false, status: 409, json: async () => ({ error: 'steering_consumed' }) };
+    const conflict = { headers: uiHeaders, ok: false, status: 409, json: async () => ({ error: 'steering_consumed' }) };
     finish(conflict);
     await vi.waitFor(() => expect(currentPendingEditor()?.[1].draft.state.value.busy).toBe(false));
     render();
@@ -1170,6 +1176,7 @@ describe('main composer pending edits', () => {
 
   it('locks ambiguous saves across exit/reopen and blocks cancellation until confirmed', async () => {
     vi.mocked(fetch).mockResolvedValue({
+      headers: uiHeaders,
       ok: false,
       status: 503,
       json: async () => ({ error: 'edit_pending' }),
@@ -1209,7 +1216,12 @@ describe('main composer pending edits', () => {
     const otherFiles = [{ name: 'other.txt', size: 2 }];
     pending.value = otherFiles;
     render();
-    finish({ ok: true, status: 200, json: async () => ({ ok: true, id: 'message', text: 'Revision' }) });
+    finish({
+      headers: uiHeaders,
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, id: 'message', text: 'Revision' }),
+    });
     await vi.waitFor(() => expect(pendingEditorSessions.value.size).toBe(0));
     render();
     expect(input.value).toBe('Other draft');
@@ -1297,6 +1309,7 @@ describe('main composer pending edits', () => {
     open();
     type('Unsaved revision');
     vi.mocked(fetch).mockResolvedValue({
+      headers: uiHeaders,
       ok: false,
       status: 503,
       json: async () => ({ error: 'cancel_pending' }),
@@ -1336,8 +1349,8 @@ describe('main composer pending edits', () => {
     applyConversationFrame(
       testSnapshot({
         messages: [
-          { id: 'older-response', text: 'Older', timestamp: '1', timelinePosition: 100, direction: 'out' },
-          { id: 'latest-response', text: 'Latest', timestamp: '2', timelinePosition: 200, direction: 'out' },
+          { id: 'older-response', text: 'Older', timestamp: 1, timelinePosition: 100, direction: 'out' },
+          { id: 'latest-response', text: 'Latest', timestamp: 2, timelinePosition: 200, direction: 'out' },
         ],
       }),
       'thread',
@@ -1373,11 +1386,11 @@ describe('main composer pending edits', () => {
     applyConversationFrame(
       testSnapshot({
         messages: [
-          { id: 'older-response', text: 'Older', timestamp: '1', timelinePosition: 100, direction: 'out' },
+          { id: 'older-response', text: 'Older', timestamp: 1, timelinePosition: 100, direction: 'out' },
           {
             id: 'latest-response',
             text: 'Latest',
-            timestamp: '2',
+            timestamp: 2,
             timelinePosition: 200,
             direction: 'out',
             suggestedAction: 'continue',
@@ -1423,7 +1436,7 @@ describe('main composer pending edits', () => {
       };
       applyConversationFrame(
         testSnapshot({
-          turns: [{ ...testTurn, activity: [], startedAt: new Date(Date.now() - 7000).toISOString() }],
+          turns: [{ ...testTurn, activity: [], startedAt: Date.now() - 7000 }],
           connection: { connected: true, activeTurnId: testTurn.id },
         }),
         'thread',
@@ -1531,7 +1544,7 @@ describe('main composer pending edits', () => {
           {
             ordinal: 0,
             timelinePosition: 100,
-            ts: '1000',
+            ts: 1000,
             text: JSON.stringify({
               kind: 'tool',
               id: 'completed-call',
@@ -1545,7 +1558,7 @@ describe('main composer pending edits', () => {
         const ready = {
           ordinal: 1,
           timelinePosition: 50,
-          ts: String(Date.parse(testTurn.startedAt!)),
+          ts: testTurn.startedAt!,
           text: JSON.stringify({ kind: 'model', id: 'model:ready', durationMs: 0 }),
         };
         applyConversationFrame(
@@ -1578,7 +1591,7 @@ describe('main composer pending edits', () => {
             expect(panel.props.lines).toHaveLength(3);
           } else {
             expect(panel.props.lines.slice(1)).toMatchObject(activity);
-            expect(panel.props.lines[1].modelTime).toEqual({ ms: 0, since: Date.parse(testTurn.startedAt!) });
+            expect(panel.props.lines[1].modelTime).toEqual({ ms: 0, since: testTurn.startedAt! });
           }
         }
         expect(turnRow.props.source.turn.activity).toEqual([ready, ...activity]);
@@ -1644,7 +1657,7 @@ describe('main composer pending edits', () => {
               id: 'settled-reply',
               direction: 'out',
               text: 'Reply',
-              timestamp: '2026-09-29T00:00:02Z',
+              timestamp: 1790640002000,
               timelinePosition: 200,
               turnId: testTurn.id,
             },
@@ -1689,7 +1702,7 @@ describe('main composer pending edits', () => {
         expect(find(info.type(info.props), 'span', 'Model-call time')).toBeUndefined();
       }
       expect(row.type.name).toBe('MessageBubble');
-      expect(row.props.timestamp).toEqual(expect.any(String));
+      expect(row.props.timestamp).toEqual(expect.any(Number));
       expect(findComponent(row.props.metadata, 'ReplyTurnInfo')).toBeUndefined();
     },
   );
@@ -1768,7 +1781,7 @@ describe('main composer pending edits', () => {
         },
       ].map((step, ordinal) => ({
         ordinal,
-        ts: String(1000 + ordinal),
+        ts: 1000 + ordinal,
         timelinePosition: 150 + ordinal,
         text: JSON.stringify(step),
       }));
@@ -1779,7 +1792,7 @@ describe('main composer pending edits', () => {
               id: 'failure-ack',
               direction: 'out',
               text: 'The provider could not complete your request.',
-              timestamp: '2026-09-29T00:00:02Z',
+              timestamp: 1790640002000,
               timelinePosition: 200,
               turnId: testTurn.id,
               deliveryOrigin: 'response',
@@ -1870,7 +1883,7 @@ describe('main composer pending edits', () => {
             id: 'reply',
             direction: 'out',
             text: 'Reply',
-            timestamp: '2026-09-29T00:00:07Z',
+            timestamp: 1790640007000,
             timelinePosition: 200,
             turnId: testTurn.id,
             deliveryOrigin: 'response',
@@ -1883,7 +1896,7 @@ describe('main composer pending edits', () => {
             phase: 'settled',
             outcome: 'warning',
             outputIds: ['reply'],
-            endedAt: '2026-09-29T00:00:07Z',
+            endedAt: 1790640007000,
             metadata: { status: 'final', model: 'fixture-model', durationMs: 7000 },
             usage: [{ id: 'usage', value: { cost_usd: 0.01, context_tokens: 35, context_window: 100 } }],
           },
@@ -2091,7 +2104,7 @@ describe('main composer pending edits', () => {
               id: 'settled-card',
               direction: 'out',
               text: '',
-              timestamp: '2026-09-29T00:00:02Z',
+              timestamp: 1790640002000,
               timelinePosition: 200,
               turnId: testTurn.id,
               deliveryOrigin: 'response',
@@ -2259,7 +2272,7 @@ describe('main composer pending edits', () => {
     expect(button.props['aria-expanded']).toBe(false);
     const panel = findComponent(details, 'ActivityTracePanel');
     expect(panel.props.lines).toHaveLength(1);
-    expect(panel.props.lines[0].ts).toBe('');
+    expect(panel.props.lines[0].ts).toBeNull();
     expect(find(row.props.children.at(-1), 'span')).toBeUndefined();
     button.props.onClick();
     hooks.cursor = 0;
@@ -2279,7 +2292,7 @@ describe('main composer pending edits', () => {
       };
       applyConversationFrame(
         testSnapshot({
-          turns: [{ ...testTurn, startedAt: new Date(Date.now() - 7000).toISOString() }],
+          turns: [{ ...testTurn, startedAt: Date.now() - 7000 }],
           connection: { connected: true, activeTurnId: testTurn.id },
         }),
         'thread',
@@ -2412,7 +2425,7 @@ describe('main composer pending edits', () => {
         viewport.scrollHeight = 4500;
         if (phase === 'completion') {
           completedResponse.value = 'response';
-          chatMessages.value = [{ id: 'response', direction: 'out', text: 'Long reply', timestamp: '2' }];
+          chatMessages.value = [{ id: 'response', direction: 'out', text: 'Long reply', timestamp: 2 }];
         } else {
           pendingWebSends.value = [testWebSubmission];
           if (phase === 'submission') scrollToBottomTick.value++;
@@ -2457,8 +2470,8 @@ describe('inline activity metrics', () => {
       phase: 'settled',
       outcome: 'replied',
       outputIds: ['previous-reply'],
-      startedAt: '2026-09-28T00:00:00Z',
-      endedAt: '2026-09-28T00:00:10Z',
+      startedAt: 1790553600000,
+      endedAt: 1790553610000,
       usage: [{ id: 'previous-usage', value: { cost_usd: 0.01 } }],
     };
     const reply: ConversationMessage = {
@@ -2466,7 +2479,7 @@ describe('inline activity metrics', () => {
       direction: 'out',
       turnId: previous.id,
       text: 'Done',
-      timestamp: '2026-09-28T00:00:10Z',
+      timestamp: 1790553610000,
     };
     let generation = 0;
     const publish = (turns: ConversationTurn[], echoed = false) => {
@@ -2572,7 +2585,7 @@ describe('inline activity metrics', () => {
       else if (reply) turn.outcome = 'replied';
       const newer = { ...turn, id: 'newer-history', outputIds: [] };
       const messages: ConversationMessage[] = reply
-        ? [{ id: 'reply', direction: 'out', turnId: turn.id, text: 'Done', timestamp: '2026-09-29T00:00:01Z' }]
+        ? [{ id: 'reply', direction: 'out', turnId: turn.id, text: 'Done', timestamp: 1790640001000 }]
         : [];
       const turns = historical ? [turn, newer] : [turn];
       applyConversationFrame(
@@ -2631,10 +2644,10 @@ describe('inline activity metrics', () => {
 
   it('groups usage into outlined timing, token and model columns', () => {
     appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
-    const t0 = Date.parse(testTurn.startedAt!);
+    const t0 = testTurn.startedAt!;
     const tool = (id: string, at: number, durationMs: number, ordinal: number) => ({
       ordinal,
-      ts: String(t0 + at),
+      ts: t0 + at,
       timelinePosition: 100 + ordinal,
       text: JSON.stringify({ kind: 'tool', id, tool: 'bash', status: 'completed', durationMs }),
     });
@@ -2807,7 +2820,7 @@ describe('activity trace completion', () => {
       ...testTurn,
       activity: [0, 1].map((ordinal) => ({
         ordinal,
-        ts: '1000',
+        ts: 1000,
         timelinePosition: 100 + ordinal,
         text: JSON.stringify({ kind: 'tool', id: `command-${ordinal}`, tool: 'bash', status: 'running' }),
       })),
@@ -2870,7 +2883,7 @@ describe('activity trace completion', () => {
       ...testTurn,
       activity: [0, 1].map((ordinal) => ({
         ordinal,
-        ts: '1000',
+        ts: 1000,
         timelinePosition: 100 + ordinal,
         text: JSON.stringify({
           kind: 'tool',
@@ -2910,7 +2923,7 @@ describe('activity trace completion', () => {
     const chips = (text: string, status: string, extra: object = {}) => {
       resetMount();
       const line = {
-        ts: '1000',
+        ts: 1000,
         text: JSON.stringify({ kind: 'notification', id: 'ui:start:m', text, status, ...extra }),
       };
       const [row] = [traceList(ActivityTraceList({ lines: [line], live: true, now: 5000 })).props.children].flat();
@@ -2933,7 +2946,7 @@ describe('activity trace completion', () => {
       ...testTurn,
       activity: [0, 1].map((ordinal) => ({
         ordinal,
-        ts: '1000',
+        ts: 1000,
         timelinePosition: 100 + ordinal,
         text: JSON.stringify({
           kind: 'tool',
@@ -2990,7 +3003,7 @@ describe('activity trace completion', () => {
 
 describe('activity trace chapter following', () => {
   const line = (id: string, status: 'running' | 'completed', tool = 'bash'): ActivityLine => ({
-    ts: '1000',
+    ts: 1000,
     text: JSON.stringify({ kind: 'tool', id, status, tool, detail: `${tool}-${id}` }),
   });
   function renderTrace(lines: ActivityLine[]) {
@@ -3121,7 +3134,7 @@ describe('activity trace chapter following', () => {
     for (const lines of [
       [line('one', 'completed')],
       [line('one', 'completed'), line('two', 'running')],
-      [{ ts: '1000', text: 'Legacy activity <literal>' }],
+      [{ ts: 1000, text: 'Legacy activity <literal>' }],
     ]) {
       resetMount();
       const row = findComponent(ActivityTraceList({ lines, live: true }), 'ActivityTraceRow');
@@ -3157,7 +3170,12 @@ describe('activity trace chapter following', () => {
     expect(descriptions[1]).not.toHaveBeenCalled();
   });
 
-  const timed = (id: string, ts: string, status: 'running' | 'completed', durationMs?: number): ActivityLine => ({
+  const timed = (
+    id: string,
+    ts: number | null,
+    status: 'running' | 'completed',
+    durationMs?: number,
+  ): ActivityLine => ({
     ts,
     text: JSON.stringify({ kind: 'tool', id, tool: 'bash', status, durationMs }),
   });
@@ -3169,54 +3187,54 @@ describe('activity trace chapter following', () => {
   }
 
   it('counts overlapping completed commands once, including nested and out-of-order intervals', () => {
-    expect(
-      chapterTimeCells([timed('a', '1000', 'completed', 3000), timed('b', '2000', 'completed', 3000)]).cpu,
-    ).toEqual({ ms: 4000 });
-    expect(
-      chapterTimeCells([timed('a', '1000', 'completed', 4000), timed('b', '2000', 'completed', 1000)]).cpu,
-    ).toEqual({ ms: 4000 });
-    expect(
-      chapterTimeCells([timed('b', '2000', 'completed', 3000), timed('a', '1000', 'completed', 3000)]).cpu,
-    ).toEqual({ ms: 4000 });
+    expect(chapterTimeCells([timed('a', 1000, 'completed', 3000), timed('b', 2000, 'completed', 3000)]).cpu).toEqual({
+      ms: 4000,
+    });
+    expect(chapterTimeCells([timed('a', 1000, 'completed', 4000), timed('b', 2000, 'completed', 1000)]).cpu).toEqual({
+      ms: 4000,
+    });
+    expect(chapterTimeCells([timed('b', 2000, 'completed', 3000), timed('a', 1000, 'completed', 3000)]).cpu).toEqual({
+      ms: 4000,
+    });
   });
 
   it('keeps live chapter time continuous when a parallel command finishes', () => {
-    expect(chapterTimeCells([timed('a', '1000', 'running'), timed('b', '2000', 'running')]).cpu).toEqual({
+    expect(chapterTimeCells([timed('a', 1000, 'running'), timed('b', 2000, 'running')]).cpu).toEqual({
       since: 1000,
     });
-    expect(chapterTimeCells([timed('a', '1000', 'completed', 3000), timed('b', '2000', 'running')]).cpu).toEqual({
+    expect(chapterTimeCells([timed('a', 1000, 'completed', 3000), timed('b', 2000, 'running')]).cpu).toEqual({
       since: 1000,
     });
-    expect(chapterTimeCells([timed('a', '1000', 'running'), timed('b', '2000', 'completed', 3000)]).cpu).toEqual({
+    expect(chapterTimeCells([timed('a', 1000, 'running'), timed('b', 2000, 'completed', 3000)]).cpu).toEqual({
       since: 1000,
     });
   });
 
   it('excludes idle gaps and preserves reported durations without usable timestamps', () => {
-    expect(
-      chapterTimeCells([timed('a', '1000', 'completed', 1000), timed('b', '4000', 'completed', 2000)]).cpu,
-    ).toEqual({ ms: 3000 });
-    expect(chapterTimeCells([timed('a', '1000', 'completed', 1000), timed('b', '4000', 'running')]).cpu).toEqual({
+    expect(chapterTimeCells([timed('a', 1000, 'completed', 1000), timed('b', 4000, 'completed', 2000)]).cpu).toEqual({
+      ms: 3000,
+    });
+    expect(chapterTimeCells([timed('a', 1000, 'completed', 1000), timed('b', 4000, 'running')]).cpu).toEqual({
       since: 3000,
     });
-    for (const ts of ['', ' \n', 'unknown']) {
-      expect(chapterTimeCells([timed('a', ts, 'completed', 1000), timed('b', '1000', 'completed', 2000)]).cpu).toEqual({
+    for (const ts of [null]) {
+      expect(chapterTimeCells([timed('a', ts, 'completed', 1000), timed('b', 1000, 'completed', 2000)]).cpu).toEqual({
         ms: 3000,
       });
     }
-    expect(chapterTimeCells([timed('a', '1000', 'running'), timed('b', '2000', 'running')], false).cpu).toBeNull();
+    expect(chapterTimeCells([timed('a', 1000, 'running'), timed('b', 2000, 'running')], false).cpu).toBeNull();
   });
 
   it('leaves chapter model-time sums and live tails unchanged', () => {
-    const first = { ...timed('a', '1000', 'completed', 3000), modelTime: { ms: 900 } };
-    const second = { ...timed('b', '2000', 'completed', 3000), modelTime: { ms: 1200 } };
+    const first = { ...timed('a', 1000, 'completed', 3000), modelTime: { ms: 900 } };
+    const second = { ...timed('b', 2000, 'completed', 3000), modelTime: { ms: 1200 } };
     expect(chapterTimeCells([first, second])).toEqual({ cpu: { ms: 4000 }, ai: { ms: 2100 } });
     expect(chapterTimeCells([first, { ...second, modelTime: { ms: 1200, since: 5000 } }]).ai).toEqual({ since: 2900 });
   });
 
   it('keeps recorded durations on expanded completed rows without Stop or a live timer', () => {
     const completed = {
-      ts: '1000',
+      ts: 1000,
       text: JSON.stringify({
         kind: 'tool',
         id: 'one',
@@ -3235,7 +3253,7 @@ describe('activity trace chapter following', () => {
   });
 
   it('does not invent a live duration or a stoppable turn for legacy unfinished activity', () => {
-    const unfinished = { ...line('one', 'running'), ts: '' };
+    const unfinished = { ...line('one', 'running'), ts: null };
     const list = ActivityTraceList({ lines: [unfinished], live: true, now: 65_000 });
     const row = findComponent(list, 'ActivityTraceRow');
     const view = row.type(row.props);
@@ -3245,7 +3263,7 @@ describe('activity trace chapter following', () => {
     expect(cpu.props.time).toBeNull();
   });
 
-  it.each([' ', 'unknown'])('shows no timer or Stop for a running call with timestamp %j', (ts) => {
+  it.each([null])('shows no timer or Stop for a running call with timestamp %j', (ts) => {
     const unfinished = { ...line('one', 'running'), ts };
     const list = ActivityTraceList({ lines: [unfinished], live: true, now: 65_000, turnId: 'turn' });
     const row = findComponent(list, 'ActivityTraceRow');

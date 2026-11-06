@@ -1,3 +1,4 @@
+import { uiHeaders } from './api-test-fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSearch, searchThreads } from './actions';
 import { searchError, searchLoading, searchOpen, searchQuery, searchResults } from './state';
@@ -19,6 +20,7 @@ function deferredResponse() {
 
 function responseWith(results: SearchResult[]): Response {
   return {
+    headers: uiHeaders,
     ok: true,
     status: 200,
     json: async () => ({ results }),
@@ -33,7 +35,7 @@ function result(messageId: string): SearchResult {
     channelType: 'web',
     messagingGroupId: 'group',
     direction: 'in',
-    timestamp: '2026-07-22T00:00:00.000Z',
+    timestamp: 1784678400000,
     snippet: messageId,
     rank: 0,
   };

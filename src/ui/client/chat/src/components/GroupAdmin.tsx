@@ -51,8 +51,8 @@ interface SettingsResponse {
   id: string;
   name: string;
   folder: string;
-  createdAt: string;
-  updatedAt: string | null;
+  createdAt: number;
+  updatedAt: number | null;
   config: {
     provider: string | null;
     upstream_provider: string | null;
@@ -83,7 +83,7 @@ interface SettingsResponse {
   validCliScopes: string[];
   runningSessionCount: number;
   selectedModelDetail: { label: string; detail?: string; tooltip?: string } | null;
-  selectedImageDetail: { label: string; createdAt: string | null; size: number | null } | null;
+  selectedImageDetail: { label: string; createdAt: number | null; size: number | null } | null;
   actorIsElevated: boolean;
   providesAgentSurfaces: boolean;
   site: {
@@ -106,7 +106,7 @@ interface SettingsResponse {
 interface ImageSuggestion {
   value: string;
   label: string;
-  createdAt: string | null;
+  createdAt: number | null;
   size: number | null;
   isDefault: boolean;
 }
@@ -123,11 +123,9 @@ const PROVIDER_INFO: Record<string, string> = {
     'OpenCode — multi-provider gateway. The upstream (OpenRouter, MiniMax, DeepSeek, Anthropic, …) is not chosen here: it comes from whichever model you pick, since every models.dev id names its own gateway.',
 };
 
-function formatAge(iso: string | null): string | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return null;
-  const diffMs = Date.now() - t;
+function formatAge(timestamp: number | null): string | null {
+  if (timestamp == null) return null;
+  const diffMs = Date.now() - timestamp;
   const day = 24 * 3600 * 1000;
   const hour = 3600 * 1000;
   if (diffMs < hour) return 'just now';
@@ -652,7 +650,7 @@ function SettingsTab({
       detail: detailParts.length ? detailParts.join(' · ') : undefined,
       tooltip: [
         i.value,
-        i.createdAt ? `Created: ${new Date(i.createdAt).toLocaleString()}` : null,
+        i.createdAt != null ? `Created: ${new Date(i.createdAt).toLocaleString()}` : null,
         size ? `Size: ${size}` : null,
         i.isDefault ? 'Install default image (used when image_tag is unset).' : null,
       ]
@@ -670,7 +668,7 @@ function SettingsTab({
         <div class="group-admin-toolbar">
           <p class="muted ga-folder-line">
             Folder <code>{data.folder}</code> <code class="ga-folder-id">{data.id}</code>
-            {data.updatedAt ? ` · last updated ${new Date(data.updatedAt).toLocaleString()}` : ''}
+            {data.updatedAt != null ? ` · last updated ${new Date(data.updatedAt).toLocaleString()}` : ''}
             {data.runningSessionCount > 0
               ? ` · ${data.runningSessionCount} running session${data.runningSessionCount === 1 ? '' : 's'}`
               : ' · no running sessions'}
@@ -830,7 +828,7 @@ function SettingsTab({
                     ) : null}
                     {selectedImg.isDefault ? <span class="selected-detail"> · default</span> : null}
                   </div>
-                  {selectedImg.createdAt ? (
+                  {selectedImg.createdAt != null ? (
                     <pre class="selected-tooltip">Created: {new Date(selectedImg.createdAt).toLocaleString()}</pre>
                   ) : null}
                 </div>

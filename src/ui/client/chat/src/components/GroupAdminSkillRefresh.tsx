@@ -9,7 +9,7 @@ export function CatalogRefreshStatus({
   return (
     <div class="ga-catalog-refresh-status" aria-live="polite">
       <p class="ga-catalog-meta">
-        Last successful refresh: {refreshedAt
+        Last successful refresh: {refreshedAt != null
           ? <RelativeTime ts={refreshedAt} className="ga-catalog-refresh-time" />
           : 'Not recorded'}
       </p>

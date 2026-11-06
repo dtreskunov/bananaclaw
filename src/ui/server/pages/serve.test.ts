@@ -53,6 +53,7 @@ function makeRes(): CapturedRes {
     },
   });
   const res = w as unknown as http.ServerResponse;
+  res.setHeader = () => res;
   res.writeHead = ((s: number, h?: http.OutgoingHttpHeaders) => {
     status = s;
     if (h) headers = h;
@@ -70,7 +71,7 @@ function makeRes(): CapturedRes {
 }
 
 function makeReq(host: string | undefined, url = '/', method = 'GET'): http.IncomingMessage {
-  return { headers: { host }, url, method } as unknown as http.IncomingMessage;
+  return { headers: { 'x-nanoclaw-ui-protocol': '16', host }, url, method } as unknown as http.IncomingMessage;
 }
 
 beforeAll(async () => {

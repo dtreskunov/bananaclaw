@@ -79,6 +79,7 @@ function makeRes(): CapturedRes {
     },
   });
   const res = w as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((s: number, h?: Record<string, string | string[]>) => {
     status = s;
     if (h) headers = h;

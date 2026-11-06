@@ -4,7 +4,7 @@ import type { ChatMessage } from './types';
 import { testSnapshot } from './conversation-test-fixtures';
 
 function message(id: string, direction: ChatMessage['direction']): ChatMessage {
-  return { id, direction, text: id, timestamp: '2026-01-01T00:00:00.000Z' };
+  return { id, direction, text: id, timestamp: 1767225600000 };
 }
 
 describe('findEditBranchAnchorId', () => {

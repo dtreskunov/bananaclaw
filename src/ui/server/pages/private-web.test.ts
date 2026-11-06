@@ -47,6 +47,7 @@ function makeRes(): CapturedRes {
     },
   });
   const res = writable as unknown as http.ServerResponse;
+  res.setHeader = () => res;
   res.writeHead = ((nextStatus: number, nextHeaders?: http.OutgoingHttpHeaders) => {
     status = nextStatus;
     for (const [name, value] of Object.entries(nextHeaders || {})) {
@@ -78,6 +79,7 @@ function makeReq(args: {
   req.method = args.method || 'GET';
   req.url = args.url || '/';
   req.headers = {
+    'x-nanoclaw-ui-protocol': '16',
     host: args.host,
     ...(args.cookie ? { cookie: args.cookie } : {}),
     ...(args.ifMatch ? { 'if-match': args.ifMatch } : {}),

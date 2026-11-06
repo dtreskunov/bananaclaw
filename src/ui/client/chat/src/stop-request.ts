@@ -1,4 +1,5 @@
 import { channelType, messagingGroupId } from './state';
+import { protocolFetch } from './api';
 
 const TOOL_STOP_ERRORS: Record<string, string> = {
   not_running: 'This tool is no longer running. Waiting for its latest state.',
@@ -19,7 +20,7 @@ export async function sendStopRequest(
   if (channelType.value !== 'web' && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
   }
-  const response = await fetch(url, {
+  const response = await protocolFetch(url, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },

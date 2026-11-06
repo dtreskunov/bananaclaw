@@ -11,6 +11,7 @@
  * audit seam for a real DB table without touching handlers.
  */
 import http from 'http';
+import { parseTimestamp } from '../../shared/time.js';
 import zlib from 'zlib';
 import { URL } from 'url';
 
@@ -230,8 +231,8 @@ interface SettingsResponse {
   id: string;
   name: string;
   folder: string;
-  createdAt: string;
-  updatedAt: string | null;
+  createdAt: number;
+  updatedAt: number | null;
   config: Pick<
     ContainerConfigRow,
     | 'provider'
@@ -288,7 +289,7 @@ interface SettingsResponse {
   runningSessionCount: number;
   /** Tooltip / detail / age for the currently-selected model and image. */
   selectedModelDetail: { label: string; detail?: string; tooltip?: string } | null;
-  selectedImageDetail: { label: string; createdAt: string | null; size: number | null } | null;
+  selectedImageDetail: { label: string; createdAt: number | null; size: number | null } | null;
   /** True iff the acting admin is owner or global admin (controls UI gating
    * of privilege-escalating options like cli_scope=global). */
   actorIsElevated: boolean;
@@ -327,7 +328,11 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
   if (cfg.image_tag) {
     const match = listImages().find((i) => i.value === cfg.image_tag);
     if (match) {
-      selectedImageDetail = { label: match.label, createdAt: match.createdAt, size: match.size };
+      selectedImageDetail = {
+        label: match.label,
+        createdAt: parseTimestamp(match.createdAt),
+        size: match.size,
+      };
     }
   }
 
@@ -347,8 +352,8 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     id: group.id,
     name: group.name,
     folder: group.folder,
-    createdAt: group.created_at,
-    updatedAt: cfg.updated_at ?? null,
+    createdAt: parseTimestamp(group.created_at),
+    updatedAt: parseTimestamp(cfg.updated_at),
     config: {
       provider: cfg.provider,
       upstream_provider: cfg.upstream_provider,
@@ -1331,7 +1336,7 @@ interface RoleDto {
   displayName: string | null;
   primaryHandle: string | null;
   primaryChannel: string | null;
-  grantedAt: string;
+  grantedAt: number;
   grantedBy: string | null;
 }
 
@@ -1340,7 +1345,7 @@ function handleGetRoles(res: http.ServerResponse, gid: string): void {
   const out: RoleDto[] = rows.map((r) => ({
     userId: r.user_id,
     ...userDtoBase(r.user_id),
-    grantedAt: r.granted_at,
+    grantedAt: parseTimestamp(r.granted_at),
     grantedBy: r.granted_by,
   }));
   writeJson(res, 200, { admins: out });
@@ -1453,7 +1458,12 @@ async function handleListModels(req: http.IncomingMessage, res: http.ServerRespo
 // ── image catalog (for the image_tag dropdown) ────────────────────────────
 
 function handleListImages(res: http.ServerResponse): void {
-  writeJson(res, 200, { images: listImages() });
+  writeJson(res, 200, {
+    images: listImages().map((image) => ({
+      ...image,
+      createdAt: parseTimestamp(image.createdAt),
+    })),
+  });
 }
 
 // ── destinations (agent-to-agent links) ────────────────────────────────────
@@ -1475,7 +1485,7 @@ interface DestinationDto {
     localName: string;
     viewerCanRemove: boolean;
   } | null;
-  createdAt: string;
+  createdAt: number;
   createdBy: string | null;
 }
 
@@ -1509,7 +1519,7 @@ function handleListDestinations(res: http.ServerResponse, actorUserId: string, g
       channelType,
       platformId,
       reverseLink,
-      createdAt: r.created_at,
+      createdAt: parseTimestamp(r.created_at),
       createdBy: r.created_by,
     };
   });

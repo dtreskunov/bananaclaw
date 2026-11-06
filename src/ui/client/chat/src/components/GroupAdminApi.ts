@@ -7,7 +7,7 @@ export async function call<T>(
   method: string = 'GET',
   body?: unknown,
 ): Promise<{ ok: boolean; status: number; data: T }> {
-  const r = await fetch(url, {
+  const r = await protocolFetch(url, {
     method,
     credentials: 'same-origin',
     headers: body ? { 'Content-Type': 'application/json' } : {},
@@ -26,3 +26,4 @@ export function errMsg(d: unknown, fallback: string): string {
   const e = (d as { error?: unknown })?.error;
   return typeof e === 'string' && e ? e : fallback;
 }
+import { protocolFetch } from '../api';

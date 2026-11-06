@@ -63,7 +63,7 @@ it('keeps a pending output delta and its stream revision across a metadata refre
     const initial = frames[0].conversation!;
     state.view = {
       ...state.view,
-      messages: [{ id: 'reply', direction: 'out', timestamp: 'now', text: 'New output' }],
+      messages: [{ id: 'reply', direction: 'out', timestamp: 0, text: 'New output' }],
       timeline: [{ kind: 'message', messageId: 'reply' }],
     };
     publishHostChange({ kind: 'sessions', sessionId: 's' });

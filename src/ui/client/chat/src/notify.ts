@@ -6,7 +6,8 @@
 //
 // The worker owns notification display and the authoritative unread badge.
 import { effect } from '@preact/signals';
-import { notifMutedSig, NOTIF_MUTE_KEY } from './state';
+import { protocolFetch } from './api';
+import { notifMutedSig, NOTIF_MUTE_KEY, chatReady, chatReloadRequired } from './state';
 import { showStickyToast, showToast } from './components/Toast';
 import { shouldAutoSubscribe, type NotificationPermissionState } from './notification-policy';
 
@@ -77,6 +78,13 @@ function watchForUpdates(reg: ServiceWorkerRegistration): void {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     reloadForUpdate();
   });
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+    if (event.data?.type === 'ui-reload-required') {
+      chatReady.value = false;
+      chatReloadRequired.value = true;
+      showClientReloadPrompt('App version changed');
+    }
+  });
 
   const onNewWorker = (worker: ServiceWorker): void => {
     worker.addEventListener('statechange', () => {
@@ -97,7 +105,7 @@ function watchForUpdates(reg: ServiceWorkerRegistration): void {
   });
 }
 
-function requestClientReload(): void {
+export function requestClientReload(): void {
   void reloadChatClient();
 }
 
@@ -211,7 +219,7 @@ async function ensureSubscribed(requestPermission: boolean): Promise<SubscribeRe
   try {
     let sub = await registration.pushManager.getSubscription();
     if (!sub) {
-      const keyResp = await fetch('api/push/public-key', { credentials: 'include' });
+      const keyResp = await protocolFetch('api/push/public-key', { credentials: 'include' });
       if (!keyResp.ok) return 'failed';
       const { publicKey } = (await keyResp.json()) as { publicKey?: string };
       if (!publicKey) return 'failed';
@@ -220,7 +228,7 @@ async function ensureSubscribed(requestPermission: boolean): Promise<SubscribeRe
         applicationServerKey: urlBase64ToUint8Array(publicKey).buffer as ArrayBuffer,
       });
     }
-    const response = await fetch('api/push/subscribe', {
+    const response = await protocolFetch('api/push/subscribe', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -240,7 +248,7 @@ async function unsubscribePush(): Promise<void> {
     if (!sub) return;
     const endpoint = sub.endpoint;
     await sub.unsubscribe();
-    await fetch('api/push/subscribe', {
+    await protocolFetch('api/push/subscribe', {
       method: 'DELETE',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

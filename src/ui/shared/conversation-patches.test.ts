@@ -13,13 +13,13 @@ const turn: ConversationTurn = {
   id: 'turn',
   phase: 'running',
   outcome: 'pending',
-  startedAt: 'now',
+  startedAt: 1767225600000,
   endedAt: null,
   inputIds: [],
   outputIds: [],
   activity: Array.from({ length: 1000 }, (_, ordinal) => ({
     ordinal,
-    ts: String(ordinal),
+    ts: ordinal,
     text: JSON.stringify({ kind: 'tool', id: `tool-${ordinal}`, status: 'running', detail: 'x'.repeat(256) }),
     timelinePosition: ordinal + 1,
   })),
@@ -88,7 +88,7 @@ describe('incremental conversation activity', () => {
     expect(reduced.conversation.turns[0].activity).toBe(turn.activity);
   });
   it('adds and removes entries together with only affected timeline rows', () => {
-    const added = { ordinal: 1000, ts: '1000', text: 'new', timelinePosition: 1001 };
+    const added = { ordinal: 1000, ts: 1000, text: 'new', timelinePosition: 1001 };
     const next: Conversation = {
       ...view,
       turns: [{ ...turn, activity: [...turn.activity.slice(1), added] }],
@@ -115,11 +115,11 @@ describe('incremental conversation activity', () => {
     expect(reduceConversation(snapshot, parseConversationFrame(wire(update(patch)))).conversation).toEqual(next);
   });
   it('applies settlement, output, trace ownership and turn fields atomically', () => {
-    const reply = { id: 'reply', direction: 'out' as const, turnId: turn.id, text: 'Done', timestamp: 'later' };
+    const reply = { id: 'reply', direction: 'out' as const, turnId: turn.id, text: 'Done', timestamp: 1767225601000 };
     const next: Conversation = {
       ...view,
       messages: [reply],
-      turns: [{ ...turn, phase: 'settled', outcome: 'replied', endedAt: 'later', outputIds: [reply.id] }],
+      turns: [{ ...turn, phase: 'settled', outcome: 'replied', endedAt: 1767225601000, outputIds: [reply.id] }],
       timeline: [
         {
           kind: 'message',

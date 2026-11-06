@@ -1,3 +1,4 @@
+import { UiResponse as Response } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyTurnState, resetTurnState, stopActiveTurn } from './stop-turn';
 import { testWebSubmission } from './conversation-test-fixtures';

@@ -1,3 +1,4 @@
+import { UiResponse as Response } from '../api-test-fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   accessPath,

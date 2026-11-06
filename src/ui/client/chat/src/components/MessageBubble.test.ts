@@ -48,7 +48,7 @@ describe('scrollable message bubble', () => {
     const node = MessageBubble({
       class: 'msg out',
       from: 'Research agent',
-      timestamp: '2026-10-31T01:00:00Z',
+      timestamp: 1793408400000,
       metadata: 'Extra status',
       children: 'Request body',
     });
@@ -57,7 +57,7 @@ describe('scrollable message bubble', () => {
     expect(body).toBe('Request body');
     expect(footer.props.class).toBe('meta turn-info');
     expect(footer.props.children[0].type).toBe(RelativeTime);
-    expect(footer.props.children[0].props.ts).toBe('2026-10-31T01:00:00Z');
+    expect(footer.props.children[0].props.ts).toBe(1793408400000);
     expect(footer.props.children[1]).toBe('Extra status');
   });
   it('uses shared edge tracking and makes only overflowing messages keyboard focusable', () => {

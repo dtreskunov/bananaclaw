@@ -10,6 +10,7 @@ import { postJson } from '../api';
 import { selectGroup } from '../actions';
 import { groups } from '../state';
 import type { Group } from '../types';
+import type { EpochMs } from '../../../../shared/time';
 import { showToast } from './Toast';
 import { MobileDialog, MobileDialogFooter } from './MobileDialog';
 
@@ -19,7 +20,7 @@ interface NewGroupResponse {
   id: string;
   name: string;
   folder: string;
-  createdAt: string;
+  createdAt: EpochMs;
 }
 
 function errMsg(data: unknown, fallback: string): string {

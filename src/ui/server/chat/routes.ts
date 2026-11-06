@@ -13,7 +13,7 @@ import Router from 'find-my-way';
 import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
-import { fromEpoch } from '../../../db/time.js';
+import { parseTimestamp, UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../shared/time.js';
 import { getInteraction, legacyInteractionExpired } from '../../../db/interactions.js';
 import { log } from '../../../log.js';
 import {
@@ -89,6 +89,16 @@ interface Ctx {
   url: URL;
 }
 
+/** Browser-native resource loads have no JSON timestamp protocol and cannot set custom headers. */
+function isNativeResourceRequest(req: http.IncomingMessage, url: URL, pathname: string): boolean {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  return (
+    (/^\/api\/groups\/[^/]+\/files\/.+/.test(pathname) && url.searchParams.get('meta') !== '1') ||
+    /^\/api\/groups\/[^/]+\/chat\/[^/]+\/attachments\/.+/.test(pathname) ||
+    /^\/api\/groups\/[^/]+\/zip$/.test(pathname)
+  );
+}
+
 export async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const ctx: Ctx = { req, res, url };
@@ -103,6 +113,16 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
   }
   if (pathname.startsWith(CHAT_MOUNT_PREFIX + '/')) {
     pathname = pathname.slice(CHAT_MOUNT_PREFIX.length) || '/';
+  }
+  if (pathname.startsWith('/api/')) {
+    res.setHeader(UI_PROTOCOL_HEADER, String(UI_TIMESTAMP_PROTOCOL_VERSION));
+    if (
+      !isNativeResourceRequest(req, url, pathname) &&
+      req.headers[UI_PROTOCOL_HEADER.toLowerCase()] !== String(UI_TIMESTAMP_PROTOCOL_VERSION)
+    ) {
+      json(ctx, 409, { error: 'ui_protocol_mismatch', protocolVersion: UI_TIMESTAMP_PROTOCOL_VERSION });
+      return;
+    }
   }
 
   try {
@@ -501,7 +521,7 @@ async function handleCreatePrivateWebSession(
   redeemUrl.searchParams.set('next', `/${relPath}`);
   redeemUrl.searchParams.set('preview', '1');
   ctx.res.writeHead(201, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' });
-  ctx.res.end(JSON.stringify({ url: redeemUrl.toString(), expiresAt: issued.expiresAt }));
+  ctx.res.end(JSON.stringify({ url: redeemUrl.toString(), expiresAt: parseTimestamp(issued.expiresAt) }));
 }
 
 function handleGroups(ctx: Ctx, userId: string): void {
@@ -511,8 +531,8 @@ function handleGroups(ctx: Ctx, userId: string): void {
   const rows = getDb()
     .prepare('SELECT agent_group_id, MAX(last_active) AS last_active FROM sessions GROUP BY agent_group_id')
     .all() as Row[];
-  const lastByGroup = new Map<string, string | null>();
-  for (const r of rows) lastByGroup.set(r.agent_group_id, fromEpoch(r.last_active));
+  const lastByGroup = new Map<string, number | null>();
+  for (const r of rows) lastByGroup.set(r.agent_group_id, r.last_active);
   const groups = accessible.map((g) => ({
     id: g.id,
     name: g.name,
@@ -591,7 +611,7 @@ async function handleCreateGroup(ctx: Ctx, userId: string): Promise<void> {
     id: group.id,
     name: group.name,
     folder: group.folder,
-    createdAt: group.created_at,
+    createdAt: parseTimestamp(group.created_at),
   });
 }
 
@@ -723,11 +743,11 @@ function handleTree(ctx: Ctx, userId: string, groupId: string, relPath: string):
     if (cls.tier === 'admin' && !isAdmin) continue;
 
     let size: number | null = null;
-    let mtime: string | null = null;
+    let mtime: number | null = null;
     try {
       const s = fs.statSync(path.join(abs, e.name));
       size = s.isFile() ? s.size : null;
-      mtime = s.mtime.toISOString();
+      mtime = Math.floor(s.mtimeMs);
     } catch {
       // dangling symlink or race; skip stat fields.
     }
@@ -858,7 +878,7 @@ async function handleMeta(ctx: Ctx, userId: string, groupId: string, relPath: st
   const out: Record<string, unknown> = {
     name: path.basename(abs),
     size: stat.size,
-    mtime: stat.mtime.toISOString(),
+    mtime: Math.floor(stat.mtimeMs),
     // Version token for optimistic-concurrency writes (pass back as If-Match).
     etag,
     mime: mimeFor(ext).type,

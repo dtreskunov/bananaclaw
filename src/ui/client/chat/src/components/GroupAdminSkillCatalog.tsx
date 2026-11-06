@@ -39,7 +39,7 @@ export interface CatalogDto extends CatalogRefreshMetadata {
   label: string | null;
   description: string | null;
   commit: string | null;
-  refreshedAt: string | null;
+  refreshedAt: number | null;
   kind: 'plugin-marketplace' | 'skill-repo' | 'built-in' | 'workspace';
   plugins: CatalogPluginDto[];
   error: string | null;

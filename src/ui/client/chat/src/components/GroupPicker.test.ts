@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 function waitingGroup() {
-  groups.value = [{ id: 'g', name: 'Group', isAdmin: false }];
+  groups.value = [{ id: 'g', name: 'Group', isAdmin: false, lastActivityAt: null }];
   agentActivity.value = [{ id: 'g', activity: 'idle', waiting: true }];
   attentionTargets.value = [
     { id: 'q', origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm' } },
@@ -51,14 +51,14 @@ describe('agent activity status', () => {
   });
   it('joins thread counts to last activity with the same dot separator as thread metadata', () => {
     waitingGroup();
-    groups.value = [{ id: 'g', name: 'Group', isAdmin: true, lastActivityAt: '2026-11-05T00:00:00Z' }];
+    groups.value = [{ id: 'g', name: 'Group', isAdmin: true, lastActivityAt: 1793836800000 }];
     const before = GroupStrip()!.props.items[0].sublabel;
     agentActivity.value = [{ id: 'g', activity: 'idle', threadCount: 12 }];
     expect(GroupStrip()!.props.items[0].sublabel).toBe(`${before} \u00b7 12 thr`);
   });
 
   it.each([undefined, 0, 1, 23])('renders count %s without a dangling separator or plural variant', (threadCount) => {
-    groups.value = [{ id: 'g', name: 'Group', isAdmin: true }];
+    groups.value = [{ id: 'g', name: 'Group', isAdmin: true, lastActivityAt: null }];
     agentActivity.value = [{ id: 'g', activity: 'idle', threadCount }];
     expect(GroupStrip()!.props.items[0].sublabel).toBe(threadCount ? `${threadCount} thr` : undefined);
   });
@@ -68,7 +68,9 @@ describe('agent activity status', () => {
     const item = GroupStrip()!.props.items[0];
     expect(item.badge.type).toBe(ActivityIndicator);
     expect(ActivityIndicator(item.badge.props)!.props.class).toBe('activity-indicator idle waiting');
-    expect(item.badgeLabel).toBe('Activity: Idle. Waiting for input. 1 request needs your input. Open oldest request in Group');
+    expect(item.badgeLabel).toBe(
+      'Activity: Idle. Waiting for input. 1 request needs your input. Open oldest request in Group',
+    );
     expect(item.badgeDisabled).toBe(false);
     item.onBadgeClick();
     expect(navigateAttention).toHaveBeenCalledExactlyOnceWith('g');
@@ -165,8 +167,8 @@ describe.each(['all', 'non-members'] as const)('agent picker (%s)', (mode) => {
 
   it('keeps both running and idle icons passive in the picker', () => {
     groups.value = [
-      { id: 'running', name: 'Running agent', elevatedOnly: mode === 'non-members' },
-      { id: 'idle', name: 'Idle agent', elevatedOnly: mode === 'non-members' },
+      { id: 'running', name: 'Running agent', elevatedOnly: mode === 'non-members', lastActivityAt: null },
+      { id: 'idle', name: 'Idle agent', elevatedOnly: mode === 'non-members', lastActivityAt: null },
     ];
     agentActivity.value = [
       { id: 'running', activity: 'running' },

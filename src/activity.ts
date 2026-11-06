@@ -1,12 +1,31 @@
 import type { ActivityLine } from './channels/adapter.js';
 
 export type ActivityStep =
-  | { kind: 'tool'; id: string; tool: string; status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; description?: string; title?: string; error?: string; durationMs?: number; rejectedBeforeExecution?: boolean }
+  | {
+      kind: 'tool';
+      id: string;
+      tool: string;
+      status: 'pending' | 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
+      detail?: string;
+      description?: string;
+      title?: string;
+      error?: string;
+      durationMs?: number;
+      rejectedBeforeExecution?: boolean;
+    }
   | { kind: 'internal'; id: string; text: string }
   | { kind: 'file'; id: string; path?: string; name?: string; mime?: string }
   | { kind: 'patch'; id: string; files: string[] }
   | { kind: 'retry'; id: string; attempt: number; error?: string }
-  | { kind: 'compaction'; id: string; auto?: boolean; status?: 'running' | 'completed' | 'error' | 'interrupted' | 'unknown'; detail?: string; error?: string; durationMs?: number }
+  | {
+      kind: 'compaction';
+      id: string;
+      auto?: boolean;
+      status?: 'running' | 'completed' | 'error' | 'interrupted' | 'unknown';
+      detail?: string;
+      error?: string;
+      durationMs?: number;
+    }
   | { kind: 'subtask'; id: string; agent?: string; description?: string }
   | { kind: 'notification'; id: string; text: string; detail?: string }
   | { kind: 'model'; id: string; durationMs: number };
@@ -19,7 +38,12 @@ function parseStep(text: string): ActivityStep | null {
   try {
     const value = JSON.parse(text) as Partial<ActivityStep>;
     if (!value || typeof value.kind !== 'string' || typeof value.id !== 'string' || !value.id) return null;
-    if (!['tool', 'internal', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification', 'model'].includes(value.kind)) return null;
+    if (
+      !['tool', 'internal', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification', 'model'].includes(
+        value.kind,
+      )
+    )
+      return null;
     return value as ActivityStep;
   } catch {
     return null;
@@ -27,8 +51,10 @@ function parseStep(text: string): ActivityStep | null {
 }
 
 /** Collapse lifecycle updates by kind + provider id while preserving first-seen order and timestamp. */
-export function reduceActivityLines(lines: ActivityLine[]): ActivityLine[] {
-  const reduced: ReducedActivityLine[] = [];
+export function reduceActivityLines<T extends { ts: string | number; text: string }>(
+  lines: T[],
+): { ts: T['ts']; text: string }[] {
+  const reduced: { ts: T['ts']; text: string; step: ActivityStep }[] = [];
   const positions = new Map<string, number>();
 
   for (const line of lines) {

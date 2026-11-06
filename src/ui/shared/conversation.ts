@@ -2,6 +2,7 @@ import type { InputState } from './input-state.js';
 import type { QuestionInput, QuestionResponse } from './question.js';
 import type { ConversationApproval } from './approval.js';
 import type { ReadCursor } from './read-state.js';
+import type { EpochMs } from './time.js';
 
 /** Browser-safe, route-scoped host projection. No runner journal or routing IDs. */
 export interface ConversationUsage {
@@ -23,7 +24,7 @@ export interface ConversationUsage {
 export interface ConversationMessage {
   id: string;
   direction: 'in' | 'out' | 'event';
-  timestamp: string;
+  timestamp: EpochMs;
   text: string;
   questionId?: string;
   questionResponseType?: QuestionResponse['responseType'];
@@ -42,7 +43,7 @@ export interface ConversationMessage {
     children: string[];
     actions: { label: string; url: string; style?: 'primary' | 'danger' | 'default' }[];
   };
-  reactions?: { emoji: string; ts: string }[];
+  reactions?: { emoji: string; ts: EpochMs }[];
   event?: {
     kind: 'task-run';
     taskId?: string;
@@ -60,12 +61,12 @@ export interface ConversationQuestion extends QuestionInput {
   id: string;
   status: 'pending' | 'answered' | 'cancelled';
   response: QuestionResponse | null;
-  answeredAt: string | null;
-  activity?: { ts: string; text: string }[];
+  answeredAt: EpochMs | null;
+  activity?: { ts: EpochMs; text: string }[];
   turnId?: string;
   threadId: string | null;
   agentGroupId: string;
-  createdAt: string;
+  createdAt: EpochMs;
   messageId?: string;
   timelinePosition?: number;
 }
@@ -82,7 +83,7 @@ export function isQuestionInteraction(item: ConversationInteraction): item is Co
 
 export interface ConversationActivity {
   ordinal: number;
-  ts: string;
+  ts: EpochMs;
   text: string;
   timelinePosition: number;
 }
@@ -102,10 +103,10 @@ export interface ConversationTurn {
   id: string;
   phase: 'running' | 'stopping' | 'settling' | 'settled';
   outcome: 'pending' | 'replied' | 'warning' | 'silent' | 'stopped' | 'failed' | 'unknown' | 'interrupted';
-  startedAt: string | null;
+  startedAt: EpochMs | null;
   /** When the earliest input answered by this turn was submitted; falls back to startedAt. */
-  requestedAt?: string | null;
-  endedAt: string | null;
+  requestedAt?: EpochMs | null;
+  endedAt: EpochMs | null;
   inputIds: string[];
   outputIds: string[];
   activity: ConversationActivity[];

@@ -15,7 +15,7 @@ function questionTimeline(messages: ConversationMessage[], questions: Conversati
 }
 
 function message(id: string, timestamp: string): ConversationMessage {
-  return { id, direction: 'out', text: id, timestamp };
+  return { id, direction: 'out', text: id, timestamp: Date.parse(timestamp) };
 }
 
 function question(overrides: Partial<ConversationQuestion> = {}): ConversationQuestion {
@@ -29,7 +29,7 @@ function question(overrides: Partial<ConversationQuestion> = {}): ConversationQu
     answeredAt: null,
     threadId: 'thread-1',
     agentGroupId: 'group-1',
-    createdAt: '2026-07-15 05:34:20',
+    createdAt: 1784093660000,
     ...overrides,
     response: null,
   };
@@ -71,7 +71,7 @@ describe('host question presentation order', () => {
         { ...message('triggering-input', timestamp), direction: 'in', timelinePosition: position + 1 },
         { ...message('later-output', timestamp), timelinePosition: position + 1001 },
       ],
-      [question({ createdAt: timestamp })],
+      [question({ createdAt: Date.parse(timestamp) })],
       'thread-1',
     );
     expect(result).toEqual([
@@ -88,8 +88,8 @@ describe('host question presentation order', () => {
       [
         question({
           status: 'answered',
-          createdAt: '2026-07-15T05:52:33.695Z',
-          answeredAt: '2026-07-15T05:53:18.606Z',
+          createdAt: 1784094753695,
+          answeredAt: 1784094798606,
           response: { responseType: 'text', value: 'Dude' },
         }),
       ],
@@ -119,8 +119,8 @@ describe('host question presentation order', () => {
       [
         question({
           status: 'answered',
-          createdAt: '2026-07-15T05:52:10Z',
-          answeredAt: '2026-07-15T05:52:15Z',
+          createdAt: 1784094730000,
+          answeredAt: 1784094735000,
           timelinePosition: base + 10_000_000,
           response: { responseType: 'text', value: 'Dude' },
         }),
@@ -139,7 +139,7 @@ describe('host question presentation order', () => {
       [],
       [
         question({
-          createdAt: '2026-07-15T05:34:20Z',
+          createdAt: 1784093660000,
         }),
       ],
       'thread-1',

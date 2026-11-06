@@ -67,7 +67,10 @@ describe('immediate activity presentation', () => {
     groupId.value = 'group';
     threadId.value = 'thread';
     const message = {
-      id: testWebSubmission.messageId, direction: 'in' as const, text: 'Queued', timestamp: '',
+      id: testWebSubmission.messageId,
+      direction: 'in' as const,
+      text: 'Queued',
+      timestamp: 0,
       inputState: { messageId: testWebSubmission.messageId, status: 'queued' as const },
     };
     conversationState.value = testSnapshot({ messages: [message] });
@@ -76,18 +79,28 @@ describe('immediate activity presentation', () => {
     pendingWebSends.value = [withWebSendState(testWebSubmission, { status: 'accepted' })];
     expect(withPendingActivity(idle, 'group').activity).toBe('running');
     for (const phase of ['running', 'settled'] as const) {
-      conversationState.value = testSnapshot({ messages: [message], turns: [{ ...testTurn, phase, inputIds: [message.id] }] });
-      pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, conversationState.value.conversation, 'group');
+      conversationState.value = testSnapshot({
+        messages: [message],
+        turns: [{ ...testTurn, phase, inputIds: [message.id] }],
+      });
+      pendingWebSends.value = reconcileWebSubmissions(
+        pendingWebSends.value,
+        conversationState.value.conversation,
+        'group',
+      );
       expect(withPendingActivity(idle, 'group').activity).toBe(phase === 'running' ? 'running' : 'idle');
     }
-    conversationState.value = testSnapshot({ messages: [{ ...message, inputState: { ...message.inputState, status: 'cancelled' } }] });
+    conversationState.value = testSnapshot({
+      messages: [{ ...message, inputState: { ...message.inputState, status: 'cancelled' } }],
+    });
     expect(withPendingActivity(idle, 'group').activity).toBe('idle');
   });
 
   it('preserves waiting while a local input is being submitted', () => {
     pendingWebSends.value = [testWebSubmission];
     expect(withPendingActivity({ activity: 'idle', waiting: true }, 'group')).toMatchObject({
-      activity: 'running', waiting: true,
+      activity: 'running',
+      waiting: true,
     });
   });
 });
@@ -97,14 +110,16 @@ function rowParts(Row: typeof ThreadRow, thread: Thread) {
   const children = toChildArray(row.props.children) as VNode<{ class?: string }>[];
   const title = children.find((node) => node.props.class === 'title')!;
   const marker = toChildArray(title.props.children)[0] as VNode<{ thread: Thread }>;
-  const indicator = (marker.type as (props: { thread: Thread }) => VNode<{
-    children: VNode<ComponentProps<typeof ActivityIndicator>>;
-    disabled: boolean;
-    'aria-label': string;
-    description: string;
-    status?: ComponentProps<typeof ActivityIndicator>['status'];
-    onClick: (event: { stopPropagation: () => void }) => void;
-  }>)(marker.props);
+  const indicator = (
+    marker.type as (props: { thread: Thread }) => VNode<{
+      children: VNode<ComponentProps<typeof ActivityIndicator>>;
+      disabled: boolean;
+      'aria-label': string;
+      description: string;
+      status?: ComponentProps<typeof ActivityIndicator>['status'];
+      onClick: (event: { stopPropagation: () => void }) => void;
+    }>
+  )(marker.props);
   return { row, title, indicator, meta: children.find((node) => node.props.class === 'meta')! };
 }
 
@@ -148,12 +163,16 @@ describe('shared activity presentation', () => {
 
 describe.each([ThreadRow, DmRow])('thread/DM title activity (%s)', (Row) => {
   it.each([
-    { activity: 'idle' as const }, { activity: 'running' as const },
-    { activity: 'idle' as const, waiting: true }, { activity: 'running' as const, waiting: true },
+    { activity: 'idle' as const },
+    { activity: 'running' as const },
+    { activity: 'idle' as const, waiting: true },
+    { activity: 'running' as const, waiting: true },
   ])('places $activity/$waiting before lineage/channel/title, never in metadata', (status) => {
     const { indicator, meta } = rowParts(Row, testThread(status));
     expect(toChildArray(meta.props.children)).toHaveLength(1);
-    const component = (status.waiting ? indicator.props.children : indicator) as VNode<ComponentProps<typeof ActivityIndicator>>;
+    const component = (status.waiting ? indicator.props.children : indicator) as VNode<
+      ComponentProps<typeof ActivityIndicator>
+    >;
     expect(component.type).toBe(ActivityIndicator);
     expect(ActivityIndicator(component.props).props.class).toContain(status.activity);
   });
@@ -162,7 +181,10 @@ describe.each([ThreadRow, DmRow])('thread/DM title activity (%s)', (Row) => {
     groupId.value = 'group';
     const thread = testThread({ activity: 'idle', waiting: true });
     const location = {
-      agentGroupId: 'group', threadId: thread.threadId, channelType: 'web', messagingGroupId: thread.messagingGroupId,
+      agentGroupId: 'group',
+      threadId: thread.threadId,
+      channelType: 'web',
+      messagingGroupId: thread.messagingGroupId,
     };
     attentionTargets.value = [{ id: 'request', origin: location }];
     const { row, indicator } = rowParts(Row, thread);
@@ -183,11 +205,21 @@ describe.each([ThreadRow, DmRow])('thread/DM title activity (%s)', (Row) => {
   it.each(['unknown', 'empty', 'offline'] as const)('disables waiting actions when %s', (reason) => {
     groupId.value = 'group';
     const thread = testThread({ activity: 'idle', waiting: true });
-    if (reason !== 'unknown') attentionTargets.value = reason === 'empty' ? [] : [{
-      id: 'request', origin: {
-        agentGroupId: 'group', threadId: thread.threadId, channelType: 'web', messagingGroupId: thread.messagingGroupId,
-      },
-    }];
+    if (reason !== 'unknown')
+      attentionTargets.value =
+        reason === 'empty'
+          ? []
+          : [
+              {
+                id: 'request',
+                origin: {
+                  agentGroupId: 'group',
+                  threadId: thread.threadId,
+                  channelType: 'web',
+                  messagingGroupId: thread.messagingGroupId,
+                },
+              },
+            ];
     if (reason === 'offline') attentionError.value = 'Connection lost';
     const { indicator } = rowParts(Row, thread);
     expect(indicator.props.disabled).toBe(true);
@@ -198,18 +230,34 @@ describe.each([ThreadRow, DmRow])('thread/DM title activity (%s)', (Row) => {
   it('keeps a current request actionable while execution is stale', () => {
     groupId.value = 'group';
     const thread = testThread({ activity: 'running', waiting: true, activityStale: true });
-    attentionTargets.value = [{ id: 'request', origin: {
-      agentGroupId: 'group', threadId: thread.threadId, channelType: 'web', messagingGroupId: thread.messagingGroupId,
-    } }];
+    attentionTargets.value = [
+      {
+        id: 'request',
+        origin: {
+          agentGroupId: 'group',
+          threadId: thread.threadId,
+          channelType: 'web',
+          messagingGroupId: thread.messagingGroupId,
+        },
+      },
+    ];
     expect(rowParts(Row, thread).indicator.props.disabled).toBe(false);
   });
 
   it('does not turn running into an additional request control even if old requests remain', () => {
     groupId.value = 'group';
     const thread = testThread({ activity: 'running' });
-    attentionTargets.value = [{ id: 'request', origin: {
-      agentGroupId: 'group', threadId: thread.threadId, channelType: 'web', messagingGroupId: thread.messagingGroupId,
-    } }];
+    attentionTargets.value = [
+      {
+        id: 'request',
+        origin: {
+          agentGroupId: 'group',
+          threadId: thread.threadId,
+          channelType: 'web',
+          messagingGroupId: thread.messagingGroupId,
+        },
+      },
+    ];
     const { indicator } = rowParts(Row, thread);
     expect(indicator.type).toBe(ActivityIndicator);
     expect(indicator.props.description).toBe('Activity: Running');
@@ -218,9 +266,17 @@ describe.each([ThreadRow, DmRow])('thread/DM title activity (%s)', (Row) => {
   it('scopes request navigation to the full channel and messaging-group identity', () => {
     groupId.value = 'group';
     const thread = testThread({ activity: 'idle', waiting: true, channelType: 'telegram', messagingGroupId: 'm' });
-    attentionTargets.value = [{ id: 'request', origin: {
-      agentGroupId: 'group', threadId: thread.threadId, channelType: 'web', messagingGroupId: 'other',
-    } }];
+    attentionTargets.value = [
+      {
+        id: 'request',
+        origin: {
+          agentGroupId: 'group',
+          threadId: thread.threadId,
+          channelType: 'web',
+          messagingGroupId: 'other',
+        },
+      },
+    ];
     expect(rowParts(Row, thread).indicator.props.disabled).toBe(true);
   });
 });

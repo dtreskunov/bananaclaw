@@ -1,3 +1,4 @@
+import { uiHeaders } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat, runSync, sendChat } from './actions';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
@@ -38,7 +39,7 @@ describe('Stop integration with chat actions', () => {
     chatReady.value = true;
     canSend.value = true;
     applyTurnState({ id: 'turn-1', status: 'running' }, true);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 202 }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ headers: uiHeaders, ok: true, status: 202 }));
     await stopActiveTurn('turn-1');
     expect(stopRequest.value?.busy).toBe(true);
     expect(await sendChat('Follow up after this turn stops', null)).toBe(true);
@@ -128,7 +129,7 @@ describe('Stop integration with chat actions', () => {
       answeredAt: null,
       threadId: 'thread',
       agentGroupId: 'group',
-      createdAt: '2026-09-25T00:00:00Z',
+      createdAt: 1790294400000,
       response: null,
     };
     pendingQuestions.value = [question];
@@ -136,6 +137,7 @@ describe('Stop integration with chat actions', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        headers: uiHeaders,
         ok: true,
         json: async () => ({ accepted: true }),
       }),

@@ -20,7 +20,22 @@
 const SCOPE_PATH = '/ui/chat/';
 const NOTIF_DETAILS_URL = '/ui/chat/api/push/notification';
 const SUBSCRIBE_URL = '/ui/chat/api/push/subscribe';
+const UI_PROTOCOL_HEADER = 'X-NanoClaw-UI-Protocol';
+const UI_TIMESTAMP_PROTOCOL_VERSION = 16;
 let badgeQueue = Promise.resolve();
+
+async function apiFetch(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: { ...options.headers, [UI_PROTOCOL_HEADER]: String(UI_TIMESTAMP_PROTOCOL_VERSION) },
+  });
+  if (response.ok && response.headers.get(UI_PROTOCOL_HEADER) !== String(UI_TIMESTAMP_PROTOCOL_VERSION)) {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) client.postMessage({ type: 'ui-reload-required' });
+    throw new Error('The app and server versions do not match. Reload this page.');
+  }
+  return response;
+}
 
 function refreshUnreadBadge(enable = false) {
   badgeQueue = badgeQueue.then(async () => {
@@ -29,7 +44,7 @@ function refreshUnreadBadge(enable = false) {
     const key = '/ui/chat/.badge-capability';
     if (enable) await capability.put(key, new Response('enabled'));
     if (!await capability.match(key)) return;
-    const response = await fetch('/ui/chat/api/unread', { credentials: 'include', cache: 'no-store' });
+    const response = await apiFetch('/ui/chat/api/unread', { credentials: 'include', cache: 'no-store' });
     if (response.status === 401) {
       await self.navigator.clearAppBadge();
       return;
@@ -45,7 +60,7 @@ function refreshUnreadBadge(enable = false) {
 }
 
 const CACHE_VERSION = '__CACHE_VERSION__';
-const SHELL_CACHE = 'nanoclaw-shell-' + CACHE_VERSION;
+const SHELL_CACHE = 'nanoclaw-shell-v' + UI_TIMESTAMP_PROTOCOL_VERSION + '-' + CACHE_VERSION;
 const SHELL_ASSETS = [
   '/ui/chat/',
   '/ui/chat/dist/appearance.js',
@@ -207,7 +222,7 @@ async function handlePush(event) {
     const url = `${NOTIF_DETAILS_URL}?groupId=${encodeURIComponent(groupId)}&threadId=${encodeURIComponent(
       threadId,
     )}&msgId=${encodeURIComponent(msgId)}`;
-    const resp = await fetch(url, { credentials: 'include' });
+    const resp = await apiFetch(url, { credentials: 'include' });
     if (resp.ok) {
       const detail = await resp.json();
       if (detail.title) title = detail.title;
@@ -307,7 +322,7 @@ self.addEventListener('pushsubscriptionchange', (event) => {
 
 async function resubscribe() {
   try {
-    const keyResp = await fetch('/ui/chat/api/push/public-key', { credentials: 'include' });
+    const keyResp = await apiFetch('/ui/chat/api/push/public-key', { credentials: 'include' });
     if (!keyResp.ok) return;
     const { publicKey } = await keyResp.json();
     if (!publicKey) return;
@@ -315,7 +330,7 @@ async function resubscribe() {
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(publicKey),
     });
-    await fetch(SUBSCRIBE_URL, {
+    await apiFetch(SUBSCRIBE_URL, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

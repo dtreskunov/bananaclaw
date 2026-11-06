@@ -61,6 +61,7 @@ function makeRes(): CapturedRes {
     },
   });
   const res = writable as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((nextStatus: number, nextHeaders?: http.OutgoingHttpHeaders) => {
     status = nextStatus;
     for (const [name, value] of Object.entries(nextHeaders || {})) {
@@ -84,7 +85,7 @@ function makeReq(groupId: string, body: unknown, origin = 'http://localhost:3000
   return {
     method: 'POST',
     url: `/ui/chat/api/groups/${groupId}/private-web-session`,
-    headers: { host: 'localhost:3000', origin, 'content-type': 'application/json' },
+    headers: { 'x-nanoclaw-ui-protocol': '16', host: 'localhost:3000', origin, 'content-type': 'application/json' },
     socket: { remoteAddress: '127.0.0.1' },
     [Symbol.asyncIterator]() {
       return {

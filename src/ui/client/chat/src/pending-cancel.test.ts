@@ -1,3 +1,4 @@
+import { uiHeaders } from './api-test-fixtures';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   canCancelPendingMessage,
@@ -30,12 +31,12 @@ const thread = testThread({
   channelType: 'web',
   messagingGroupId: 'web/group',
   title: '',
-  lastActivityAt: '',
+  lastActivityAt: null,
 });
 const message: ChatMessage = {
   id: 'message/id',
   text: 'Original',
-  timestamp: '1',
+  timestamp: 1,
   direction: 'in',
   files: [{ filename: 'keep.txt', size: 0 }],
   canEditPending: true,
@@ -61,7 +62,14 @@ beforeEach(() => {
   stopRequest.value = null;
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, id: message.id }) }),
+    vi
+      .fn()
+      .mockResolvedValue({
+        headers: uiHeaders,
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, id: message.id }),
+      }),
   );
 });
 
@@ -163,7 +171,7 @@ describe('pending input cancellation', () => {
       }),
     );
     expect(cancellation.requestId).toMatch(/^[0-9a-f-]{36}$/);
-    finish({ ok: true, status: 200, json: async () => ({ ok: true, id: message.id }) });
+    finish({ headers: uiHeaders, ok: true, status: 200, json: async () => ({ ok: true, id: message.id }) });
     expect(await cancelling).toBe(true);
     expect(chatMessages.value).toEqual([message, { ...message, direction: 'out' }]);
     expect(cancellation.state.value.confirmed).toBe(true);
@@ -201,7 +209,12 @@ describe('pending input cancellation', () => {
   );
 
   it.each(['input_not_pending', 'steering_consumed'])('does not remove a bubble on %s conflict', async (error) => {
-    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 409, json: async () => ({ error }) } as Response);
+    vi.mocked(fetch).mockResolvedValue({
+      headers: uiHeaders,
+      ok: false,
+      status: 409,
+      json: async () => ({ error }),
+    } as Response);
     const cancellation = request();
     expect(await cancellation.cancel()).toBe(false);
     expect(cancellation.state.value.unresolved).toBe(false);
@@ -215,7 +228,12 @@ describe('pending input cancellation', () => {
     ['cancel_in_progress', 409],
     ['edit_in_progress', 409],
   ] as const)('retains the bubble without an ambiguous lock for explicit %s rejection', async (error, status) => {
-    vi.mocked(fetch).mockResolvedValue({ ok: false, status, json: async () => ({ error }) } as Response);
+    vi.mocked(fetch).mockResolvedValue({
+      headers: uiHeaders,
+      ok: false,
+      status,
+      json: async () => ({ error }),
+    } as Response);
     const cancellation = request();
     expect(await cancellation.cancel()).toBe(false);
     expect(cancellation.state.value.unresolved).toBe(false);
@@ -249,6 +267,7 @@ describe('pending input cancellation', () => {
     const draft = currentPendingEditor()![1].draft;
     draft.setText('Revision');
     vi.mocked(fetch).mockResolvedValue({
+      headers: uiHeaders,
       ok: false,
       status: 503,
       json: async () => ({ error: 'edit_pending' }),
@@ -261,7 +280,12 @@ describe('pending input cancellation', () => {
   it('does not remove an identically named input after navigation', async () => {
     vi.mocked(fetch).mockImplementation(async () => {
       messagingGroupId.value = 'other';
-      return { ok: true, status: 200, json: async () => ({ ok: true, id: message.id }) } as Response;
+      return {
+        headers: uiHeaders,
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, id: message.id }),
+      } as Response;
     });
     await request().cancel();
     expect(chatMessages.value).toHaveLength(2);

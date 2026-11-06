@@ -10,6 +10,7 @@
  * Fetches the same `/models?provider=...` endpoint as the old ModelSelector.
  */
 import './ModelPickerDialog.css';
+import { protocolFetch } from '../api';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { isMobile } from '../state';
@@ -152,7 +153,7 @@ function fetchModels(url: string): Promise<{ ok: boolean; data: ModelsResponse }
   }
   const promise = (async () => {
     try {
-      const res = await fetch(url, { credentials: 'same-origin' });
+      const res = await protocolFetch(url, { credentials: 'same-origin' });
       const data = await res.json();
       return { ok: res.ok, data: data as ModelsResponse };
     } catch {

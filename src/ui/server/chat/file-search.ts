@@ -12,7 +12,7 @@ export interface FileSearchResult {
   name: string;
   type: 'file' | 'dir';
   size?: number;
-  mtime?: string;
+  mtime?: number;
   tier?: 'member' | 'admin';
 }
 
@@ -23,7 +23,7 @@ export interface FileSearchResponse {
 
 interface DateSortablePath {
   path: string;
-  mtime?: string | null;
+  mtime?: number | null;
 }
 
 function matchesName(name: string, query: string): boolean {
@@ -33,9 +33,9 @@ function matchesName(name: string, query: string): boolean {
 
 export function compareEntriesByDate(left: DateSortablePath, right: DateSortablePath): number {
   if (left.mtime !== right.mtime) {
-    if (!left.mtime) return 1;
-    if (!right.mtime) return -1;
-    return right.mtime.localeCompare(left.mtime);
+    if (left.mtime == null) return 1;
+    if (right.mtime == null) return -1;
+    return right.mtime - left.mtime;
   }
   return left.path.localeCompare(right.path);
 }
@@ -105,7 +105,7 @@ export async function searchFilesByName(
       try {
         const stat = await fs.stat(path.join(directory.absolute, entry.name));
         if (isFile) result.size = stat.size;
-        result.mtime = stat.mtime.toISOString();
+        result.mtime = Math.floor(stat.mtimeMs);
       } catch {
         // A matching file can disappear between readdir and stat.
       }

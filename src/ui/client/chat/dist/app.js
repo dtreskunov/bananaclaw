@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/path-to-regexp/dist/index.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "node_modules/path-to-regexp/dist/index.js"(exports) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/core.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "node_modules/highlight.js/lib/core.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/xml.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/bash.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/c.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/cpp.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/csharp.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/css.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/markdown.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/diff.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/ruby.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/go.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/graphql.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/ini.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/java.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/javascript.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/json.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/kotlin.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/less.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/lua.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/makefile.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/perl.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/objectivec.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/php.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/php-template.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/plaintext.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/python.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/python-repl.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/r.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/rust.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/scss.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/shell.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/sql.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/swift.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/yaml.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/typescript.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/vbnet.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/wasm.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/common.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "node_modules/highlight.js/lib/common.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// node_modules/preact/dist/preact.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// node_modules/preact/hooks/dist/hooks.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// node_modules/@preact/signals-core/dist/signals-core.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// node_modules/@preact/signals/dist/signals.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -15472,6 +15472,13 @@ function A3() {
   if (1 === p4.push(this)) (l.requestAnimationFrame || k3)(x3);
 }
 
+// ../../shared/time.ts
+var UI_TIMESTAMP_PROTOCOL_VERSION = 16;
+var UI_PROTOCOL_HEADER = "X-NanoClaw-UI-Protocol";
+function isEpochMs(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && Math.abs(value) <= 864e13;
+}
+
 // src/api.ts
 var UnauthorizedError = class extends Error {
   constructor() {
@@ -15483,8 +15490,34 @@ function redirectToLogin() {
   const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
   window.location.replace(`/ui/login?next=${next}`);
 }
+var UiProtocolError = class extends Error {
+  constructor() {
+    super("The app and server versions do not match. Reload this page to update the app.");
+    this.name = "UiProtocolError";
+  }
+};
+var UI_RELOAD_EVENT = "nanoclaw:ui-reload-required";
+function isOwnedApi(url) {
+  if (/^https?:\/\//.test(url)) {
+    const parsed = new URL(url);
+    return typeof window !== "undefined" && parsed.origin === window.location?.origin && /^\/ui\/(?:chat|settings)\/api(?:\/|$)/.test(parsed.pathname);
+  }
+  return /^(?:\/ui\/(?:chat|settings)\/)?api(?:\/|$)/.test(url);
+}
+async function protocolFetch(url, opts) {
+  const owned = isOwnedApi(url);
+  const headers = new Headers(opts?.headers);
+  if (owned) headers.set(UI_PROTOCOL_HEADER, String(UI_TIMESTAMP_PROTOCOL_VERSION));
+  const response = await fetch(url, { credentials: "same-origin", ...opts, headers });
+  if (owned && response.status !== 401 && (response.ok || response.headers.get(UI_PROTOCOL_HEADER) !== null) && response.headers.get(UI_PROTOCOL_HEADER) !== String(UI_TIMESTAMP_PROTOCOL_VERSION)) {
+    const error = new UiProtocolError();
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(UI_RELOAD_EVENT));
+    throw error;
+  }
+  return response;
+}
 async function api(url, opts) {
-  const r4 = await fetch(url, { credentials: "same-origin", ...opts });
+  const r4 = await protocolFetch(url, opts);
   if (r4.status === 401) {
     redirectToLogin();
     throw new UnauthorizedError();
@@ -15493,7 +15526,7 @@ async function api(url, opts) {
   return r4.json();
 }
 async function postJson(path, body) {
-  const r4 = await fetch(path, {
+  const r4 = await protocolFetch(path, {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -15507,7 +15540,7 @@ async function postJson(path, body) {
   return { ok: r4.ok, status: r4.status, data };
 }
 async function patchJson(path, body) {
-  const r4 = await fetch(path, {
+  const r4 = await protocolFetch(path, {
     method: "PATCH",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -15567,9 +15600,29 @@ function startConnectionTimeout(delayMs, onElapsed) {
 }
 
 // src/startup.ts
+async function loadBootstrap(signal) {
+  const [me3, response] = await Promise.all([
+    api("api/me", { signal }),
+    api("api/groups", { signal })
+  ]);
+  if (!Array.isArray(response.groups) || response.groups.some(
+    (group) => !group || typeof group.id !== "string" || typeof group.name !== "string" || group.lastActivityAt != null && !isEpochMs(group.lastActivityAt)
+  )) {
+    throw new Error("The server returned invalid group data. Expected epoch-millisecond activity timestamps.");
+  }
+  return [
+    me3,
+    {
+      ...response,
+      groups: response.groups.map(
+        (group) => group.lastActivityAt === void 0 ? { ...group, lastActivityAt: null } : group
+      )
+    }
+  ];
+}
 var REQUEST_TIMEOUT_MS = 1e4;
 var RETRY_DELAY_MS = 5e3;
-function loadStartupData(load, onState) {
+function loadStartupData(load, onState, reload = () => window.location.reload()) {
   return new Promise((resolve, reject) => {
     let active = null;
     let retryTimer = null;
@@ -15608,6 +15661,13 @@ function loadStartupData(load, onState) {
           finished = true;
           cleanup2();
           onState({ kind: "redirecting" });
+          reject(error);
+          return;
+        }
+        if (error instanceof UiProtocolError) {
+          finished = true;
+          cleanup2();
+          onState({ kind: "error", message: error.message, reloadRequired: true, retry: reload });
           reject(error);
           return;
         }
@@ -16221,7 +16281,7 @@ async function captureVoice(onChunk, onError, signal) {
 }
 async function reportVoiceDiagnostic(groupId3, diagnostic) {
   try {
-    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/voice/diagnostics`, {
+    const response = await protocolFetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/voice/diagnostics`, {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
@@ -16601,7 +16661,7 @@ function clearApprovalMessage(approvalId) {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// node_modules/marked/lib/marked.esm.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -17893,29 +17953,19 @@ function fmtBytesShort(n3) {
   return (n3 / (1024 * 1024)).toFixed(1) + " MB";
 }
 function fmtRelative(ts) {
-  if (!ts) return "";
-  const norm = ts.includes("T") ? ts : ts.replace(" ", "T") + "Z";
-  const t4 = Date.parse(norm);
-  if (!t4) return "";
-  const sec = Math.max(0, (Date.now() - t4) / 1e3);
+  if (ts == null) return "";
+  const sec = Math.max(0, (Date.now() - ts) / 1e3);
   if (sec < 60) return "just now";
   if (sec < 3600) return Math.floor(sec / 60) + "m";
   if (sec < 86400) return Math.floor(sec / 3600) + "h";
   if (sec < 86400 * 7) return Math.floor(sec / 86400) + "d";
-  return new Date(t4).toLocaleDateString();
+  return new Date(ts).toLocaleDateString();
 }
 function fmtAbsolute(ts) {
-  if (!ts) return "";
-  const norm = ts.includes("T") ? ts : ts.replace(" ", "T") + "Z";
-  const t4 = Date.parse(norm);
-  if (!t4) return "";
-  return new Date(t4).toLocaleString();
+  return ts == null ? "" : new Date(ts).toLocaleString();
 }
-function tsKey(s5) {
-  if (!s5) return 0;
-  const norm = s5.includes("T") ? s5 : s5.replace(" ", "T") + "Z";
-  const n3 = Date.parse(norm);
-  return Number.isFinite(n3) ? n3 : 0;
+function sortGroups(groups2) {
+  return groups2.slice().sort((a4, b5) => (b5.lastActivityAt ?? 0) - (a4.lastActivityAt ?? 0) || a4.name.localeCompare(b5.name));
 }
 function parentPath(p5) {
   const i5 = p5.lastIndexOf("/");
@@ -18589,7 +18639,7 @@ function activityChapters(lines, live = false) {
 
 // ../../shared/activity-timing.ts
 function activityTimestamp(ts) {
-  return ts.trim() ? Number(ts) : NaN;
+  return ts ?? NaN;
 }
 function executionTime(spans) {
   let ms = 0;
@@ -18635,24 +18685,24 @@ function conversationActivity(turn2, activity = turn2.activity) {
   const lines = [...activity].sort((a4, b5) => a4.timelinePosition - b5.timelinePosition);
   const outcome = terminalOutcomeStep(turn2);
   if (!outcome) return lines;
-  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
+  const endedAt = turn2.endedAt ?? NaN;
   return [
     ...lines,
     {
-      ts: Number.isFinite(endedAt) ? String(endedAt) : "",
+      ts: Number.isFinite(endedAt) ? endedAt : null,
       text: JSON.stringify(outcome)
     }
   ];
 }
 function turnRequestedAt(turn2) {
-  const requestedAt = turn2.requestedAt ? Date.parse(turn2.requestedAt) : NaN;
+  const requestedAt = turn2.requestedAt ?? NaN;
   if (Number.isFinite(requestedAt)) return requestedAt;
-  return turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
+  return turn2.startedAt ?? NaN;
 }
 var CALL_START_SLACK_MS = 250;
 function turnModelTime(turn2) {
   const times = /* @__PURE__ */ new Map();
-  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
+  const startedAt2 = turn2.startedAt ?? NaN;
   if (!Number.isFinite(startedAt2)) return times;
   const live = turn2.phase !== "settled";
   const entries = turn2.activity.map((line) => ({ ordinal: line.ordinal, at: activityTimestamp(line.ts), step: parseStep(line.text) })).filter(({ at }) => Number.isFinite(at)).sort((a4, b5) => a4.at - b5.at);
@@ -18685,7 +18735,7 @@ function withModelTime(turn2, lines, times, hostsStart) {
     const modelTime2 = line.ordinal === void 0 ? void 0 : times.get(line.ordinal);
     return modelTime2 ? { ...line, modelTime: modelTime2 } : line;
   });
-  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
+  const startedAt2 = turn2.startedAt ?? NaN;
   if (!hostsStart || !Number.isFinite(startedAt2)) return timed;
   const modelTime = times.get(TURN_START);
   const callStarts = turn2.activity.flatMap(({ ts, text: text3 }) => {
@@ -18703,7 +18753,7 @@ function withModelTime(turn2, lines, times, hostsStart) {
     status: text2 === STARTED_TURN_TEXT ? "completed" : "running",
     ...prepared
   };
-  return [{ ts: String(startedAt2), text: JSON.stringify(step), ...modelTime ? { modelTime } : {} }, ...timed];
+  return [{ ts: startedAt2, text: JSON.stringify(step), ...modelTime ? { modelTime } : {} }, ...timed];
 }
 function isTurnStartStep(step) {
   return step.kind === "notification" && !!step.id?.startsWith("ui:start:");
@@ -18918,7 +18968,7 @@ function accessRequestInput(raw) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = 15;
+var CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -18946,7 +18996,7 @@ function isQuestionInput(value) {
 function isQuestionResponse(value) {
   return questionAnswer(value) || questionSkip(value);
 }
-var trace = shape({ ts: text, text });
+var trace = shape({ ts: isEpochMs, text });
 var usageFields = {
   cost_usd: number,
   input_tokens: number,
@@ -18968,7 +19018,7 @@ var reportedUsage = shape(
 var message = shape({
   id,
   direction: oneOf("in", "out", "event"),
-  timestamp: text,
+  timestamp: isEpochMs,
   text,
   questionId: optional(id),
   questionResponseType: optional(oneOf("choice", "text", "skipped")),
@@ -19008,7 +19058,7 @@ var message = shape({
       actions: array(shape({ label: text, url: text, style: optional(oneOf("primary", "danger", "default")) }))
     })
   ),
-  reactions: optional(array(shape({ emoji: text, ts: text }))),
+  reactions: optional(array(shape({ emoji: text, ts: isEpochMs }))),
   event: optional(
     shape({
       kind: oneOf("task-run"),
@@ -19022,14 +19072,14 @@ var message = shape({
     })
   )
 });
-var activityLine = shape({ ordinal: integer, ts: text, text, timelinePosition: position });
+var activityLine = shape({ ordinal: integer, ts: isEpochMs, text, timelinePosition: position });
 var turnFields = {
   id,
   phase: oneOf("running", "stopping", "settling", "settled"),
   outcome: oneOf("pending", "replied", "warning", "silent", "stopped", "failed", "unknown", "interrupted"),
-  startedAt: nullable(text),
-  requestedAt: optional(nullable(text)),
-  endedAt: nullable(text),
+  startedAt: nullable(isEpochMs),
+  requestedAt: optional(nullable(isEpochMs)),
+  endedAt: nullable(isEpochMs),
   inputIds: strings,
   outputIds: strings,
   usage: array(shape({ id, value: reportedUsage })),
@@ -19045,12 +19095,12 @@ var question = (value) => isQuestionInput(value) && shape({
   id,
   status: oneOf("pending", "answered", "cancelled"),
   response: nullable(isQuestionResponse),
-  answeredAt: nullable(text),
+  answeredAt: nullable(isEpochMs),
   activity: optional(array(trace)),
   turnId: optional(id),
   threadId: nullable(text),
   agentGroupId: id,
-  createdAt: text,
+  createdAt: isEpochMs,
   messageId: optional(id),
   timelinePosition: optional(integer)
 })(value);
@@ -19058,13 +19108,13 @@ var consentContext = {
   id,
   agentGroupId: nullable(text),
   agentGroupName: nullable(text),
-  createdAt: text,
+  createdAt: isEpochMs,
   origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
   decision: optional(nullable(text)),
   respondedBy: optional(nullable(shape({ userId: id, displayName: text }))),
   responseMessage: optional(nullable(text)),
   outcomeMessage: optional(nullable(text)),
-  resolvedAt: optional(nullable(text))
+  resolvedAt: optional(nullable(isEpochMs))
 };
 var approval = shape({
   ...consentContext,
@@ -19092,12 +19142,12 @@ var account = shape({
   requirements,
   revision: integer,
   retryable: bool,
-  expiresAt: nullable(text),
+  expiresAt: nullable(isEpochMs),
   agentGroupId: id,
   agentGroupName: text,
   status: oneOf("pending", "applying", "completed", "rejected", "cancelled", "expired", "failed"),
   outcomeMessage: nullable(text),
-  resolvedAt: nullable(text)
+  resolvedAt: nullable(isEpochMs)
 });
 var interaction = (value) => question(value) || approval(value) || account(value);
 function isConversationApproval(value) {
@@ -19268,7 +19318,7 @@ async function sendStopRequest(groupId3, threadId2, target, signal) {
   if (channelType.value !== "web" && messagingGroupId.value) {
     url += `?channel=${encodeURIComponent(channelType.value)}&mg=${encodeURIComponent(messagingGroupId.value)}`;
   }
-  const response = await fetch(url, {
+  const response = await protocolFetch(url, {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -19619,7 +19669,7 @@ var PendingCancellation = class {
       return false;
     this.state.value = { ...this.state.value, busy: true, error: "" };
     try {
-      const response = await fetch(pendingMessageUrl(this.gid, this.thread, this.messageId), {
+      const response = await protocolFetch(pendingMessageUrl(this.gid, this.thread, this.messageId), {
         method: "DELETE",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -20004,7 +20054,7 @@ var thread = shape({
   messagingGroupId: id,
   platformId: text,
   title: text,
-  lastActivityAt: text,
+  lastActivityAt: nullable(isEpochMs),
   sessionMode: oneOf("per-thread", "shared", "agent-shared"),
   messageCount: integer,
   activity: oneOf("idle", "running"),
@@ -20021,7 +20071,7 @@ var thread = shape({
     array(
       shape({
         seriesId: id,
-        nextRunAt: nullable(text),
+        nextRunAt: nullable(isEpochMs),
         recurrence: nullable(text),
         summary: text,
         paused: bool
@@ -20384,7 +20434,7 @@ function openChat() {
   if (location.hash === "#credentials") location.hash = "";
 }
 
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -20552,6 +20602,13 @@ function watchForUpdates(reg) {
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     reloadForUpdate();
   });
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "ui-reload-required") {
+      chatReady.value = false;
+      chatReloadRequired.value = true;
+      showClientReloadPrompt("App version changed");
+    }
+  });
   const onNewWorker = (worker) => {
     worker.addEventListener("statechange", () => {
       if (worker.state === "installed" && navigator.serviceWorker.controller) {
@@ -20668,7 +20725,7 @@ async function ensureSubscribed(requestPermission) {
   try {
     let sub = await registration.pushManager.getSubscription();
     if (!sub) {
-      const keyResp = await fetch("api/push/public-key", { credentials: "include" });
+      const keyResp = await protocolFetch("api/push/public-key", { credentials: "include" });
       if (!keyResp.ok) return "failed";
       const { publicKey } = await keyResp.json();
       if (!publicKey) return "failed";
@@ -20677,7 +20734,7 @@ async function ensureSubscribed(requestPermission) {
         applicationServerKey: urlBase64ToUint8Array(publicKey).buffer
       });
     }
-    const response = await fetch("api/push/subscribe", {
+    const response = await protocolFetch("api/push/subscribe", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -20696,7 +20753,7 @@ async function unsubscribePush() {
     if (!sub) return;
     const endpoint = sub.endpoint;
     await sub.unsubscribe();
-    await fetch("api/push/subscribe", {
+    await protocolFetch("api/push/subscribe", {
       method: "DELETE",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -21076,7 +21133,7 @@ async function deleteThread(thread2, cascade = false) {
     params.set("cancelApprovals", "1");
     const query = params.toString();
     try {
-      const r4 = await fetch(
+      const r4 = await protocolFetch(
         `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ""}`,
         {
           method: "DELETE",
@@ -21147,7 +21204,7 @@ async function forkThreadAt(thread2, atMessageId, options = {}) {
   const gid = groupId.value;
   let created = null;
   try {
-    const r4 = await fetch(
+    const r4 = await protocolFetch(
       `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread2.threadId)}/fork${query ? `?${query}` : ""}`,
       {
         method: "POST",
@@ -21438,7 +21495,7 @@ async function openChat2(gid, resumeTid, opts, options = {}) {
   chatStatus.value = "starting\u2026";
   let started;
   try {
-    const r4 = await fetch(`api/groups/${encodeURIComponent(gid)}/chat/start`, {
+    const r4 = await protocolFetch(`api/groups/${encodeURIComponent(gid)}/chat/start`, {
       method: "POST",
       credentials: "same-origin"
     });
@@ -21471,7 +21528,7 @@ async function openChat2(gid, resumeTid, opts, options = {}) {
       platformId: started.platformId,
       sessionMode: "per-thread",
       title: "(new thread)",
-      lastActivityAt: (/* @__PURE__ */ new Date()).toISOString(),
+      lastActivityAt: Date.now(),
       messageCount: 0,
       activity: "idle"
     },
@@ -21554,7 +21611,7 @@ async function sendChat(text2, files, options = {}) {
       clientMessageId: crypto.randomUUID(),
       text: text2,
       files: files?.slice() ?? [],
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      timestamp: Date.now(),
       inputHandling,
       startsResponse: !turn2
     },
@@ -21596,9 +21653,9 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
       for (const f5 of files) {
         if (f5.file) fd.append("file", f5.file, f5.name);
       }
-      res = await fetch(url, { method: "POST", credentials: "same-origin", body: fd });
+      res = await protocolFetch(url, { method: "POST", credentials: "same-origin", body: fd });
     } else {
-      res = await fetch(url, {
+      res = await protocolFetch(url, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -21826,7 +21883,7 @@ async function previewAttachment(file) {
   let mime = file.contentType || "";
   let mtime = null;
   try {
-    const response = await fetch(file.url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
+    const response = await protocolFetch(file.url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
     if (!response.ok) {
       setPreview({
         kind: "error",
@@ -21841,7 +21898,7 @@ async function previewAttachment(file) {
     const lastModified = response.headers.get("last-modified");
     if (lastModified) {
       const timestamp = Date.parse(lastModified);
-      if (Number.isFinite(timestamp)) mtime = new Date(timestamp).toISOString();
+      if (Number.isFinite(timestamp)) mtime = timestamp;
     }
     mime = response.headers.get("content-type") || mime;
   } catch {
@@ -21875,7 +21932,7 @@ async function previewAttachment(file) {
     return;
   }
   try {
-    const response = await fetch(file.url, { credentials: "same-origin", cache: "no-store" });
+    const response = await protocolFetch(file.url, { credentials: "same-origin", cache: "no-store" });
     if (!response.ok) {
       setPreview({ kind: "error", text: `HTTP ${response.status}`, ...meta });
       return;
@@ -21922,7 +21979,7 @@ async function selectFile(entry) {
   let size = entry.size;
   let mtime = entry.mtime;
   try {
-    const h5 = await fetch(url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
+    const h5 = await protocolFetch(url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
     if (h5.status >= 400) {
       const msg = h5.status === 404 ? "File not found. It may have been renamed or deleted." : `HTTP ${h5.status}`;
       setPreview({ kind: "error", text: msg, name: entry.name, url });
@@ -21932,11 +21989,11 @@ async function selectFile(entry) {
       const cl = h5.headers.get("content-length");
       if (cl) size = Number(cl);
     }
-    if (!mtime) {
+    if (mtime == null) {
       const lm = h5.headers.get("last-modified");
       if (lm) {
         const t4 = Date.parse(lm);
-        if (t4) mtime = new Date(t4).toISOString();
+        if (Number.isFinite(t4)) mtime = t4;
       }
     }
   } catch {
@@ -21948,7 +22005,7 @@ async function selectFile(entry) {
   if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) {
     if (ext === "svg") {
       try {
-        const r4 = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+        const r4 = await protocolFetch(url, { credentials: "same-origin", cache: "no-store" });
         if (!r4.ok) {
           setPreview({ kind: "error", text: `HTTP ${r4.status}`, ...meta });
           return;
@@ -21972,7 +22029,7 @@ async function selectFile(entry) {
   else if (ext === "pdf") setPreview({ kind: "pdf", ...refreshableMeta() });
   else {
     try {
-      const r4 = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+      const r4 = await protocolFetch(url, { credentials: "same-origin", cache: "no-store" });
       if (!r4.ok) {
         setPreview({ kind: "error", text: `HTTP ${r4.status}`, ...meta });
         return;
@@ -22005,7 +22062,7 @@ async function fetchAndAttachMeta(p5) {
   if (!gid) return;
   const segs = String(p5 || "").split("/").filter(Boolean).map(encodeURIComponent);
   const u5 = `api/groups/${encodeURIComponent(gid)}/files/${segs.join("/")}?meta=1`;
-  const r4 = await fetch(u5, { credentials: "same-origin", cache: "no-store" });
+  const r4 = await protocolFetch(u5, { credentials: "same-origin", cache: "no-store" });
   if (!r4.ok) return;
   const data = await r4.json();
   const cur = previewBlock.value;
@@ -22016,7 +22073,7 @@ async function fetchAndAttachMeta(p5) {
     lyrics: data.lyrics || null,
     mime: data.mime || cur.mime,
     size: data.size ?? cur.size,
-    mtime: data.mtime || cur.mtime,
+    mtime: data.mtime ?? cur.mtime,
     etag: data.etag ?? cur.etag
   };
   previewBlock.value = next;
@@ -22454,7 +22511,7 @@ function chipParts(g8, elevated) {
   const parts = [];
   if (!g8.isAdmin) parts.push("\u{1F512}");
   if (isAdminOnly) parts.push("\u{1F441}");
-  if (g8.lastActivityAt) parts.push(fmtRelative(g8.lastActivityAt));
+  if (g8.lastActivityAt != null) parts.push(fmtRelative(g8.lastActivityAt));
   const threadCount = agentActivity.value.find((activity) => activity.id === g8.id)?.threadCount;
   if (threadCount) parts.push(`${threadCount} thr`);
   return { parts, isAdminOnly };
@@ -22464,7 +22521,7 @@ function tipFor(g8, isAdminOnly) {
   const unread = agentActivity.value.find((activity) => activity.id === g8.id)?.unreadThreadCount;
   if (unread) parts.push(`${unread} unread ${unread === 1 ? "conversation" : "conversations"}`);
   if (isAdminOnly) parts.push("Visible to you as admin");
-  if (g8.lastActivityAt) parts.push(fmtAbsolute(g8.lastActivityAt));
+  if (g8.lastActivityAt != null) parts.push(fmtAbsolute(g8.lastActivityAt));
   return parts.join(" \xB7 ");
 }
 function groupItem(g8, elevated) {
@@ -22795,7 +22852,7 @@ function ExternalLinkIcon() {
 // src/components/RelativeTime.tsx
 function RelativeTime({ ts, className }) {
   nowTick.value;
-  if (!ts) return null;
+  if (ts == null) return null;
   return /* @__PURE__ */ u4("span", { class: className || "ts", title: fmtAbsolute(ts), children: fmtRelative(ts) });
 }
 
@@ -22839,7 +22896,7 @@ function ThreadRow({ t: t4 }) {
   const liveTaskTitle = head ? [
     lt.length > 1 ? `${lt.length} scheduled tasks` : head.paused ? "Paused scheduled task" : "Live scheduled task",
     head.recurrence ? `recurs ${head.recurrence}` : null,
-    head.nextRunAt ? `next ${new Date(head.nextRunAt).toLocaleString()}` : null,
+    head.nextRunAt != null ? `next ${new Date(head.nextRunAt).toLocaleString()}` : null,
     head.summary
   ].filter(Boolean).join(" \xB7 ") : void 0;
   const onOpen = (ev) => {
@@ -22977,9 +23034,9 @@ function ChannelSection({ ct, items, defaultOpen }) {
   const meta = channelMeta(ct);
   const totalMsgs = items.reduce((sum, t4) => sum + (t4.messageCount || 0), 0);
   const lastActivityAt = items.reduce((latest, t4) => {
-    const ts = t4.lastActivityAt || "";
-    return ts > latest ? ts : latest;
-  }, "");
+    const ts = t4.lastActivityAt;
+    return ts !== null && (latest === null || ts > latest) ? ts : latest;
+  }, null);
   const handles = Array.from(new Set(items.map((t4) => t4.counterparty).filter((h5) => !!h5)));
   const handleStr = handles.length === 0 ? "" : handles.length === 1 ? handles[0] : `${handles[0]} +${handles.length - 1}`;
   return /* @__PURE__ */ u4("div", { class: "thread-section" + (expanded ? " open" : " collapsed"), children: [
@@ -22996,7 +23053,7 @@ function ChannelSection({ ct, items, defaultOpen }) {
             /* @__PURE__ */ u4("span", { class: "ch-pill", "aria-hidden": "true", children: meta.icon }),
             /* @__PURE__ */ u4("span", { class: "label", children: meta.label }),
             /* @__PURE__ */ u4("span", { class: "count", children: [
-              lastActivityAt ? /* @__PURE__ */ u4(k, { children: [
+              lastActivityAt != null ? /* @__PURE__ */ u4(k, { children: [
                 /* @__PURE__ */ u4(RelativeTime, { ts: lastActivityAt }),
                 " \xB7 "
               ] }) : null,
@@ -23105,7 +23162,7 @@ function ThreadsRail() {
     return a4.label.localeCompare(b5.label);
   });
   for (const s5 of sections) {
-    s5.items.sort((a4, b5) => tsKey(b5.lastActivityAt) - tsKey(a4.lastActivityAt));
+    s5.items.sort((a4, b5) => (b5.lastActivityAt ?? 0) - (a4.lastActivityAt ?? 0));
   }
   const runSearch = () => {
     const q5 = searchQuery.peek().trim();
@@ -23207,7 +23264,7 @@ function ThreadsRail() {
   );
 }
 
-// node_modules/preact/compat/dist/compat.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -23411,6 +23468,32 @@ l.diffed = function(n3) {
   var t4 = n3.props, e4 = n3.__e;
   null != e4 && "textarea" === n3.type && "value" in t4 && t4.value !== e4.value && (e4.value = null == t4.value ? "" : t4.value), cn = null;
 };
+
+// src/task-time.ts
+function fmtNextRun(timestamp) {
+  const diff = timestamp - Date.now();
+  if (diff <= 3e4) return "now";
+  const min = Math.round(diff / 6e4);
+  if (min < 60) return `in ${min}m`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `in ${hr}h`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `in ${day}d`;
+  return new Date(timestamp).toLocaleDateString();
+}
+function toDatetimeLocal(timestamp) {
+  const date = new Date(timestamp ?? Date.now());
+  const pad = (value, width = 2) => String(value).padStart(width, "0");
+  return `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}
+function fromDatetimeLocal(value, original = null) {
+  if (original !== null && value === toDatetimeLocal(original)) return original;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/.test(value)) return null;
+  const timestamp = new Date(value).getTime();
+  if (!isEpochMs(timestamp)) return null;
+  if (toDatetimeLocal(timestamp).slice(0, value.length) !== value) return null;
+  return timestamp;
+}
 
 // src/components/VoiceButton.tsx
 function VoiceButton({ target, controller, onStart, configured, unavailable, disabled, id: id2, className = "" }) {
@@ -23733,9 +23816,7 @@ function parseTimelinePosition(value) {
 function timelineSortKey(timestamp, timelinePosition) {
   const position2 = parseTimelinePosition(timelinePosition);
   if (position2 !== void 0) return position2;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp) ? timestamp.replace(" ", "T") + "Z" : timestamp;
-  const milliseconds = Date.parse(normalized);
-  return Number.isFinite(milliseconds) ? milliseconds * 1e3 : 0;
+  return timestamp * 1e3;
 }
 
 // src/queued-followups.ts
@@ -23803,7 +23884,7 @@ function liveTurnActivity(turn2, lines, chapters, connected, stop) {
     text: current.action,
     status: presentation.error ? "error" : !connected ? "interrupted" : "running"
   };
-  const line = { ts: "", text: JSON.stringify(marker) };
+  const line = { ts: null, text: JSON.stringify(marker) };
   return {
     ...presentation,
     lines: [...lines, line],
@@ -23842,8 +23923,8 @@ function toolCallMs(turn2, now) {
 }
 function turnRowView(turn2, now) {
   const settled = turn2.phase === "settled";
-  const startedAt2 = turn2.startedAt ? Date.parse(turn2.startedAt) : NaN;
-  const endedAt = turn2.endedAt ? Date.parse(turn2.endedAt) : NaN;
+  const startedAt2 = turn2.startedAt ?? NaN;
+  const endedAt = turn2.endedAt ?? NaN;
   const requestedAt = turnRequestedAt(turn2);
   const waitedMs = Number.isFinite(startedAt2) && Number.isFinite(requestedAt) ? Math.max(0, startedAt2 - requestedAt) : 0;
   const ranMs = settled ? turn2.metadata.durationMs ?? (Number.isFinite(startedAt2) && Number.isFinite(endedAt) ? Math.max(0, endedAt - startedAt2) : null) : null;
@@ -24602,11 +24683,11 @@ function MessageBubble({
       bubble.scrollTop += match2.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  const content = from || timestamp || metadata ? /* @__PURE__ */ u4(k, { children: [
+  const content = from || timestamp != null || metadata ? /* @__PURE__ */ u4(k, { children: [
     from ? /* @__PURE__ */ u4("div", { class: "message-author", children: from }) : null,
     children,
-    timestamp || metadata ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
-      timestamp ? /* @__PURE__ */ u4(RelativeTime, { ts: timestamp }) : null,
+    timestamp != null || metadata ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
+      timestamp != null ? /* @__PURE__ */ u4(RelativeTime, { ts: timestamp }) : null,
       metadata
     ] }) : null
   ] }) : children;
@@ -24642,7 +24723,7 @@ var CredentialsError = class extends Error {
   }
 };
 async function credentialRequest(url, method = "GET", body, signal) {
-  const response = await fetch(url, {
+  const response = await protocolFetch(url, {
     method,
     credentials: "same-origin",
     headers: body === void 0 ? {} : { "Content-Type": "application/json" },
@@ -27622,7 +27703,7 @@ function attachReadTracking(log, target) {
       url += `?channel=${encodeURIComponent(target.channelType)}&mg=${encodeURIComponent(target.messagingGroupId)}`;
     const timeout = setTimeout(() => active.abort(), 1e4);
     try {
-      const response = await fetch(url, {
+      const response = await protocolFetch(url, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -27639,7 +27720,8 @@ function attachReadTracking(log, target) {
       }
     } catch (error) {
       if (request === null) return;
-      if (!(error instanceof ReadAckError) && !(error instanceof TypeError) && !(error instanceof Error && error.name === "AbortError")) throw error;
+      if (!(error instanceof ReadAckError) && !(error instanceof UiProtocolError) && !(error instanceof TypeError) && !(error instanceof Error && error.name === "AbortError"))
+        throw error;
       console.warn("Read acknowledgement failed", error);
       const previousError = readErrors.get(errorKey);
       if (previousError !== void 0) dismissToastById(previousError);
@@ -27651,9 +27733,10 @@ function attachReadTracking(log, target) {
   };
   const schedule = () => {
     clearTimeout(timer2);
-    if (eligible() && !complete) timer2 = setTimeout(() => {
-      void send();
-    }, 150);
+    if (eligible() && !complete)
+      timer2 = setTimeout(() => {
+        void send();
+      }, 150);
   };
   log.addEventListener("scroll", schedule);
   document.addEventListener("visibilitychange", schedule);
@@ -27704,9 +27787,7 @@ function fmtTok(n3) {
   return String(n3);
 }
 function fmtActivityTs(ts) {
-  const n3 = activityTimestamp(ts);
-  if (!Number.isFinite(n3)) return "";
-  return new Date(n3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return ts == null ? "" : new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 function StepHeadlineContent({ headline, repetitions = 1 }) {
   return /* @__PURE__ */ u4(k, { children: [
@@ -28316,7 +28397,7 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
-  const metadata = m6.timestamp || m6.inputState || activity.length ? /* @__PURE__ */ u4(k, { children: [
+  const metadata = m6.timestamp != null || m6.inputState || activity.length ? /* @__PURE__ */ u4(k, { children: [
     inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
     submission?.status === "sending" && !m6.hideInitialQueuedCaption ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: [
       "Sending",
@@ -28438,7 +28519,7 @@ function DisplayCardMessage({ message: message2, card }) {
       class: "msg out display-card agent-action",
       "data-msg-id": message2.id,
       timestamp: message2.timestamp,
-      metadata: message2.timestamp || activity.length ? /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }) : null,
+      metadata: message2.timestamp != null || activity.length ? /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }) : null,
       reveal: highlightMessageId.value === message2.id ? searchQuery.value : void 0,
       children: [
         showTechnicalStatus ? /* @__PURE__ */ u4(
@@ -28571,20 +28652,6 @@ function ApprovalReferences() {
   if (list.length === 0) return null;
   return /* @__PURE__ */ u4(k, { children: list.map((a4) => /* @__PURE__ */ u4(ApprovalRow, { reference: true, approval: a4 }, a4.id)) });
 }
-function fmtNextShort(iso) {
-  if (!iso) return "";
-  const t4 = Date.parse(iso);
-  if (!Number.isFinite(t4)) return "";
-  const diff = t4 - Date.now();
-  if (diff <= 3e4) return "now";
-  const min = Math.round(diff / 6e4);
-  if (min < 60) return `in ${min}m`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `in ${hr}h`;
-  const day = Math.round(hr / 24);
-  if (day < 7) return `in ${day}d`;
-  return new Date(t4).toLocaleDateString();
-}
 function TaskIndicator() {
   const gid = groupId.value;
   const tid = threadId.value;
@@ -28593,7 +28660,7 @@ function TaskIndicator() {
   const tasks = t4?.liveTasks;
   if (!tasks || tasks.length === 0) return null;
   return /* @__PURE__ */ u4(k, { children: tasks.map((lt) => {
-    const trailer = lt.paused ? "paused" : lt.nextRunAt ? `next ${fmtNextShort(lt.nextRunAt)}` : "";
+    const trailer = lt.paused ? "paused" : lt.nextRunAt != null ? `next ${fmtNextRun(lt.nextRunAt)}` : "";
     return /* @__PURE__ */ u4(
       "button",
       {
@@ -28705,8 +28772,7 @@ function TurnElapsed({ ms, live }) {
 }
 function startingResponsePresentation(submission) {
   const ownerId = submissionTraceOwner(submission.messageId);
-  const submittedAt = Date.parse(submission.timestamp);
-  const lines = [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : "", text: JSON.stringify({
+  const lines = [{ ts: submission.timestamp, text: JSON.stringify({
     kind: "notification",
     id: `ui:start:${submission.messageId}`,
     text: QUEUED_TEXT,
@@ -28747,7 +28813,7 @@ function turnResponsePresentation({ turn: turn2, activity: lines, status, traceO
   };
 }
 function ResponseStatusRow({ source }) {
-  const clock = source.kind === "turn" ? { startedAt: turnRequestedAt(source.turn), live: source.status && source.turn.phase !== "settled" } : { startedAt: Date.parse(source.submission.timestamp), live: true };
+  const clock = source.kind === "turn" ? { startedAt: turnRequestedAt(source.turn), live: source.status && source.turn.phase !== "settled" } : { startedAt: source.submission.timestamp, live: true };
   const [now, setNow] = h2(() => Date.now());
   const startedAt2 = clock.startedAt;
   const tick = Number.isFinite(startedAt2) && now - startedAt2 < 1e4 ? 100 : 1e3;
@@ -28761,7 +28827,7 @@ function ResponseStatusRow({ source }) {
   const presentation = T2(() => source.kind === "starting" ? startingResponsePresentation(source.submission) : turnResponsePresentation(source, chapters), [source, chapters, stopRequest.value, turnConnected.value]);
   const { ownerId, status, busy, lines, activity } = presentation;
   const elapsedMs = Number.isFinite(startedAt2) ? Math.max(0, now - startedAt2) : source.kind === "starting" ? 0 : null;
-  const traceNow = source.kind === "turn" ? source.turn.endedAt ? Date.parse(source.turn.endedAt) : now : null;
+  const traceNow = source.kind === "turn" ? source.turn.endedAt ?? now : null;
   const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;
@@ -29724,10 +29790,17 @@ function uploadOne(idx, mode) {
     const xhr = new XMLHttpRequest();
     const url = `api/groups/${groupId.value}/upload?path=${encodeURIComponent(uploadDirectory)}&mode=${encodeURIComponent(mode)}`;
     xhr.open("POST", url);
+    xhr.setRequestHeader(UI_PROTOCOL_HEADER, String(UI_TIMESTAMP_PROTOCOL_VERSION));
     xhr.upload.onprogress = (ev) => {
       if (ev.lengthComputable) updateItem(idx, { pct: ev.loaded / ev.total * 100 });
     };
     xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300 && xhr.getResponseHeader(UI_PROTOCOL_HEADER) !== String(UI_TIMESTAMP_PROTOCOL_VERSION)) {
+        window.dispatchEvent(new Event(UI_RELOAD_EVENT));
+        updateItem(idx, { status: "error", statusText: new UiProtocolError().message });
+        resolve();
+        return;
+      }
       let body = {};
       try {
         body = JSON.parse(xhr.responseText || "{}");
@@ -30104,7 +30177,7 @@ function PrivateWebView({ groupId: groupId3, path, title, fragment }) {
     const controller = new AbortController();
     setUrl(null);
     setError(null);
-    fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/private-web-session`, {
+    protocolFetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/private-web-session`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -30250,7 +30323,7 @@ function FilePreviewDialog({ expanded, title, onClose, children }) {
   );
 }
 
-// node_modules/highlight.js/es/common.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 
@@ -30971,14 +31044,8 @@ function mimeFromKind(kind) {
       return null;
   }
 }
-function formatMtime(iso) {
-  try {
-    const d5 = new Date(iso);
-    if (Number.isNaN(d5.getTime())) return iso;
-    return d5.toLocaleString();
-  } catch {
-    return iso;
-  }
+function formatMtime(timestamp) {
+  return new Date(timestamp).toLocaleString();
 }
 function renderMetaPanel(rows) {
   const summary = rows.map(([, v5]) => v5).join(" \xB7 ");
@@ -31004,7 +31071,7 @@ function Preview({ editor }) {
   if (p5.size != null) fileRows.push(["Size", fmtBytes(p5.size)]);
   const mimeOrKind = p5.mime || mimeFromKind(p5.kind);
   if (mimeOrKind) fileRows.push(["Type", mimeOrKind]);
-  if (p5.mtime) fileRows.push(["Modified", formatMtime(p5.mtime)]);
+  if (p5.mtime != null) fileRows.push(["Modified", formatMtime(p5.mtime)]);
   const tagRows = p5.tags ? Object.entries(p5.tags).map(([k4, v5]) => [k4, String(v5)]) : [];
   const metaRows = [...fileRows, ...tagRows];
   const meta = metaRows.length > 0 ? renderMetaPanel(metaRows) : null;
@@ -31378,11 +31445,11 @@ function AppearanceSettings() {
 // src/components/Settings.tsx
 var API = "/ui/settings/api";
 async function jget(p5) {
-  const r4 = await fetch(p5, { credentials: "same-origin" });
+  const r4 = await protocolFetch(p5, { credentials: "same-origin" });
   return { ok: r4.ok, status: r4.status, data: await r4.json().catch(() => ({})) };
 }
 async function jsend(p5, method, body) {
-  const r4 = await fetch(p5, {
+  const r4 = await protocolFetch(p5, {
     method,
     credentials: "same-origin",
     headers: body ? { "Content-Type": "application/json" } : {},
@@ -31880,7 +31947,7 @@ function ShareLinkModal() {
       if (err && err.name !== "AbortError") setError(String(err));
     }
   }
-  const expiresLabel = result?.expiresAt ? new Date(result.expiresAt).toLocaleString() : null;
+  const expiresLabel = result?.expiresAt != null ? new Date(result.expiresAt).toLocaleString() : null;
   const navAny = navigator;
   return /* @__PURE__ */ u4(MobileDialog, { title: "Share with link", onClose: close, maxWidth: "520px", children: [
     /* @__PURE__ */ u4("div", { class: "settings-body", children: [
@@ -31993,31 +32060,12 @@ function humanizeCron(expr) {
   }
   return expr;
 }
-function fmtNextRun(iso) {
-  const t4 = Date.parse(iso);
-  if (!Number.isFinite(t4)) return "";
-  const diff = t4 - Date.now();
-  if (diff <= 30 * 1e3) return "now";
-  const min = Math.round(diff / 6e4);
-  if (min < 60) return `in ${min}m`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `in ${hr}h`;
-  const day = Math.round(hr / 24);
-  if (day < 7) return `in ${day}d`;
-  return new Date(t4).toLocaleDateString();
-}
-function toDatetimeLocal(iso) {
-  const t4 = iso ? Date.parse(iso) : NaN;
-  const d5 = Number.isFinite(t4) ? new Date(t4) : /* @__PURE__ */ new Date();
-  const pad = (n3) => String(n3).padStart(2, "0");
-  return `${d5.getFullYear()}-${pad(d5.getMonth() + 1)}-${pad(d5.getDate())}T${pad(d5.getHours())}:${pad(d5.getMinutes())}`;
-}
 function TaskCard({ task, onOpen }) {
   return /* @__PURE__ */ u4("div", { class: "task-card" + (task.status === "paused" ? " paused" : ""), "data-series-id": task.seriesId, children: [
     /* @__PURE__ */ u4("button", { type: "button", class: "task-card-summary", onClick: onOpen, title: "Open task", children: task.summary || "(no prompt)" }),
     /* @__PURE__ */ u4("div", { class: "task-meta", children: [
       /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(task.recurrence) }),
-      task.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(task.nextRunAt).toLocaleString(), children: [
+      task.nextRunAt != null ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(task.nextRunAt).toLocaleString(), children: [
         "next ",
         fmtNextRun(task.nextRunAt)
       ] }) : null,
@@ -32053,12 +32101,12 @@ function TaskSingle({
       const body = {};
       if (section === "schedule") {
         if (schedKind === "once") {
-          const ms = Date.parse(dtDraft);
-          if (!Number.isFinite(ms)) {
+          const ms = fromDatetimeLocal(dtDraft, task.nextRunAt);
+          if (ms === null) {
             setErr("Pick a valid date and time.");
             return;
           }
-          body.processAfter = new Date(ms).toISOString();
+          body.processAfter = ms;
           body.recurrence = null;
         } else {
           body.recurrence = draft.trim() ? draft.trim() : null;
@@ -32194,6 +32242,7 @@ function TaskSingle({
           "input",
           {
             type: "datetime-local",
+            step: "0.001",
             value: dtDraft,
             onInput: (e4) => setDtDraft(e4.currentTarget.value)
           }
@@ -32215,7 +32264,7 @@ function TaskSingle({
         ] })
       ] }) : /* @__PURE__ */ u4("div", { class: "task-sec-view task-meta", children: [
         /* @__PURE__ */ u4("span", { class: "task-schedule", children: humanizeCron(task.recurrence) }),
-        task.nextRunAt ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(task.nextRunAt).toLocaleString(), children: [
+        task.nextRunAt != null ? /* @__PURE__ */ u4("span", { class: "task-next", title: new Date(task.nextRunAt).toLocaleString(), children: [
           "next ",
           fmtNextRun(task.nextRunAt)
         ] }) : null
@@ -32626,7 +32675,7 @@ function fetchModels(url) {
   }
   const promise = (async () => {
     try {
-      const res = await fetch(url, { credentials: "same-origin" });
+      const res = await protocolFetch(url, { credentials: "same-origin" });
       const data = await res.json();
       return { ok: res.ok, data };
     } catch {
@@ -32926,7 +32975,7 @@ function apiPath(gid, sub) {
   return `/ui/chat/api/groups/${encodeURIComponent(gid)}/admin${sub}`;
 }
 async function call(url, method = "GET", body) {
-  const r4 = await fetch(url, {
+  const r4 = await protocolFetch(url, {
     method,
     credentials: "same-origin",
     headers: body ? { "Content-Type": "application/json" } : {},
@@ -34890,7 +34939,7 @@ function CatalogRefreshStatus({
   return /* @__PURE__ */ u4("div", { class: "ga-catalog-refresh-status", "aria-live": "polite", children: [
     /* @__PURE__ */ u4("p", { class: "ga-catalog-meta", children: [
       "Last successful refresh: ",
-      refreshedAt ? /* @__PURE__ */ u4(RelativeTime, { ts: refreshedAt, className: "ga-catalog-refresh-time" }) : "Not recorded"
+      refreshedAt != null ? /* @__PURE__ */ u4(RelativeTime, { ts: refreshedAt, className: "ga-catalog-refresh-time" }) : "Not recorded"
     ] }),
     lastRefreshError ? /* @__PURE__ */ u4("p", { class: "ga-skills-unavailable ga-catalog-refresh-error", children: [
       "Refresh failed: ",
@@ -35579,11 +35628,9 @@ var PROVIDER_INFO = {
   native: "Native \u2014 experimental in-process agent loop using OpenAI-compatible Chat or Anthropic Messages. The model picker only shows models.dev routes these transports can call directly.",
   opencode: "OpenCode \u2014 multi-provider gateway. The upstream (OpenRouter, MiniMax, DeepSeek, Anthropic, \u2026) is not chosen here: it comes from whichever model you pick, since every models.dev id names its own gateway."
 };
-function formatAge(iso) {
-  if (!iso) return null;
-  const t4 = Date.parse(iso);
-  if (Number.isNaN(t4)) return null;
-  const diffMs = Date.now() - t4;
+function formatAge(timestamp) {
+  if (timestamp == null) return null;
+  const diffMs = Date.now() - timestamp;
   const day = 24 * 3600 * 1e3;
   const hour = 3600 * 1e3;
   if (diffMs < hour) return "just now";
@@ -36060,7 +36107,7 @@ function SettingsTab({
       detail: detailParts.length ? detailParts.join(" \xB7 ") : void 0,
       tooltip: [
         i5.value,
-        i5.createdAt ? `Created: ${new Date(i5.createdAt).toLocaleString()}` : null,
+        i5.createdAt != null ? `Created: ${new Date(i5.createdAt).toLocaleString()}` : null,
         size ? `Size: ${size}` : null,
         i5.isDefault ? "Install default image (used when image_tag is unset)." : null
       ].filter(Boolean).join("\n")
@@ -36075,7 +36122,7 @@ function SettingsTab({
       /* @__PURE__ */ u4("code", { children: data.folder }),
       " ",
       /* @__PURE__ */ u4("code", { class: "ga-folder-id", children: data.id }),
-      data.updatedAt ? ` \xB7 last updated ${new Date(data.updatedAt).toLocaleString()}` : "",
+      data.updatedAt != null ? ` \xB7 last updated ${new Date(data.updatedAt).toLocaleString()}` : "",
       data.runningSessionCount > 0 ? ` \xB7 ${data.runningSessionCount} running session${data.runningSessionCount === 1 ? "" : "s"}` : " \xB7 no running sessions"
     ] }) }) : null,
     section === "models" ? /* @__PURE__ */ u4(k, { children: [
@@ -36239,7 +36286,7 @@ function SettingsTab({
             ] }) : null,
             selectedImg.isDefault ? /* @__PURE__ */ u4("span", { class: "selected-detail", children: " \xB7 default" }) : null
           ] }),
-          selectedImg.createdAt ? /* @__PURE__ */ u4("pre", { class: "selected-tooltip", children: [
+          selectedImg.createdAt != null ? /* @__PURE__ */ u4("pre", { class: "selected-tooltip", children: [
             "Created: ",
             new Date(selectedImg.createdAt).toLocaleString()
           ] }) : null
@@ -36684,23 +36731,10 @@ function StartupScreen({ state }) {
     /* @__PURE__ */ u4("p", { class: "startup-title", children: title }),
     state.kind === "error" ? /* @__PURE__ */ u4(k, { children: [
       /* @__PURE__ */ u4("p", { class: "startup-error", role: "alert", children: state.message }),
-      /* @__PURE__ */ u4("p", { children: "Check your connection and try again." }),
-      /* @__PURE__ */ u4("button", { type: "button", onClick: state.retry, children: "Try again" })
+      /* @__PURE__ */ u4("p", { children: state.reloadRequired ? "Reload to get the current app version." : "Check your connection and try again." }),
+      /* @__PURE__ */ u4("button", { type: "button", onClick: state.retry, children: state.reloadRequired ? "Reload" : "Try again" })
     ] }) : /* @__PURE__ */ u4("p", { children: "Please wait." })
   ] });
-}
-function sortGroups(list) {
-  return list.slice().sort((a4, b5) => {
-    const parseTs = (s5) => {
-      if (!s5) return 0;
-      const norm = s5.includes("T") ? s5 : s5.replace(" ", "T") + "Z";
-      return Date.parse(norm) || 0;
-    };
-    const ta = parseTs(a4.lastActivityAt);
-    const tb = parseTs(b5.lastActivityAt);
-    if (tb !== ta) return tb - ta;
-    return a4.name.localeCompare(b5.name);
-  });
 }
 function setupViewportFit() {
   const vv = window.visualViewport;
@@ -36745,6 +36779,13 @@ async function init() {
   const app = document.getElementById("app");
   if (!app) throw new Error("Chat app root is missing");
   initAppearance((message2) => showToast(message2, "err"));
+  window.addEventListener(UI_RELOAD_EVENT, () => {
+    n2(() => {
+      chatReady.value = false;
+      chatReloadRequired.value = true;
+    });
+    showClientReloadPrompt("App version changed");
+  });
   initNotif();
   initSound();
   initInstall();
@@ -36754,11 +36795,9 @@ async function init() {
   applyPanelClasses();
   maybeShowIosInstallHint();
   const [meRes, groupsRes] = await loadStartupData(
-    (signal) => Promise.all([
-      api("api/me", { signal }),
-      api("api/groups", { signal })
-    ]),
-    (state) => D(/* @__PURE__ */ u4(StartupScreen, { state }), app)
+    loadBootstrap,
+    (state) => D(/* @__PURE__ */ u4(StartupScreen, { state }), app),
+    requestClientReload
   );
   n2(() => {
     me.value = meRes.displayName || meRes.userId;
@@ -36814,7 +36853,7 @@ function handleShareTarget() {
   window.history.replaceState(window.history.state, "", nextPath + window.location.hash);
 }
 init().catch((err) => {
-  if (err instanceof UnauthorizedError) return;
+  if (err instanceof UnauthorizedError || err instanceof UiProtocolError) return;
   console.error("App initialization failed", err);
   const app = document.getElementById("app");
   if (app) D(/* @__PURE__ */ u4(StartupScreen, { state: {

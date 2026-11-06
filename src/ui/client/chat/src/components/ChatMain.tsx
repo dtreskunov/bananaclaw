@@ -16,6 +16,7 @@ import {
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
 } from '../state';
 import { displayWorkspacePath, renderMarkdown, rewriteFileLinks, highlightTextNodes, fmtBytesShort } from '../utils';
+import { fmtNextRun } from '../task-time';
 import {
   sendChat, retryChatSend, warmChat, addPendingFiles, removePending,
   navFile, previewAttachment, removePinnedPath, clearPinnedContext, respondInteraction,
@@ -114,12 +115,9 @@ function fmtTok(n: number): string {
   return String(n);
 }
 
-/** Format an activity line's epoch-ms timestamp as a short wall-clock time.
- *  Empty / non-numeric (legacy lines) render no timestamp. */
-function fmtActivityTs(ts: string): string {
-  const n = activityTimestamp(ts);
-  if (!Number.isFinite(n)) return '';
-  return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function fmtActivityTs(ts: number | null): string {
+  return ts == null ? '' :
+    new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function StepHeadlineContent({ headline, repetitions = 1 }: { headline: StepHeadline; repetitions?: number }) {
@@ -789,7 +787,7 @@ function Message(
       send.groupId === groupId.value && send.threadId === threadId.value && send.status !== 'failed');
   const midTurnUpdate = m.deliveryOrigin === 'send_message' &&
     !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled');
-  const metadata = m.timestamp || m.inputState || activity.length ? <>
+  const metadata = m.timestamp != null || m.inputState || activity.length ? <>
     {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
     {submission?.status === 'sending' && !m.hideInitialQueuedCaption
       ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
@@ -914,7 +912,7 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   return (
     <MessageBubble class="msg out display-card agent-action" data-msg-id={message.id}
-      timestamp={message.timestamp} metadata={message.timestamp || activity.length ? <AgentActionLabel label="card" title="Sent with send_card" /> : null}
+      timestamp={message.timestamp} metadata={message.timestamp != null || activity.length ? <AgentActionLabel label="card" title="Sent with send_card" /> : null}
       reveal={highlightMessageId.value === message.id ? searchQuery.value : undefined}>
       {showTechnicalStatus
         ? <TurnTechnicalDetails turn={message.statsTurn} lines={activity}
@@ -1066,22 +1064,6 @@ function ApprovalReferences() {
   );
 }
 
-/** Future-aware short label; fmtRelative clamps future times to "just now". */
-function fmtNextShort(iso: string | null): string {
-  if (!iso) return '';
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '';
-  const diff = t - Date.now();
-  if (diff <= 30_000) return 'now';
-  const min = Math.round(diff / 60000);
-  if (min < 60) return `in ${min}m`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `in ${hr}h`;
-  const day = Math.round(hr / 24);
-  if (day < 7) return `in ${day}d`;
-  return new Date(t).toLocaleDateString();
-}
-
 /** Persistent pills shown while the open thread has live scheduled task(s):
  *  one pill per distinct task, rendered as the last entries in the log so
  *  tasks are discoverable without expanding the threads rail. Mirrors the
@@ -1096,7 +1078,7 @@ function TaskIndicator() {
   return (
     <>
       {tasks.map((lt) => {
-        const trailer = lt.paused ? 'paused' : lt.nextRunAt ? `next ${fmtNextShort(lt.nextRunAt)}` : '';
+        const trailer = lt.paused ? 'paused' : lt.nextRunAt != null ? `next ${fmtNextRun(lt.nextRunAt)}` : '';
         return (
           <button
             key={lt.seriesId}
@@ -1192,9 +1174,8 @@ function TurnElapsed({ ms, live }: { ms: number; live: boolean }) {
 
 function startingResponsePresentation(submission: PendingWebSend) {
   const ownerId = submissionTraceOwner(submission.messageId);
-  const submittedAt = Date.parse(submission.timestamp);
   // Queueing counts as a trace entry, but has no execution stopwatch.
-  const lines = [{ ts: Number.isFinite(submittedAt) ? String(submittedAt) : '', text: JSON.stringify({
+  const lines = [{ ts: submission.timestamp, text: JSON.stringify({
     kind: 'notification', id: `ui:start:${submission.messageId}`,
     text: QUEUED_TEXT, status: 'pending',
   }) }];
@@ -1239,7 +1220,7 @@ function ResponseStatusRow({ source }: {
   // Measured from submission, so the wait before the turn starts counts.
   const clock = source.kind === 'turn'
     ? { startedAt: turnRequestedAt(source.turn), live: source.status && source.turn.phase !== 'settled' }
-    : { startedAt: Date.parse(source.submission.timestamp), live: true };
+    : { startedAt: source.submission.timestamp, live: true };
   const [now, setNow] = useState(() => Date.now());
   // One clock for the status line and the usage summary: tenths below 10s, then whole seconds.
   const startedAt = clock.startedAt;
@@ -1257,7 +1238,7 @@ function ResponseStatusRow({ source }: {
     : turnResponsePresentation(source, chapters), [source, chapters, stopRequest.value, turnConnected.value]);
   const { ownerId, status, busy, lines, activity } = presentation;
   const elapsedMs = Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : source.kind === 'starting' ? 0 : null;
-  const traceNow = source.kind === 'turn' ? source.turn.endedAt ? Date.parse(source.turn.endedAt) : now : null;
+  const traceNow = source.kind === 'turn' ? source.turn.endedAt ?? now : null;
   const expanded = activityTraceExpanded(ownerId);
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const headline = activity?.headline;

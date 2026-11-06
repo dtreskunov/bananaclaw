@@ -1,5 +1,6 @@
 import { VoiceController, type VoiceCapture } from './voice';
 import type { VoiceDiagnostic } from '../../../shared/voice';
+import { protocolFetch } from './api';
 
 export function voiceBrowserReason(): string | null {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia)
@@ -126,7 +127,7 @@ export async function captureVoice(
 
 export async function reportVoiceDiagnostic(groupId: string, diagnostic: VoiceDiagnostic): Promise<void> {
   try {
-    const response = await fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId)}/voice/diagnostics`, {
+    const response = await protocolFetch(`/ui/chat/api/groups/${encodeURIComponent(groupId)}/voice/diagnostics`, {
       method: 'POST',
       credentials: 'same-origin',
       keepalive: true,

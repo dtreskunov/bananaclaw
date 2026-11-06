@@ -107,6 +107,7 @@ describe('durable viewer unread state', () => {
       fetch(base, {
         method: 'POST',
         headers: {
+          'x-nanoclaw-ui-protocol': '16',
           'Content-Type': 'application/json',
           ...(authenticated ? { Cookie: `${COOKIE_NAME}=${token}` } : {}),
         },

@@ -20,6 +20,7 @@ import {
 import { parseInputHandling } from './history.js';
 import crypto from 'crypto';
 import http from 'http';
+import { isEpochMs, parseTimestamp } from '../../shared/time.js';
 import type internal from 'stream';
 import path from 'path';
 
@@ -30,7 +31,6 @@ import { WebSocketServer, type WebSocket } from 'ws';
 
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
-import { fromEpoch } from '../../../db/time.js';
 import {
   createMessagingGroup,
   createMessagingGroupAgent,
@@ -756,7 +756,12 @@ export async function handleChatRequest(
         agentGroupId: m.groupId,
         conversations: buildViewerSearchConversations(visibleThreads),
       });
-      writeJson(res, 200, { results });
+      writeJson(res, 200, {
+        results: results.map((result) => ({
+          ...result,
+          timestamp: parseTimestamp(result.timestamp),
+        })),
+      });
     } catch (err) {
       log.warn('web chat search failed', { userId, groupId: m.groupId, query, err });
       writeJson(res, 503, { error: 'Search unavailable; retry the request' });
@@ -944,12 +949,12 @@ export async function handleChatRequest(
       const s = b.script as string | null;
       update.script = typeof s === 'string' && s.trim().length > 0 ? s : null;
     }
-    if (typeof b.processAfter === 'string') {
-      if (Number.isNaN(Date.parse(b.processAfter))) {
+    if (b.processAfter !== undefined) {
+      if (!isEpochMs(b.processAfter)) {
         writeJson(res, 400, { error: 'invalid_process_after' });
         return true;
       }
-      update.processAfter = b.processAfter;
+      update.processAfter = new Date(b.processAfter).toISOString();
     }
     if (b.recurrence === null || typeof b.recurrence === 'string') {
       const cron = b.recurrence as string | null;
@@ -1382,8 +1387,8 @@ function readTaskAttempts(groupId: string, sessionId: string, seriesId: string):
         taskMessageId: row.task_message_id,
         triggerSource: row.trigger_source === 'manual' ? 'manual' : 'scheduled',
         status: row.status,
-        startedAt: fromEpoch(row.started_at),
-        completedAt: fromEpoch(row.completed_at),
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
         durationMs: row.duration_ms,
         exitCode: row.exit_code,
         signal: row.signal,
@@ -1486,7 +1491,7 @@ function readLiveTaskDetails(
         out.push({
           seriesId: r.id,
           status: r.status === 'paused' ? 'paused' : 'pending',
-          nextRunAt: fromEpoch(r.process_after),
+          nextRunAt: r.process_after,
           recurrence: r.recurrence,
           summary: summarizeTaskPrompt(r.content),
           prompt,

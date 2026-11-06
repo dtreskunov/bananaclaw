@@ -9,6 +9,7 @@ import { getUser } from '../../../modules/permissions/db/users.js';
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
 import { getAccountRequest } from '../../../modules/approvals/workflows.js';
 import type { AccountInteraction, AccountRequestData } from '../../shared/approval.js';
+import { parseTimestamp } from '../../shared/time.js';
 import { interactionRoute } from '../../../conversation-publications.js';
 import type { ApprovalOrigin, ConversationApproval } from '../../shared/approval.js';
 import { presentApproval } from './approval-presentation.js';
@@ -63,11 +64,17 @@ function responseContext(userId: string, row: Approval) {
 export function projectAccountInteraction(userId: string, account: AccountRequestData): AccountInteraction {
   const approval = getApproval(account.id);
   if (!approval) throw new Error('Account request unavailable');
-  return { ...responseContext(userId, approval), ...account };
+  return {
+    ...responseContext(userId, approval),
+    ...account,
+    createdAt: parseTimestamp(account.createdAt),
+    expiresAt: parseTimestamp(account.expiresAt),
+    resolvedAt: parseTimestamp(account.resolvedAt),
+  };
 }
 
 export function projectApproval(userId: string, row: Approval): ConversationApproval {
-  if (row.kind !== 'confirmation') return { ...responseContext(userId, row), ...getAccountRequest(row.id) };
+  if (row.kind !== 'confirmation') return projectAccountInteraction(userId, getAccountRequest(row.id));
   const session = row.session_id ? getSession(row.session_id) : undefined;
   const groupId = row.agent_group_id ?? session?.agent_group_id ?? null;
   return {
@@ -80,10 +87,10 @@ export function projectApproval(userId: string, row: Approval): ConversationAppr
     options: row.input.options,
     agentGroupId: groupId,
     agentGroupName: groupId ? (getAgentGroup(groupId)?.name ?? null) : null,
-    createdAt: row.created_at,
+    createdAt: parseTimestamp(row.created_at),
     supportsResponseMessage: row.session_id !== null,
     status: legacyInteractionExpired(row) ? 'expired' : row.status,
-    resolvedAt: row.resolved_at,
+    resolvedAt: parseTimestamp(row.resolved_at),
     outcomeMessage: row.outcome_message,
   };
 }

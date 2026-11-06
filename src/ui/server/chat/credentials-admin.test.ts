@@ -177,12 +177,12 @@ async function call(method: string, url: string, body?: unknown, headers: Record
   const req = {
     method,
     url,
-    headers: { host: 'localhost', 'content-type': 'application/json', ...headers },
+    headers: { 'x-nanoclaw-ui-protocol': '16', host: 'localhost', 'content-type': 'application/json', ...headers },
     socket: { remoteAddress: '127.0.0.1' },
     async *[Symbol.asyncIterator]() {
       if (raw) yield Buffer.from(raw);
     },
-  } as http.IncomingMessage;
+  } as unknown as http.IncomingMessage;
   let status = 0;
   const chunks: Buffer[] = [];
   const writable = new Writable({
@@ -192,6 +192,7 @@ async function call(method: string, url: string, body?: unknown, headers: Record
     },
   });
   const response = writable as unknown as http.ServerResponse;
+  response.setHeader = vi.fn(() => response);
   response.writeHead = ((value: number) => {
     status = value;
     return response;

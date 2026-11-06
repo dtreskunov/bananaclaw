@@ -60,6 +60,7 @@ import { pushAvailable, sendToUser as sendPushToUser } from '../../modules/push/
 
 import { authenticate } from './auth.js';
 import { getBranding } from './branding.js';
+import { parseTimestamp, UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../shared/time.js';
 
 const SETTINGS_PREFIX = '/ui/settings';
 const PROFILE_NAME_MAX = 80;
@@ -87,6 +88,9 @@ export async function handleSettings(req: http.IncomingMessage, res: http.Server
 
   // JSON API.
   if (pathname.startsWith('/api/')) {
+    res.setHeader(UI_PROTOCOL_HEADER, String(UI_TIMESTAMP_PROTOCOL_VERSION));
+    if (req.headers[UI_PROTOCOL_HEADER.toLowerCase()] !== String(UI_TIMESTAMP_PROTOCOL_VERSION))
+      return json(res, 409, { error: 'ui_protocol_mismatch', protocolVersion: UI_TIMESTAMP_PROTOCOL_VERSION });
     const session = authenticate(req);
     if (!session) return json(res, 401, { error: 'unauthorized' });
     return await handleApi(req, res, pathname.slice('/api'.length), session.userId);
@@ -141,7 +145,7 @@ async function handleApi(
         channel: r.channel,
         handle: r.handle,
         primary: r.primary_for_channel === 1,
-        verified_at: r.verified_at,
+        verified_at: parseTimestamp(r.verified_at),
       })),
       availableChannels,
       deepLinkChannels: availableChannels.filter((c) => hasDeepLinkBuilder(c)),
@@ -169,7 +173,7 @@ async function handleApi(
       return json(res, 502, { error: 'deeplink_failed', message: `Could not build deep link for ${channel}.` });
     }
     log.info('identity deep-link challenge created', { userId, channel, challengeId: row.id });
-    return json(res, 200, { challengeId: row.id, channel, deepLink, expiresAt: row.expires_at });
+    return json(res, 200, { challengeId: row.id, channel, deepLink, expiresAt: parseTimestamp(row.expires_at) });
   }
 
   if (req.method === 'GET' && pathname === '/identities/link/status') {
@@ -185,7 +189,7 @@ async function handleApi(
       expired,
       channel: ch.channel_type,
       handle: ch.handle || null,
-      expiresAt: ch.expires_at,
+      expiresAt: parseTimestamp(ch.expires_at),
     });
   }
 
@@ -224,7 +228,7 @@ async function handleApi(
     log.info('identity link challenge created', { userId, channel, handle, challengeId: row.id });
     return json(res, 200, {
       challengeId: row.id,
-      expiresAt: row.expires_at,
+      expiresAt: parseTimestamp(row.expires_at),
       channel,
       handle,
     });

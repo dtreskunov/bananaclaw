@@ -586,8 +586,8 @@ describe('voice upgrade authorization', () => {
     });
     const req = {
       url: '/ui/chat/api/groups/group/chat/thread/voice/stream',
-      headers: { origin },
-    } as http.IncomingMessage;
+      headers: { 'x-nanoclaw-ui-protocol': '16', origin },
+    } as unknown as http.IncomingMessage;
     return { socket, req, response: () => response };
   }
   const options = { expectedOrigin: 'https://chat.example', canSend: () => true };

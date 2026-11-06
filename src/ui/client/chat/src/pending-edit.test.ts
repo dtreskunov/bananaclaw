@@ -1,3 +1,4 @@
+import { uiHeaders } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canEditMessageInBranch, canEditPendingMessage, PendingEditDraft, savePendingMessage } from './pending-edit';
 import {
@@ -23,14 +24,14 @@ const thread = testThread({
   channelType: 'web',
   messagingGroupId: 'web/group',
   title: 'Chat',
-  lastActivityAt: '',
+  lastActivityAt: null,
 });
 const message: ChatMessage = {
   id: 'web-message/id',
   direction: 'in',
   text: 'Original',
   files: [{ filename: 'keep.txt', size: 0 }],
-  timestamp: '1',
+  timestamp: 1,
   author: { userId: 'owner', displayName: 'Owner' },
   canEditPending: true,
   inputState: { messageId: 'web-message/id', status: 'queued', turnId: 'turn' },
@@ -109,7 +110,7 @@ describe('durable in-place edit action', () => {
       'api/groups/group/chat/thread%2Fid/messages/web-message%2Fid?channel=web&mg=web%2Fgroup',
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify(body) }),
     );
-    finish({ ok: true, status: 200, json: async () => success().data });
+    finish({ headers: uiHeaders, ok: true, status: 200, json: async () => success().data });
     await saving;
     expect(chatMessages.value).toEqual([message, outgoing]);
     expect(chatMessages.value[0].files).toBe(message.files);
@@ -126,7 +127,7 @@ describe('durable in-place edit action', () => {
       'fetch',
       vi.fn(async () => {
         groupId.value = 'another-group';
-        return { ok: true, status: 200, json: async () => success().data };
+        return { headers: uiHeaders, ok: true, status: 200, json: async () => success().data };
       }),
     );
     await savePendingMessage('group', thread, message.id!, {
@@ -141,6 +142,7 @@ describe('durable in-place edit action', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        headers: uiHeaders,
         ok: true,
         status: 200,
         json: async () => ({ ok: true, id: message.id, text: 'Newer edit from another tab' }),

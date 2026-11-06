@@ -64,6 +64,7 @@ function makeRes(): { res: http.ServerResponse; done: Promise<void>; status: () 
     },
   });
   const res = writable as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((next: number) => {
     status = next;
     return res;
@@ -81,7 +82,7 @@ async function postFork(
   const req = Readable.from([Buffer.from(JSON.stringify(body))]) as unknown as http.IncomingMessage;
   req.method = 'POST';
   req.url = pathname + (opts.query ?? '');
-  req.headers = { 'content-type': 'application/json' };
+  req.headers = { 'x-nanoclaw-ui-protocol': '16', 'content-type': 'application/json' };
   const captured = makeRes();
   expect(await handleChatRequest(req, captured.res, pathname, opts.userId ?? USER_ID)).toBe(true);
   await captured.done;
@@ -96,7 +97,7 @@ async function call(
   const req = Readable.from([]) as unknown as http.IncomingMessage;
   req.method = method;
   req.url = pathname + (opts.query ?? '');
-  req.headers = {};
+  req.headers = { 'x-nanoclaw-ui-protocol': '16' };
   const captured = makeRes();
   expect(await handleChatRequest(req, captured.res, pathname, opts.userId ?? USER_ID)).toBe(true);
   await captured.done;
@@ -415,7 +416,7 @@ describe('POST chat thread fork', () => {
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.method = 'GET';
     req.url = pathname;
-    req.headers = {};
+    req.headers = { 'x-nanoclaw-ui-protocol': '16' };
     const captured = makeRes();
     expect(await handleChatRequest(req, captured.res, pathname, USER_ID)).toBe(true);
     await captured.done;

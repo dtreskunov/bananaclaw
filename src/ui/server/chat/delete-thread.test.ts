@@ -53,6 +53,7 @@ function makeRes(): { res: http.ServerResponse; done: Promise<void>; status: () 
     },
   });
   const res = writable as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((nextStatus: number) => {
     status = nextStatus;
     return res;

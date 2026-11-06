@@ -20,7 +20,7 @@ import {
 
 const line = (ordinal: number, step: TraceStep): TraceLine => ({
   ordinal,
-  ts: String(1000 + ordinal),
+  ts: 1000 + ordinal,
   text: JSON.stringify(step),
 });
 const tool = (id: string, name: string, status: TraceStep['status'] = 'completed'): TraceStep => ({
@@ -46,7 +46,7 @@ describe('activity presentation', () => {
       line(0, tool('ui:current:tool', 'bash')),
       line(1, { kind: 'compaction', id: 'compact', status: 'completed' }),
       line(2, { kind: 'notification', id: 'steering:input', text: 'Steering message injected' }),
-      { ts: '1000', text: 'Legacy recorded activity' },
+      { ts: 1000, text: 'Legacy recorded activity' },
     ];
     const all = [...recorded, ...synthetic];
     const before = JSON.stringify(all);
@@ -282,11 +282,11 @@ describe('activity presentation', () => {
 describe('activity chapters', () => {
   it('parses each line once and prepares compact children, full singletons and raw-text fallbacks', () => {
     const values: TraceLine[] = [
-      { ts: '1000', text: JSON.stringify({ ...tool('first', 'bash'), detail: 'echo first\n--flag' }) },
-      { ts: '2000', text: JSON.stringify({ ...tool('second', 'bash', 'running'), detail: 'echo second' }) },
-      { ts: '3000', text: JSON.stringify({ ...tool('file', 'read'), detail: 'file.ts' }) },
-      { ts: '4000', text: 'Legacy activity <literal>' },
-      { ts: '5000', text: '{"detail":123}' },
+      { ts: 1000, text: JSON.stringify({ ...tool('first', 'bash'), detail: 'echo first\n--flag' }) },
+      { ts: 2000, text: JSON.stringify({ ...tool('second', 'bash', 'running'), detail: 'echo second' }) },
+      { ts: 3000, text: JSON.stringify({ ...tool('file', 'read'), detail: 'file.ts' }) },
+      { ts: 4000, text: 'Legacy activity <literal>' },
+      { ts: 5000, text: '{"detail":123}' },
     ];
     const before = JSON.stringify(values);
     const parse = vi.spyOn(JSON, 'parse');

@@ -58,7 +58,7 @@ export function liveTurnActivity(
     text: current.action,
     status: presentation.error ? 'error' : !connected ? 'interrupted' : 'running',
   };
-  const line = { ts: '', text: JSON.stringify(marker) };
+  const line = { ts: null, text: JSON.stringify(marker) };
   return {
     ...presentation,
     lines: [...lines, line],
@@ -118,8 +118,8 @@ function toolCallMs(turn: ConversationTurn, now: number): number {
 
 export function turnRowView(turn: ConversationTurn, now: number): TurnRowView {
   const settled = turn.phase === 'settled';
-  const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
-  const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : NaN;
+  const startedAt = turn.startedAt ?? NaN;
+  const endedAt = turn.endedAt ?? NaN;
   // Total runs from submission; the wait before the turn started counts.
   const requestedAt = turnRequestedAt(turn);
   const waitedMs =

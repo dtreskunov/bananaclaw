@@ -18,7 +18,7 @@ const approval: ConversationApproval = {
   id: 'approval',
   agentGroupId: 'g',
   agentGroupName: 'Group',
-  createdAt: 'now',
+  createdAt: 1767225600000,
   action: 'test',
   title: 'Review',
   details: null,
@@ -35,7 +35,7 @@ const group: SyncGroupState = {
     sessionId: `s-${index}`,
     platformId: 'group:g',
     title: 'Conversation',
-    lastActivityAt: 'now',
+    lastActivityAt: 1767225600000,
     sessionMode: 'per-thread',
     messageCount: 1,
     activity: 'idle',
@@ -55,7 +55,10 @@ const wire = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 describe('incremental metadata projections', () => {
   it('clears only an agent unread flag without replacing its 1000-thread group snapshot', () => {
-    const before = { ...state, data: { ...data, agentActivity: [{ id: 'g', activity: 'idle' as const, unreadThreadCount: 1 }] } };
+    const before = {
+      ...state,
+      data: { ...data, agentActivity: [{ id: 'g', activity: 'idle' as const, unreadThreadCount: 1 }] },
+    };
     const next = { ...before.data, agentActivity: [{ id: 'g', activity: 'idle' as const }] };
     const changes = wire(diffGlobal(before, next, 'g'));
     expect(changes).toEqual({ agentActivity: { upserts: next.agentActivity, removeIds: [] } });
@@ -98,7 +101,9 @@ describe('incremental metadata projections', () => {
       agentActivity: [before.data.agentActivity[0], { id: 'other', activity: 'running' as const, waiting: true }],
     };
     const changes = wire(diffGlobal(before, next, 'g'));
-    expect(changes).toEqual({ agentActivity: { upserts: [{ id: 'other', activity: 'running', waiting: true }], removeIds: [] } });
+    expect(changes).toEqual({
+      agentActivity: { upserts: [{ id: 'other', activity: 'running', waiting: true }], removeIds: [] },
+    });
     const reduced = reduceGlobal(before, { ...patch(data), changes }, 'g');
     expect(reduced.data).toEqual(next);
     expect(reduced.data.group).toBe(before.data.group);
@@ -106,24 +111,44 @@ describe('incremental metadata projections', () => {
     const cleared = { ...next, agentActivity: before.data.agentActivity };
     const clearedChanges = diffGlobal(reduced, cleared, 'g');
     expect(clearedChanges.agentActivity?.upserts).toEqual([{ id: 'other', activity: 'running' }]);
-    expect(reduceGlobal(reduced, {
-      kind: 'update', streamId: reduced.streamId, baseRevision: 1, revision: 2, changes: clearedChanges,
-    }, 'g').data).toEqual(cleared);
+    expect(
+      reduceGlobal(
+        reduced,
+        {
+          kind: 'update',
+          streamId: reduced.streamId,
+          baseRevision: 1,
+          revision: 2,
+          changes: clearedChanges,
+        },
+        'g',
+      ).data,
+    ).toEqual(cleared);
     const removed = diffGlobal(reduced, { ...next, agentActivity: [next.agentActivity[0]] }, 'g');
     expect(removed.agentActivity?.removeIds).toEqual(['other']);
   });
   it.each([
-    { activity: 'waiting' }, { activity: 'running', waiting: 'yes' },
-    { activity: 'idle', threadCount: -1 }, { activity: 'idle', threadCount: 1.5 },
+    { activity: 'waiting' },
+    { activity: 'running', waiting: 'yes' },
+    { activity: 'idle', threadCount: -1 },
+    { activity: 'idle', threadCount: 1.5 },
     { activity: 'idle', threadCount: '2' },
   ])('rejects obsolete or malformed overlay status %j', (status) => {
-    expect(() => parseSyncFrame({
-      kind: 'sync', protocolVersion: SYNC_PROTOCOL_VERSION, groupId: null, subscriptionId: 1,
-      global: { ...patch(data), changes: { agentActivity: { upserts: [{ id: 'g', ...status }], removeIds: [] } } },
-    })).toThrow('Invalid');
+    expect(() =>
+      parseSyncFrame({
+        kind: 'sync',
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        groupId: null,
+        subscriptionId: 1,
+        global: { ...patch(data), changes: { agentActivity: { upserts: [{ id: 'g', ...status }], removeIds: [] } } },
+      }),
+    ).toThrow('Invalid');
   });
   it('patches just one unselected agent count without sending its thread list', () => {
-    const before = { ...state, data: { ...data, agentActivity: [{ id: 'other', activity: 'idle' as const, threadCount: 4 }] } };
+    const before = {
+      ...state,
+      data: { ...data, agentActivity: [{ id: 'other', activity: 'idle' as const, threadCount: 4 }] },
+    };
     const next = { ...before.data, agentActivity: [{ ...before.data.agentActivity[0], threadCount: 5 }] };
     const changes = wire(diffGlobal(before, next, 'g'));
     expect(changes).toEqual({ agentActivity: { upserts: next.agentActivity, removeIds: [] } });

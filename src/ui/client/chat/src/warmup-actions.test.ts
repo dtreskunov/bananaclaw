@@ -1,3 +1,4 @@
+import { UiResponse as Response } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addPendingFiles, deleteThread, sendChat, warmChat } from './actions';
 import {
@@ -41,7 +42,7 @@ beforeEach(() => {
     sessionId: null,
     channelType: 'web',
     title: '(new thread)',
-    lastActivityAt: '',
+    lastActivityAt: null,
     messageCount: 0,
   });
   threads.value = [thread];
@@ -61,6 +62,15 @@ afterEach(() => {
 });
 
 describe('composer-intent warmup', () => {
+  it('captures optimistic submissions as epoch milliseconds, including zero', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(0);
+    expect(await sendChat('Hello', null)).toBe(true);
+    expect(pendingWebSends.value[0].timestamp).toBe(0);
+    const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/send'));
+    expect(request).toBeDefined();
+    expect(new Headers(request![1]?.headers).get('X-NanoClaw-UI-Protocol')).toBe('16');
+  });
+
   it('sends one request per empty thread and records the reusable session', async () => {
     const first = warmChat();
     expect(warmChat()).toBe(first);
@@ -174,6 +184,7 @@ describe('composer-intent warmup', () => {
     expect(fetch).toHaveBeenLastCalledWith(`api/groups/agent/chat/${thread.threadId}?cancelApprovals=1`, {
       method: 'DELETE',
       credentials: 'same-origin',
+      headers: expect.any(Headers),
     });
     expect(threads.value).toEqual(status === 404 ? [] : [thread]);
   });
@@ -197,6 +208,7 @@ describe('composer-intent warmup', () => {
     expect(fetch).toHaveBeenLastCalledWith(`api/groups/agent/chat/${thread.threadId}?cancelApprovals=1`, {
       method: 'DELETE',
       credentials: 'same-origin',
+      headers: expect.any(Headers),
     });
     expect(threads.value).toEqual([]);
   });

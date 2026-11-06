@@ -1,4 +1,4 @@
-// node_modules/preact/dist/preact.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -255,7 +255,7 @@ n = v.slice, l = { __e: function(n2, l3, u4, t3) {
   return n2.__v.__b - l3.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// node_modules/preact/hooks/dist/hooks.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -402,7 +402,39 @@ function forwardedFragment(hash) {
   return cleaned ? `#${cleaned}` : "";
 }
 
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// ../../shared/time.ts
+var UI_TIMESTAMP_PROTOCOL_VERSION = 16;
+var UI_PROTOCOL_HEADER = "X-NanoClaw-UI-Protocol";
+
+// src/api.ts
+var UiProtocolError = class extends Error {
+  constructor() {
+    super("The app and server versions do not match. Reload this page to update the app.");
+    this.name = "UiProtocolError";
+  }
+};
+var UI_RELOAD_EVENT = "nanoclaw:ui-reload-required";
+function isOwnedApi(url) {
+  if (/^https?:\/\//.test(url)) {
+    const parsed = new URL(url);
+    return typeof window !== "undefined" && parsed.origin === window.location?.origin && /^\/ui\/(?:chat|settings)\/api(?:\/|$)/.test(parsed.pathname);
+  }
+  return /^(?:\/ui\/(?:chat|settings)\/)?api(?:\/|$)/.test(url);
+}
+async function protocolFetch(url, opts) {
+  const owned = isOwnedApi(url);
+  const headers = new Headers(opts?.headers);
+  if (owned) headers.set(UI_PROTOCOL_HEADER, String(UI_TIMESTAMP_PROTOCOL_VERSION));
+  const response = await fetch(url, { credentials: "same-origin", ...opts, headers });
+  if (owned && response.status !== 401 && (response.ok || response.headers.get(UI_PROTOCOL_HEADER) !== null) && response.headers.get(UI_PROTOCOL_HEADER) !== String(UI_TIMESTAMP_PROTOCOL_VERSION)) {
+    const error = new UiProtocolError();
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(UI_RELOAD_EVENT));
+    throw error;
+  }
+  return response;
+}
+
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f3 = 0;
 var i3 = Array.isArray;
 function u3(e3, t3, n2, o3, i4, u4) {
@@ -425,7 +457,7 @@ function PrivateWebView({ groupId, path, title, fragment }) {
     const controller = new AbortController();
     setUrl(null);
     setError(null);
-    fetch(`/ui/chat/api/groups/${encodeURIComponent(groupId)}/private-web-session`, {
+    protocolFetch(`/ui/chat/api/groups/${encodeURIComponent(groupId)}/private-web-session`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },

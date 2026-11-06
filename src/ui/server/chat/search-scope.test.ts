@@ -12,7 +12,7 @@ function thread(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
     platformId: 'viewer@example.com',
     sessionMode: 'per-thread',
     title: 'Visible thread',
-    lastActivityAt: '2026-07-22T00:00:00.000Z',
+    lastActivityAt: 1784678400000,
     messageCount: 1,
     activity: 'idle',
     ...overrides,

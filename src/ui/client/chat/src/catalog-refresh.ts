@@ -1,8 +1,8 @@
 import { call, errMsg } from './components/GroupAdminApi';
 
 export interface CatalogRefreshMetadata {
-  refreshedAt: string | null;
-  lastRefreshAttemptAt?: string | null;
+  refreshedAt: number | null;
+  lastRefreshAttemptAt?: number | null;
   lastRefreshError?: string | null;
 }
 

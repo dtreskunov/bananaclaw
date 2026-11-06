@@ -8,6 +8,7 @@ import type {
 } from './conversation.js';
 import { isQuestionInteraction } from './conversation.js';
 import { isReadCursor } from './read-state.js';
+import { isEpochMs, UI_TIMESTAMP_PROTOCOL_VERSION } from './time.js';
 import {
   applyCollection,
   diffCollection,
@@ -36,7 +37,7 @@ import {
   type Check,
 } from './validation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = 15;
+export const CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION;
 export type EntityChanges<T> = CollectionPatch<T>;
 export type ConversationTurnFields = Omit<ConversationTurn, 'activity'>;
 export interface ConversationActivityPatch {
@@ -99,7 +100,7 @@ export function isQuestionInput(value: unknown): value is QuestionInput {
 export function isQuestionResponse(value: unknown): value is QuestionResponse {
   return questionAnswer(value) || questionSkip(value);
 }
-const trace = shape({ ts: text, text });
+const trace = shape({ ts: isEpochMs, text });
 const usageFields = {
   cost_usd: number,
   input_tokens: number,
@@ -121,7 +122,7 @@ const reportedUsage = shape(
 const message = shape({
   id,
   direction: oneOf('in', 'out', 'event'),
-  timestamp: text,
+  timestamp: isEpochMs,
   text,
   questionId: optional(id),
   questionResponseType: optional(oneOf('choice', 'text', 'skipped')),
@@ -161,7 +162,7 @@ const message = shape({
       actions: array(shape({ label: text, url: text, style: optional(oneOf('primary', 'danger', 'default')) })),
     }),
   ),
-  reactions: optional(array(shape({ emoji: text, ts: text }))),
+  reactions: optional(array(shape({ emoji: text, ts: isEpochMs }))),
   event: optional(
     shape({
       kind: oneOf('task-run'),
@@ -175,14 +176,14 @@ const message = shape({
     }),
   ),
 });
-const activityLine = shape({ ordinal: integer, ts: text, text, timelinePosition: position });
+const activityLine = shape({ ordinal: integer, ts: isEpochMs, text, timelinePosition: position });
 const turnFields = {
   id,
   phase: oneOf('running', 'stopping', 'settling', 'settled'),
   outcome: oneOf('pending', 'replied', 'warning', 'silent', 'stopped', 'failed', 'unknown', 'interrupted'),
-  startedAt: nullable(text),
-  requestedAt: optional(nullable(text)),
-  endedAt: nullable(text),
+  startedAt: nullable(isEpochMs),
+  requestedAt: optional(nullable(isEpochMs)),
+  endedAt: nullable(isEpochMs),
   inputIds: strings,
   outputIds: strings,
   usage: array(shape({ id, value: reportedUsage })),
@@ -200,12 +201,12 @@ const question: Check = (value) =>
     id,
     status: oneOf('pending', 'answered', 'cancelled'),
     response: nullable(isQuestionResponse),
-    answeredAt: nullable(text),
+    answeredAt: nullable(isEpochMs),
     activity: optional(array(trace)),
     turnId: optional(id),
     threadId: nullable(text),
     agentGroupId: id,
-    createdAt: text,
+    createdAt: isEpochMs,
     messageId: optional(id),
     timelinePosition: optional(integer),
   })(value);
@@ -213,13 +214,13 @@ const consentContext = {
   id,
   agentGroupId: nullable(text),
   agentGroupName: nullable(text),
-  createdAt: text,
+  createdAt: isEpochMs,
   origin: optional(nullable(shape({ agentGroupId: id, threadId: id, channelType: id, messagingGroupId: id }))),
   decision: optional(nullable(text)),
   respondedBy: optional(nullable(shape({ userId: id, displayName: text }))),
   responseMessage: optional(nullable(text)),
   outcomeMessage: optional(nullable(text)),
-  resolvedAt: optional(nullable(text)),
+  resolvedAt: optional(nullable(isEpochMs)),
 };
 const approval = shape({
   ...consentContext,
@@ -247,12 +248,12 @@ const account = shape({
   requirements,
   revision: integer,
   retryable: bool,
-  expiresAt: nullable(text),
+  expiresAt: nullable(isEpochMs),
   agentGroupId: id,
   agentGroupName: text,
   status: oneOf('pending', 'applying', 'completed', 'rejected', 'cancelled', 'expired', 'failed'),
   outcomeMessage: nullable(text),
-  resolvedAt: nullable(text),
+  resolvedAt: nullable(isEpochMs),
 });
 const interaction: Check = (value) => question(value) || approval(value) || account(value);
 export function isConversationApproval(value: unknown): value is import('./approval.js').ConversationApproval {
@@ -426,7 +427,7 @@ function applyConversation(state: ConversationSnapshot | null, frame: Conversati
       timeline: applyCollection(state.conversation.timeline, changes.timeline, timelineKey),
       connection: changes.connection ?? state.conversation.connection,
       capabilities: changes.capabilities ?? state.conversation.capabilities,
-      readCursor: changes.readCursor === undefined ? state.conversation.readCursor : changes.readCursor ?? undefined,
+      readCursor: changes.readCursor === undefined ? state.conversation.readCursor : (changes.readCursor ?? undefined),
     },
   };
   validateTimeline(next.conversation);
@@ -459,7 +460,7 @@ export function diffConversation(before: Conversation, after: Conversation): Con
     interactions: diffCollection(before.interactions, after.interactions, entityId),
     connection: sameValue(before.connection, after.connection) ? undefined : after.connection,
     capabilities: sameValue(before.capabilities, after.capabilities) ? undefined : after.capabilities,
-    readCursor: sameValue(before.readCursor, after.readCursor) ? undefined : after.readCursor ?? null,
+    readCursor: sameValue(before.readCursor, after.readCursor) ? undefined : (after.readCursor ?? null),
     timeline: diffCollection(before.timeline, after.timeline, timelineKey),
   };
 }

@@ -16,6 +16,7 @@ import {
 } from '../../../thread-summaries.js';
 import { getSessionActiveTurn } from '../../../session-link.js';
 import type { AttentionTarget } from '../../shared/attention.js';
+import { parseTimestamp } from '../../shared/time.js';
 import { readInteractionSync } from './attention.js';
 import {
   isElevated,
@@ -25,10 +26,6 @@ import {
   viewerHandlesForChannel,
 } from './conversation-context.js';
 import { conversationUnread } from './read-state.js';
-
-function normTs(s: string): string {
-  return s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
-}
 
 interface UserMessagingContext {
   messagingGroupId: string;
@@ -217,22 +214,26 @@ function withExecutionActivity(userId: string, agentGroupId: string, threads: Th
     const unread = conversationUnread(userId, agentGroupId, context);
     const state = live.get(thread.sessionId)!;
     const current =
-      state.turn &&
-      routeMatches(context, state.turn.channelType, state.turn.platformId, state.turn.threadId)
+      state.turn && routeMatches(context, state.turn.channelType, state.turn.platformId, state.turn.threadId)
         ? state.turn
         : null;
-    const durable = saved.get(thread.sessionId)?.find(
-      (turn) => routeMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null),
-    );
-    const pending = queued.get(thread.sessionId)?.some(
-      (route) => routeMatches(context, route.channel_type, route.platform_id, route.thread_id || null),
-    );
-    const running = pending ||
+    const durable = saved
+      .get(thread.sessionId)
+      ?.find((turn) => routeMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null));
+    const pending = queued
+      .get(thread.sessionId)
+      ?.some((route) => routeMatches(context, route.channel_type, route.platform_id, route.thread_id || null));
+    const running =
+      pending ||
       (current && !(durable?.id === current.id && durable.phase === 'settled')) ||
       (durable && durable.phase !== 'settled');
     const activity = running ? 'running' : 'idle';
-    return { ...thread, activity, ...(unread ? { unread: true } : {}),
-      ...(running && !pending && (!state.connected || !current) ? { activityStale: true } : {}) };
+    return {
+      ...thread,
+      activity,
+      ...(unread ? { unread: true } : {}),
+      ...(running && !pending && (!state.connected || !current) ? { activityStale: true } : {}),
+    };
   });
 }
 
@@ -253,17 +254,15 @@ export function readAgentActivity(
     const threads =
       group.id === selectedGroupId
         ? selectedThreads
-        : withExecutionActivity(
-            userId,
-            group.id,
-            collectThreadsForContexts(group.id, contexts, spectator, handles),
-          );
+        : withExecutionActivity(userId, group.id, collectThreadsForContexts(group.id, contexts, spectator, handles));
     const running = threads.filter((thread) => thread.activity === 'running');
     return {
       id: group.id,
       activity: running.length ? 'running' : 'idle',
       threadCount: threads.length,
-      ...(threads.some(thread => thread.unread) ? { unreadThreadCount: threads.filter(thread => thread.unread).length } : {}),
+      ...(threads.some((thread) => thread.unread)
+        ? { unreadThreadCount: threads.filter((thread) => thread.unread).length }
+        : {}),
       ...overlay,
       ...(running.length && running.every((thread) => thread.activityStale) ? { activityStale: true } : {}),
     };
@@ -315,12 +314,17 @@ function collectThreadsForContexts(
   const plans: Plan[] = [];
   const sharedPlans: Plan[] = [];
   for (const ctx of ctxs) {
-    const perThread = decodeTimeRows<Pick<(typeof sessions)[number], 'id' | 'thread_id' | 'last_active' | 'created_at'>>(getDb()
-      .prepare(
-        `SELECT id, thread_id, last_active, created_at FROM sessions
+    const perThread = decodeTimeRows<
+      Pick<(typeof sessions)[number], 'id' | 'thread_id' | 'last_active' | 'created_at'>
+    >(
+      getDb()
+        .prepare(
+          `SELECT id, thread_id, last_active, created_at FROM sessions
        WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NOT NULL`,
-      )
-      .all(agentGroupId, ctx.messagingGroupId), ['last_active', 'created_at']);
+        )
+        .all(agentGroupId, ctx.messagingGroupId),
+      ['last_active', 'created_at'],
+    );
     for (const session of perThread) {
       if (session.thread_id === null) continue;
       plans.push({
@@ -382,15 +386,19 @@ function collectThreadsForContexts(
       const target = plan.mode === 'agent-shared' ? agentSummaries : out;
       target.push({
         ...thread,
+        liveTasks: thread.liveTasks?.map((task) => ({
+          ...task,
+          nextRunAt: parseTimestamp(task.nextRunAt),
+        })),
         activity: 'idle',
         sessionId: plan.session.id,
         messagingGroupId: ctx.messagingGroupId,
         sessionMode: plan.mode,
-        lastActivityAt:
-          thread.lastActivityAt ||
-          (plan.mode === 'per-thread'
-            ? plan.session.last_active || plan.session.created_at
-            : new Date(0).toISOString()),
+        lastActivityAt: thread.lastActivityAt
+          ? parseTimestamp(thread.lastActivityAt)
+          : plan.mode === 'per-thread'
+            ? parseTimestamp(plan.session.last_active ?? plan.session.created_at)
+            : null,
         counterparty: ctx.channelType === WEB_CHANNEL_TYPE ? undefined : thread.platformId,
         ...usage,
       });
@@ -406,7 +414,8 @@ function collectThreadsForContexts(
     const reply = scan.dmReplies.find((r) => r.channelType === ctx.channelType);
     const times = [...dms.map((dm) => dm.lastActivityAt), reply?.lastActivityAt || '']
       .filter(Boolean)
-      .sort((a, b) => Date.parse(normTs(b)) - Date.parse(normTs(a)));
+      .map((value) => parseTimestamp(value))
+      .sort((a, b) => b - a);
     const platformId = dms[dms.length - 1].platformId;
     dmSummaries.push({
       threadId: `__dm:${ctx.messagingGroupId}`,
@@ -416,7 +425,7 @@ function collectThreadsForContexts(
       platformId,
       sessionMode: 'shared',
       title: 'Direct messages',
-      lastActivityAt: times[0] || new Date(0).toISOString(),
+      lastActivityAt: times[0] ?? null,
       messageCount: dms.reduce((total, dm) => total + dm.messageCount, reply?.messageCount ?? 0),
       activity: 'idle',
       counterparty: platformId,
@@ -439,7 +448,7 @@ function collectThreadsForContexts(
   }
   for (const t of out) t.canSend = canSendByChannel.get(t.channelType) === true;
 
-  out.sort((a, b) => Date.parse(normTs(b.lastActivityAt)) - Date.parse(normTs(a.lastActivityAt)));
+  out.sort((a, b) => (b.lastActivityAt ?? -Infinity) - (a.lastActivityAt ?? -Infinity));
 
   // Deduplicate by threadId — keep the entry with the latest activity.
   // This can happen when the same thread_id exists under multiple
@@ -452,7 +461,7 @@ function collectThreadsForContexts(
     deduped.push(t);
   }
   if (stampForkLineage(agentGroupId, deduped)) {
-    deduped.sort((a, b) => Date.parse(normTs(b.lastActivityAt)) - Date.parse(normTs(a.lastActivityAt)));
+    deduped.sort((a, b) => (b.lastActivityAt ?? -Infinity) - (a.lastActivityAt ?? -Infinity));
   }
   return deduped;
 }
@@ -513,8 +522,8 @@ function stampForkLineage(agentGroupId: string, threads: ThreadSummary[]): boole
         fidelity: fork.fidelity,
         deleted: !liveParents.has(fork.parent_thread_id),
       };
-      if (Date.parse(normTs(fork.created_at)) > Date.parse(normTs(t.lastActivityAt))) {
-        t.lastActivityAt = fork.created_at;
+      if (t.lastActivityAt === null || parseTimestamp(fork.created_at) > t.lastActivityAt) {
+        t.lastActivityAt = parseTimestamp(fork.created_at);
         resorted = true;
       }
     }

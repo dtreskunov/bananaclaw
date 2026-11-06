@@ -1,6 +1,8 @@
 // Format helpers + markdown rendering. Returns plain strings/HTML —
 // components handle escaping via JSX prop interpolation when possible.
 import { marked } from 'marked';
+import type { EpochMs } from '../../../shared/time';
+import type { Group } from './types';
 
 // Open absolute (http/mailto/etc.) links rendered from markdown in a new
 // tab. Relative links are left alone — they get rewritten to in-app
@@ -62,32 +64,24 @@ export function fmtBytesShort(n: number | null | undefined): string {
   return (n / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-export function fmtRelative(ts: string | null | undefined): string {
-  if (!ts) return '';
-  const norm = ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z';
-  const t = Date.parse(norm);
-  if (!t) return '';
-  const sec = Math.max(0, (Date.now() - t) / 1000);
+export function fmtRelative(ts: EpochMs | null | undefined): string {
+  if (ts == null) return '';
+  const sec = Math.max(0, (Date.now() - ts) / 1000);
   if (sec < 60) return 'just now';
   if (sec < 3600) return Math.floor(sec / 60) + 'm';
   if (sec < 86400) return Math.floor(sec / 3600) + 'h';
   if (sec < 86400 * 7) return Math.floor(sec / 86400) + 'd';
-  return new Date(t).toLocaleDateString();
+  return new Date(ts).toLocaleDateString();
 }
 
-export function fmtAbsolute(ts: string | null | undefined): string {
-  if (!ts) return '';
-  const norm = ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z';
-  const t = Date.parse(norm);
-  if (!t) return '';
-  return new Date(t).toLocaleString();
+export function fmtAbsolute(ts: EpochMs | null | undefined): string {
+  return ts == null ? '' : new Date(ts).toLocaleString();
 }
 
-export function tsKey(s: string | null | undefined): number {
-  if (!s) return 0;
-  const norm = s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
-  const n = Date.parse(norm);
-  return Number.isFinite(n) ? n : 0;
+export function sortGroups(groups: Group[]): Group[] {
+  return groups
+    .slice()
+    .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0) || a.name.localeCompare(b.name));
 }
 
 export function parentPath(p: string): string {

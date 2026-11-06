@@ -42,10 +42,26 @@ import { getMarketplaceRecord, readMarketplaceRecords, type MarketplaceRecord } 
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { recordAdminAction } from './audit.js';
 import { listAvailableSkills } from './skill-catalog.js';
+import { parseTimestamp } from '../../shared/time.js';
 
 export interface SkillsAdminResult {
   status: number;
   body: unknown;
+}
+
+function catalogForUi<
+  T extends {
+    refreshedAt: string | null;
+    lastRefreshAttemptAt?: string | null;
+    addedAt?: string;
+  },
+>(catalog: T) {
+  return {
+    ...catalog,
+    refreshedAt: parseTimestamp(catalog.refreshedAt),
+    lastRefreshAttemptAt: parseTimestamp(catalog.lastRefreshAttemptAt),
+    ...(catalog.addedAt === undefined ? {} : { addedAt: parseTimestamp(catalog.addedAt) }),
+  };
 }
 
 function fail(err: unknown): SkillsAdminResult {
@@ -152,7 +168,7 @@ export function getSkillsOverview(gid?: string): SkillsAdminResult {
     status: 200,
     body: {
       skills: listAvailableSkills(group ? groupSkillRoots(group.folder) : undefined),
-      catalogs: [builtinCatalog(), ...(workspace ? [workspace] : []), ...listCatalogs()],
+      catalogs: [builtinCatalog(), ...(workspace ? [workspace] : []), ...listCatalogs()].map(catalogForUi),
     },
   };
 }
@@ -176,7 +192,7 @@ export function addCatalog(body: Record<string, unknown>, actorUserId: string): 
       targetId: record.id,
       payload: { repo: record.repo, ref: record.ref },
     });
-    return { status: 200, body: { catalog: record } };
+    return { status: 200, body: { catalog: catalogForUi(record) } };
   } catch (err) {
     return fail(err);
   }
@@ -192,14 +208,15 @@ export async function refreshCatalog(id: string, actorUserId: string): Promise<S
       targetId: id,
       payload: { commit: record.commit },
     });
-    return { status: 200, body: { catalog: record } };
+    return { status: 200, body: { catalog: catalogForUi(record) } };
   } catch (err) {
     const result = fail(err);
+    const current = getMarketplaceRecord(id);
     return {
       status: result.status,
       body: {
         error: err instanceof MarketplaceError ? err.message : 'internal_error',
-        catalog: getMarketplaceRecord(id),
+        catalog: current ? catalogForUi(current) : null,
       },
     };
   }
@@ -321,8 +338,8 @@ export async function discoverSkills(query: string): Promise<SkillsAdminResult> 
         source: string;
         catalogId: string | null;
         snapshot: { commit: string; ref: string } | null;
-        refreshedAt: string | null;
-        lastRefreshAttemptAt: string | null;
+        refreshedAt: number | null;
+        lastRefreshAttemptAt: number | null;
         lastRefreshError: string | null;
         skills: typeof result.skills;
       }
@@ -341,8 +358,8 @@ export async function discoverSkills(query: string): Promise<SkillsAdminResult> 
           source: skill.source,
           catalogId: catalog?.id ?? null,
           snapshot: catalog?.commit ? { commit: catalog.commit, ref: catalog.ref } : null,
-          refreshedAt: catalog?.refreshedAt ?? null,
-          lastRefreshAttemptAt: catalog?.lastRefreshAttemptAt ?? null,
+          refreshedAt: parseTimestamp(catalog?.refreshedAt),
+          lastRefreshAttemptAt: parseTimestamp(catalog?.lastRefreshAttemptAt),
           lastRefreshError: catalog?.lastRefreshError ?? null,
           skills: [],
         };
@@ -373,7 +390,7 @@ export async function discoverSkills(query: string): Promise<SkillsAdminResult> 
 export function previewRepo(repo: string): SkillsAdminResult {
   if (!repo) return { status: 400, body: { error: 'repo is required' } };
   try {
-    return { status: 200, body: { catalog: previewCatalog({ repo }) } };
+    return { status: 200, body: { catalog: catalogForUi(previewCatalog({ repo })) } };
   } catch (err) {
     return fail(err);
   }

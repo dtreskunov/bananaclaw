@@ -8,6 +8,7 @@ import {
   pendingMessageUrl,
 } from './pending-edit';
 import type { ActiveTurn, ChatMessage, Thread } from './types';
+import { protocolFetch } from './api';
 
 export function canCancelPendingMessage(
   message: ChatMessage,
@@ -79,7 +80,7 @@ export class PendingCancellation {
       return false;
     this.state.value = { ...this.state.value, busy: true, error: '' };
     try {
-      const response = await fetch(pendingMessageUrl(this.gid, this.thread, this.messageId), {
+      const response = await protocolFetch(pendingMessageUrl(this.gid, this.thread, this.messageId), {
         method: 'DELETE',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },

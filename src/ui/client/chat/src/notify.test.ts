@@ -53,6 +53,19 @@ afterEach(() => {
 });
 
 describe('shared client reload action', () => {
+  it('offers Reload when the service worker reports an incompatible API response', async () => {
+    const { sw } = setupRegistration(null);
+    const { initNotif } = await import('./notify');
+    const { toastMessage, chatReady, chatReloadRequired } = await import('./state');
+    chatReady.value = true;
+    initNotif();
+    await vi.waitFor(() => expect(sw.register).toHaveBeenCalledOnce());
+    sw.dispatchEvent(new MessageEvent('message', { data: { type: 'ui-reload-required' } }));
+    expect(toastMessage.value).toMatchObject({ text: 'App version changed', actionLabel: 'Reload' });
+    expect(chatReady.value).toBe(false);
+    expect(chatReloadRequired.value).toBe(true);
+  });
+
   it('uses the same Reload action for new versions and activates the worker before reloading once', async () => {
     const worker = new Worker('installed');
     const { reg, sw } = setupRegistration(worker);

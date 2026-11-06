@@ -694,14 +694,8 @@ function mimeFromKind(kind: PreviewKind): string | null {
   }
 }
 
-function formatMtime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString();
-  } catch {
-    return iso;
-  }
+function formatMtime(timestamp: number): string {
+  return new Date(timestamp).toLocaleString();
 }
 
 function renderMetaPanel(rows: [string, string][]): VNode {
@@ -735,7 +729,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
   if (p.size != null) fileRows.push(['Size', fmtBytes(p.size)]);
   const mimeOrKind = p.mime || mimeFromKind(p.kind);
   if (mimeOrKind) fileRows.push(['Type', mimeOrKind]);
-  if (p.mtime) fileRows.push(['Modified', formatMtime(p.mtime)]);
+  if (p.mtime != null) fileRows.push(['Modified', formatMtime(p.mtime)]);
   const tagRows: [string, string][] = p.tags
     ? Object.entries(p.tags).map<[string, string]>(([k, v]) => [k, String(v)])
     : [];

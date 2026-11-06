@@ -16,6 +16,7 @@ import { renderMarkdown } from '../utils';
 import { formatDuration as fmtDuration } from '../duration-format';
 import { highlightCode } from '../highlight';
 import type { TaskDetailDto } from '../../../../shared/thread';
+import { fmtNextRun, toDatetimeLocal, fromDatetimeLocal } from '../task-time';
 
 interface TasksResponse {
   tasks: TaskDetailDto[];
@@ -56,30 +57,6 @@ function humanizeCron(expr: string | null): string {
   return expr;
 }
 
-/** Future-aware relative label (fmtRelative clamps future times to "just now"). */
-function fmtNextRun(iso: string): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '';
-  const diff = t - Date.now();
-  if (diff <= 30 * 1000) return 'now';
-  const min = Math.round(diff / 60000);
-  if (min < 60) return `in ${min}m`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `in ${hr}h`;
-  const day = Math.round(hr / 24);
-  if (day < 7) return `in ${day}d`;
-  return new Date(t).toLocaleDateString();
-}
-
-/** ISO → `YYYY-MM-DDTHH:mm` in the browser's local zone, for a
- *  <input type="datetime-local">. Falls back to now when the time is missing. */
-function toDatetimeLocal(iso: string | null): string {
-  const t = iso ? Date.parse(iso) : NaN;
-  const d = Number.isFinite(t) ? new Date(t) : new Date();
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 /** Compact, view-only task card for list mode. Clicking the summary opens
  *  the focused single-task view. */
 function TaskCard({ task, onOpen }: { task: TaskDetailDto; onOpen: () => void }): JSX.Element {
@@ -90,7 +67,7 @@ function TaskCard({ task, onOpen }: { task: TaskDetailDto; onOpen: () => void })
       </button>
       <div class="task-meta">
         <span class="task-schedule">{humanizeCron(task.recurrence)}</span>
-        {task.nextRunAt ? (
+        {task.nextRunAt != null ? (
           <span class="task-next" title={new Date(task.nextRunAt).toLocaleString()}>
             next {fmtNextRun(task.nextRunAt)}
           </span>
@@ -144,12 +121,12 @@ function TaskSingle({
       const body: Record<string, unknown> = {};
       if (section === 'schedule') {
         if (schedKind === 'once') {
-          const ms = Date.parse(dtDraft);
-          if (!Number.isFinite(ms)) {
+          const ms = fromDatetimeLocal(dtDraft, task.nextRunAt);
+          if (ms === null) {
             setErr('Pick a valid date and time.');
             return;
           }
-          body.processAfter = new Date(ms).toISOString();
+          body.processAfter = ms;
           body.recurrence = null;
         } else {
           body.recurrence = draft.trim() ? draft.trim() : null;
@@ -292,6 +269,7 @@ function TaskSingle({
             {schedKind === 'once' ? (
               <input
                 type="datetime-local"
+                step="0.001"
                 value={dtDraft}
                 onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => setDtDraft(e.currentTarget.value)}
               />
@@ -314,7 +292,7 @@ function TaskSingle({
         ) : (
           <div class="task-sec-view task-meta">
             <span class="task-schedule">{humanizeCron(task.recurrence)}</span>
-            {task.nextRunAt ? (
+            {task.nextRunAt != null ? (
               <span class="task-next" title={new Date(task.nextRunAt).toLocaleString()}>
                 next {fmtNextRun(task.nextRunAt)}
               </span>

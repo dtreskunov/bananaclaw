@@ -2,6 +2,7 @@ import type { ComponentChildren, RefObject } from 'preact';
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { attachScrollEdges } from '../scroll-edges';
 import { RelativeTime } from './RelativeTime';
+import type { EpochMs } from '../../../../shared/time';
 
 interface Props {
   class: string;
@@ -13,7 +14,7 @@ interface Props {
   elementRef?: RefObject<HTMLDivElement>;
   reveal?: string;
   from?: string;
-  timestamp?: string;
+  timestamp?: EpochMs | null;
   metadata?: ComponentChildren;
   children: ComponentChildren;
 }
@@ -51,11 +52,11 @@ export function MessageBubble({
         match.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  const content = from || timestamp || metadata ? <>
+  const content = from || timestamp != null || metadata ? <>
     {from ? <div class="message-author">{from}</div> : null}
     {children}
-    {timestamp || metadata ? <div class="meta turn-info">
-      {timestamp ? <RelativeTime ts={timestamp} /> : null}
+    {timestamp != null || metadata ? <div class="meta turn-info">
+      {timestamp != null ? <RelativeTime ts={timestamp} /> : null}
       {metadata}
     </div> : null}
   </> : children;

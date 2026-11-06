@@ -1,3 +1,4 @@
+import { UiResponse as Response } from '../api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
 import { ErrorNotice } from './CredentialsParts';

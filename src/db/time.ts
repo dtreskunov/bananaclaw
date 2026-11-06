@@ -1,20 +1,10 @@
-/** SQLite instants are UTC epoch milliseconds; public records remain ISO strings. */
+import { parseTimestamp } from '../ui/shared/time.js';
+
+/** Provider/admin record boundaries remain ISO; UI-owned records use epoch milliseconds. */
 export function toEpoch(value: string): number;
 export function toEpoch(value: string | null | undefined): number | null;
 export function toEpoch(value: string | null | undefined): number | null {
-  if (value == null) return null;
-  if (/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d{1,3})?$/.test(value)) value = `${value.replace(' ', 'T')}Z`;
-  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(value)) {
-    throw new Error(`Invalid timestamp: ${value}`);
-  }
-  const date = value.slice(0, 10);
-  const time = value.slice(11, 19);
-  const normalized = new Date(`${date}T${time}Z`);
-  const epoch = Date.parse(value);
-  if (!Number.isSafeInteger(epoch) || normalized.toISOString().slice(0, 19) !== `${date}T${time}`) {
-    throw new Error(`Invalid timestamp: ${value}`);
-  }
-  return epoch;
+  return parseTimestamp(value);
 }
 
 export function fromEpoch(value: number): string;

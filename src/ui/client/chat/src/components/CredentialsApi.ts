@@ -1,4 +1,5 @@
 import { isOAuthScope, type OAuthAppConfiguration } from '../../../../shared/oauth-app';
+import { protocolFetch } from '../api';
 export type { OAuthAppConfiguration, OAuthScopeOptions } from '../../../../shared/oauth-app';
 
 export interface Service {
@@ -114,7 +115,7 @@ export async function credentialRequest<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(url, {
+  const response = await protocolFetch(url, {
     method,
     credentials: 'same-origin',
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },

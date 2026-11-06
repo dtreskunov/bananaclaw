@@ -21,7 +21,7 @@ const approval: PendingApprovalDto = {
   options: [],
   agentGroupId: 'agent',
   agentGroupName: 'Research agent',
-  createdAt: '2026-10-31T01:00:00Z',
+  createdAt: 1793408400000,
 };
 describe('shared approval bubble chrome', () => {
   beforeEach(() => {
@@ -40,7 +40,7 @@ describe('shared approval bubble chrome', () => {
     const resolved = {
       ...approval,
       status: 'approved' as const,
-      resolvedAt: '2026-10-31T01:01:00Z',
+      resolvedAt: 1793408460000,
       respondedBy: { userId: 'another-user', displayName: 'Another user' },
     };
     const node = ApprovalBubble({ approval: resolved, busy: false, onRespond: vi.fn() });

@@ -1,3 +1,4 @@
+import { uiHeaders } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, deleteThread, loadThreads } from './actions';
 import { groupId, threadId, threads, toastMessage } from './state';
@@ -44,6 +45,7 @@ describe('deleteThread', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        headers: uiHeaders,
         ok: true,
         status: 200,
         json: async () => ({ cancelledApprovals: 0 }),
@@ -64,7 +66,7 @@ describe('deleteThread', () => {
 
     expect(fetch).toHaveBeenCalledWith(
       'api/groups/agent/chat/resend%3Aagent%40example.com%3Aperson%40example.net%3Aroot?channel=resend&mg=mailbox&cancelApprovals=1',
-      { method: 'DELETE', credentials: 'same-origin' },
+      { method: 'DELETE', credentials: 'same-origin', headers: expect.any(Headers) },
     );
     expect(threads.value).toEqual([]);
   });
@@ -73,6 +75,7 @@ describe('deleteThread', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        headers: uiHeaders,
         ok: true,
         status: 200,
         json: async () => ({ cancelledApprovals: 0 }),
@@ -92,6 +95,7 @@ describe('deleteThread', () => {
     expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/web-thread?cancelApprovals=1', {
       method: 'DELETE',
       credentials: 'same-origin',
+      headers: expect.any(Headers),
     });
   });
 
@@ -114,6 +118,7 @@ describe('deleteThread', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        headers: uiHeaders,
         ok: true,
         status: 200,
         json: async () => ({ attention: [], approvals: [], threads: [latest], threadMessages: [] }),
@@ -154,7 +159,7 @@ describe('deleteThread', () => {
   });
 
   it('shows delete failures as shared error toasts', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 } as Response));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ headers: uiHeaders, ok: false, status: 500 } as Response));
     groupId.value = 'agent';
     const thread = testThread({
       threadId: 'web-thread',
@@ -174,6 +179,7 @@ describe('deleteThread', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        headers: uiHeaders,
         ok: true,
         status: 200,
         json: async () => ({ cancelledApprovals: 2 }),
@@ -188,6 +194,7 @@ describe('deleteThread', () => {
     expect(fetch).toHaveBeenCalledWith('api/groups/agent/chat/web-thread?cascade=1&cancelApprovals=1', {
       method: 'DELETE',
       credentials: 'same-origin',
+      headers: expect.any(Headers),
     });
     expect(threads.value).toEqual([]);
     expect(toastMessage.value).toMatchObject({
@@ -203,6 +210,7 @@ describe('deleteThread', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        headers: uiHeaders,
         ok: false,
         status: 409,
         json: async () => ({ detail }),

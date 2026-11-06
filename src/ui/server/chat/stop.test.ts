@@ -117,7 +117,7 @@ function connectConversation(
   });
   const req = Readable.from([]) as unknown as http.IncomingMessage;
   req.url = '/ui/chat/api/sync/ws';
-  req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
+  req.headers = { 'x-nanoclaw-ui-protocol': '16', cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
   handleChatUpgrade(req, new PassThrough(), Buffer.alloc(0));
   ws.emit(
     'message',
@@ -263,6 +263,7 @@ async function stop(
       callback();
     },
   }) as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((code: number) => {
     status = code;
     return res;
@@ -380,7 +381,7 @@ describe('native steering submissions', () => {
           questionId: 'q',
           text: responseType === 'skipped' ? 'Question skipped' : 'Yes',
           ...(responseType === 'skipped' ? { questionResponseType: 'skipped' } : {}),
-          timestamp: NOW,
+          timestamp: toEpoch(NOW),
           timelinePosition: 300,
         }),
       ]);
@@ -539,7 +540,11 @@ describe('durable input state history', () => {
       expect(socketView(frames).messages[0].timelinePosition).toBe(timelinePosition);
       await createWebAdapter().deliver('group:agent', 'thread-1', { id: 'out-test', kind: 'chat', content });
       expect(frames).toHaveLength(1);
-      expect(socketView(frames).messages[0]).toMatchObject({ id: 'out-test', timelinePosition, timestamp: NOW });
+      expect(socketView(frames).messages[0]).toMatchObject({
+        id: 'out-test',
+        timelinePosition,
+        timestamp: toEpoch(NOW),
+      });
       expect(history()[0].timelinePosition).toBe(timelinePosition);
     } finally {
       ws.emit('close');
@@ -564,7 +569,7 @@ describe('durable input state history', () => {
       const messages = history();
       expect(messages.map((message) => message.id)).toEqual(['a', 'out-a', 'b', 'out-b']);
       expect(messages.find((message) => message.id === 'b')).toMatchObject({
-        timestamp: NOW,
+        timestamp: toEpoch(NOW),
         timelinePosition: base + 3,
         canEditPending: false,
       });
@@ -728,7 +733,7 @@ describe('unified WebSocket upgrades', () => {
     const upgrade = vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation(() => {});
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.url = url;
-    req.headers = { origin: new URL(uiBaseUrl()).origin };
+    req.headers = { 'x-nanoclaw-ui-protocol': '16', origin: new URL(uiBaseUrl()).origin };
     const rejected = new PassThrough();
     let response = '';
     rejected.on('data', (data) => {
@@ -746,7 +751,7 @@ describe('unified WebSocket upgrades', () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Test server did not bind a TCP port');
     const client = new WebSocket(`ws://127.0.0.1:${address.port}/ui/chat/api/sync/ws`, {
-      headers: { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin },
+      headers: { 'x-nanoclaw-ui-protocol': '16', cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin },
     });
     try {
       await once(client, 'open');
@@ -763,7 +768,7 @@ describe('unified WebSocket upgrades', () => {
     const upgrade = vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation(() => {});
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.url = url;
-    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: 'https://other.example' };
+    req.headers = { 'x-nanoclaw-ui-protocol': '16', cookie: `${COOKIE_NAME}=test`, origin: 'https://other.example' };
     const rejected = new PassThrough();
     let response = '';
     rejected.on('data', (data) => {
@@ -1224,7 +1229,7 @@ describe('chat turn snapshots and events', () => {
         expect(socketView(frames).messages.find((message) => message.questionId === 'q')).toMatchObject({
           id: 'question-response:q',
           direction: 'in',
-          timestamp: NOW,
+          timestamp: toEpoch(NOW),
           text: 'yes',
         }),
       );
@@ -1249,7 +1254,11 @@ describe('chat turn snapshots and events', () => {
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.method = 'GET';
     req.url = '/ui/chat/api/sync?gid=agent&tid=thread-1&channel=web&mg=web-mg';
-    req.headers = { cookie: `${COOKIE_NAME}=test`, origin: new URL(uiBaseUrl()).origin };
+    req.headers = {
+      'x-nanoclaw-ui-protocol': '16',
+      cookie: `${COOKIE_NAME}=test`,
+      origin: new URL(uiBaseUrl()).origin,
+    };
     const chunks: Buffer[] = [];
     const res = new Writable({
       write(chunk, _encoding, callback) {
@@ -1257,6 +1266,7 @@ describe('chat turn snapshots and events', () => {
         callback();
       },
     }) as unknown as http.ServerResponse;
+    res.setHeader = vi.fn(() => res);
     res.writeHead = (() => res) as typeof res.writeHead;
     await handle(req, res);
     const body = JSON.parse(Buffer.concat(chunks).toString());

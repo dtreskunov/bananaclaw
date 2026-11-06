@@ -206,7 +206,17 @@ describe('catalog refresh endpoint', () => {
   it('waits for refresh and returns the new successful timestamp', async () => {
     const updated = { ...catalog, refreshedAt: '2026-09-23T20:30:00Z', lastRefreshError: null };
     vi.mocked(refreshMarketplace).mockResolvedValue(updated);
-    expect(await refreshCatalog(catalog.id, 'owner')).toEqual({ status: 200, body: { catalog: updated } });
+    expect(await refreshCatalog(catalog.id, 'owner')).toEqual({
+      status: 200,
+      body: {
+        catalog: {
+          ...updated,
+          addedAt: Date.parse(updated.addedAt),
+          refreshedAt: Date.parse(updated.refreshedAt),
+          lastRefreshAttemptAt: updated.lastRefreshAttemptAt ? Date.parse(updated.lastRefreshAttemptAt) : null,
+        },
+      },
+    });
     expect(recordAdminAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'skill_catalog_refresh' }));
   });
 
@@ -220,7 +230,15 @@ describe('catalog refresh endpoint', () => {
     vi.mocked(getMarketplaceRecord).mockReturnValue(retained);
     expect(await refreshCatalog(catalog.id, 'owner')).toEqual({
       status: 400,
-      body: { error: 'Repository not found', catalog: retained },
+      body: {
+        error: 'Repository not found',
+        catalog: {
+          ...retained,
+          addedAt: Date.parse(retained.addedAt),
+          refreshedAt: retained.refreshedAt === null ? null : Date.parse(retained.refreshedAt),
+          lastRefreshAttemptAt: Date.parse(retained.lastRefreshAttemptAt),
+        },
+      },
     });
     expect(recordAdminAction).not.toHaveBeenCalled();
   });

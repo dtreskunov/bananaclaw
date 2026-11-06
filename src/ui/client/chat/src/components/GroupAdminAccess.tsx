@@ -1,6 +1,7 @@
 import './GroupAdminAccess.css';
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
+import type { EpochMs } from '../../../../shared/time';
 
 import { apiPath, call, errMsg } from './GroupAdminApi';
 import { showToast } from './Toast';
@@ -19,7 +20,7 @@ interface RoleDto {
   displayName: string | null;
   primaryHandle: string | null;
   primaryChannel: string | null;
-  grantedAt: string;
+  grantedAt: EpochMs;
   grantedBy: string | null;
 }
 

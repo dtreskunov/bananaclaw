@@ -42,6 +42,7 @@ async function settings(method: string, body?: unknown) {
       done();
     },
   }) as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((status: number) => {
     res.statusCode = status;
     return res;

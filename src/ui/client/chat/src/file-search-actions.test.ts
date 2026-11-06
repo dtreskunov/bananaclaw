@@ -1,3 +1,4 @@
+import { UiResponse as Response, uiHeaders } from './api-test-fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearFileSearch,
@@ -43,6 +44,7 @@ function deferredResponse() {
 
 function responseWith(results: TreeEntry[], truncated = false): Response {
   return {
+    headers: uiHeaders,
     ok: true,
     status: 200,
     json: async () => ({ results, truncated }),
@@ -108,6 +110,7 @@ describe('searchFiles', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
+        headers: uiHeaders,
         ok: true,
         status: 200,
         json: async () => ({ entries: [] }),

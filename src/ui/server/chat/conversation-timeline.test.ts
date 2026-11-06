@@ -11,7 +11,7 @@ const turn: ConversationTurn = {
   id: 'turn',
   phase: 'running',
   outcome: 'pending',
-  startedAt: 'not-an-order-key',
+  startedAt: 0,
   endedAt: null,
   inputIds: ['ask'],
   outputIds: [],
@@ -23,12 +23,12 @@ const message = (id: string, direction: 'in' | 'out', timelinePosition: number):
   id,
   direction,
   timelinePosition,
-  timestamp: 'identical-or-invalid',
+  timestamp: 0,
   text: id,
 });
 const activity = (ordinal: number, timelinePosition: number) => ({
   ordinal,
-  ts: String(1000 - ordinal),
+  ts: 1000 - ordinal,
   text: `step ${ordinal}`,
   timelinePosition,
 });
@@ -256,7 +256,7 @@ describe('explicit host trace placement', () => {
         answeredAt: null,
         threadId: 'thread',
         agentGroupId: 'group',
-        createdAt: 'not-an-order-key',
+        createdAt: 0,
         response: null,
       },
     ];

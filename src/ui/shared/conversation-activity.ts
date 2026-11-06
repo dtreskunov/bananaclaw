@@ -39,11 +39,11 @@ export function conversationActivity(turn: ConversationTurn, activity = turn.act
   const lines: TraceLine[] = [...activity].sort((a, b) => a.timelinePosition - b.timelinePosition);
   const outcome = terminalOutcomeStep(turn);
   if (!outcome) return lines;
-  const endedAt = turn.endedAt ? Date.parse(turn.endedAt) : NaN;
+  const endedAt = turn.endedAt ?? NaN;
   return [
     ...lines,
     {
-      ts: Number.isFinite(endedAt) ? String(endedAt) : '',
+      ts: Number.isFinite(endedAt) ? endedAt : null,
       text: JSON.stringify(outcome),
     },
   ];
@@ -51,9 +51,9 @@ export function conversationActivity(turn: ConversationTurn, activity = turn.act
 
 /** When the turn was requested (its earliest submission), falling back to its start. */
 export function turnRequestedAt(turn: Pick<ConversationTurn, 'requestedAt' | 'startedAt'>): number {
-  const requestedAt = turn.requestedAt ? Date.parse(turn.requestedAt) : NaN;
+  const requestedAt = turn.requestedAt ?? NaN;
   if (Number.isFinite(requestedAt)) return requestedAt;
-  return turn.startedAt ? Date.parse(turn.startedAt) : NaN;
+  return turn.startedAt ?? NaN;
 }
 
 // Reported call starts are derived from end minus duration, so allow a little clock skew.
@@ -68,7 +68,7 @@ const CALL_START_SLACK_MS = 250;
  */
 export function turnModelTime(turn: ConversationTurn): Map<number, ModelTime> {
   const times = new Map<number, ModelTime>();
-  const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
+  const startedAt = turn.startedAt ?? NaN;
   if (!Number.isFinite(startedAt)) return times;
   const live = turn.phase !== 'settled';
   const entries = turn.activity
@@ -127,7 +127,7 @@ export function withModelTime(
       const modelTime = line.ordinal === undefined ? undefined : times.get(line.ordinal);
       return modelTime ? { ...line, modelTime } : line;
     });
-  const startedAt = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
+  const startedAt = turn.startedAt ?? NaN;
   if (!hostsStart || !Number.isFinite(startedAt)) return timed;
   const modelTime = times.get(TURN_START);
   // The readiness marker (or first model call) ends preparation.
@@ -152,7 +152,7 @@ export function withModelTime(
     status: text === STARTED_TURN_TEXT ? 'completed' : 'running',
     ...prepared,
   };
-  return [{ ts: String(startedAt), text: JSON.stringify(step), ...(modelTime ? { modelTime } : {}) }, ...timed];
+  return [{ ts: startedAt, text: JSON.stringify(step), ...(modelTime ? { modelTime } : {}) }, ...timed];
 }
 
 /** The synthetic start row; its execution time is the wait before the first model call. */

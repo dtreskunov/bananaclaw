@@ -51,6 +51,7 @@ import { initTestDb, closeDb, runMigrations, getDb } from '../../../db/index.js'
 import { addMember } from '../../../modules/permissions/db/agent-group-members.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { handle } from './routes.js';
+import { UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../shared/time.js';
 
 function now(): string {
   return new Date().toISOString();
@@ -78,6 +79,7 @@ function makeRes(): CapturedRes {
     },
   });
   const res = w as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((s: number) => {
     status = s;
     return res;
@@ -105,7 +107,7 @@ function makeReq(method: string, url: string, body?: unknown): http.IncomingMess
   const req = {
     method,
     url,
-    headers: { host: 'localhost', 'content-type': 'application/json' },
+    headers: { 'x-nanoclaw-ui-protocol': '16', host: 'localhost', 'content-type': 'application/json' },
     socket: { remoteAddress: '127.0.0.1' },
     [Symbol.asyncIterator]() {
       return {
@@ -155,7 +157,59 @@ afterEach(() => {
 });
 
 describe('GET /api/groups', () => {
-  it('serializes epoch activity timestamps as ISO strings for browser startup', async () => {
+  it('serves headerless native file loads while still gating JSON metadata and writes', async () => {
+    seedUser('web:owner');
+    grantRole({
+      user_id: 'web:owner',
+      role: 'owner',
+      agent_group_id: null,
+      granted_by: null,
+      granted_at: now(),
+    });
+    getDb()
+      .prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)')
+      .run('files', 'Files', 'files', toEpoch(now()));
+    fs.mkdirSync(path.join(TEST_GROUPS_DIR, 'files'));
+    fs.writeFileSync(path.join(TEST_GROUPS_DIR, 'files', 'note.txt'), 'read me');
+    mockUserId = 'web:owner';
+    for (const [method, url, status] of [
+      ['GET', '/ui/chat/api/groups/files/files/note.txt', 200],
+      ['GET', '/ui/chat/api/groups/files/files/note.txt?meta=1', 409],
+      ['PUT', '/ui/chat/api/groups/files/files/note.txt', 409],
+    ] as const) {
+      const req = makeReq(method, url);
+      delete req.headers[UI_PROTOCOL_HEADER.toLowerCase()];
+      const cap = makeRes();
+      await handle(req, cap.res);
+      await cap.done;
+      expect(cap.status()).toBe(status);
+      if (status === 200) expect(cap.raw()).toBe('read me');
+    }
+    expect(fs.readFileSync(path.join(TEST_GROUPS_DIR, 'files', 'note.txt'), 'utf8')).toBe('read me');
+  });
+
+  it.each([undefined, '15'])(
+    'rejects startup and mutations from UI protocol %s before handling them',
+    async (version) => {
+      for (const [method, url, body] of [
+        ['GET', '/ui/chat/api/groups', undefined],
+        ['POST', '/ui/chat/api/groups', { name: 'Must not create' }],
+      ] as const) {
+        const req = makeReq(method, url, body);
+        if (version === undefined) delete req.headers[UI_PROTOCOL_HEADER.toLowerCase()];
+        else req.headers[UI_PROTOCOL_HEADER.toLowerCase()] = version;
+        const cap = makeRes();
+        await handle(req, cap.res);
+        await cap.done;
+        expect(cap.status()).toBe(409);
+        expect(cap.body()).toEqual({ error: 'ui_protocol_mismatch', protocolVersion: UI_TIMESTAMP_PROTOCOL_VERSION });
+        expect(cap.res.setHeader).toHaveBeenCalledWith(UI_PROTOCOL_HEADER, String(UI_TIMESTAMP_PROTOCOL_VERSION));
+      }
+      expect(getDb().prepare('SELECT count(*) n FROM agent_groups').get()).toEqual({ n: 0 });
+    },
+  );
+
+  it('returns epoch activity timestamps with millisecond precision for browser startup', async () => {
     seedUser('web:owner');
     grantRole({
       user_id: 'web:owner',
@@ -177,13 +231,13 @@ describe('GET /api/groups', () => {
 
     const res = await call('GET', '/ui/chat/api/groups');
     expect(res.status()).toBe(200);
-    const body = res.body() as { groups: Array<{ id: string; lastActivityAt: string | null }> };
+    const body = res.body() as { groups: Array<{ id: string; lastActivityAt: number | null }> };
     expect(Object.fromEntries(body.groups.map((group) => [group.id, group.lastActivityAt]))).toEqual({
-      active: latest,
+      active: toEpoch(latest),
       'never-active': null,
     });
     for (const group of body.groups) {
-      if (group.lastActivityAt) expect(group.lastActivityAt.includes('T')).toBe(true);
+      if (group.lastActivityAt !== null) expect(Number.isSafeInteger(group.lastActivityAt)).toBe(true);
     }
   });
 

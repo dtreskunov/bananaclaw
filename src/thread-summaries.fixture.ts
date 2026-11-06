@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from './channels/homeassistant-text.js';
 import { readThreadTitle } from './modules/thread-titles/db.js';
-import type { LiveTaskDto } from './ui/shared/thread.js';
+import type { SummaryTask } from './thread-summaries.js';
 import { fromEpoch, decodeTimeRows } from './db/time.js';
 
 export interface ThreadScanSpec {
@@ -19,7 +19,7 @@ export interface ScannedThread {
   title: string;
   messageCount: number;
   lastActivityAt: string;
-  liveTasks?: LiveTaskDto[];
+  liveTasks?: SummaryTask[];
 }
 
 export interface SessionThreadScan {
@@ -121,26 +121,32 @@ export function scanThreadSession(dataDir: string, spec: ThreadScanSpec): Sessio
         )
         .get() as Pick<SessionThreadScan, 'totalCost' | 'totalTokens' | 'turnCount'>;
       const result: SessionThreadScan = { threads: [], owners: [], dms: [], dmReplies: [], ...usage };
-      const replies = decodeTimeRows<CountRow>(outbound
-        .prepare(
-          `SELECT channel_type, thread_id, COUNT(*) AS n, MAX(timestamp) AS max_ts
+      const replies = decodeTimeRows<CountRow>(
+        outbound
+          .prepare(
+            `SELECT channel_type, thread_id, COUNT(*) AS n, MAX(timestamp) AS max_ts
          FROM messages_out WHERE kind IN ('chat', 'text') GROUP BY channel_type, thread_id`,
-        )
-        .all(), ['max_ts']);
+          )
+          .all(),
+        ['max_ts'],
+      );
 
-      const groups = decodeTimeRows<CountRow>(spec.thread
-        ? (inbound
-            .prepare(
-              `SELECT channel_type, COUNT(*) AS n, MAX(timestamp) AS max_ts FROM messages_in
+      const groups = decodeTimeRows<CountRow>(
+        spec.thread
+          ? (inbound
+              .prepare(
+                `SELECT channel_type, COUNT(*) AS n, MAX(timestamp) AS max_ts FROM messages_in
            WHERE channel_type = ? AND thread_id = ?`,
-            )
-            .all(spec.thread.channelType, spec.thread.threadId) as CountRow[])
-        : (inbound
-            .prepare(
-              `SELECT channel_type, platform_id, thread_id, COUNT(*) AS n, MAX(timestamp) AS max_ts
+              )
+              .all(spec.thread.channelType, spec.thread.threadId) as CountRow[])
+          : (inbound
+              .prepare(
+                `SELECT channel_type, platform_id, thread_id, COUNT(*) AS n, MAX(timestamp) AS max_ts
            FROM messages_in GROUP BY channel_type, platform_id, thread_id`,
-            )
-            .all() as CountRow[]), ['max_ts']);
+              )
+              .all() as CountRow[]),
+        ['max_ts'],
+      );
 
       for (const group of groups) {
         if (!spec.thread && group.thread_id === null) {

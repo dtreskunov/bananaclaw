@@ -13,7 +13,7 @@ const question: PendingQuestionDto = {
   answeredAt: null,
   threadId: 'thread',
   agentGroupId: 'group',
-  createdAt: '2026-10-05T17:00:00Z',
+  createdAt: 1791219600000,
   timelinePosition: 100,
   response: null,
 };
@@ -22,7 +22,7 @@ const answer: ConversationMessage = {
   direction: 'in',
   text: 'Yes',
   questionId: 'q',
-  timestamp: 'later',
+  timestamp: 1791219660000,
 };
 describe('question input dock', () => {
   it('keeps pending and metadata-only answered prompts until an actual input answer is available', () => {

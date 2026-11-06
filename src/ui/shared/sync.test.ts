@@ -56,7 +56,7 @@ describe('global sync protocol', () => {
         messagingGroupId: 'mg',
         platformId: 'group:g',
         title: '',
-        lastActivityAt: '',
+        lastActivityAt: null,
         sessionMode: 'per-thread',
         messageCount: 0,
         activity: 'idle',

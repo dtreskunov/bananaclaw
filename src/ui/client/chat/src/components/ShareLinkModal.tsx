@@ -16,7 +16,7 @@ const DURATIONS: { label: string; minutes: number }[] = [
 
 interface ShareTokenResponse {
   url: string;
-  expiresAt: string;
+  expiresAt: number;
   ttlMinutes: number;
   uses: number;
   error?: string;
@@ -95,7 +95,7 @@ export function ShareLinkModal() {
     }
   }
 
-  const expiresLabel = result?.expiresAt ? new Date(result.expiresAt).toLocaleString() : null;
+  const expiresLabel = result?.expiresAt != null ? new Date(result.expiresAt).toLocaleString() : null;
   const navAny = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
 
   return (

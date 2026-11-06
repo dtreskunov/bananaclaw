@@ -39,7 +39,7 @@ async function call(
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const url = `/api/groups/${GROUP}/chat/${suffix}`;
   const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
-  Object.assign(req, { method, url, headers: { 'content-type': 'application/json' } });
+  Object.assign(req, { method, url, headers: { 'x-nanoclaw-ui-protocol': '16', 'content-type': 'application/json' } });
   const chunks: Buffer[] = [];
   const res = new Writable({
     write(chunk, _encoding, done) {
@@ -63,7 +63,10 @@ beforeEach(async () => {
   runMigrations(initTestDb());
   const db = getDb();
   for (const id of [USER, 'web:outsider']) {
-    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(id, toEpoch(new Date().toISOString()));
+    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(
+      id,
+      toEpoch(new Date().toISOString()),
+    );
   }
   db.prepare('INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)').run(
     GROUP,

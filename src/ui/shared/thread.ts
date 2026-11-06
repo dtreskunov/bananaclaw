@@ -1,3 +1,4 @@
+import type { EpochMs } from './time.js';
 /** Authorized thread-list entry; private routing and ownership checks stay on the host. */
 export type ThreadActivityState = 'idle' | 'running';
 
@@ -22,7 +23,7 @@ export interface ThreadSummary extends ActivityStatus {
   platformId: string;
   sessionMode: 'per-thread' | 'shared' | 'agent-shared';
   title: string;
-  lastActivityAt: string;
+  lastActivityAt: EpochMs | null;
   messageCount: number;
   counterparty?: string;
   /** Presentation hint, not send authorization. */
@@ -48,7 +49,7 @@ export type ChatStartResponse = Pick<ThreadSummary, 'threadId' | 'messagingGroup
 
 export interface LiveTaskDto {
   seriesId: string;
-  nextRunAt: string | null;
+  nextRunAt: EpochMs | null;
   recurrence: string | null;
   summary: string;
   paused: boolean;
@@ -57,7 +58,7 @@ export interface LiveTaskDto {
 export interface TaskDetailDto {
   seriesId: string;
   status: 'pending' | 'paused';
-  nextRunAt: string | null;
+  nextRunAt: EpochMs | null;
   recurrence: string | null;
   summary: string;
   prompt: string;
@@ -73,8 +74,8 @@ export interface TaskAttemptDto {
   taskMessageId: string;
   triggerSource: 'scheduled' | 'manual';
   status: 'running' | 'ready' | 'skipped' | 'failed' | 'timed_out' | 'completed';
-  startedAt: string;
-  completedAt: string | null;
+  startedAt: EpochMs;
+  completedAt: EpochMs | null;
   durationMs: number | null;
   exitCode: number | null;
   signal: string | null;

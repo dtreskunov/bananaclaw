@@ -54,7 +54,7 @@ import {
   userMenuOpen,
   credentialsOpen,
 } from './state';
-import { api, postJson, redirectToLogin } from './api';
+import { api, postJson, redirectToLogin, protocolFetch } from './api';
 import { clearApprovalMessage } from './approval-messages';
 import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
@@ -225,7 +225,7 @@ export async function deleteThread(
     params.set('cancelApprovals', '1');
     const query = params.toString();
     try {
-      const r = await fetch(
+      const r = await protocolFetch(
         `api/groups/${encodeURIComponent(groupId.value)}/chat/${encodeURIComponent(tid)}${query ? `?${query}` : ''}`,
         {
           method: 'DELETE',
@@ -314,7 +314,7 @@ export async function forkThreadAt(
   const gid = groupId.value;
   let created: { threadId: string } | null = null;
   try {
-    const r = await fetch(
+    const r = await protocolFetch(
       `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(thread.threadId)}/fork${query ? `?${query}` : ''}`,
       {
         method: 'POST',
@@ -669,7 +669,7 @@ export async function openChat(
   chatStatus.value = 'starting\u2026';
   let started: ChatStartResponse;
   try {
-    const r = await fetch(`api/groups/${encodeURIComponent(gid)}/chat/start`, {
+    const r = await protocolFetch(`api/groups/${encodeURIComponent(gid)}/chat/start`, {
       method: 'POST',
       credentials: 'same-origin',
     });
@@ -702,7 +702,7 @@ export async function openChat(
       platformId: started.platformId,
       sessionMode: 'per-thread',
       title: '(new thread)',
-      lastActivityAt: new Date().toISOString(),
+      lastActivityAt: Date.now(),
       messageCount: 0,
       activity: 'idle',
     },
@@ -825,7 +825,7 @@ export async function sendChat(
       clientMessageId: crypto.randomUUID(),
       text,
       files: files?.slice() ?? [],
-      timestamp: new Date().toISOString(),
+      timestamp: Date.now(),
       inputHandling,
       startsResponse: !turn,
     },
@@ -875,9 +875,9 @@ async function submitChatPacket(
       for (const f of files) {
         if (f.file) fd.append('file', f.file, f.name);
       }
-      res = await fetch(url, { method: 'POST', credentials: 'same-origin', body: fd });
+      res = await protocolFetch(url, { method: 'POST', credentials: 'same-origin', body: fd });
     } else {
-      res = await fetch(url, {
+      res = await protocolFetch(url, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -1146,9 +1146,9 @@ export async function previewAttachment(file: ChatMessageFile): Promise<void> {
   };
   let size = file.size;
   let mime = file.contentType || '';
-  let mtime: string | null = null;
+  let mtime: number | null = null;
   try {
-    const response = await fetch(file.url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' });
+    const response = await protocolFetch(file.url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' });
     if (!response.ok) {
       setPreview({
         kind: 'error',
@@ -1163,7 +1163,7 @@ export async function previewAttachment(file: ChatMessageFile): Promise<void> {
     const lastModified = response.headers.get('last-modified');
     if (lastModified) {
       const timestamp = Date.parse(lastModified);
-      if (Number.isFinite(timestamp)) mtime = new Date(timestamp).toISOString();
+      if (Number.isFinite(timestamp)) mtime = timestamp;
     }
     mime = response.headers.get('content-type') || mime;
   } catch {
@@ -1199,7 +1199,7 @@ export async function previewAttachment(file: ChatMessageFile): Promise<void> {
     return;
   }
   try {
-    const response = await fetch(file.url, { credentials: 'same-origin', cache: 'no-store' });
+    const response = await protocolFetch(file.url, { credentials: 'same-origin', cache: 'no-store' });
     if (!response.ok) {
       setPreview({ kind: 'error', text: `HTTP ${response.status}`, ...meta });
       return;
@@ -1256,7 +1256,7 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
   let size = entry.size;
   let mtime = entry.mtime;
   try {
-    const h = await fetch(url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' });
+    const h = await protocolFetch(url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' });
     if (h.status >= 400) {
       const msg = h.status === 404 ? 'File not found. It may have been renamed or deleted.' : `HTTP ${h.status}`;
       setPreview({ kind: 'error', text: msg, name: entry.name, url });
@@ -1266,11 +1266,11 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
       const cl = h.headers.get('content-length');
       if (cl) size = Number(cl);
     }
-    if (!mtime) {
+    if (mtime == null) {
       const lm = h.headers.get('last-modified');
       if (lm) {
         const t = Date.parse(lm);
-        if (t) mtime = new Date(t).toISOString();
+        if (Number.isFinite(t)) mtime = t;
       }
     }
   } catch {
@@ -1283,7 +1283,7 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
     if (ext === 'svg') {
       try {
-        const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+        const r = await protocolFetch(url, { credentials: 'same-origin', cache: 'no-store' });
         if (!r.ok) {
           setPreview({ kind: 'error', text: `HTTP ${r.status}`, ...meta });
           return;
@@ -1307,7 +1307,7 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
   else if (ext === 'pdf') setPreview({ kind: 'pdf', ...refreshableMeta() });
   else {
     try {
-      const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+      const r = await protocolFetch(url, { credentials: 'same-origin', cache: 'no-store' });
       if (!r.ok) {
         setPreview({ kind: 'error', text: `HTTP ${r.status}`, ...meta });
         return;
@@ -1343,7 +1343,7 @@ export async function selectFile(entry: Pick<TreeEntry, 'path' | 'name'> & Parti
 interface FileMetaResponse {
   name: string;
   size: number;
-  mtime: string;
+  mtime: number;
   etag: string;
   mime: string;
   ext: string;
@@ -1359,7 +1359,7 @@ async function fetchAndAttachMeta(p: string): Promise<void> {
     .filter(Boolean)
     .map(encodeURIComponent);
   const u = `api/groups/${encodeURIComponent(gid)}/files/${segs.join('/')}?meta=1`;
-  const r = await fetch(u, { credentials: 'same-origin', cache: 'no-store' });
+  const r = await protocolFetch(u, { credentials: 'same-origin', cache: 'no-store' });
   if (!r.ok) return;
   const data = (await r.json()) as FileMetaResponse;
   const cur = previewBlock.value;
@@ -1370,7 +1370,7 @@ async function fetchAndAttachMeta(p: string): Promise<void> {
     lyrics: data.lyrics || null,
     mime: data.mime || cur.mime,
     size: data.size ?? cur.size,
-    mtime: data.mtime || cur.mtime,
+    mtime: data.mtime ?? cur.mtime,
     etag: data.etag ?? cur.etag,
   };
   previewBlock.value = next;

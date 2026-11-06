@@ -54,7 +54,7 @@ function chipParts(g: Group, elevated: boolean): ChipParts {
   const parts: string[] = [];
   if (!g.isAdmin) parts.push('\uD83D\uDD12');
   if (isAdminOnly) parts.push('\uD83D\uDC41');
-  if (g.lastActivityAt) parts.push(fmtRelative(g.lastActivityAt));
+  if (g.lastActivityAt != null) parts.push(fmtRelative(g.lastActivityAt));
   const threadCount = agentActivity.value.find((activity) => activity.id === g.id)?.threadCount;
   if (threadCount) parts.push(`${threadCount} thr`);
   return { parts, isAdminOnly };
@@ -65,7 +65,7 @@ function tipFor(g: Group, isAdminOnly: boolean): string {
   const unread = agentActivity.value.find(activity => activity.id === g.id)?.unreadThreadCount;
   if (unread) parts.push(`${unread} unread ${unread === 1 ? 'conversation' : 'conversations'}`);
   if (isAdminOnly) parts.push('Visible to you as admin');
-  if (g.lastActivityAt) parts.push(fmtAbsolute(g.lastActivityAt));
+  if (g.lastActivityAt != null) parts.push(fmtAbsolute(g.lastActivityAt));
   return parts.join(' \u00B7 ');
 }
 

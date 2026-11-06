@@ -8,6 +8,7 @@ import {
 } from './conversation-protocol.js';
 import type { ThreadSummary, AgentGroupSummary } from './thread.js';
 import type { VoiceInputCapability } from './voice.js';
+import { isEpochMs } from './time.js';
 import { isAttentionTargets } from './attention.js';
 import { isConversationApproval } from './conversation-protocol.js';
 import { object, text, id, bool, number, integer, optional, nullable, array, oneOf, shape } from './validation.js';
@@ -103,7 +104,7 @@ const thread = shape({
   messagingGroupId: id,
   platformId: text,
   title: text,
-  lastActivityAt: text,
+  lastActivityAt: nullable(isEpochMs),
   sessionMode: oneOf('per-thread', 'shared', 'agent-shared'),
   messageCount: integer,
   activity: oneOf('idle', 'running'),
@@ -120,7 +121,7 @@ const thread = shape({
     array(
       shape({
         seriesId: id,
-        nextRunAt: nullable(text),
+        nextRunAt: nullable(isEpochMs),
         recurrence: nullable(text),
         summary: text,
         paused: bool,
@@ -143,8 +144,12 @@ const cursor = shape({ streamId: id, revision: integer });
 const voiceInput = shape({ backend: oneOf('disabled', 'elevenlabs'), ready: bool, reason: optional(text) });
 const groupState = shape({ threads: array(thread), voiceInput });
 const agentActivity = shape({
-  id, activity: oneOf('idle', 'running'), waiting: optional(bool),
-  activityStale: optional(bool), threadCount: optional(integer), unreadThreadCount: optional(integer),
+  id,
+  activity: oneOf('idle', 'running'),
+  waiting: optional(bool),
+  activityStale: optional(bool),
+  threadCount: optional(integer),
+  unreadThreadCount: optional(integer),
 });
 const globalState = shape({
   approvals: array(isConversationApproval),

@@ -1,3 +1,4 @@
+import { UiResponse as Response, uiHeaders } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearChat, respondInteraction, retryChatSend, sendChat } from './actions';
 import { approvalMessageDrafts } from './approval-messages';
@@ -52,7 +53,12 @@ beforeEach(() => {
     'fetch',
     vi
       .fn()
-      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ attention: [], ok: true, approvals: [] }) }),
+      .mockResolvedValue({
+        headers: uiHeaders,
+        ok: true,
+        status: 200,
+        json: async () => ({ attention: [], ok: true, approvals: [] }),
+      }),
   );
 });
 afterEach(() => {
@@ -483,7 +489,7 @@ describe('authoritative input dispositions', () => {
               id: 'input',
               direction: 'in',
               text: 'guide',
-              timestamp: '2026-09-29T00:00:01Z',
+              timestamp: 1790640001000,
               inputState: { messageId: 'input', status, turnId: testTurn.id },
             },
           ],
@@ -504,12 +510,12 @@ describe('authoritative input dispositions', () => {
     applyConversationFrame(
       testSnapshot({
         messages: [
-          { id: 'answer', direction: 'out', text: 'old', timestamp: '2026-09-29T00:00:02Z' },
+          { id: 'answer', direction: 'out', text: 'old', timestamp: 1790640002000 },
           {
             id: 'input',
             direction: 'in',
             text: 'queued',
-            timestamp: '2026-09-29T00:00:01Z',
+            timestamp: 1790640001000,
             inputState: { messageId: 'input', status: 'queued', queuedForNextTurn: true },
           },
         ],

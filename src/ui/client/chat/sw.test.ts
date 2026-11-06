@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
+import { UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../shared/time';
 
 type RenotifyPolicy = (deliveryOrigin: string | null, hasExistingNotification: boolean) => boolean;
 
@@ -20,6 +21,26 @@ function loadRenotifyPolicy(): RenotifyPolicy {
 describe('service worker notification cadence', () => {
   const shouldRenotify = loadRenotifyPolicy();
 
+  it.each([null, '15'])('signals a reload for protocol %j without consuming API data', async (version) => {
+    const source = fs.readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
+    const postMessage = vi.fn();
+    const fetch = vi.fn().mockResolvedValue({ ok: true, headers: { get: () => version } });
+    const sandbox: {
+      self: object;
+      fetch: typeof fetch;
+      request?: (url: string) => Promise<unknown>;
+    } = {
+      self: { addEventListener() {}, clients: { matchAll: async () => [{ postMessage }] } },
+      fetch,
+    };
+    vm.runInNewContext(`${source}\n;globalThis.request = apiFetch;`, sandbox);
+    await expect(sandbox.request!('/ui/chat/api/unread')).rejects.toThrow('Reload');
+    expect(fetch).toHaveBeenCalledWith('/ui/chat/api/unread', {
+      headers: { [UI_PROTOCOL_HEADER]: String(UI_TIMESTAMP_PROTOCOL_VERSION) },
+    });
+    expect(postMessage).toHaveBeenCalledWith({ type: 'ui-reload-required' });
+  });
+
   it('alerts for the first mid-turn update', () => {
     expect(shouldRenotify('send_message', false)).toBe(true);
   });
@@ -27,13 +48,21 @@ describe('service worker notification cadence', () => {
   describe('authoritative unread badges', () => {
     it('uses server thread counts, serializes refreshes and never clears just on focus', async () => {
       const source = fs.readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
-      const set = vi.fn(), clear = vi.fn();
-      const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ unreadThreadCount: 3 }) })
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ unreadThreadCount: 0 }) });
+      const set = vi.fn(),
+        clear = vi.fn();
+      const headers = { get: () => '16' };
+      const fetch = vi
+        .fn()
+        .mockResolvedValueOnce({ headers, ok: true, json: async () => ({ unreadThreadCount: 3 }) })
+        .mockResolvedValueOnce({ headers, ok: true, json: async () => ({ unreadThreadCount: 0 }) });
       const sandbox: {
-        self: object; fetch: typeof fetch; caches: object; refresh?: () => Promise<void>;
+        self: object;
+        fetch: typeof fetch;
+        caches: object;
+        refresh?: () => Promise<void>;
       } = {
-        self: { addEventListener() {}, navigator: { setAppBadge: set, clearAppBadge: clear } }, fetch,
+        self: { addEventListener() {}, navigator: { setAppBadge: set, clearAppBadge: clear } },
+        fetch,
         caches: { open: async () => ({ match: async () => ({}) }) },
       };
       vm.runInNewContext(`${source}\n;globalThis.refresh = refreshUnreadBadge;`, sandbox);
@@ -41,7 +70,11 @@ describe('service worker notification cadence', () => {
       await Promise.all([sandbox.refresh(), sandbox.refresh()]);
       expect(set).toHaveBeenCalledExactlyOnceWith(3);
       expect(clear).toHaveBeenCalledOnce();
-      expect(fetch).toHaveBeenCalledWith('/ui/chat/api/unread', { credentials: 'include', cache: 'no-store' });
+      expect(fetch).toHaveBeenCalledWith('/ui/chat/api/unread', {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'X-NanoClaw-UI-Protocol': '16' },
+      });
       const client = fs.readFileSync(new URL('./src/badge.ts', import.meta.url), 'utf8');
       expect(client).not.toContain('visibilitychange');
       expect(client).not.toContain('unread += 1');
@@ -49,9 +82,11 @@ describe('service worker notification cadence', () => {
     });
     it('does not call native badging for non-installed browser and embedded clients', async () => {
       const source = fs.readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
-      const native = vi.fn(), fetch = vi.fn();
+      const native = vi.fn(),
+        fetch = vi.fn();
       const sandbox: { self: object; fetch: typeof fetch; caches: object; refresh?: () => Promise<void> } = {
-        self: { addEventListener() {}, navigator: { setAppBadge: native, clearAppBadge: native } }, fetch,
+        self: { addEventListener() {}, navigator: { setAppBadge: native, clearAppBadge: native } },
+        fetch,
         caches: { open: async () => ({ match: async () => undefined }) },
       };
       vm.runInNewContext(`${source}\n;globalThis.refresh = refreshUnreadBadge;`, sandbox);

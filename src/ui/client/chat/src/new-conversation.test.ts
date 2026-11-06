@@ -1,3 +1,4 @@
+import { UiResponse as Response } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, selectGroup, startNewThread } from './actions';
 import { applyHash, parseHash } from './hash';
@@ -16,7 +17,7 @@ const latest = testThread({
   channelType: 'web',
   messagingGroupId: 'web-context',
   title: 'Existing conversation',
-  lastActivityAt: '',
+  lastActivityAt: null,
   messageCount: 2,
 });
 const blank: Thread = {
@@ -42,7 +43,7 @@ beforeEach(async () => {
   };
   vi.stubGlobal('history', browserHistory);
   vi.stubGlobal('requestAnimationFrame', vi.fn());
-  groups.value = [{ id: 'agent', name: 'Agent' }];
+  groups.value = [{ id: 'agent', name: 'Agent', lastActivityAt: null }];
   serverThreads = [latest];
   vi.stubGlobal(
     'fetch',

@@ -147,7 +147,7 @@ async function connect(
   waitForSnapshot = true,
 ) {
   const client = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`, {
-    headers: { Cookie: `${COOKIE_NAME}=${token}` },
+    headers: { 'x-nanoclaw-ui-protocol': '16', Cookie: `${COOKIE_NAME}=${token}` },
   });
   clients.push(client);
   client.on('message', (raw) => {
@@ -183,7 +183,7 @@ describe('unified sync WebSocket integration', () => {
         const received: SyncFrame[] = [];
         const cookie = createSession(user, 60_000).token;
         const client = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`, {
-          headers: { Cookie: `${COOKIE_NAME}=${cookie}` },
+          headers: { 'x-nanoclaw-ui-protocol': '16', Cookie: `${COOKIE_NAME}=${cookie}` },
         });
         clients.push(client);
         client.on('message', (raw) => received.push(parseSyncFrame(JSON.parse(raw.toString()))));
@@ -572,7 +572,7 @@ describe('unified sync WebSocket integration', () => {
 
   it('explicitly requests a reload for an outdated subscription protocol', async () => {
     const client = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`, {
-      headers: { Cookie: `${COOKIE_NAME}=${token}` },
+      headers: { 'x-nanoclaw-ui-protocol': '16', Cookie: `${COOKIE_NAME}=${token}` },
     });
     clients.push(client);
     await once(client, 'open');

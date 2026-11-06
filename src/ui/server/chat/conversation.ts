@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { decodeTimes, decodeTimeRows } from '../../../db/time.js';
+import { epochMs, parseTimestamp } from '../../shared/time.js';
 import { reduceActivityLines } from '../../../activity.js';
 import type { Question } from '../../../types.js';
 import type { ConversationApproval } from '../../shared/approval.js';
@@ -23,6 +23,10 @@ import { resolveTurnContext, routeMatches, type TurnContext } from './conversati
 import { renderedReadCursor } from './read-state.js';
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
+type StoredTurn = Omit<TurnRow, 'started_at' | 'ended_at'> & {
+  started_at: number | null;
+  ended_at: number | null;
+};
 
 function displayActivity(lines: ConversationTurn['activity']): ConversationTurn['activity'] {
   const groups = new Map<string, ConversationTurn['activity']>();
@@ -75,21 +79,21 @@ function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
 
 /** When the earliest submission answered by the turn arrived, never before the previous turn ended. */
 function turnRequestedAt(
-  turn: TurnRow,
-  previous: TurnRow | undefined,
+  turn: StoredTurn,
+  previous: StoredTurn | undefined,
   inputIds: string[],
   messages: ConversationMessage[],
-): string | null {
-  const startedAt = turn.started_at ? Date.parse(turn.started_at) : NaN;
+): number | null {
+  const startedAt = turn.started_at ?? NaN;
   if (!Number.isFinite(startedAt)) return null;
   const submitted = messages
     .filter((m) => m.direction === 'in' && inputIds.includes(m.id))
-    .map((m) => Date.parse(m.timestamp))
+    .map((m) => m.timestamp)
     .filter(Number.isFinite);
   if (!submitted.length) return null;
-  const previousEnd = previous?.ended_at ? Date.parse(previous.ended_at) : NaN;
+  const previousEnd = previous?.ended_at ?? NaN;
   const floor = Number.isFinite(previousEnd) && previousEnd <= startedAt ? previousEnd : -Infinity;
-  return new Date(Math.min(startedAt, Math.max(floor, Math.min(...submitted)))).toISOString();
+  return Math.min(startedAt, Math.max(floor, Math.min(...submitted)));
 }
 
 /** Pure synchronous read of host-owned state. The host is the only writer and cannot
@@ -104,21 +108,22 @@ export function projectConversation(
   signals: Signals,
   approvals: ConversationApproval[] = [],
 ): Conversation {
-  const records = outDb ? decodeTimeRows<TurnRow>(outDb.prepare('SELECT * FROM turns ORDER BY started_at, id').all(), ['started_at', 'ended_at']) : [];
+  const records = outDb ? (outDb.prepare('SELECT * FROM turns ORDER BY started_at, id').all() as StoredTurn[]) : [];
   const byId = new Map(records.map((turn) => [turn.id, turn]));
   for (const message of history) {
     if (message.turnId && !byId.has(message.turnId)) throw new Error('Missing conversation turn association');
   }
-  const owns = (turn: TurnRow) =>
+  const owns = (turn: StoredTurn) =>
     routeMatches(context, turn.origin_channel_type, turn.origin_platform_id, turn.origin_thread_id);
-  const unknown = (turn: TurnRow) =>
+  const unknown = (turn: StoredTurn) =>
     turn.provenance !== 'native' && turn.origin_channel_type === null && turn.origin_platform_id === null;
   const visibleQuestions = questions.filter((q) => routeMatches(context, q.channel_type, q.platform_id, q.thread_id));
   const questionAnchors = new Map(
     visibleQuestions.map((q) => [
       q.message_out_id,
-      decodeTimes<{ turn_id: string | null; content: string; timestamp: string } | undefined>(
-        outDb?.prepare('SELECT turn_id, content, timestamp FROM messages_out WHERE id = ?').get(q.message_out_id), ['timestamp']),
+      outDb?.prepare('SELECT turn_id, content, timestamp FROM messages_out WHERE id = ?').get(q.message_out_id) as
+        | { turn_id: string | null; content: string; timestamp: number }
+        | undefined,
     ]),
   );
   const messages: ConversationMessage[] = history
@@ -154,7 +159,7 @@ export function projectConversation(
       .all(turn.id) as Array<{
       message_out_id: string | null;
       ordinal: number;
-      ts: string;
+      ts: number;
       text: string;
       timeline_position: number;
     }>;
@@ -163,7 +168,7 @@ export function projectConversation(
       if (owned || (line.message_out_id !== null && visibleOutputIds.has(line.message_out_id)))
         trace.set(line.ordinal, {
           ordinal: line.ordinal,
-          ts: String(line.ts),
+          ts: line.ts,
           text: line.text,
           timelinePosition: line.timeline_position,
         });
@@ -173,7 +178,7 @@ export function projectConversation(
         if (line.turnId === turn.id && !trace.has(line.ordinal))
           trace.set(line.ordinal, {
             ordinal: line.ordinal,
-            ts: line.ts,
+            ts: epochMs(Number(line.ts)),
             text: line.text,
             timelinePosition: line.timelinePosition,
           });
@@ -235,7 +240,7 @@ export function projectConversation(
       ...q.input,
       status: legacyInteractionExpired(q) ? 'cancelled' : q.status,
       response: q.response,
-      answeredAt: q.responded_at,
+      answeredAt: parseTimestamp(q.responded_at),
       threadId: q.thread_id,
       agentGroupId: groupId,
       createdAt: anchor.timestamp,

@@ -21,7 +21,7 @@ const question: PendingQuestionDto = {
   answeredAt: null,
   threadId: 'thread',
   agentGroupId: 'group',
-  createdAt: '2026-10-05T17:00:00Z',
+  createdAt: 1791219600000,
   response: null,
 };
 const answer: ChatMessage = {
@@ -30,7 +30,7 @@ const answer: ChatMessage = {
   questionResponseType: 'text',
   direction: 'in',
   text: '**Tuesday**',
-  timestamp: '2026-10-05T17:01:00Z',
+  timestamp: 1791219660000,
 };
 
 afterEach(() => vi.restoreAllMocks());

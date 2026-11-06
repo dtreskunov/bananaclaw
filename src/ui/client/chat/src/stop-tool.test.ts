@@ -1,3 +1,4 @@
+import { UiResponse as Response } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyToolStopState, resetToolStops, stopActiveTool, toolStopRequest } from './stop-tool';
 import { applyTurnState, resetTurnState, stopActiveTurn } from './stop-turn';
@@ -21,7 +22,7 @@ function sync(options: { connected?: boolean; status?: 'running' | 'interrupted'
         phase: 'running',
         activity: ['target', 'sibling'].map((toolCallId, ordinal) => ({
           ordinal,
-          ts: '1000',
+          ts: 1000,
           timelinePosition: ordinal + 1,
           text: JSON.stringify({
             kind: 'tool',

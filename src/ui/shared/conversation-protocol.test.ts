@@ -28,8 +28,14 @@ const snapshot: ConversationSnapshot = {
 const next: Conversation = {
   ...empty,
   messages: [
-    { id: 'one', direction: 'in', text: 'input', timestamp: 'now', inputState: { messageId: 'one', status: 'queued' } },
-    { id: 'two', direction: 'out', text: 'output', timestamp: 'later' },
+    {
+      id: 'one',
+      direction: 'in',
+      text: 'input',
+      timestamp: 1767225600000,
+      inputState: { messageId: 'one', status: 'queued' },
+    },
+    { id: 'two', direction: 'out', text: 'output', timestamp: 1767225601000 },
   ],
   timeline: [
     { kind: 'message', messageId: 'one' },
@@ -45,6 +51,27 @@ const update: ConversationUpdate = {
   changes: diffConversation(empty, next),
 };
 describe('conversation protocol', () => {
+  it('accepts epoch zero and rejects string or imprecise timestamps before reducing snapshots', () => {
+    const frame = {
+      ...snapshot,
+      conversation: {
+        ...empty,
+        messages: [{ ...next.messages[0], timestamp: 0 }],
+        timeline: [{ kind: 'message', messageId: 'one' }],
+      },
+    };
+    expect(reduceConversation(null, parseConversationFrame(frame)).conversation.messages[0].timestamp).toBe(0);
+    for (const timestamp of ['2026-01-01T00:00:00Z', '0', 0.5, Infinity, 8640000000000001]) {
+      expect(() =>
+        parseConversationFrame({
+          ...frame,
+          conversation: { ...frame.conversation, messages: [{ ...next.messages[0], timestamp }] },
+        }),
+      ).toThrow('invalid_frame');
+    }
+    expect(() => parseConversationFrame({ ...frame, protocolVersion: 15 })).toThrow('Reload');
+  });
+
   it('patches and clears opaque rendered-content cursors without replacing transcript collections', () => {
     const withCursor = { ...empty, readCursor: { sessionId: 'session', key: 'a'.repeat(32) } };
     const changes = JSON.parse(JSON.stringify(diffConversation(empty, withCursor)));
@@ -54,8 +81,13 @@ describe('conversation protocol', () => {
     expect(applied.conversation.messages).toBe(empty.messages);
     const cleared = JSON.parse(JSON.stringify(diffConversation(withCursor, empty)));
     expect(cleared).toEqual({ readCursor: null });
-    expect(reduceConversation(applied, { ...update, baseRevision: 1, revision: 2, changes: cleared }).conversation.readCursor).toBeUndefined();
-    expect(() => parseConversationFrame({ ...update, changes: { readCursor: { sessionId: 'session', key: 12 } } })).toThrow('invalid_frame');
+    expect(
+      reduceConversation(applied, { ...update, baseRevision: 1, revision: 2, changes: cleared }).conversation
+        .readCursor,
+    ).toBeUndefined();
+    expect(() =>
+      parseConversationFrame({ ...update, changes: { readCursor: { sessionId: 'session', key: 12 } } }),
+    ).toThrow('invalid_frame');
   });
   it.each([2, 3])('requires protocol %s clients to reload for title-free questions', (protocolVersion) => {
     expect(() => parseConversationFrame({ ...snapshot, protocolVersion })).toThrow('Chat protocol changed');
@@ -76,7 +108,7 @@ describe('conversation protocol', () => {
           answeredAt: null,
           threadId: 't',
           agentGroupId: 'g',
-          createdAt: 'now',
+          createdAt: 1767225600000,
           response: null,
         },
       ],

@@ -27,10 +27,11 @@ async function report(body: unknown, origin = 'https://chat.example', raw = fals
   const req = Readable.from([Buffer.from(raw ? String(body) : JSON.stringify(body))]) as http.IncomingMessage;
   req.method = 'POST';
   req.url = '/ui/chat/api/groups/group/voice/diagnostics';
-  req.headers = { host: 'chat.example', origin, 'content-type': 'application/json' };
+  req.headers = { 'x-nanoclaw-ui-protocol': '16', host: 'chat.example', origin, 'content-type': 'application/json' };
   const res = new http.ServerResponse(req);
   let status = 0;
   let content = '';
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((code: number) => {
     status = code;
     return res;

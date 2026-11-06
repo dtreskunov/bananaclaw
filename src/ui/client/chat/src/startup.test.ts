@@ -1,5 +1,6 @@
+import { UiResponse as Response } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, UnauthorizedError } from './api';
+import { api, UnauthorizedError, UiProtocolError } from './api';
 import { loadStartupData, type StartupState } from './startup';
 
 function deferred<T>() {
@@ -36,6 +37,7 @@ describe('startup recovery', () => {
         search: '?settings=1',
         hash: '#g/group/t/thread',
         replace: redirect,
+        reload: vi.fn(),
       },
     });
     documentState = Object.assign(new EventTarget(), { hidden: false });
@@ -191,5 +193,29 @@ describe('startup recovery', () => {
     documentState.dispatchEvent(new Event('visibilitychange'));
     await vi.advanceTimersByTimeAsync(30_000);
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('offers reload instead of retrying a timestamp protocol mismatch', async () => {
+    const load = vi.fn().mockRejectedValue(new UiProtocolError());
+    await expect(loadStartupData(load, onState)).rejects.toBeInstanceOf(UiProtocolError);
+    const state = errorState(states);
+    expect(state.reloadRequired).toBe(true);
+    expect(state.message).toContain('Reload');
+    expect(vi.getTimerCount()).toBe(0);
+    browser.dispatchEvent(new Event('online'));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(load).toHaveBeenCalledOnce();
+    state.retry();
+    expect(window.location.reload).toHaveBeenCalledOnce();
+  });
+
+  it('uses the supplied worker-aware reload action on a protocol mismatch', async () => {
+    const reload = vi.fn();
+    await expect(loadStartupData(() => Promise.reject(new UiProtocolError()), onState, reload)).rejects.toBeInstanceOf(
+      UiProtocolError,
+    );
+    errorState(states).retry();
+    expect(reload).toHaveBeenCalledOnce();
+    expect(window.location.reload).not.toHaveBeenCalled();
   });
 });

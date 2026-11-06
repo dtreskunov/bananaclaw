@@ -1,7 +1,41 @@
-import { UnauthorizedError } from './api';
+import { api, UnauthorizedError, UiProtocolError } from './api';
 import { startConnectionTimeout } from './reconnect-countdown';
+import type { Group } from './types';
+import { isEpochMs } from '../../../shared/time';
 
-export type StartupState = { kind: 'loading' | 'redirecting' } | { kind: 'error'; message: string; retry: () => void };
+type BootstrapData = [{ displayName?: string; userId: string; isElevated?: boolean }, { groups: Group[] }];
+
+export async function loadBootstrap(signal: AbortSignal): Promise<BootstrapData> {
+  const [me, response] = await Promise.all([
+    api<BootstrapData[0]>('api/me', { signal }),
+    api<BootstrapData[1]>('api/groups', { signal }),
+  ]);
+  if (
+    !Array.isArray(response.groups) ||
+    response.groups.some(
+      (group) =>
+        !group ||
+        typeof group.id !== 'string' ||
+        typeof group.name !== 'string' ||
+        (group.lastActivityAt != null && !isEpochMs(group.lastActivityAt)),
+    )
+  ) {
+    throw new Error('The server returned invalid group data. Expected epoch-millisecond activity timestamps.');
+  }
+  return [
+    me,
+    {
+      ...response,
+      groups: response.groups.map((group) =>
+        group.lastActivityAt === undefined ? { ...group, lastActivityAt: null } : group,
+      ),
+    },
+  ];
+}
+
+export type StartupState =
+  | { kind: 'loading' | 'redirecting' }
+  | { kind: 'error'; message: string; retry: () => void; reloadRequired?: boolean };
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const RETRY_DELAY_MS = 5_000;
@@ -9,6 +43,7 @@ const RETRY_DELAY_MS = 5_000;
 export function loadStartupData<T>(
   load: (signal: AbortSignal) => Promise<T>,
   onState: (state: StartupState) => void,
+  reload: () => void = () => window.location.reload(),
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     let active: AbortController | null = null;
@@ -53,6 +88,13 @@ export function loadStartupData<T>(
           finished = true;
           cleanup();
           onState({ kind: 'redirecting' });
+          reject(error);
+          return;
+        }
+        if (error instanceof UiProtocolError) {
+          finished = true;
+          cleanup();
+          onState({ kind: 'error', message: error.message, reloadRequired: true, retry: reload });
           reject(error);
           return;
         }

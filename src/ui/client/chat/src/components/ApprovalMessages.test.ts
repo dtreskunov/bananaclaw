@@ -1,3 +1,4 @@
+import { UiResponse as Response } from '../api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection } from './CredentialsApi';
 import type { PendingApprovalDto } from '../types';
@@ -94,7 +95,7 @@ const approval: PendingApprovalDto = {
   ],
   agentGroupId: 'group',
   agentGroupName: 'Group',
-  createdAt: '2026-10-30T00:00:00Z',
+  createdAt: 1793318400000,
   supportsResponseMessage: true,
   origin: { agentGroupId: 'group', threadId: 'thread', channelType: 'web', messagingGroupId: 'web-mg' },
 };

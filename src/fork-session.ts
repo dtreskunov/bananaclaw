@@ -225,7 +225,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
     const anchor = findAnchor(srcIn, srcOut, agentGroupId, channelType, parentThreadId, anchorMessageId);
     cutTs = anchor.timestamp;
     const cutMs = toEpoch(cutTs);
-    const cutPosition = timelineSortKey(cutTs, anchor.timelinePosition);
+    const cutPosition = timelineSortKey(cutMs, anchor.timelinePosition);
     // Historical outbound timestamps can have whole-second resolution, so a reply written in
     // the same second as the inbound message it answers looks simultaneous.
     // When the user branches at their own message, resolve that ambiguity the
@@ -233,7 +233,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
     const keepOut = (r: Row): boolean => {
       const position = outboundTimelinePosition(String(r.content));
       if (anchor.timelinePosition !== undefined || position !== undefined) {
-        return timelineSortKey(fromEpoch(r.timestamp as number), position) <= cutPosition;
+        return timelineSortKey(r.timestamp as number, position) <= cutPosition;
       }
       const ms = r.timestamp as number;
       return anchor.direction === 'in' && Math.floor(cutMs / 1000) === Math.floor(ms / 1000) ? false : ms <= cutMs;
@@ -252,7 +252,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
       const state = readInputTimeline(srcOut, String(r.id));
       if (state?.status === 'cancelled' || isCancelledInputContent(String(r.content))) return false;
       if (state?.queuedForNextTurn && state.status === 'queued') return false;
-      return timelineSortKey(fromEpoch(r.timestamp as number), state?.timelinePosition) <= cutPosition;
+      return timelineSortKey(r.timestamp as number, state?.timelinePosition) <= cutPosition;
     });
 
     outRows = (
@@ -290,7 +290,9 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
       });
     }
     transcript.sort(
-      (a, b) => timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition),
+      (a, b) =>
+        timelineSortKey(toEpoch(a.timestamp), a.timelinePosition) -
+        timelineSortKey(toEpoch(b.timestamp), b.timelinePosition),
     );
 
     // A fork inherits the parent's title. The container only requests a title

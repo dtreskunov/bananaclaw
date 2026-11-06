@@ -8,7 +8,7 @@ const reply: ChatMessage = {
   id: 'reply',
   direction: 'out',
   text: 'Done',
-  ts: '',
+  ts: null,
   statsTurn: { ...testTurn, phase: 'settled', outcome: 'replied' },
   files: null,
 };

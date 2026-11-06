@@ -1,3 +1,4 @@
+import { UiResponse as Response, uiHeaders } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./components/Toast', () => ({ showToast: vi.fn(() => 42), dismissToastById: vi.fn() }));
 import { dismissToastById, showToast } from './components/Toast';
@@ -34,7 +35,7 @@ beforeEach(() => {
   Object.assign(documentEvents, { hasFocus: () => focused });
   vi.stubGlobal('document', documentEvents);
   vi.stubGlobal('window', windowEvents);
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ headers: uiHeaders, ok: true }));
 });
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();

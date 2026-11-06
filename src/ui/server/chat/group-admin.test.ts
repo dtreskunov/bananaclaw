@@ -85,6 +85,7 @@ function makeRes(): CapturedRes {
     },
   });
   const res = w as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((s: number) => {
     status = s;
     return res;
@@ -111,7 +112,7 @@ function makeReq(method: string, url: string, body?: unknown): http.IncomingMess
   return {
     method,
     url,
-    headers: { host: 'localhost', 'content-type': 'application/json' },
+    headers: { 'x-nanoclaw-ui-protocol': '16', host: 'localhost', 'content-type': 'application/json' },
     socket: { remoteAddress: '127.0.0.1' },
     [Symbol.asyncIterator]() {
       return {
@@ -428,7 +429,7 @@ describe('PATCH /api/groups/:gid/admin/mcp-servers', () => {
         remote: {
           type: 'http',
           url: 'https://example.com/mcp',
-          headers: { Authorization: 'Bearer x' },
+          headers: { 'x-nanoclaw-ui-protocol': '16', Authorization: 'Bearer x' },
         },
       },
     });

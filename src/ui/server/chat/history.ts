@@ -18,7 +18,6 @@ import { parseInputState, type InputHandling, type InputState } from '../../shar
 import { parseTimelinePosition, timelineSortKey } from '../../shared/timeline.js';
 import { inputStateKey, isCancelledInputContent } from '../../../input-timeline.js';
 import { isElevated, resolveTurnContext, viewerHandlesForChannel } from './conversation-context.js';
-import { fromEpoch } from '../../../db/time.js';
 export function parseInputHandling(value: unknown): InputHandling | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_input_handling');
@@ -185,7 +184,7 @@ export function readChatHistory(
             messages.push({
               direction: 'in',
               id,
-              timestamp: fromEpoch(r.timestamp),
+              timestamp: r.timestamp,
               text: '',
               inputState: { messageId: id, status: 'cancelled' },
             });
@@ -212,7 +211,7 @@ export function readChatHistory(
           messages.push({
             direction: 'in',
             id,
-            timestamp: fromEpoch(r.timestamp),
+            timestamp: r.timestamp,
             text,
             ...(parsed.questionId ? { questionId: parsed.questionId } : {}),
             ...(parsed.questionResponseType ? { questionResponseType: parsed.questionResponseType } : {}),
@@ -255,7 +254,7 @@ export function readChatHistory(
       // Reactions are `chat` rows with `operation:'reaction'` targeting a
       // prior message id. Collect them keyed by target so they fold onto the
       // target bubble after the loop instead of rendering as empty bubbles.
-      const reactionsByTarget = new Map<string, { emoji: string; ts: string }[]>();
+      const reactionsByTarget = new Map<string, { emoji: string; ts: number }[]>();
       const editsByTarget = new Map<string, string>();
 
       for (const r of rows) {
@@ -270,7 +269,7 @@ export function readChatHistory(
               direction: 'out',
               id: r.id,
               ...(r.turn_id ? { turnId: r.turn_id } : {}),
-              timestamp: fromEpoch(r.timestamp),
+              timestamp: r.timestamp,
             });
           }
           continue;
@@ -290,7 +289,7 @@ export function readChatHistory(
             // user's own messages find their target bubble.
             const target = publicInboundMessageId(c.messageId, groupId);
             const arr = reactionsByTarget.get(target) ?? [];
-            arr.push({ emoji: shortcodeToEmoji(c.emoji), ts: fromEpoch(r.timestamp) });
+            arr.push({ emoji: shortcodeToEmoji(c.emoji), ts: r.timestamp });
             reactionsByTarget.set(target, arr);
             continue;
           }
@@ -302,7 +301,7 @@ export function readChatHistory(
           ...parsed,
           direction: 'out',
           id: r.id,
-          timestamp: fromEpoch(r.timestamp),
+          timestamp: r.timestamp,
           ...(r.turn_id ? { turnId: r.turn_id } : {}),
         });
       }
@@ -390,7 +389,7 @@ export function readChatHistory(
         messages.push({
           direction: 'event',
           id: r.id,
-          timestamp: fromEpoch(r.process_after),
+          timestamp: r.process_after,
           text: `${subject} ${verb}${autoPaused ? ' and was auto-paused' : ''}: ${summary}`,
           event: {
             kind: 'task-run',

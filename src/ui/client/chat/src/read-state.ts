@@ -1,5 +1,6 @@
 import type { ReadCursor } from '../../../shared/read-state';
 import { dismissToastById, showToast } from './components/Toast';
+import { protocolFetch, UiProtocolError } from './api';
 
 interface ReadLog extends EventTarget {
   scrollHeight: number;
@@ -38,7 +39,7 @@ export function attachReadTracking(log: ReadLog, target: ReadTarget): () => void
       url += `?channel=${encodeURIComponent(target.channelType)}&mg=${encodeURIComponent(target.messagingGroupId)}`;
     const timeout = setTimeout(() => active.abort(), 10_000);
     try {
-      const response = await fetch(url, {
+      const response = await protocolFetch(url, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -57,6 +58,7 @@ export function attachReadTracking(log: ReadLog, target: ReadTarget): () => void
       if (request === null) return;
       if (
         !(error instanceof ReadAckError) &&
+        !(error instanceof UiProtocolError) &&
         !(error instanceof TypeError) &&
         !(error instanceof Error && error.name === 'AbortError')
       )

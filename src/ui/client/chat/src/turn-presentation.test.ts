@@ -1,3 +1,4 @@
+import { uiHeaders } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearChat, openChat, runSync } from './actions';
 import {
@@ -61,7 +62,10 @@ function update(next: Conversation): void {
 beforeEach(async () => {
   appearance.value = { preferences: { ...DEFAULT_APPEARANCE }, resolvedMode: 'light', error: null };
   vi.useFakeTimers();
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ attention: [], approvals: [] }) }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({ headers: uiHeaders, ok: true, json: async () => ({ attention: [], approvals: [] }) }),
+  );
   vi.spyOn(console, 'error').mockImplementation(() => {});
   threadId.value = null;
   sync = await installSyncFixture();
@@ -99,7 +103,7 @@ describe('authoritative turn presentation', () => {
           id: 'refresh-reply',
           direction: 'out',
           text: 'Done',
-          timestamp: '2026-09-29T00:00:02Z',
+          timestamp: 1790640002000,
           turnId: testTurn.id,
           deliveryOrigin: 'response',
           timelinePosition: 200,
@@ -115,7 +119,7 @@ describe('authoritative turn presentation', () => {
   });
 
   it('uses undecorated wire messages directly without timestamp or file reshaping', () => {
-    const message = { id: 'input', direction: 'in' as const, text: 'Hello', timestamp: '2026-11-03T00:00:00Z' };
+    const message = { id: 'input', direction: 'in' as const, text: 'Hello', timestamp: 1793664000000 };
     const view = testSnapshot({ messages: [message] }).conversation;
     const presented = conversationPresentation(view).messages[0];
     expect(presented).toBe(message);
@@ -125,7 +129,7 @@ describe('authoritative turn presentation', () => {
 
   it('resolves the supplied layout without parsing timestamps or fabricating messages', () => {
     const view = testSnapshot({
-      messages: [{ id: 'input', direction: 'in', text: 'ask', timestamp: 'invalid', timelinePosition: 50 }],
+      messages: [{ id: 'input', direction: 'in', text: 'ask', timestamp: 0, timelinePosition: 50 }],
       turns: [{ ...testTurn, inputIds: ['input'], startedAt: null }],
     }).conversation;
     const parse = vi.spyOn(Date, 'parse').mockImplementation(() => {
@@ -143,15 +147,15 @@ describe('authoritative turn presentation', () => {
       id: 'turn-0',
       phase: 'settled',
       outcome: 'replied',
-      endedAt: '2026-09-29T00:01:00Z',
+      endedAt: 1790640060000,
       inputIds: ['q0'],
       outputIds: ['a0'],
-      activity: [{ ordinal: 0, ts: '900', text: 'done', timelinePosition: 15 }],
+      activity: [{ ordinal: 0, ts: 900, text: 'done', timelinePosition: 15 }],
     };
     const messages = [
-      { id: 'q0', direction: 'in' as const, text: 'First', timestamp: '1', timelinePosition: 10 },
-      { id: 'a0', direction: 'out' as const, text: 'Answer', timestamp: '2', timelinePosition: 20 },
-      { id: 'q1', direction: 'in' as const, text: 'Second', timestamp: '3', timelinePosition: 30 },
+      { id: 'q0', direction: 'in' as const, text: 'First', timestamp: 1, timelinePosition: 10 },
+      { id: 'a0', direction: 'out' as const, text: 'Answer', timestamp: 2, timelinePosition: 20 },
+      { id: 'q1', direction: 'in' as const, text: 'Second', timestamp: 3, timelinePosition: 30 },
     ];
     const live = { ...testTurn, inputIds: ['q1'] };
     const byId = () => new Map(chatMessages.value.map((message) => [message.id, message]));
@@ -165,7 +169,7 @@ describe('authoritative turn presentation', () => {
       messages,
       turns: [
         settled,
-        { ...live, activity: [...live.activity, { ordinal: 1, ts: '1001', text: 'more', timelinePosition: 101 }] },
+        { ...live, activity: [...live.activity, { ordinal: 1, ts: 1001, text: 'more', timelinePosition: 101 }] },
       ],
     });
     const second = byId();
@@ -192,7 +196,7 @@ describe('authoritative turn presentation', () => {
   it('preserves an open disclosure through activity updates', () => {
     const steps = [0, 1].map((ordinal) => ({
       ordinal,
-      ts: String(1000 + ordinal),
+      ts: 1000 + ordinal,
       timelinePosition: 100 + ordinal,
       text: JSON.stringify({ kind: 'tool', id: `step-${ordinal}`, tool: 'bash', status: 'running' }),
     }));
@@ -209,7 +213,7 @@ describe('authoritative turn presentation', () => {
             ...steps,
             {
               ordinal: 2,
-              ts: '1002',
+              ts: 1002,
               timelinePosition: 102,
               text: JSON.stringify({ kind: 'tool', id: 'step-2', tool: 'read', status: 'running' }),
             },
@@ -224,9 +228,7 @@ describe('authoritative turn presentation', () => {
     toggleActivityTrace(traceId);
     const settled: Conversation = {
       ...initial,
-      messages: [
-        { id: 'reply', direction: 'out', turnId: testTurn.id, text: 'Done', timestamp: '2026-09-29T00:00:02Z' },
-      ],
+      messages: [{ id: 'reply', direction: 'out', turnId: testTurn.id, text: 'Done', timestamp: 1790640002000 }],
       turns: [{ ...testTurn, phase: 'settled', outcome: 'replied', outputIds: ['reply'] }],
       connection: { connected: true, activeTurnId: null },
     };
@@ -247,7 +249,7 @@ describe('authoritative turn presentation', () => {
       deliveryOrigin: 'send_message' as const,
       turnId: testTurn.id,
       text: 'Still working',
-      timestamp: '2026-09-29T00:00:02Z',
+      timestamp: 1790640002000,
       timelinePosition: 200,
     };
     const early = {
@@ -266,7 +268,7 @@ describe('authoritative turn presentation', () => {
 
     const tail = {
       ordinal: 1,
-      ts: String(Date.parse('2026-09-29T00:00:03Z')),
+      ts: 1790640003000,
       text: JSON.stringify({ kind: 'tool', id: 'tail', tool: 'bash', status: 'running' }),
       timelinePosition: 300,
     };
@@ -283,9 +285,7 @@ describe('authoritative turn presentation', () => {
   it('does not request completion scrolling for a settled reconnect snapshot', () => {
     const settled: Conversation = {
       ...initial,
-      messages: [
-        { id: 'old-reply', direction: 'out', turnId: testTurn.id, text: 'Done', timestamp: '2026-09-29T00:00:02Z' },
-      ],
+      messages: [{ id: 'old-reply', direction: 'out', turnId: testTurn.id, text: 'Done', timestamp: 1790640002000 }],
       turns: [{ ...testTurn, phase: 'settled', outcome: 'replied', outputIds: ['old-reply'] }],
       connection: { connected: true, activeTurnId: null },
     };
@@ -312,7 +312,7 @@ describe('authoritative turn presentation', () => {
       answeredAt: null,
       threadId: 'thread',
       agentGroupId: 'group',
-      createdAt: '2026-09-29T00:00:01Z',
+      createdAt: 1790640001000,
       response: null,
     };
     const asking: Conversation = presentedConversation({
@@ -326,7 +326,7 @@ describe('authoritative turn presentation', () => {
               text: 'Waiting',
               turnId: testTurn.id,
               deliveryOrigin: 'response',
-              timestamp: '2026-09-29T00:00:02Z',
+              timestamp: 1790640002000,
               timelinePosition: 200,
             },
           ]
@@ -348,7 +348,7 @@ describe('authoritative turn presentation', () => {
         {
           ...question,
           status: 'answered',
-          answeredAt: '2026-09-29T00:00:09Z',
+          answeredAt: 1790640009000,
           response: responseType === 'skipped' ? { responseType } : { responseType, value: 'Stale metadata' },
         },
       ],
@@ -363,7 +363,7 @@ describe('authoritative turn presentation', () => {
       questionId: 'q',
       text: responseType === 'skipped' ? 'Question skipped' : 'Yes',
       ...(responseType === 'skipped' ? { questionResponseType: 'skipped' as const } : {}),
-      timestamp: '2026-09-29T00:00:03Z',
+      timestamp: 1790640003000,
       timelinePosition: 300,
     };
     const answered: Conversation = presentedConversation({
@@ -413,14 +413,14 @@ describe('authoritative turn presentation', () => {
         answeredAt: null,
         threadId: 'thread',
         agentGroupId: 'group',
-        createdAt: '2026-09-29T00:00:01Z',
+        createdAt: 1790640001000,
         response: null,
       };
       const activity = recorded
         ? [
             {
               ordinal: 0,
-              ts: '1000',
+              ts: 1000,
               timelinePosition: 100,
               text: JSON.stringify({
                 kind: 'tool',
@@ -443,7 +443,7 @@ describe('authoritative turn presentation', () => {
             direction: 'out',
             turnId: testTurn.id,
             text: 'Waiting for your answer',
-            timestamp: '2026-09-29T00:00:02Z',
+            timestamp: 1790640002000,
             timelinePosition: 300,
             deliveryOrigin: 'response',
           },
@@ -561,7 +561,7 @@ describe('authoritative turn presentation', () => {
     };
     update(settled);
     expectSelection();
-    const next = { ...testTurn, id: 'turn-2', activity: [], startedAt: '2026-09-29T00:00:02Z' };
+    const next = { ...testTurn, id: 'turn-2', activity: [], startedAt: 1790640002000 };
     const view: Conversation = {
       ...settled,
       turns: [...settled.turns, next],
@@ -580,7 +580,7 @@ describe('authoritative turn presentation', () => {
           ...next,
           phase: 'settled',
           outcome: 'silent',
-          endedAt: '2026-09-29T00:00:05Z',
+          endedAt: 1790640005000,
         },
       ],
     });
@@ -677,7 +677,7 @@ describe('authoritative turn presentation', () => {
       activity: [
         {
           ordinal: 0,
-          ts: '1000',
+          ts: 1000,
           timelinePosition: 200,
           text: JSON.stringify({
             kind: 'notification',
@@ -785,7 +785,7 @@ describe('authoritative turn presentation', () => {
                 direction: 'out',
                 turnId: testTurn.id,
                 text: 'Progress',
-                timestamp: '',
+                timestamp: 0,
                 timelinePosition: 150,
                 deliveryOrigin: 'send_message',
               },
@@ -794,7 +794,7 @@ describe('authoritative turn presentation', () => {
                 direction: 'out',
                 turnId: testTurn.id,
                 text: 'Response',
-                timestamp: '',
+                timestamp: 0,
                 timelinePosition: 200,
                 deliveryOrigin: 'response',
                 ...(carrier === 'system-notice' ? { systemGenerated: true } : {}),
@@ -808,7 +808,7 @@ describe('authoritative turn presentation', () => {
             ...testTurn,
             phase: 'settled',
             outcome: 'warning',
-            endedAt: '2026-09-29T00:00:02Z',
+            endedAt: 1790640002000,
             outputIds: messages.map((message) => message.id),
           },
         ],
@@ -850,7 +850,7 @@ describe('authoritative turn presentation', () => {
         turnId: testTurn.id,
         direction: 'out',
         text: id,
-        timestamp: '2026-09-29T00:00:02Z',
+        timestamp: 1790640002000,
       })),
       connection: { connected: true, activeTurnId: null },
     };

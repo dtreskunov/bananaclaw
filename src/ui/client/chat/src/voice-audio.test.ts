@@ -1,3 +1,4 @@
+import { uiHeaders } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureVoice, reportVoiceDiagnostic, voiceBrowserReason } from './voice-audio';
 import type { VoiceDiagnostic } from '../../../shared/voice';
@@ -56,14 +57,14 @@ describe('voice diagnostic delivery', () => {
   };
 
   it('uses an authenticated same-origin keepalive request so disconnects can still be diagnosed', async () => {
-    const fetch = vi.fn().mockResolvedValue({ ok: true });
+    const fetch = vi.fn().mockResolvedValue({ headers: uiHeaders, ok: true });
     vi.stubGlobal('fetch', fetch);
     const reporting = reportVoiceDiagnostic('a/b', diagnostic);
     expect(fetch).toHaveBeenCalledWith('/ui/chat/api/groups/a%2Fb/voice/diagnostics', {
       method: 'POST',
       credentials: 'same-origin',
       keepalive: true,
-      headers: { 'Content-Type': 'application/json' },
+      headers: expect.any(Headers),
       body: JSON.stringify(diagnostic),
     });
     await reporting;
@@ -72,7 +73,7 @@ describe('voice diagnostic delivery', () => {
   it.each([false, true])('reports failed diagnostic delivery safely (network failure: %s)', async (networkFailure) => {
     const fetch = vi.fn();
     if (networkFailure) fetch.mockRejectedValue(new Error('private network error'));
-    else fetch.mockResolvedValue({ ok: false, status: 403 });
+    else fetch.mockResolvedValue({ headers: uiHeaders, ok: false, status: 403 });
     vi.stubGlobal('fetch', fetch);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     reportVoiceDiagnostic('g', diagnostic);

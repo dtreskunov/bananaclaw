@@ -81,10 +81,11 @@ async function request(method: string, url: string, body?: unknown) {
   const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]) as http.IncomingMessage;
   req.method = method;
   req.url = url;
-  req.headers = { host: 'localhost', 'content-type': 'application/json' };
+  req.headers = { 'x-nanoclaw-ui-protocol': '16', host: 'localhost', 'content-type': 'application/json' };
   const res = new http.ServerResponse(req);
   let status = 0;
   let content = '';
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((code: number) => {
     status = code;
     return res;
@@ -258,7 +259,7 @@ describe('typed responses through the existing endpoint', () => {
         questionId: 'q',
         questionResponseType: 'skipped',
         text: 'Question skipped',
-        timestamp: saved?.responded_at,
+        timestamp: saved?.responded_at ? toEpoch(saved.responded_at) : null,
       }),
     ]);
     expect(runtime.wake).toHaveBeenCalled();

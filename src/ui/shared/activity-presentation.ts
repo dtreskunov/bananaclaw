@@ -1,3 +1,4 @@
+import type { EpochMs } from './time.js';
 export interface TraceStep {
   kind?: 'tool' | 'internal' | 'file' | 'patch' | 'retry' | 'compaction' | 'subtask' | 'notification' | 'model';
   id?: string;
@@ -42,7 +43,7 @@ export interface ModelTime {
   since?: number;
 }
 export interface TraceLine {
-  ts: string;
+  ts: EpochMs | null;
   text: string;
   ordinal?: number;
   modelTime?: ModelTime;

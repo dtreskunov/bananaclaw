@@ -38,7 +38,7 @@ describe('activity panel expansion', () => {
       id: 'reply',
       direction: 'out',
       text: 'Done',
-      timestamp: '',
+      timestamp: 0,
       turnId: testTurn.id,
       activity: [],
     };

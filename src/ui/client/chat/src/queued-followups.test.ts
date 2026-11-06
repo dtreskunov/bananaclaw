@@ -3,8 +3,8 @@ import { testSnapshot } from './conversation-test-fixtures';
 import { isQueuedFollowup, splitPendingInputs, splitQueuedFollowups } from './queued-followups';
 import type { ChatMessage } from './types';
 
-const sent = '2026-09-26T00:00:00Z';
-const base = Date.parse(sent) * 1000;
+const sent = 1790380800000;
+const base = sent * 1000;
 function message(id: string, direction: ChatMessage['direction'], timelinePosition?: number): ChatMessage {
   return { id, direction, timelinePosition, text: id, timestamp: sent };
 }
@@ -104,7 +104,7 @@ describe('queued follow-up timeline', () => {
     const steering = { ...followup('steer'), inputState: { messageId: 'steer', status: 'steering' as const } };
     expect(isQueuedFollowup(initial)).toBe(false);
     expect(ids(layout([initial, steering, message('legacy', 'out')]).transcript)).toEqual(['idle', 'steer', 'legacy']);
-    const legacy = [message('later', 'in'), { ...message('earlier', 'out'), timestamp: '2026-09-25 23:59:59' }];
+    const legacy = [message('later', 'in'), { ...message('earlier', 'out'), timestamp: 1790380799000 }];
     expect(ids(layout(legacy).transcript)).toEqual(['earlier', 'later']);
   });
   it('keeps the queue through Stop and promotes only the consumed successor', () => {

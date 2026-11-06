@@ -7,13 +7,15 @@ Orientation for the data model: the three databases, how they fit together, and 
 
 Related: [architecture.md](architecture.md) for the high-level design; [api-details.md](api-details.md) for inbound/outbound message content shapes; [isolation-model.md](isolation-model.md) for channel-to-agent wiring modes.
 
-Maintained SQL instants use INTEGER UTC epoch milliseconds; API and session-link
-records retain strings. All stores are version-gated, including optional native
+Maintained SQL instants and UI-owned API/state timestamps use INTEGER UTC epoch
+milliseconds. Provider, channel and session-link records retain their existing
+string boundaries. All stores are version-gated, including optional native
 provider state and the search index. Existing stores require the
 [explicit offline cutover](db-storage-cutover.md), never startup conversion.
-The groups API's `lastActivityAt` remains an ISO string or null, including
-timestamps selected through SQL aggregates; stored integers must not leak into
-browser startup data.
+UI protocol 16 carries numeric timestamps (including `lastActivityAt`) and null
+for missing values. UI HTTP requests and responses exchange the
+`X-NanoClaw-UI-Protocol` version header before startup data is consumed; the
+sync socket also requires protocol 16.
 
 ---
 

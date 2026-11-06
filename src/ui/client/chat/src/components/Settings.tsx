@@ -12,6 +12,8 @@ import { showToast } from './Toast';
 import { requestConfirm } from './PromptModal';
 import { BRAND } from '../brand';
 import type { Identity } from '../types';
+import type { EpochMs } from '../../../../shared/time';
+import { protocolFetch } from '../api';
 import { MobileDialog } from './MobileDialog';
 import { AppearanceSettings } from './AppearanceSettings';
 
@@ -20,11 +22,11 @@ const API = '/ui/settings/api';
 interface JResp<T = unknown> { ok: boolean; status: number; data: T }
 
 async function jget<T = Record<string, unknown>>(p: string): Promise<JResp<T>> {
-  const r = await fetch(p, { credentials: 'same-origin' });
+  const r = await protocolFetch(p, { credentials: 'same-origin' });
   return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) as T };
 }
 async function jsend<T = Record<string, unknown>>(p: string, method: string, body?: unknown): Promise<JResp<T>> {
-  const r = await fetch(p, {
+  const r = await protocolFetch(p, {
     method,
     credentials: 'same-origin',
     headers: body ? { 'Content-Type': 'application/json' } : {},
@@ -38,8 +40,11 @@ function chanLabel(c: string): string {
   return m ? `${m.icon} ${m.label}` : c;
 }
 
+interface SettingsIdentity extends Identity {
+  verified_at: EpochMs | null;
+}
 interface IdentitiesResponse {
-  identities?: Identity[];
+  identities?: SettingsIdentity[];
   deepLinkChannels?: string[];
   availableChannels?: string[];
 }
@@ -47,7 +52,7 @@ interface ChallengeResponse {
   challengeId: string;
   channel: string;
   handle: string;
-  expiresAt: string;
+  expiresAt: EpochMs;
   deepLink?: string;
   message?: string;
   error?: string;
@@ -67,14 +72,14 @@ interface NotificationHealthResponse {
 
 export function Settings() {
   const open = settingsOpen.value;
-  const [identities, setIdentities] = useState<Identity[]>([]);
+  const [identities, setIdentities] = useState<SettingsIdentity[]>([]);
   const [channels, setChannels] = useState<string[]>([]);
   const [deepLinkChannels, setDeepLinkChannels] = useState<string[]>([]);
   const [chan, setChan] = useState<string>('');
   const [handle, setHandle] = useState<string>('');
   const [code, setCode] = useState<string>('');
-  const [challenge, setChallenge] = useState<{ id: string; channel: string; handle: string; expiresAt: string } | null>(null);
-  const [deepLink, setDeepLink] = useState<{ id: string; channel: string; url: string; expiresAt: string } | null>(null);
+  const [challenge, setChallenge] = useState<{ id: string; channel: string; handle: string; expiresAt: EpochMs } | null>(null);
+  const [deepLink, setDeepLink] = useState<{ id: string; channel: string; url: string; expiresAt: EpochMs } | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState<string>('');

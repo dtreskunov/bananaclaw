@@ -46,6 +46,7 @@ function makeRes(): { res: http.ServerResponse; done: Promise<void>; status: () 
     },
   });
   const res = writable as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((nextStatus: number) => {
     status = nextStatus;
     return res;
@@ -113,12 +114,55 @@ afterEach(() => {
 });
 
 describe('POST chat task run', () => {
+  it.each([0, 1793934000123])('updates scheduled instants using exact epoch milliseconds %s', async (processAfter) => {
+    const pathname = `/api/groups/${GROUP_ID}/chat/${THREAD_ID}/tasks/${SERIES_ID}`;
+    const req = Readable.from([Buffer.from(JSON.stringify({ processAfter }))]) as http.IncomingMessage;
+    req.method = 'PATCH';
+    req.url = pathname;
+    req.headers = { 'x-nanoclaw-ui-protocol': '16' };
+    const captured = makeRes();
+    expect(await handleChatRequest(req, captured.res, pathname, USER_ID)).toBe(true);
+    await captured.done;
+    expect(captured.status()).toBe(200);
+    const db = new Database(inboundDbPath(GROUP_ID, SESSION_ID), { readonly: true });
+    try {
+      expect(db.prepare('SELECT process_after FROM messages_in WHERE id=?').get(SERIES_ID)).toEqual({
+        process_after: processAfter,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each(['2026-11-06T03:00:00Z', 0.5, null, 8640000000000001])(
+    'rejects invalid scheduled timestamp %s without changing the task',
+    async (processAfter) => {
+      const pathname = `/api/groups/${GROUP_ID}/chat/${THREAD_ID}/tasks/${SERIES_ID}`;
+      const req = Readable.from([Buffer.from(JSON.stringify({ processAfter }))]) as http.IncomingMessage;
+      req.method = 'PATCH';
+      req.url = pathname;
+      req.headers = { 'x-nanoclaw-ui-protocol': '16' };
+      const captured = makeRes();
+      expect(await handleChatRequest(req, captured.res, pathname, USER_ID)).toBe(true);
+      await captured.done;
+      expect(captured.status()).toBe(400);
+      const db = new Database(inboundDbPath(GROUP_ID, SESSION_ID), { readonly: true });
+      try {
+        expect(db.prepare('SELECT process_after FROM messages_in WHERE id=?').get(SERIES_ID)).toEqual({
+          process_after: toEpoch('2026-08-17T12:00:00.000Z'),
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
   it('creates a distinct manual occurrence and leaves the schedule unchanged', async () => {
     const pathname = `/api/groups/${GROUP_ID}/chat/${THREAD_ID}/tasks/${SERIES_ID}/run`;
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.method = 'POST';
     req.url = pathname;
-    req.headers = {};
+    req.headers = { 'x-nanoclaw-ui-protocol': '16' };
     const captured = makeRes();
 
     expect(await handleChatRequest(req, captured.res, pathname, USER_ID)).toBe(true);

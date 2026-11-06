@@ -408,7 +408,7 @@ async function handleFileWrite(
     const etag = fileEtag(created);
     res.setHeader('ETag', etag);
     recordAccess({ userId, groupId, path: relPath, action: 'write', req });
-    writeJson(res, 201, { ok: true, path: relPath, size: created.size, mtime: created.mtime.toISOString(), etag });
+    writeJson(res, 201, { ok: true, path: relPath, size: created.size, mtime: Math.floor(created.mtimeMs), etag });
     return true;
   }
   let st: fs.Stats;
@@ -452,7 +452,7 @@ async function handleFileWrite(
   const etag = fileEtag(after);
   res.setHeader('ETag', etag);
   recordAccess({ userId, groupId, path: relPath, action: 'write', req });
-  writeJson(res, 200, { ok: true, path: relPath, size: after.size, mtime: after.mtime.toISOString(), etag });
+  writeJson(res, 200, { ok: true, path: relPath, size: after.size, mtime: Math.floor(after.mtimeMs), etag });
   return true;
 }
 

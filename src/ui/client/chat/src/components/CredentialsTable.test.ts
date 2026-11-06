@@ -1,3 +1,4 @@
+import { UiResponse as Response } from '../api-test-fixtures';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, CredentialGroup } from './CredentialsApi';
 import { CredentialAction, CredentialName, CredentialRow, CredentialsTable } from './CredentialsTable';

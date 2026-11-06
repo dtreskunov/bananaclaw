@@ -1,3 +1,4 @@
+import type { EpochMs } from './time.js';
 export interface ApprovalOrigin {
   agentGroupId: string;
   threadId: string;
@@ -9,7 +10,7 @@ interface InteractionIdentity {
   id: string;
   agentGroupId: string | null;
   agentGroupName: string | null;
-  createdAt: string;
+  createdAt: EpochMs;
 }
 
 interface InteractionContext {
@@ -29,7 +30,7 @@ export interface ConfirmationInteraction extends InteractionIdentity, Interactio
   supportsResponseMessage: boolean;
   status: 'pending' | 'applying' | 'approved' | 'rejected' | 'failed' | 'cancelled' | 'expired';
   outcomeMessage?: string | null;
-  resolvedAt?: string | null;
+  resolvedAt?: EpochMs | null;
 }
 
 export interface AccountRequirements extends AccessRequirements {
@@ -45,7 +46,8 @@ export type AccountRequestStatus =
   | 'expired'
   | 'failed';
 
-export interface AccountRequestData extends InteractionIdentity {
+export interface AccountRequestData extends Omit<InteractionIdentity, 'createdAt'> {
+  createdAt: string;
   kind: 'account_setup' | 'access_grant';
   requirements: AccountRequirements;
   status: AccountRequestStatus;
@@ -58,6 +60,11 @@ export interface AccountRequestData extends InteractionIdentity {
   resolvedAt: string | null;
 }
 
-export type AccountInteraction = AccountRequestData & InteractionContext;
+export type AccountInteraction = Omit<AccountRequestData, 'createdAt' | 'expiresAt' | 'resolvedAt'> &
+  InteractionContext & {
+    createdAt: EpochMs;
+    expiresAt: EpochMs | null;
+    resolvedAt: EpochMs | null;
+  };
 export type ConversationApproval = ConfirmationInteraction | AccountInteraction;
 import type { AccessRequirements } from './access-authentication.js';

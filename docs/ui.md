@@ -275,6 +275,35 @@ Global disconnection likewise makes indicators stale and disables waiting action
 Stale state is muted and explained in accessible names/tooltips. A current
 authorized request remains actionable when only its execution signal is stale.
 
+### UI timestamp upgrade
+
+UI-owned REST and synchronization records use UTC epoch milliseconds as JSON
+numbers. Message, reaction, activity, question/approval, turn, task, group and
+file timestamps share this representation in browser state. Missing dates are
+null; zero is a valid instant. Durations and durable timeline positions remain
+distinct concepts and keep their existing units/order. Display uses local
+locale/timezone formatting; datetime-local edits convert local wall time to
+epoch milliseconds at submission.
+
+- **Detect:** protocol 16 is required by HTTP header `X-NanoClaw-UI-Protocol`
+  and the synchronization socket. Mismatched startup responses are rejected
+  before consumption; missing/older request versions receive HTTP 409 before
+  any UI mutation. Static assets remain loadable so clients can reload.
+- **Why:** UI strings previously repeated date parsing and timezone
+  normalization and could crash when database integer timestamps escaped
+  through an aggregate. Numeric contracts eliminate that representation gap.
+- **Fix:** deploy the matching host and browser assets/service worker together
+  and reload open or installed clients. This is a UI wire-protocol change,
+  not another database cutover; provider/session-link timestamps and external
+  credential metadata keep their existing boundaries.
+- **Verify:** startup, reconnect, optimistic sends, reactions, question/approval
+  responses, task editing, file dates and date sorting still work; inspect
+  millisecond precision, null and epoch-zero values. Old clients must receive
+  an explicit reload/version error rather than partially ingesting new data.
+- **Rollback:** restore matching host and UI assets from the preceding
+  revision together and reload clients. No timestamp data conversion or
+  database restoration is needed.
+
 #### Message search index
 
 `data/search.db` is a rebuildable, host-only FTS5 index. Each message occurrence

@@ -38,7 +38,7 @@ const settled = (partial: Partial<ConversationTurn> = {}): ConversationTurn => (
   ...testTurn,
   phase: 'settled',
   outcome: 'replied',
-  endedAt: '2026-09-29T00:00:05Z',
+  endedAt: 1790640005000,
   metadata: { status: 'final', durationMs: 5000, model: 'm' },
   ...partial,
 });
@@ -69,7 +69,7 @@ describe('Stats availability', () => {
 });
 
 describe('latest trace headline', () => {
-  const line = (step: TraceStep): TraceLine => ({ ts: '1000', text: JSON.stringify(step) });
+  const line = (step: TraceStep): TraceLine => ({ ts: 1000, text: JSON.stringify(step) });
   const tool: TraceStep = { kind: 'tool', id: 'call', tool: 'bash', detail: 'pnpm test' };
 
   it('falls back to Thinking only before any activity', () => {
@@ -132,14 +132,14 @@ describe('latest trace headline', () => {
   });
 
   it('shows legacy text entries by their text', () => {
-    expect(latestTraceHeadline([{ ts: '1000', text: 'Earlier work' }], true).headline).toEqual({
+    expect(latestTraceHeadline([{ ts: 1000, text: 'Earlier work' }], true).headline).toEqual({
       action: 'Earlier work',
     });
   });
 });
 
 describe('model time versus wall time', () => {
-  it.each(['', ' \n', 'unknown', 'Infinity'])('does not invent tool runtime from an invalid timestamp %j', (ts) => {
+  it.each([NaN, Infinity, -Infinity])('does not invent tool runtime from an invalid timestamp %j', (ts) => {
     const activity = [
       {
         ordinal: 0,
@@ -167,13 +167,13 @@ describe('model time versus wall time', () => {
     const activity = [
       {
         ordinal: 0,
-        ts: '0',
+        ts: 0,
         timelinePosition: 1,
         text: JSON.stringify({ kind: 'tool', id: 'call', tool: 'bash', status: 'running' }),
       },
     ];
     expect(turnRowView({ ...testTurn, activity }, 1000).toolCallMs).toBe(1000);
-    activity[0].ts = '2000';
+    activity[0].ts = 2000;
     expect(turnRowView({ ...testTurn, activity }, 1000).toolCallMs).toBe(0);
   });
 
@@ -187,9 +187,9 @@ describe('model time versus wall time', () => {
     expect(turnRowView(turn, start)).toMatchObject({ elapsedMs: 5000, modelCallMs: 3000 });
   });
   it('measures the total from submission, including the wait before the turn started', () => {
-    const requestedAt = new Date(start - 2000).toISOString();
+    const requestedAt = start - 2000;
     expect(turnRowView(settled({ requestedAt }), start).elapsedMs).toBe(7000);
-    const live = { ...testTurn, startedAt: new Date(start).toISOString(), requestedAt };
+    const live = { ...testTurn, startedAt: start, requestedAt };
     expect(turnRowView(live, start + 1000).elapsedMs).toBe(3000);
     expect(turnRowView({ ...live, requestedAt: null }, start + 1000).elapsedMs).toBe(1000);
   });
@@ -211,7 +211,7 @@ describe('model time versus wall time', () => {
   it('counts overlapping tool time once and live tools up to now', () => {
     const tool = (id: string, at: number, status: string, durationMs?: number) => ({
       ordinal: at,
-      ts: String(start + at),
+      ts: start + at,
       timelinePosition: at,
       text: JSON.stringify({ kind: 'tool', id, tool: 'bash', status, durationMs }),
     });
@@ -222,7 +222,7 @@ describe('model time versus wall time', () => {
 });
 
 describe('live status and trace notices', () => {
-  const line = (step: TraceStep): TraceLine => ({ ts: '1000', text: JSON.stringify(step) });
+  const line = (step: TraceStep): TraceLine => ({ ts: 1000, text: JSON.stringify(step) });
   const initial = conversationActivity({ ...testTurn, activity: [], startedAt: null });
   const finished = line({ kind: 'tool', id: 'call', tool: 'bash', status: 'completed', detail: 'pnpm test' });
   const running = line({ kind: 'tool', id: 'next', tool: 'read', status: 'running', detail: 'file.ts' });
@@ -376,7 +376,7 @@ describe('turn row placement', () => {
   const message = (id: string, direction: 'in' | 'out', position: number): ConversationMessage => ({
     id,
     direction,
-    timestamp: '2026-09-29T00:00:00Z',
+    timestamp: 1790640000000,
     text: id,
     timelinePosition: position,
   });
@@ -415,14 +415,14 @@ describe('turn activity placement', () => {
   ): ConversationMessage => ({
     id,
     direction,
-    timestamp: '2026-09-29T00:00:00Z',
+    timestamp: 1790640000000,
     text: id,
     timelinePosition: us + offsetMs * 1000,
     ...(status ? { inputState: { messageId: id, status } } : {}),
   });
   const step = (ordinal: number, offsetMs: number) => ({
     ordinal,
-    ts: String(start + offsetMs),
+    ts: start + offsetMs,
     text: `step ${ordinal}`,
     timelinePosition: us + offsetMs * 1000,
   });
@@ -494,7 +494,7 @@ describe('turn activity placement', () => {
         // The runner marks when the first model call can start; the start row then completes.
         {
           ordinal: 2,
-          ts: String(start + 500),
+          ts: start + 500,
           text: JSON.stringify({ kind: 'model', id: 'model:ready', durationMs: 0 }),
           timelinePosition: us + 500_000,
         },

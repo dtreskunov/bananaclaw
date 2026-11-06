@@ -35,7 +35,7 @@ function makeReq(url: string): http.IncomingMessage {
   return {
     method: 'GET',
     url,
-    headers: { host: 'localhost' },
+    headers: { 'x-nanoclaw-ui-protocol': '16', host: 'localhost' },
     socket: { remoteAddress: '127.0.0.1' },
   } as unknown as http.IncomingMessage;
 }
@@ -55,6 +55,7 @@ async function get(url: string): Promise<{ status: number; headers: Map<string, 
     },
   });
   const res = writable as unknown as http.ServerResponse;
+  res.setHeader = vi.fn(() => res);
   res.writeHead = ((code: number, values?: http.OutgoingHttpHeaders) => {
     status = code;
     if (values) for (const [name, value] of Object.entries(values)) headers.set(name.toLowerCase(), String(value));
@@ -77,7 +78,11 @@ beforeEach(() => {
   const db = initTestDb();
   runMigrations(db);
   const now = new Date().toISOString();
-  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`).run(ADMIN, ADMIN, toEpoch(now));
+  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`).run(
+    ADMIN,
+    ADMIN,
+    toEpoch(now),
+  );
   db.prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`).run(
     GID,
     FOLDER,
