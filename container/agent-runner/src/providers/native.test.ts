@@ -1273,10 +1273,91 @@ describe('NativeProvider', () => {
       event.step.status === status);
   }
 
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'starts a fresh 262K-context/output model through %s without compaction', async protocol => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      catalogModels = { local: { models: {
+        small: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 262_144, output: 262_144 } },
+      } } };
+      const query = new NativeProvider({ model: 'local/small' }).query({
+        prompt: 'First message', cwd: root, systemContext: { instructions: 's'.repeat(90_597) },
+      });
+      query.end();
+      const events: ProviderEvent[] = [];
+      for await (const event of query.events) events.push(event);
+      expect(events.some(event => event.type === 'error')).toBe(false);
+      expect(compactions(events, 'running')).toHaveLength(0);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].max_tokens).toBe(32_768);
+      expect(replyTexts(events)).toEqual([[protocol === 'anthropic-messages' ? 'hello from direct minimax' : 'hello from stub']]);
+    },
+  );
+
+  it.each([
+    ['catalog output', 1_000_000, 8192, 8192],
+    ['context quarter', 100_000, 100_000, 25_000],
+    ['unknown context', undefined, 64_000, 32_768],
+    ['unknown output', 262_144, undefined, 32_768],
+    ['unknown limits', undefined, undefined, 32_768],
+  ] as const)('bounds the default output allowance for %s', async (_name, context, output, expected) => {
+    catalogModels = { local: { models: {
+      'test-model': { modalities: { input: ['text'], output: ['text'] }, limit: { context, output } },
+    } } };
+    const events = await collect(new NativeProvider({ model: 'local/test-model' }));
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(compactions(events, 'running')).toHaveLength(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].max_tokens).toBe(expected);
+  });
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'preserves an explicit output allowance above the default through %s', async protocol => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      catalogModels = { local: { models: {
+        small: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 262_144, output: 262_144 } },
+      } } };
+      const events = await collect(new NativeProvider({ model: 'local/small', modelParams: { max_tokens: 65_536 } }));
+      expect(events.some(event => event.type === 'error')).toBe(false);
+      expect(compactions(events, 'running')).toHaveLength(0);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].max_tokens).toBe(65_536);
+    },
+  );
+
+  it.each([
+    ['whole context', 262_144, 'Short instructions'],
+    ['fixed instructions', 200_000, 's'.repeat(90_597)],
+  ] as const)('rejects an explicit output allowance that conflicts with %s without compaction or transcript loss', async (_name, output, instructions) => {
+    catalogModels = { local: { models: {
+      small: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 262_144, output: 262_144 } },
+    } } };
+    const continuation = history();
+    const store = new NativeStore();
+    const original = store.messages(continuation);
+    store.close();
+    const query = new NativeProvider({ model: 'local/small', modelParams: { max_tokens: output } }).query({
+      prompt: 'Keep this pending request', continuation, cwd: root, systemContext: { instructions },
+    });
+    query.end();
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) events.push(event);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error', retryable: false, message: expect.stringContaining('reduce max_tokens'),
+    }));
+    expect(compactions(events, 'running')).toHaveLength(0);
+    expect(requests).toHaveLength(0);
+    expect(events.filter(event => event.type === 'usage_call')).toHaveLength(0);
+    const reopened = new NativeStore();
+    try {
+      expect(reopened.messages(continuation)).toEqual([...original, { role: 'user', content: 'Keep this pending request' }]);
+      expect(reopened.contextMessages(continuation)).toEqual(reopened.messages(continuation));
+    } finally { reopened.close(); }
+  });
+
   function preflightContext() {
     catalogModels = { local: { models: {
-      large: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 1_000_000, output: 32768 } },
-      small: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 262_144, output: 32768 } },
+      large: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 1_000_000, output: 524_288 } },
+      small: { modalities: { input: ['text'], output: ['text'] }, limit: { context: 262_144, output: 262_144 } },
     } } };
     const continuation = history();
     const store = new NativeStore();
@@ -1295,6 +1376,7 @@ describe('NativeProvider', () => {
       const large = await collect(new NativeProvider({ model: 'local/large' }), continuation);
       expect(compactions(large, 'running')).toHaveLength(0);
       expect(requests).toHaveLength(1);
+      expect(requests[0].max_tokens).toBe(32_768);
       requests.length = 0;
       const small = new NativeProvider({ model: 'local/small' });
       const events = await collect(small, continuation);
@@ -1303,6 +1385,7 @@ describe('NativeProvider', () => {
       expect(JSON.stringify(requests[0])).toContain(COMPACTION_INSTRUCTIONS);
       const normal = requests.filter(request => !JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
       expect(normal).toHaveLength(1);
+      expect(normal[0].max_tokens).toBe(32_768);
       expect(Buffer.byteLength(JSON.stringify(normal[0])) + 32768 + 1024).toBeLessThan(262_144);
       expect(JSON.stringify(normal[0].messages)).toContain('follow up');
       expect(replyTexts(events)).toEqual([[protocol === 'anthropic-messages' ? 'hello from direct minimax' : 'hello from stub']]);
@@ -1326,7 +1409,7 @@ describe('NativeProvider', () => {
     expect(JSON.stringify(requests[0])).toContain(COMPACTION_INSTRUCTIONS);
   });
 
-  it.each(['input', 'instructions', 'schema', 'output'] as const)(
+  it.each(['input', 'instructions', 'schema'] as const)(
     'fails an irreducible oversized %s without sending a normal request or losing input', async component => {
       preflightContext();
       const huge = 'x'.repeat(300_000);
@@ -1335,9 +1418,7 @@ describe('NativeProvider', () => {
       })) : undefined;
       try {
         const prompt = component === 'input' ? huge : 'Keep this pending request';
-        const provider = new NativeProvider({
-          model: 'local/small', ...(component === 'output' ? { modelParams: { max_tokens: 262_144 } } : {}),
-        });
+        const provider = new NativeProvider({ model: 'local/small' });
         const query = provider.query({
           prompt, cwd: root,
           ...(component === 'instructions' ? { systemContext: { instructions: huge } } : {}),

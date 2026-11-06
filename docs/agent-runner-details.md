@@ -480,6 +480,14 @@ results, only when another generation is needed. A final answer is delivered
 without trailing compaction. Missing usage disables this utilization trigger,
 not the request preflight check or emergency recovery.
 
+Normal generations default to at most **32,768 output tokens**, additionally
+capped by the model's advertised output limit and one quarter of its context
+window when known. The catalog's maximum output capability is not reserved in
+full. An explicit `model_params.max_tokens` overrides this default unchanged.
+An output allowance that cannot fit even without conversation history alongside
+fixed system instructions, tool schemas and framing fails with an explicit
+`reduce max_tokens` error, not a compaction attempt.
+
 Before every normal generation, including the first after a resume or model
 switch, a preflight checks the normalized text prompt, system instructions,
 tool schemas and protocol options, plus the requested output allowance and

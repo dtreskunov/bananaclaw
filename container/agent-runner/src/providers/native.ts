@@ -412,7 +412,11 @@ export class NativeProvider implements AgentProvider {
               const configuredMaxOutput =
                 typeof options.modelParams?.max_tokens === 'number'
                   ? Math.floor(options.modelParams.max_tokens)
-                  : resolved.maxOutputTokens;
+                  : Math.min(
+                      32_768,
+                      resolved.maxOutputTokens ?? 32_768,
+                      resolved.contextWindow === undefined ? 32_768 : Math.floor(resolved.contextWindow / 4),
+                    );
               const adapter = await languageModel(resolved);
               const modelSetupMs = Date.now() - startedAt;
               const compactionPolicy = createCompactionPolicy(resolved.contextWindow);
