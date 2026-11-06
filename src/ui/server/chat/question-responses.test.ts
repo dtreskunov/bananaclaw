@@ -29,7 +29,9 @@ vi.mock('../../../modules/typing/index.js', () => ({
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
 import { createQuestion, getQuestion } from '../../../db/sessions.js';
 import { createApproval } from '../../../db/approvals.js';
-import { initSessionFolder, openInboundDb } from '../../../session-manager.js';
+import { initSessionFolder, openInboundDb, openOutboundDbRw } from '../../../session-manager.js';
+import * as sessionManager from '../../../session-manager.js';
+import { inputStateKey } from '../../../input-timeline.js';
 import '../../../modules/interactive/index.js';
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
 import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
@@ -102,6 +104,52 @@ function respond(body: unknown, id = 'q') {
 }
 
 describe('global attention sync', () => {
+  it('reads only authorized receipt rows and opens each history database once', () => {
+    const input = openInboundDb('agent', 'session');
+    input
+      .prepare(
+        `INSERT INTO messages_in(id,seq,kind,timestamp,content,status,channel_type,platform_id,thread_id,sender_user_id)
+      VALUES('visible:agent',2,'chat',?,'{"text":"Visible"}','pending','web','group:agent','thread',NULL),
+        ('hidden:agent',4,'chat',?,'{"text":"Hidden"}','pending','web','group:agent','private',NULL)`,
+      )
+      .run(NOW, NOW);
+    input.close();
+    const output = openOutboundDbRw('agent', 'session');
+    const receipt = JSON.stringify({ messageId: 'visible:agent', status: 'queued' });
+    for (const id of ['visible:agent', 'hidden:agent']) {
+      output
+        .prepare('INSERT INTO processing_ack(message_id,status,status_changed) VALUES(?,?,?)')
+        .run(id, 'pending', NOW);
+      output
+        .prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,?)')
+        .run(inputStateKey(id), id.startsWith('visible') ? receipt : '{private-invalid', NOW);
+    }
+    const all = vi.spyOn(Object.getPrototypeOf(output.prepare('SELECT 1')), 'all');
+    output.close();
+    const inbound = vi.spyOn(sessionManager, 'openInboundDb');
+    const outbound = vi.spyOn(sessionManager, 'openOutboundDb');
+    try {
+      const history = readChatHistory('web:member', 'agent', 'thread');
+      expect(history.map((row) => row.id)).toEqual(['visible']);
+      expect(inbound).toHaveBeenCalledTimes(1);
+      expect(outbound).toHaveBeenCalledTimes(1);
+      const queries = all.mock.results.map((result, index) => ({
+        source: all.mock.contexts[index].source as string,
+        rows: result.type === 'return' ? result.value : undefined,
+      }));
+      expect(queries.find((query) => query.source.includes('FROM processing_ack'))?.rows).toEqual([
+        { message_id: 'visible:agent', status: 'pending' },
+      ]);
+      expect(queries.find((query) => query.source.includes('FROM session_state'))?.rows).toEqual([
+        { key: inputStateKey('visible:agent'), value: receipt },
+      ]);
+    } finally {
+      inbound.mockRestore();
+      outbound.mockRestore();
+      all.mockRestore();
+    }
+  });
+
   it('does not make a cancelled question actionable or mutate it during reads', async () => {
     getDb().prepare("UPDATE interactions SET status='cancelled' WHERE id='q'").run();
     const before = getQuestion('q');

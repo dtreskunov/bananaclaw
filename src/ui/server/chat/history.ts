@@ -1,4 +1,5 @@
 import path from 'path';
+import type Database from 'better-sqlite3';
 import { isQuestionResponse } from '../../shared/conversation-protocol.js';
 import type { ConversationMessage } from '../../shared/conversation.js';
 import type { TaskAttemptDto } from '../../shared/thread.js';
@@ -17,7 +18,7 @@ import fs from 'fs';
 import { parseInputState, type InputHandling, type InputState } from '../../shared/input-state.js';
 import { parseTimelinePosition, timelineSortKey } from '../../shared/timeline.js';
 import { inputStateKey, isCancelledInputContent } from '../../../input-timeline.js';
-import { isElevated, resolveTurnContext, viewerHandlesForChannel } from './conversation-context.js';
+import { isElevated, resolveTurnContext, viewerHandlesForChannel, type TurnContext } from './conversation-context.js';
 export function parseInputHandling(value: unknown): InputHandling | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_input_handling');
@@ -40,7 +41,7 @@ export function publicInboundMessageId(id: string, groupId: string): string {
 /** Only project receipts for inbound rows already authorized by the history query. */
 function readVisibleInputStates(
   groupId: string,
-  sessionId: string,
+  outDb: Database.Database,
   rows: Array<{ id: string; status: string; content: string }>,
   isWeb: boolean,
 ): { states: Map<string, InputState>; positions: Map<string, number> } {
@@ -62,48 +63,45 @@ function readVisibleInputStates(
     }
   }
   try {
-    const outDb = openOutboundDb(groupId, sessionId);
-    try {
-      const acknowledgements = new Map(
-        (
-          outDb.prepare('SELECT message_id, status FROM processing_ack').all() as Array<{
-            message_id: string;
-            status: string;
-          }>
-        )
-          .filter((ack) => visible.has(ack.message_id))
-          .map((ack) => [ack.message_id, ack.status]),
-      );
-      const receipts = outDb.prepare("SELECT key, value FROM session_state WHERE key LIKE 'input:%'").all() as Array<{
-        key: string;
-        value: string;
-      }>;
-      for (const receipt of receipts) {
-        let state: InputState | undefined;
-        try {
-          state = parseInputState(JSON.parse(receipt.value));
-        } catch {
-          continue;
-        }
-        if (!state || receipt.key !== inputStateKey(state.messageId)) continue;
-        const row = visible.get(state.messageId);
-        if (!row) continue;
-        if (state.timelinePosition !== undefined) positions.set(row.id, state.timelinePosition);
-        states.set(row.id, { ...state, messageId: publicInboundMessageId(row.id, groupId) });
+    const acknowledgements = new Map(
+      (
+        outDb
+          .prepare('SELECT message_id, status FROM processing_ack WHERE message_id IN (SELECT value FROM json_each(?))')
+          .all(JSON.stringify([...visible.keys()])) as Array<{
+          message_id: string;
+          status: string;
+        }>
+      ).map((ack) => [ack.message_id, ack.status]),
+    );
+    const receipts = outDb
+      .prepare('SELECT key, value FROM session_state WHERE key IN (SELECT value FROM json_each(?))')
+      .all(JSON.stringify([...visible.keys()].map(inputStateKey))) as Array<{
+      key: string;
+      value: string;
+    }>;
+    for (const receipt of receipts) {
+      let state: InputState | undefined;
+      try {
+        state = parseInputState(JSON.parse(receipt.value));
+      } catch {
+        continue;
       }
-      for (const [id, state] of states) {
-        const status = acknowledgements.get(id) ?? visible.get(id)?.status;
-        if (
-          state.status !== 'applied' &&
-          state.status !== 'cancelled' &&
-          (status === 'processing' || status === 'completed' || status === 'failed')
-        ) {
-          if (status === 'processing' || state.reason) states.set(id, { ...state, status: 'processing' });
-          else states.delete(id);
-        }
+      if (!state || receipt.key !== inputStateKey(state.messageId)) continue;
+      const row = visible.get(state.messageId);
+      if (!row) continue;
+      if (state.timelinePosition !== undefined) positions.set(row.id, state.timelinePosition);
+      states.set(row.id, { ...state, messageId: publicInboundMessageId(row.id, groupId) });
+    }
+    for (const [id, state] of states) {
+      const status = acknowledgements.get(id) ?? visible.get(id)?.status;
+      if (
+        state.status !== 'applied' &&
+        state.status !== 'cancelled' &&
+        (status === 'processing' || status === 'completed' || status === 'failed')
+      ) {
+        if (status === 'processing' || state.reason) states.set(id, { ...state, status: 'processing' });
+        else states.delete(id);
       }
-    } finally {
-      outDb.close();
     }
   } catch (err) {
     throw new Error('Unable to read input dispositions', { cause: err });
@@ -123,297 +121,305 @@ function readVisibleInputStates(
  * they don't participate in. DMs and outputs remain scoped to the selected
  * platform recipient; privileged access never means every DM in a shared session.
  */
+type HistoryOptions = { includeCancelled?: boolean; hideApprovalOutcomes?: boolean };
+
 export function readChatHistory(
   userId: string,
   groupId: string,
   threadId: string,
   override?: { channelType: string; messagingGroupId: string },
-  options: { includeCancelled?: boolean; hideApprovalOutcomes?: boolean } = {},
+  options: HistoryOptions = {},
 ): ConversationMessage[] {
+  return readConversationHistory(userId, groupId, threadId, override, options).messages;
+}
+
+export function readConversationHistory(
+  userId: string,
+  groupId: string,
+  threadId: string,
+  override?: { channelType: string; messagingGroupId: string },
+  options: HistoryOptions = {},
+): { context: TurnContext; messages: ConversationMessage[] } {
   const context = resolveTurnContext(userId, groupId, threadId, override);
   if (!context) throw new Error('Conversation is not accessible');
   const elevated = isElevated(userId);
   // Synthetic DM IDs resolve to the same route as active-turn controls.
   const isDm = threadId.startsWith('__dm:');
   const sessionId = context.sessionId;
-  if (!sessionId) return [];
+  if (!sessionId) return { context, messages: [] };
   const viewerHandles = isDm && !elevated ? viewerHandlesForChannel(userId, context.channelType) : [];
-  if (isDm && !elevated && viewerHandles.length === 0) return [];
+  if (isDm && !elevated && viewerHandles.length === 0) return { context, messages: [] };
 
   const messages: ConversationMessage[] = [];
+  const inDb = openInboundDb(groupId, sessionId);
   try {
-    const inDb = openInboundDb(groupId, sessionId);
+    const outDb = openOutboundDb(groupId, sessionId);
     try {
-      const rows = inDb
-        .prepare(
-          `SELECT id, kind, timestamp, content, status, sender_user_id FROM messages_in
+      try {
+        const rows = inDb
+          .prepare(
+            `SELECT id, kind, timestamp, content, status, sender_user_id FROM messages_in
          WHERE channel_type = ? AND thread_id IS ?
            AND platform_id IN (${context.platformIds.map(() => '?').join(',')}) ORDER BY seq`,
-        )
-        .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
-        id: string;
-        kind: string;
-        timestamp: number;
-        content: string;
-        status: string;
-        sender_user_id: string | null;
-      }>;
-      const { states: inputStates, positions: inputPositions } = readVisibleInputStates(
-        groupId,
-        sessionId,
-        rows,
-        context.channelType === WEB_CHANNEL_TYPE,
-      );
-      // Router namespaces ids as `<rawId>:<agentGroupId>` when writing
-      // into per-agent session DBs (router.ts messageIdForAgent), but the
-      // send response from submitWebInbound returns the raw `<rawId>`. If we
-      // leak the namespaced form to the client the dedup key (direction:id)
-      // mismatches and the user's own message paints twice on visibility
-      // resume. Strip the suffix here so history matches the send id.
-      for (const r of rows) {
-        if (
-          options.hideApprovalOutcomes &&
-          r.sender_user_id === null &&
-          isRepresentedApprovalOutcome(userId, groupId, context, r.content)
-        )
-          continue;
-        const cancelled = inputStates.get(r.id)?.status === 'cancelled' || isCancelledInputContent(r.content);
-        if (cancelled) {
-          if (options.includeCancelled) {
+          )
+          .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
+          id: string;
+          kind: string;
+          timestamp: number;
+          content: string;
+          status: string;
+          sender_user_id: string | null;
+        }>;
+        const { states: inputStates, positions: inputPositions } = readVisibleInputStates(
+          groupId,
+          outDb,
+          rows,
+          context.channelType === WEB_CHANNEL_TYPE,
+        );
+        // Router namespaces ids as `<rawId>:<agentGroupId>` when writing
+        // into per-agent session DBs (router.ts messageIdForAgent), but the
+        // send response from submitWebInbound returns the raw `<rawId>`. If we
+        // leak the namespaced form to the client the dedup key (direction:id)
+        // mismatches and the user's own message paints twice on visibility
+        // resume. Strip the suffix here so history matches the send id.
+        for (const r of rows) {
+          if (
+            options.hideApprovalOutcomes &&
+            r.sender_user_id === null &&
+            isRepresentedApprovalOutcome(userId, groupId, context, r.content)
+          )
+            continue;
+          const cancelled = inputStates.get(r.id)?.status === 'cancelled' || isCancelledInputContent(r.content);
+          if (cancelled) {
+            if (options.includeCancelled) {
+              const id = publicInboundMessageId(r.id, groupId);
+              messages.push({
+                direction: 'in',
+                id,
+                timestamp: r.timestamp,
+                text: '',
+                inputState: { messageId: id, status: 'cancelled' },
+              });
+            }
+            continue;
+          }
+          const parsed = parseInboundContent(
+            r.content,
+            groupId,
+            threadId,
+            context.channelType === WEB_CHANNEL_TYPE,
+            sessionId,
+            r.kind === 'interactive_response',
+          );
+          if (parsed != null) {
             const id = publicInboundMessageId(r.id, groupId);
+            // HA replays the full transcript on every turn (see buildTurn);
+            // show only the user's actual query in the UI.
+            const text = context.channelType === HA_CHANNEL_TYPE ? extractDisplayQuery(parsed.text) : parsed.text;
+            const sender = r.sender_user_id ? getUser(r.sender_user_id) : undefined;
+            const author = r.sender_user_id
+              ? { userId: r.sender_user_id, displayName: sender?.display_name?.trim() || r.sender_user_id }
+              : undefined;
             messages.push({
               direction: 'in',
               id,
               timestamp: r.timestamp,
-              text: '',
-              inputState: { messageId: id, status: 'cancelled' },
+              text,
+              ...(parsed.questionId ? { questionId: parsed.questionId } : {}),
+              ...(parsed.questionResponseType ? { questionResponseType: parsed.questionResponseType } : {}),
+              files: parsed.files,
+              author,
+              canEditPending:
+                context.channelType === WEB_CHANNEL_TYPE &&
+                r.sender_user_id === userId &&
+                ['queued', 'steering'].includes(inputStates.get(r.id)?.status ?? ''),
+              ...(inputStates.has(r.id) ? { inputState: inputStates.get(r.id) } : {}),
+              ...(inputPositions.has(r.id) ? { timelinePosition: inputPositions.get(r.id) } : {}),
             });
           }
-          continue;
         }
-        const parsed = parseInboundContent(
-          r.content,
-          groupId,
-          threadId,
-          context.channelType === WEB_CHANNEL_TYPE,
-          sessionId,
-          r.kind === 'interactive_response',
-        );
-        if (parsed != null) {
-          const id = publicInboundMessageId(r.id, groupId);
-          // HA replays the full transcript on every turn (see buildTurn);
-          // show only the user's actual query in the UI.
-          const text = context.channelType === HA_CHANNEL_TYPE ? extractDisplayQuery(parsed.text) : parsed.text;
-          const sender = r.sender_user_id ? getUser(r.sender_user_id) : undefined;
-          const author = r.sender_user_id
-            ? { userId: r.sender_user_id, displayName: sender?.display_name?.trim() || r.sender_user_id }
-            : undefined;
-          messages.push({
-            direction: 'in',
-            id,
-            timestamp: r.timestamp,
-            text,
-            ...(parsed.questionId ? { questionId: parsed.questionId } : {}),
-            ...(parsed.questionResponseType ? { questionResponseType: parsed.questionResponseType } : {}),
-            files: parsed.files,
-            author,
-            canEditPending:
-              context.channelType === WEB_CHANNEL_TYPE &&
-              r.sender_user_id === userId &&
-              ['queued', 'steering'].includes(inputStates.get(r.id)?.status ?? ''),
-            ...(inputStates.has(r.id) ? { inputState: inputStates.get(r.id) } : {}),
-            ...(inputPositions.has(r.id) ? { timelinePosition: inputPositions.get(r.id) } : {}),
-          });
-        }
+      } catch (err) {
+        throw new Error('Unable to read conversation inputs', { cause: err });
       }
-    } finally {
-      inDb.close();
-    }
-  } catch (err) {
-    throw new Error('Unable to read conversation inputs', { cause: err });
-  }
 
-  try {
-    const outDb = openOutboundDb(groupId, sessionId);
-    try {
-      const rows = outDb
-        .prepare(
-          `SELECT id, timestamp, kind, content, turn_id FROM messages_out
+      try {
+        const rows = outDb
+          .prepare(
+            `SELECT id, timestamp, kind, content, turn_id FROM messages_out
          WHERE channel_type = ? AND thread_id IS ?
            AND platform_id IN (${context.platformIds.map(() => '?').join(',')})
          ORDER BY seq`,
-        )
-        .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
-        id: string;
-        timestamp: number;
-        kind: string;
-        content: string;
-        turn_id: string | null;
-      }>;
+          )
+          .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
+          id: string;
+          timestamp: number;
+          kind: string;
+          content: string;
+          turn_id: string | null;
+        }>;
 
-      // Reactions are `chat` rows with `operation:'reaction'` targeting a
-      // prior message id. Collect them keyed by target so they fold onto the
-      // target bubble after the loop instead of rendering as empty bubbles.
-      const reactionsByTarget = new Map<string, { emoji: string; ts: number }[]>();
-      const editsByTarget = new Map<string, string>();
+        // Reactions are `chat` rows with `operation:'reaction'` targeting a
+        // prior message id. Collect them keyed by target so they fold onto the
+        // target bubble after the loop instead of rendering as empty bubbles.
+        const reactionsByTarget = new Map<string, { emoji: string; ts: number }[]>();
+        const editsByTarget = new Map<string, string>();
 
-      for (const r of rows) {
-        if (r.kind === 'chat-sdk') {
-          // Durable ask_question rows render through the question lifecycle
-          // returned by /sync. Adding a history bubble here duplicates the
-          // card after reload. Fire-and-forget cards still need their fallback.
-          const content = chatSdkHistoryContent(r.content);
-          if (content) {
-            messages.push({
-              ...content,
-              direction: 'out',
-              id: r.id,
-              ...(r.turn_id ? { turnId: r.turn_id } : {}),
-              timestamp: r.timestamp,
-            });
-          }
-          continue;
-        }
-        if (r.kind !== 'chat' && r.kind !== 'text') continue;
-        // Fold reaction rows onto their target bubble rather than rendering
-        // a standalone (empty-text) message.
-        try {
-          const c = JSON.parse(r.content) as { operation?: string; messageId?: string; emoji?: string; text?: string };
-          if (c?.operation === 'edit' && c.messageId && typeof c.text === 'string') {
-            editsByTarget.set(publicInboundMessageId(c.messageId, groupId), c.text);
+        for (const r of rows) {
+          if (r.kind === 'chat-sdk') {
+            // Durable ask_question rows render through the question lifecycle
+            // returned by /sync. Adding a history bubble here duplicates the
+            // card after reload. Fire-and-forget cards still need their fallback.
+            const content = chatSdkHistoryContent(r.content);
+            if (content) {
+              messages.push({
+                ...content,
+                direction: 'out',
+                id: r.id,
+                ...(r.turn_id ? { turnId: r.turn_id } : {}),
+                timestamp: r.timestamp,
+              });
+            }
             continue;
           }
-          if (c?.operation === 'reaction' && c.messageId && c.emoji) {
-            // Inbound ids are de-namespaced for the client (the `:<groupId>`
-            // suffix is stripped above); match that so reactions on the
-            // user's own messages find their target bubble.
-            const target = publicInboundMessageId(c.messageId, groupId);
-            const arr = reactionsByTarget.get(target) ?? [];
-            arr.push({ emoji: shortcodeToEmoji(c.emoji), ts: r.timestamp });
-            reactionsByTarget.set(target, arr);
-            continue;
+          if (r.kind !== 'chat' && r.kind !== 'text') continue;
+          // Fold reaction rows onto their target bubble rather than rendering
+          // a standalone (empty-text) message.
+          try {
+            const c = JSON.parse(r.content) as {
+              operation?: string;
+              messageId?: string;
+              emoji?: string;
+              text?: string;
+            };
+            if (c?.operation === 'edit' && c.messageId && typeof c.text === 'string') {
+              editsByTarget.set(publicInboundMessageId(c.messageId, groupId), c.text);
+              continue;
+            }
+            if (c?.operation === 'reaction' && c.messageId && c.emoji) {
+              // Inbound ids are de-namespaced for the client (the `:<groupId>`
+              // suffix is stripped above); match that so reactions on the
+              // user's own messages find their target bubble.
+              const target = publicInboundMessageId(c.messageId, groupId);
+              const arr = reactionsByTarget.get(target) ?? [];
+              arr.push({ emoji: shortcodeToEmoji(c.emoji), ts: r.timestamp });
+              reactionsByTarget.set(target, arr);
+              continue;
+            }
+          } catch {
+            /* not JSON — treat as a normal text bubble below */
           }
-        } catch {
-          /* not JSON — treat as a normal text bubble below */
+          const parsed = parseOutboundContent(r.content);
+          messages.push({
+            ...parsed,
+            direction: 'out',
+            id: r.id,
+            timestamp: r.timestamp,
+            ...(r.turn_id ? { turnId: r.turn_id } : {}),
+          });
         }
-        const parsed = parseOutboundContent(r.content);
-        messages.push({
-          ...parsed,
-          direction: 'out',
-          id: r.id,
-          timestamp: r.timestamp,
-          ...(r.turn_id ? { turnId: r.turn_id } : {}),
-        });
-      }
 
-      for (const message of messages) {
-        const edit = editsByTarget.get(message.id);
-        if (edit !== undefined) message.text = edit;
-      }
-
-      // Attach collected reactions to their target messages. Targets may be
-      // inbound (user) or outbound (agent) bubbles already pushed above.
-      if (reactionsByTarget.size > 0) {
-        for (const m of messages) {
-          if (!m.id) continue;
-          const rx = reactionsByTarget.get(m.id);
-          if (rx && rx.length) m.reactions = rx;
+        for (const message of messages) {
+          const edit = editsByTarget.get(message.id);
+          if (edit !== undefined) message.text = edit;
         }
-      }
-    } finally {
-      outDb.close();
-    }
-  } catch (err) {
-    throw new Error('Unable to read conversation outputs', { cause: err });
-  }
 
-  // Scheduled-task firings: completed `kind='task'` rows are the record of
-  // a schedule waking this session. They carry no chat text (parseInbound
-  // skips them), so surface each as a distinct timeline "event" bubble so
-  // the user can see why an otherwise-quiet thread keeps looking active.
-  try {
-    const inDb = openInboundDb(groupId, sessionId);
-    try {
-      const taskRows = inDb
-        .prepare(
-          `SELECT id, process_after, content, recurrence, series_id FROM messages_in
+        // Attach collected reactions to their target messages. Targets may be
+        // inbound (user) or outbound (agent) bubbles already pushed above.
+        if (reactionsByTarget.size > 0) {
+          for (const m of messages) {
+            if (!m.id) continue;
+            const rx = reactionsByTarget.get(m.id);
+            if (rx && rx.length) m.reactions = rx;
+          }
+        }
+      } catch (err) {
+        throw new Error('Unable to read conversation outputs', { cause: err });
+      }
+
+      // Scheduled-task firings: completed `kind='task'` rows are the record of
+      // a schedule waking this session. They carry no chat text (parseInbound
+      // skips them), so surface each as a distinct timeline "event" bubble so
+      // the user can see why an otherwise-quiet thread keeps looking active.
+      try {
+        const taskRows = inDb
+          .prepare(
+            `SELECT id, process_after, content, recurrence, series_id FROM messages_in
          WHERE kind = 'task' AND status = 'completed' AND channel_type = ? AND thread_id IS ?
            AND platform_id IN (${context.platformIds.map(() => '?').join(',')}) ORDER BY seq`,
-        )
-        .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
-        id: string;
-        process_after: number;
-        content: string;
-        recurrence: string | null;
-        series_id: string | null;
-      }>;
-      for (const r of taskRows) {
-        const summary = summarizeTaskPrompt(r.content);
-        let attempt:
-          | {
+          )
+          .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
+          id: string;
+          process_after: number;
+          content: string;
+          recurrence: string | null;
+          series_id: string | null;
+        }>;
+        const attempts = new Map(
+          (
+            outDb
+              .prepare(
+                'SELECT task_message_id,status,trigger_source,error FROM task_attempts WHERE task_message_id IN (SELECT value FROM json_each(?))',
+              )
+              .all(JSON.stringify(taskRows.map((row) => row.id))) as Array<{
+              task_message_id: string;
               status: TaskAttemptDto['status'];
               trigger_source: string;
               error: string | null;
-            }
-          | undefined;
-        try {
-          const outDb = openOutboundDb(groupId, sessionId);
-          try {
-            attempt = outDb
-              .prepare(`SELECT status, trigger_source, error FROM task_attempts WHERE task_message_id = ?`)
-              .get(r.id) as typeof attempt;
-          } finally {
-            outDb.close();
-          }
-        } catch (err) {
-          throw new Error('Unable to read conversation task attempt', { cause: err });
+            }>
+          ).map((row) => [row.task_message_id, row]),
+        );
+        for (const r of taskRows) {
+          const summary = summarizeTaskPrompt(r.content);
+          const attempt = attempts.get(r.id);
+          const status = attempt?.status ?? 'completed';
+          const triggerSource = attempt?.trigger_source === 'manual' ? 'manual' : 'scheduled';
+          const subject = triggerSource === 'manual' ? 'Manual task' : 'Scheduled task';
+          const verb =
+            status === 'timed_out'
+              ? 'timed out'
+              : status === 'failed'
+                ? 'failed'
+                : status === 'skipped'
+                  ? 'skipped'
+                  : 'completed';
+          const autoPaused = taskWasAutoPaused(r.content);
+          // Place the firing at the time it was actually due to run
+          // (`process_after`), not the row's creation `timestamp`. A recurring
+          // occurrence is cloned right after the *previous* run, so its
+          // `timestamp` can be a full cadence-interval before it fires (e.g. a
+          // daily task's row is created ~24h early); a Run-now nudge rewrites
+          // `process_after` to now while leaving `timestamp` untouched.
+          messages.push({
+            direction: 'event',
+            id: r.id,
+            timestamp: r.process_after,
+            text: `${subject} ${verb}${autoPaused ? ' and was auto-paused' : ''}: ${summary}`,
+            event: {
+              kind: 'task-run',
+              ...(r.series_id ? { taskId: r.series_id } : {}),
+              summary,
+              ...(r.recurrence ? { recurrence: r.recurrence } : {}),
+              status,
+              triggerSource,
+              ...(attempt?.error ? { error: attempt.error } : {}),
+              ...(autoPaused ? { autoPaused: true } : {}),
+            },
+          });
         }
-        const status = attempt?.status ?? 'completed';
-        const triggerSource = attempt?.trigger_source === 'manual' ? 'manual' : 'scheduled';
-        const subject = triggerSource === 'manual' ? 'Manual task' : 'Scheduled task';
-        const verb =
-          status === 'timed_out'
-            ? 'timed out'
-            : status === 'failed'
-              ? 'failed'
-              : status === 'skipped'
-                ? 'skipped'
-                : 'completed';
-        const autoPaused = taskWasAutoPaused(r.content);
-        // Place the firing at the time it was actually due to run
-        // (`process_after`), not the row's creation `timestamp`. A recurring
-        // occurrence is cloned right after the *previous* run, so its
-        // `timestamp` can be a full cadence-interval before it fires (e.g. a
-        // daily task's row is created ~24h early); a Run-now nudge rewrites
-        // `process_after` to now while leaving `timestamp` untouched.
-        messages.push({
-          direction: 'event',
-          id: r.id,
-          timestamp: r.process_after,
-          text: `${subject} ${verb}${autoPaused ? ' and was auto-paused' : ''}: ${summary}`,
-          event: {
-            kind: 'task-run',
-            ...(r.series_id ? { taskId: r.series_id } : {}),
-            summary,
-            ...(r.recurrence ? { recurrence: r.recurrence } : {}),
-            status,
-            triggerSource,
-            ...(attempt?.error ? { error: attempt.error } : {}),
-            ...(autoPaused ? { autoPaused: true } : {}),
-          },
-        });
+      } catch (err) {
+        throw new Error('Unable to read conversation tasks', { cause: err });
       }
-    } finally {
-      inDb.close();
-    }
-  } catch (err) {
-    throw new Error('Unable to read conversation tasks', { cause: err });
-  }
 
-  messages.sort(
-    (a, b) => timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition),
-  );
-  return messages;
+      messages.sort(
+        (a, b) => timelineSortKey(a.timestamp, a.timelinePosition) - timelineSortKey(b.timestamp, b.timelinePosition),
+      );
+      return { context, messages };
+    } finally {
+      outDb.close();
+    }
+  } finally {
+    inDb.close();
+  }
 }
 
 function taskWasAutoPaused(content: string): boolean {

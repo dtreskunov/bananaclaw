@@ -52,6 +52,11 @@ Unknown imported turns still expose only already-visible anchors; another
 route's metadata is neither decoded nor exposed. Numeric input timestamps
 retain epoch zero and the existing previous-turn waiting-time clamp.
 
+History reads share one inbound/outbound handle pair and reuse the authorized
+context returned with the messages. Receipt and acknowledgement queries are
+restricted to authorized input IDs; scheduled-event attempts are read in one
+batch rather than opening the outbound database for every task.
+
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 

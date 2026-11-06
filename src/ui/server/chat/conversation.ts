@@ -17,8 +17,8 @@ import type {
   ConversationTurn,
   ConversationUsage,
 } from '../../shared/conversation.js';
-import { publicInboundMessageId, readChatHistory } from './history.js';
-import { resolveTurnContext, routeMatches, type TurnContext } from './conversation-context.js';
+import { publicInboundMessageId, readConversationHistory } from './history.js';
+import { routeMatches, type TurnContext } from './conversation-context.js';
 import { renderedReadCursor } from './read-state.js';
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
@@ -293,9 +293,7 @@ export function readConversation(
   threadId: string,
   override?: { channelType: string; messagingGroupId: string },
 ): Conversation {
-  const context = resolveTurnContext(userId, groupId, threadId, override);
-  if (!context) throw new Error('Conversation is not accessible');
-  const history = readChatHistory(userId, groupId, threadId, override, {
+  const { context, messages: history } = readConversationHistory(userId, groupId, threadId, override, {
     includeCancelled: true,
     hideApprovalOutcomes: true,
   });
