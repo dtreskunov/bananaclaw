@@ -15527,33 +15527,21 @@ async function api(url, opts) {
   if (!r4.ok) throw new Error("HTTP " + r4.status);
   return r4.json();
 }
-async function postJson(path, body) {
+async function sendJson(method, path, body) {
   const r4 = await protocolFetch(path, {
-    method: "POST",
+    method,
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {})
   });
-  let data = {};
-  try {
-    data = await r4.json();
-  } catch {
-  }
+  const data = r4.status === 204 ? {} : await r4.json();
   return { ok: r4.ok, status: r4.status, data };
 }
+async function postJson(path, body) {
+  return sendJson("POST", path, body);
+}
 async function patchJson(path, body) {
-  const r4 = await protocolFetch(path, {
-    method: "PATCH",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {})
-  });
-  let data = {};
-  try {
-    data = await r4.json();
-  } catch {
-  }
-  return { ok: r4.ok, status: r4.status, data };
+  return sendJson("PATCH", path, body);
 }
 
 // src/brand.ts

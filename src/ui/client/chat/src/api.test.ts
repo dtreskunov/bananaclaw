@@ -8,6 +8,44 @@ beforeEach(() => vi.stubGlobal('window', new EventTarget()));
 afterEach(() => vi.unstubAllGlobals());
 
 describe('UI timestamp protocol boundary', () => {
+  it.each([
+    [postJson, 'POST'],
+    [patchJson, 'PATCH'],
+  ] as const)('uses the %s helper to send %s with the same JSON result contract', async (request, method) => {
+    const data = { timestamp: 0, nested: { createdAt: 'opaque external value' } };
+    const fetch = vi.fn().mockResolvedValue(UiResponse.json(data));
+    vi.stubGlobal('fetch', fetch);
+    expect(await request<typeof data>('api/groups', { enabled: true })).toEqual({ ok: true, status: 200, data });
+    expect(fetch.mock.calls[0][1]).toMatchObject({ method, credentials: 'same-origin', body: '{"enabled":true}' });
+    expect(new Headers(fetch.mock.calls[0][1].headers).get('Content-Type')).toBe('application/json');
+  });
+
+  it.each([postJson, patchJson])('retains explicit no-content and JSON error responses', async (request) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204, headers: uiHeaders })));
+    expect(await request('api/groups')).toEqual({ ok: true, status: 204, data: {} });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(UiResponse.json({ error: 'Invalid input' }, { status: 400 })));
+    expect(await request('api/groups')).toEqual({ ok: false, status: 400, data: { error: 'Invalid input' } });
+  });
+
+  it.each([postJson, patchJson])(
+    'does not turn malformed successful JSON or body-read failures into empty success',
+    async (request) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{invalid', { headers: uiHeaders })));
+      await expect(request('api/groups')).rejects.toBeInstanceOf(SyntaxError);
+      const failure = new TypeError('Response body unavailable');
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          headers: uiHeaders,
+          json: vi.fn().mockRejectedValue(failure),
+        }),
+      );
+      await expect(request('api/groups')).rejects.toBe(failure);
+    },
+  );
+
   it.each([api, postJson, patchJson])('sends the current version through each API helper', async (request) => {
     const fetch = vi.fn().mockResolvedValue(UiResponse.json({ timestamp: 0 }));
     vi.stubGlobal('fetch', fetch);

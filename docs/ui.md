@@ -41,6 +41,10 @@ Each emitted line is parsed once. Traces retain the first ordinal, timestamp
 and timeline position, plus unrecognized imported history; channel labels
 continue to omit unrecognized activity.
 
+POST and PATCH helpers share JSON encoding and decoding. HTTP 204 remains an
+explicit empty response; malformed JSON or a failed body read propagates an
+error rather than becoming a successful empty result.
+
 Conversation projection indexes visible messages, question anchors and live
 activity once, then reads selected turns' activity, usage, inputs and metadata
 in batches. Its six scoped projection queries do not grow with the turn count.

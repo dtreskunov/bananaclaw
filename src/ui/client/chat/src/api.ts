@@ -70,34 +70,25 @@ export interface PostJsonResult<T = Record<string, unknown>> {
   data: T;
 }
 
-export async function postJson<T = Record<string, unknown>>(path: string, body?: unknown): Promise<PostJsonResult<T>> {
+async function sendJson<T = Record<string, unknown>>(
+  method: 'POST' | 'PATCH',
+  path: string,
+  body?: unknown,
+): Promise<PostJsonResult<T>> {
   const r = await protocolFetch(path, {
-    method: 'POST',
+    method,
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   });
-  let data: T = {} as T;
-  try {
-    data = (await r.json()) as T;
-  } catch {
-    /* ignore non-JSON */
-  }
+  const data = r.status === 204 ? ({} as T) : ((await r.json()) as T);
   return { ok: r.ok, status: r.status, data };
 }
 
+export async function postJson<T = Record<string, unknown>>(path: string, body?: unknown): Promise<PostJsonResult<T>> {
+  return sendJson<T>('POST', path, body);
+}
+
 export async function patchJson<T = Record<string, unknown>>(path: string, body?: unknown): Promise<PostJsonResult<T>> {
-  const r = await protocolFetch(path, {
-    method: 'PATCH',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {}),
-  });
-  let data: T = {} as T;
-  try {
-    data = (await r.json()) as T;
-  } catch {
-    /* ignore non-JSON */
-  }
-  return { ok: r.ok, status: r.status, data };
+  return sendJson<T>('PATCH', path, body);
 }
