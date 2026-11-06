@@ -2045,17 +2045,41 @@ nav.tab-bar-strip.group-strip {
   white-space: nowrap;
 }
 .threads-rail .thread.branch {
-  padding-left: 16px;
+  padding-left: calc(var(--thread-padding-inline) + var(--thread-depth) * 12px);
 }
-.threads-rail .thread.branch::before {
+.thread-tree-guides {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--thread-padding-inline);
+  display: flex;
+  pointer-events: none;
+  color: var(--muted);
+  opacity: 0.4;
+}
+.thread-tree-guide {
+  position: relative;
+  width: 12px;
+}
+.thread-tree-guide.continues::before,
+.thread-tree-guide.elbow::before {
   content: "";
   position: absolute;
-  left: 7px;
-  top: 8px;
-  bottom: 8px;
-  width: 1px;
-  background: var(--border, var(--muted));
-  opacity: 0.5;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid currentColor;
+}
+.thread-tree-guide.elbow:not(.continues)::before {
+  bottom: 50%;
+}
+.thread-tree-guide.elbow::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 3px;
+  top: 50%;
+  border-top: 1px solid currentColor;
 }
 .readonly-banner {
   padding: 10px 12px;

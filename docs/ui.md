@@ -111,6 +111,20 @@ viewer-visible conversation row, including channel DMs; zero and unavailable
 counts are omitted. Counts update through the existing keyed agent metadata
 patches and use the thread rail's authorization and deduplication rules.
 
+### Fork families in the thread rail
+
+Within each channel section, forked conversations form an always-expanded
+pseudo-tree: parents precede their children, with subtle connector lines.
+Families and sibling subtrees sort by their newest activity, including
+descendants; ties use thread IDs for stable ordering. Each row keeps its own
+timestamp, unread/activity state, tasks and actions.
+
+Indentation stops after three levels without hiding deeper conversations.
+Forks whose parent is deleted or absent from the authorized channel listing
+remain top-level rows, retaining their existing lineage hint. Search results
+remain flat, and the existing channel-section toggles are unchanged.
+This is presentation-only; fork storage and deletion behavior do not change.
+
 ### Unread conversations
 
 Unread is per user and orthogonal to execution/waiting. Bold names and a small

@@ -26,6 +26,7 @@ import type { Thread, SearchResult } from '../types';
 import { ActivityIndicator, activityDetails } from './ActivityIndicator';
 import { threadAttentionCount } from '../attention-state';
 import { withPendingActivity } from '../conversation-state';
+import { buildThreadTree } from '../thread-tree';
 
 function ThreadAttention({ thread }: { thread: Thread }) {
   const location = {
@@ -50,7 +51,7 @@ function ThreadAttention({ thread }: { thread: Thread }) {
   ) : indicator;
 }
 
-export function ThreadRow({ t }: { t: Thread }) {
+export function ThreadRow({ t, guides = [] }: { t: Thread; guides?: boolean[] }) {
   const ct = t.channelType || 'web';
   const meta = channelMeta(ct);
   const active = t.threadId === threadId.value;
@@ -69,8 +70,7 @@ export function ThreadRow({ t }: { t: Thread }) {
         head.summary,
       ].filter(Boolean).join(' · ')
     : undefined;
-  const onOpen = (ev: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-    if ((ev.target as HTMLElement).classList.contains('del')) return;
+  const onOpen = (): void => {
     if (groupId.value) openChat(groupId.value, t.threadId, threadCtxOf(t)).catch(console.error);
     drawerOpen.threads.value = false;
   };
@@ -114,10 +114,21 @@ export function ThreadRow({ t }: { t: Thread }) {
   const branchCount = t.forkChildren?.length ?? 0;
   return (
     <div
-      class={'thread' + (active ? ' active' : '') + (origin ? ' branch' : '') + (t.unread ? ' is-unread' : '')}
+      class={'thread' + (active ? ' active' : '') + (guides.length ? ' branch' : '') + (t.unread ? ' is-unread' : '')}
       data-id={t.threadId}
+      style={{ '--thread-depth': guides.length }}
       onClick={onOpen}
     >
+      {guides.length ? (
+        <span class="thread-tree-guides" aria-hidden="true">
+          {guides.map((continues, i) => (
+            <span
+              key={i}
+              class={'thread-tree-guide' + (continues ? ' continues' : '') + (i === guides.length - 1 ? ' elbow' : '')}
+            />
+          ))}
+        </span>
+      ) : null}
       <div class="title">
         {origin
           ? <span
@@ -187,10 +198,12 @@ export function DmRow({ t }: { t: Thread }) {
   );
 }
 
-function renderRow(t: Thread) {
-  return t.kind === 'dm'
-    ? <DmRow key={t.threadId} t={t} />
-    : <ThreadRow key={t.threadId} t={t} />;
+export function ThreadList({ items }: { items: Thread[] }) {
+  return <>{buildThreadTree(items).map(({ thread, guides }) => (
+    thread.kind === 'dm'
+      ? <DmRow key={thread.threadId} t={thread} />
+      : <ThreadRow key={thread.threadId} t={thread} guides={guides} />
+  ))}</>;
 }
 
 function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[]; defaultOpen: boolean }) {
@@ -230,7 +243,7 @@ function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[
             ? <span class="handle" title={handles.join(', ')}>{handleStr}</span>
             : null}
         </button>}
-      {expanded ? <div class="thread-section-body">{items.map(renderRow)}</div> : null}
+      {expanded ? <div class="thread-section-body"><ThreadList items={items} /></div> : null}
     </div>
   );
 }
@@ -349,10 +362,6 @@ export function ThreadsRail() {
       if (b.ct === 'web' && a.ct !== 'web') return 1;
       return a.label.localeCompare(b.label);
     });
-  for (const s of sections) {
-    s.items.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
-  }
-
   const runSearch = (): void => {
     const q = searchQuery.peek().trim();
     if (!q) {

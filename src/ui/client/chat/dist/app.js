@@ -22850,6 +22850,54 @@ function RelativeTime({ ts, className }) {
   return /* @__PURE__ */ u4("span", { class: className || "ts", title: fmtAbsolute(ts), children: fmtRelative(ts) });
 }
 
+// src/thread-tree.ts
+function buildThreadTree(threads2) {
+  const nodes = threads2.map(
+    (thread2) => ({
+      thread: thread2,
+      children: [],
+      latestActivityAt: thread2.lastActivityAt ?? -Infinity
+    })
+  );
+  const byId = new Map(nodes.map((node) => [node.thread.threadId, node]));
+  const roots = [];
+  for (const node of nodes) {
+    const origin = node.thread.forkedFrom;
+    const parent = origin && !origin.deleted ? byId.get(origin.threadId) : void 0;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  const descendants = [...roots];
+  for (let i5 = 0; i5 < descendants.length; i5++) {
+    descendants.push(...descendants[i5].children);
+  }
+  if (descendants.length !== nodes.length) throw new Error("Cyclic thread fork lineage");
+  const byActivity = (a4, b5) => b5.latestActivityAt - a4.latestActivityAt || a4.thread.threadId.localeCompare(b5.thread.threadId);
+  for (let i5 = descendants.length - 1; i5 >= 0; i5--) {
+    const node = descendants[i5];
+    for (const child of node.children) {
+      node.latestActivityAt = Math.max(node.latestActivityAt, child.latestActivityAt);
+    }
+    node.children.sort(byActivity);
+  }
+  roots.sort(byActivity);
+  const rows = [];
+  const stack = roots.map((node) => ({ node, depth: 0, guides: [] })).reverse();
+  while (stack.length) {
+    const { node, depth, guides } = stack.pop();
+    rows.push({ thread: node.thread, depth, guides });
+    for (let i5 = node.children.length - 1; i5 >= 0; i5--) {
+      stack.push({
+        node: node.children[i5],
+        depth: depth + 1,
+        // Keep the first two ancestor guides and the immediate branch elbow.
+        guides: [...guides.slice(0, 2), i5 < node.children.length - 1]
+      });
+    }
+  }
+  return rows;
+}
+
 // src/components/ThreadsRail.tsx
 function ThreadAttention({ thread: thread2 }) {
   const location2 = {
@@ -22878,7 +22926,7 @@ function ThreadAttention({ thread: thread2 }) {
     }
   ) : indicator;
 }
-function ThreadRow({ t: t4 }) {
+function ThreadRow({ t: t4, guides = [] }) {
   const ct = t4.channelType || "web";
   const meta = channelMeta(ct);
   const active = t4.threadId === threadId.value;
@@ -22893,8 +22941,7 @@ function ThreadRow({ t: t4 }) {
     head.nextRunAt != null ? `next ${new Date(head.nextRunAt).toLocaleString()}` : null,
     head.summary
   ].filter(Boolean).join(" \xB7 ") : void 0;
-  const onOpen = (ev) => {
-    if (ev.target.classList.contains("del")) return;
+  const onOpen = () => {
     if (groupId.value) openChat2(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
@@ -22939,10 +22986,18 @@ This also cancels its outstanding approval requests. Already applied changes are
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: "thread" + (active ? " active" : "") + (origin ? " branch" : "") + (t4.unread ? " is-unread" : ""),
+      class: "thread" + (active ? " active" : "") + (guides.length ? " branch" : "") + (t4.unread ? " is-unread" : ""),
       "data-id": t4.threadId,
+      style: { "--thread-depth": guides.length },
       onClick: onOpen,
       children: [
+        guides.length ? /* @__PURE__ */ u4("span", { class: "thread-tree-guides", "aria-hidden": "true", children: guides.map((continues, i5) => /* @__PURE__ */ u4(
+          "span",
+          {
+            class: "thread-tree-guide" + (continues ? " continues" : "") + (i5 === guides.length - 1 ? " elbow" : "")
+          },
+          i5
+        )) }) : null,
         /* @__PURE__ */ u4("div", { class: "title", children: [
           origin ? /* @__PURE__ */ u4(
             "span",
@@ -23023,8 +23078,8 @@ function DmRow({ t: t4 }) {
     ] })
   ] });
 }
-function renderRow(t4) {
-  return t4.kind === "dm" ? /* @__PURE__ */ u4(DmRow, { t: t4 }, t4.threadId) : /* @__PURE__ */ u4(ThreadRow, { t: t4 }, t4.threadId);
+function ThreadList({ items }) {
+  return /* @__PURE__ */ u4(k, { children: buildThreadTree(items).map(({ thread: thread2, guides }) => thread2.kind === "dm" ? /* @__PURE__ */ u4(DmRow, { t: thread2 }, thread2.threadId) : /* @__PURE__ */ u4(ThreadRow, { t: thread2, guides }, thread2.threadId)) });
 }
 function ChannelSection({ ct, items, defaultOpen }) {
   const [open, setOpen] = h2(defaultOpen);
@@ -23067,7 +23122,7 @@ function ChannelSection({ ct, items, defaultOpen }) {
         ]
       }
     ),
-    expanded ? /* @__PURE__ */ u4("div", { class: "thread-section-body", children: items.map(renderRow) }) : null
+    expanded ? /* @__PURE__ */ u4("div", { class: "thread-section-body", children: /* @__PURE__ */ u4(ThreadList, { items }) }) : null
   ] });
 }
 function SearchResultRow({ r: r4 }) {
@@ -23159,9 +23214,6 @@ function ThreadsRail() {
     if (b5.ct === "web" && a4.ct !== "web") return 1;
     return a4.label.localeCompare(b5.label);
   });
-  for (const s5 of sections) {
-    s5.items.sort((a4, b5) => (b5.lastActivityAt ?? 0) - (a4.lastActivityAt ?? 0));
-  }
   const runSearch = () => {
     const q5 = searchQuery.peek().trim();
     if (!q5) {
