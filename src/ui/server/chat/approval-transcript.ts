@@ -1,5 +1,5 @@
 import { getDb } from '../../../db/connection.js';
-import { queryInteractions, legacyInteractionExpired } from '../../../db/interactions.js';
+import { queryInteractions } from '../../../db/interactions.js';
 
 import { getApproval, type Approval } from '../../../db/approvals.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
@@ -85,7 +85,7 @@ export function projectApproval(userId: string, row: Approval): ConversationAppr
     agentGroupName: groupId ? (getAgentGroup(groupId)?.name ?? null) : null,
     createdAt: row.created_at,
     supportsResponseMessage: row.session_id !== null,
-    status: legacyInteractionExpired(row) ? 'expired' : row.status,
+    status: row.status,
     resolvedAt: row.resolved_at,
     outcomeMessage: row.outcome_message,
   };

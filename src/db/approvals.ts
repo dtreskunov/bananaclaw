@@ -7,7 +7,7 @@ export type { Approval } from '../types.js';
 
 export function createApproval(
   approval: Pick<Approval, 'id' | 'request_id' | 'input' | 'created_at'> &
-    Partial<Pick<Approval, 'session_id' | 'agent_group_id' | 'origin_message_id' | 'expires_at'>>,
+    Partial<Pick<Approval, 'session_id' | 'agent_group_id' | 'origin_message_id'>>,
 ): boolean {
   return createInteraction({
     ...approval,

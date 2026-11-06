@@ -23,10 +23,6 @@ export function getInteraction(id: string): Interaction | undefined {
   return queryInteractions<Interaction>('SELECT * FROM interactions WHERE id=?', id)[0];
 }
 
-export function legacyInteractionExpired(row: Pick<Interaction, 'status' | 'expires_at'>, now = Date.now()): boolean {
-  return row.status === 'pending' && row.expires_at !== null && row.expires_at <= now;
-}
-
 export function mutateInteraction(id: string, write: () => boolean): boolean {
   const db = getDb();
   return transaction(db, () => {
@@ -44,7 +40,7 @@ export function mutateInteraction(id: string, write: () => boolean): boolean {
 export function createInteraction(
   record: Pick<Interaction, 'id' | 'kind' | 'input' | 'created_at'> & Partial<Interaction>,
 ): boolean {
-  assertTimestampFields(record, ['created_at', 'updated_at', 'expires_at', 'responded_at', 'resolved_at']);
+  assertTimestampFields(record, ['created_at', 'updated_at', 'responded_at', 'resolved_at']);
   const { input, response = null, ...columns } = record;
   const route = interactionRoute({ ...record, session_id: record.session_id ?? null });
   const values = {

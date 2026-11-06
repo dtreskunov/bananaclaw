@@ -21,6 +21,7 @@ vi.mock('../../container-runner.js', () => ({
   killContainer: vi.fn(),
 }));
 vi.mock('../../session-manager.js', () => ({
+  inboundDbPath: () => `${mocks.directory}/inbound.db`,
   openInboundDb: () => ({ prepare: () => ({ get: () => mocks.origin }), close: () => {} }),
   writeSessionMessage: (_gid: string, _sid: string, message: { id: string }) => {
     if (!mocks.messages.has(message.id)) mocks.messages.set(message.id, message);
@@ -92,6 +93,8 @@ const input = { resource_url: 'https://api.example.com/v1/items', reason: 'Finis
 let connection: SharedConnection;
 
 beforeEach(() => {
+  fs.mkdirSync(mocks.directory, { recursive: true });
+  fs.writeFileSync(`${mocks.directory}/inbound.db`, '');
   runMigrations(initTestDb());
   const db = getDb();
   for (const id of ['alice', 'bob', 'member'])
@@ -183,9 +186,9 @@ describe('assisted access approvals', () => {
     }
   });
 
-  it('does not resurrect or mutate a legacy expired request while projecting it', async () => {
+  it('does not resurrect or mutate a terminal request while projecting it', async () => {
     const request = await seed();
-    getDb().prepare('UPDATE interactions SET expires_at=? WHERE id=?').run('2000-01-01', request.id);
+    getDb().prepare("UPDATE interactions SET status='expired' WHERE id=?").run(request.id);
     const before = getApprovalWorkflow(request.id);
     expect(getAccountRequest(request.id).status).toBe('expired');
     expect(getAccountRequest(request.id).status).toBe('expired');
@@ -817,9 +820,11 @@ describe('assisted access approvals', () => {
     const failed = getAccountRequest(request.id);
     expect(() => retryAccessRequest('member', request.id, { request_revision: failed.revision })).toThrow();
     expect(() => retryAccessRequest('alice', request.id, { request_revision: 1 })).toThrow('failed request');
-    getDb().prepare('UPDATE interactions SET expires_at=? WHERE id=?').run('2000-01-01', request.id);
-    expect(() => retryAccessRequest('alice', request.id, { request_revision: failed.revision })).toThrow('expired');
-    expect(getApprovalWorkflow(request.id)?.status).toBe('failed');
+    getDb().prepare("UPDATE interactions SET status='expired' WHERE id=?").run(request.id);
+    expect(() => retryAccessRequest('alice', request.id, { request_revision: failed.revision })).toThrow(
+      'failed request',
+    );
+    expect(getApprovalWorkflow(request.id)?.status).toBe('expired');
     expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('does not let an old failure notification acknowledge a newer retry outcome', async () => {
@@ -870,7 +875,7 @@ describe('assisted access approvals', () => {
     expect((await seed('appr-access-reject-repeat')).id).toBe(rejected.id);
     mocks.origin.id = 'another-human-request';
     const expired = await seed('appr-access-expire');
-    getDb().prepare('UPDATE interactions SET expires_at=? WHERE id=?').run('2000-01-01', expired.id);
+    getDb().prepare("UPDATE interactions SET status='expired' WHERE id=?").run(expired.id);
     await recoverAccessRequests();
     expect(getAccountRequest(expired.id).status).toBe('expired');
     expect(mocks.grant).not.toHaveBeenCalled();

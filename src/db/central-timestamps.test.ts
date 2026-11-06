@@ -10,7 +10,6 @@ import { createThreadFork, getThreadFork } from './thread-forks.js';
 import { createApproval, getApproval, updateApprovalStatus } from './approvals.js';
 import { createInteraction, getInteraction } from './interactions.js';
 import { assertTimestampFields } from './validate-timestamps.js';
-import { legacyInteractionExpired } from './interactions.js';
 import { createUser, getUser, isUserOnboarded, markUserOnboarded } from '../modules/permissions/db/users.js';
 import { addMember, getMembers } from '../modules/permissions/db/agent-group-members.js';
 import { grantRole, getUserRoles } from '../modules/permissions/db/user-roles.js';
@@ -82,20 +81,15 @@ it('keeps zero and null distinct across central records, permissions and configu
   expect(getThreadFork('g', 'mg', 'child')).toMatchObject({ parent_message_ts: 0, created_at: 0 });
 });
 
-it('uses numeric deadlines and records resolved decisions at epoch zero', () => {
+it('records resolved decisions and identity deadlines at epoch zero', () => {
   createApproval({
     id: 'a',
     request_id: 'a',
     agent_group_id: 'g',
     created_at: 0,
-    expires_at: 0,
     input: { action: 'test', payload: {}, title: 'Test', options: [] },
   });
-  const pending = getApproval('a')!;
-  expect(pending).toMatchObject({ created_at: 0, updated_at: 0, expires_at: 0, resolved_at: null });
-  expect(legacyInteractionExpired(pending, -1)).toBe(false);
-  expect(legacyInteractionExpired(pending, 0)).toBe(true);
-  expect(legacyInteractionExpired({ status: 'pending', expires_at: null }, 0)).toBe(false);
+  expect(getApproval('a')).toMatchObject({ created_at: 0, updated_at: 0, resolved_at: null });
   updateApprovalStatus('a', 'approved', { userId: 'u', decision: 'approve' });
   expect(getApproval('a')).toMatchObject({ updated_at: 0, responded_at: 0, resolved_at: 0 });
   updateApprovalStatus('a', 'pending');
@@ -141,7 +135,7 @@ it.each([NaN, Infinity, -Infinity, 0.5, 8640000000000001, -8640000000000001])(
         id: 'invalid-interaction',
         kind: 'confirmation',
         created_at: 0,
-        expires_at: invalid,
+        resolved_at: invalid,
         input: { action: 'test', payload: {}, title: 'Test', options: [] },
       }),
     ).toThrow('Invalid epoch-millisecond timestamp');

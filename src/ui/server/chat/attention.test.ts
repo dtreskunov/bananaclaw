@@ -122,7 +122,7 @@ describe('authorized global input attention', () => {
     approval('applying');
     approval('rejected');
     approval('expired');
-    getDb().exec("UPDATE interactions SET expires_at=946684800000 WHERE id='expired'");
+    updateApprovalStatus('expired', 'expired');
     updateApprovalStatus('applying', 'applying');
     updateApprovalStatus('rejected', 'rejected');
     expect(readInteractionSync('viewer').attention.map((row) => row.id)).toEqual(['q']);

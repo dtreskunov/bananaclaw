@@ -489,8 +489,6 @@ export function retryAccessRequest(userId: string, id: string, raw: unknown) {
   const body = objectBody(raw);
   if (Object.keys(body).some((key) => key !== 'request_revision') || !Number.isSafeInteger(body.request_revision))
     throw new ConnectionInputError('Refresh and supply the reviewed request revision.');
-  if (request.expiresAt !== null && request.expiresAt <= Date.now())
-    throw new ConnectionInputError('This request has expired. Ask the agent to create a new request.', 409);
   if (!retryApprovalWorkflow(request.id, Number(body.request_revision), userId))
     throw new ConnectionInputError('Only a current failed request can be reopened for review.', 409);
   log.info('Access approval reopened for review', { approvalId: request.id, userId });

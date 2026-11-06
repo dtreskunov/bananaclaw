@@ -1,11 +1,6 @@
 import { getDb } from '../../db/connection.js';
 import { getApproval, updateApprovalStatus, type Approval } from '../../db/approvals.js';
-import {
-  getInteraction,
-  queryInteractions,
-  legacyInteractionExpired,
-  mutateInteraction,
-} from '../../db/interactions.js';
+import { getInteraction, queryInteractions, mutateInteraction } from '../../db/interactions.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { writeApprovalNotification } from './notification.js';
@@ -51,13 +46,13 @@ export function getAccountRequest(id: string, sessionId?: string): AccountReques
     id: approval.id,
     kind: approval.kind,
     requirements: approval.input.payload,
-    status: legacyInteractionExpired(approval) ? 'expired' : approval.status,
+    status: approval.status,
     revision: approval.revision,
     retryable: approval.status === 'failed' && workflow !== undefined,
     agentGroupId: session.agent_group_id,
     agentGroupName: getAgentGroup(session.agent_group_id)?.name ?? session.agent_group_id,
     createdAt: approval.created_at,
-    expiresAt: approval.expires_at,
+    expiresAt: null,
     outcomeMessage: approval.outcome_message,
     resolvedAt: approval.resolved_at,
   };

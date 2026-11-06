@@ -276,7 +276,6 @@ describe('authoritative conversation projection', () => {
       dedupe_key: null,
       outcome_message: null,
       updated_at: 1790640001000,
-      expires_at: null,
       responded_by: null,
       responded_at: null,
       resolved_at: null,

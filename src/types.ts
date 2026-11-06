@@ -223,7 +223,6 @@ interface InteractionRecord {
   origin_message_id: string | null;
   created_at: EpochMs;
   updated_at: EpochMs;
-  expires_at: EpochMs | null;
   revision: number;
   dedupe_key: string | null;
   responded_by: string | null;

@@ -292,7 +292,6 @@ CREATE TABLE interactions (
   revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>=1),
   created_at INTEGER CHECK (created_at IS NULL OR typeof(created_at)='integer') NOT NULL,
   updated_at INTEGER CHECK (updated_at IS NULL OR typeof(updated_at)='integer') NOT NULL,
-  expires_at INTEGER CHECK (expires_at IS NULL OR typeof(expires_at)='integer'),
   dedupe_key TEXT,
   responded_by TEXT,
   responded_at INTEGER CHECK (responded_at IS NULL OR typeof(responded_at)='integer'),

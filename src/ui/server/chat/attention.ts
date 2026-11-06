@@ -1,4 +1,4 @@
-import { queryInteractions, legacyInteractionExpired } from '../../../db/interactions.js';
+import { queryInteractions } from '../../../db/interactions.js';
 import type { Interaction } from '../../../types.js';
 import type { SyncResponse } from '../../shared/sync.js';
 import { projectApproval } from './approval-transcript.js';
@@ -9,10 +9,9 @@ export function readInteractionSync(userId: string): Pick<SyncResponse, 'approva
     "SELECT * FROM interactions WHERE status IN ('pending','applying') ORDER BY created_at DESC,id DESC",
   );
   const result: Pick<SyncResponse, 'approvals' | 'attention'> = { approvals: [], attention: [] };
-  const now = Date.now();
   for (const row of rows) {
     if (row.kind === 'question') {
-      if (row.status !== 'pending' || legacyInteractionExpired(row, now)) continue;
+      if (row.status !== 'pending') continue;
       const origin = questionResponseOrigin(userId, row);
       if (origin) result.attention.push({ id: row.id, origin });
       continue;
@@ -23,8 +22,7 @@ export function readInteractionSync(userId: string): Pick<SyncResponse, 'approva
     if (
       approval.status === 'pending' &&
       approval.origin &&
-      (approval.kind !== 'confirmation' || approval.options.length > 0) &&
-      !legacyInteractionExpired(row, now)
+      (approval.kind !== 'confirmation' || approval.options.length > 0)
     )
       result.attention.push({ id: row.id, origin: approval.origin });
   }

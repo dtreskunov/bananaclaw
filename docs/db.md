@@ -20,6 +20,25 @@ for missing values. UI HTTP requests and responses exchange the
 `X-NanoClaw-UI-Protocol` version header before startup data is consumed; the
 sync socket also requires protocol 16.
 
+### Retiring interaction expiry
+
+Requests now remain pending until explicitly resolved. The host refuses an
+`interactions.expires_at` column rather than reviving old expired requests.
+Before deploying this cleanup, stop the host and back up the central database.
+Then run from the checkout root:
+
+```sh
+pnpm exec tsx scripts/q.ts data/v2.db "PRAGMA foreign_keys=ON; BEGIN; UPDATE conversation_publications SET visible=0 WHERE kind IN ('question','approval') AND item_id IN (SELECT id FROM interactions WHERE expires_at IS NOT NULL); DELETE FROM interactions WHERE expires_at IS NOT NULL; ALTER TABLE interactions DROP COLUMN expires_at; COMMIT;"
+```
+
+This deliberately discards all legacy dated requests and their private progress,
+including pending ones; undated requests and unrelated credential/session expiry
+are unchanged. Their old publication positions are retained but marked invisible,
+so read cursors remain valid. Verify the column is absent and `pragma_foreign_key_check` is empty.
+The existing UI account-response `expiresAt` field is always null; no protocol
+change is needed. Roll back with the previous code and central backup while the
+host is stopped. Do not run this command against a host that is still active.
+
 Existing maintained thread-summary JSON with ISO-valued dates requires the
 explicit stopped-host rebuild before deploying numeric-host code:
 `pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped`.

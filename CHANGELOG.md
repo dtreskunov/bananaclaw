@@ -4,6 +4,12 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Retire interaction expiry.** Requests resolve explicitly; legacy
+  expiring requests and their old column must be discarded during the
+  [stopped-host cleanup](docs/db.md#retiring-interaction-expiry). Startup refuses
+  the old schema rather than restoring expired requests. Session and credential
+  expiry remain unchanged.
+
 - **[BREAKING] Numeric internal host records.** Central entities, sessions,
   approvals, claims, scheduling and maintained metadata use epoch milliseconds
   end to end. Redundant DB decode/encode and UI re-parsing are removed; only

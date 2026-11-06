@@ -19,6 +19,10 @@ export const migrations: Migration[] = [];
 export function runMigrations(db: Database.Database, list: Migration[] = migrations): void {
   if (db.inTransaction) throw new Error('Central migrations must own their transaction');
   assertStorageVersion(db, 'central', true);
+  if (db.prepare("SELECT 1 FROM pragma_table_info('interactions') WHERE name='expires_at'").get())
+    throw new Error(
+      'Unsupported interaction expiry storage; stop the host and follow docs/db.md#retiring-interaction-expiry',
+    );
   db.pragma('foreign_keys = ON');
 
   if (db.pragma('user_version', { simple: true }) === 0) {

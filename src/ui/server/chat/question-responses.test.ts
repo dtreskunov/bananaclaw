@@ -102,13 +102,13 @@ function respond(body: unknown, id = 'q') {
 }
 
 describe('global attention sync', () => {
-  it('does not make a legacy expired question actionable or mutate it during reads', async () => {
-    getDb().prepare("UPDATE interactions SET expires_at=946684800000 WHERE id='q'").run();
+  it('does not make a cancelled question actionable or mutate it during reads', async () => {
+    getDb().prepare("UPDATE interactions SET status='cancelled' WHERE id='q'").run();
     const before = getQuestion('q');
     expect((await request('GET', '/ui/chat/api/sync')).body.attention).toEqual([]);
     expect(await respond({ responseType: 'choice', value: 'yes' })).toMatchObject({
       status: 409,
-      body: { error: 'request_expired' },
+      body: { error: 'question_cancelled' },
     });
     expect(getQuestion('q')).toEqual(before);
     expect(runtime.wake).not.toHaveBeenCalled();
@@ -159,11 +159,11 @@ describe('approval response messages', () => {
     });
   });
 
-  it('rejects a legacy expired approval before applying any effects', async () => {
-    getDb().prepare("UPDATE interactions SET expires_at=946684800000 WHERE id='message-approval'").run();
+  it('rejects a terminal approval before applying any effects', async () => {
+    getDb().prepare("UPDATE interactions SET status='expired' WHERE id='message-approval'").run();
     expect(await respond({ value: 'approve' }, 'message-approval')).toMatchObject({
       status: 409,
-      body: { error: 'request_expired' },
+      body: { error: 'not_pending' },
     });
     expect(applied).not.toHaveBeenCalled();
     expect(runtime.wake).not.toHaveBeenCalled();

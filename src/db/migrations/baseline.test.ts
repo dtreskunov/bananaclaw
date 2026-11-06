@@ -10,6 +10,41 @@ import { runMigrations, type Migration } from './index.js';
 afterEach(closeDb);
 
 describe('canonical central baseline', () => {
+  it('requires explicit removal of legacy expiring requests without changing current requests', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    db.exec(`ALTER TABLE interactions ADD COLUMN expires_at INTEGER;
+      INSERT INTO interactions(id,kind,request_id,input_json,response_json,created_at,updated_at,expires_at)
+      VALUES('legacy','confirmation','legacy','{}','{}',0,0,0),
+        ('current','confirmation','current','{}','{}',0,0,NULL);
+      INSERT INTO interaction_progress(id) VALUES('legacy');
+      INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','group',0);
+      INSERT INTO sessions(id,agent_group_id,created_at) VALUES('s','g',0);
+      INSERT INTO conversation_publications(session_id,kind,item_id,channel_type,platform_id,thread_id)
+        VALUES('s','approval','legacy','web','group:g','t'),
+          ('s','approval','current','web','group:g','t')`);
+    const current = db.prepare("SELECT * FROM interactions WHERE id='current'").get();
+    expect(() => runMigrations(db)).toThrow('Unsupported interaction expiry storage');
+    expect(db.prepare('SELECT count(*) FROM interactions').pluck().get()).toBe(2);
+    db.exec(`PRAGMA foreign_keys=ON;
+      BEGIN;
+      UPDATE conversation_publications SET visible=0
+        WHERE kind IN ('question','approval') AND item_id IN (SELECT id FROM interactions WHERE expires_at IS NOT NULL);
+      DELETE FROM interactions WHERE expires_at IS NOT NULL;
+      ALTER TABLE interactions DROP COLUMN expires_at;
+      COMMIT;`);
+    const { expires_at: _retired, ...expected } = current as Record<string, unknown>;
+    expect(db.prepare('SELECT * FROM interactions').all()).toEqual([expected]);
+    expect(db.prepare('SELECT * FROM interaction_progress').all()).toEqual([]);
+    expect(db.prepare('SELECT item_id,visible FROM conversation_publications ORDER BY position').all()).toEqual([
+      { item_id: 'legacy', visible: 0 },
+      { item_id: 'current', visible: 1 },
+    ]);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    expect(() => runMigrations(db)).not.toThrow();
+    expect(() => db.exec('UPDATE interactions SET expires_at=0')).toThrow('no such column');
+  });
+
   it('creates integer-millisecond storage directly, without table rebuilds or text timestamp DDL', () => {
     const statements: string[] = [];
     const db = new Database(':memory:', { verbose: (sql) => statements.push(String(sql)) });

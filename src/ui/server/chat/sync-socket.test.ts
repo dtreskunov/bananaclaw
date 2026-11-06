@@ -617,8 +617,7 @@ describe('unified sync WebSocket integration', () => {
     expect(listThreads).not.toHaveBeenCalled();
   });
 
-  it('enforces legacy deadlines on refresh without scheduling a workflow transition', async () => {
-    const expiresAt = Date.now() + 2000;
+  it('keeps old pending requests actionable on refresh without an expiry timer', async () => {
     createInteraction({
       id: 'q',
       kind: 'question',
@@ -628,13 +627,11 @@ describe('unified sync WebSocket integration', () => {
       channel_type: 'web',
       platform_id: 'group:g',
       thread_id: 'thread',
-      expires_at: expiresAt,
-      created_at: now(),
+      created_at: 0,
       input: { question: 'Continue?', responseMode: 'text', options: [] },
     });
     const client = await connect();
     expect(globalView()!.attention.map((row) => row.id)).toEqual(['q']);
-    await new Promise((resolve) => setTimeout(resolve, Math.max(1, expiresAt - Date.now() + 50)));
     expect(frames).toHaveLength(1);
     client.send(
       JSON.stringify({
@@ -646,7 +643,7 @@ describe('unified sync WebSocket integration', () => {
         globalCursor: globalCursor(),
       }),
     );
-    await vi.waitFor(() => expect(globalView()?.attention).toEqual([]), { timeout: 2000 });
+    await vi.waitFor(() => expect(globalView()?.attention.map((row) => row.id)).toEqual(['q']), { timeout: 2000 });
     expect(getDb().prepare("SELECT status FROM interactions WHERE id='q'").get()).toEqual({ status: 'pending' });
   });
 

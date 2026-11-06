@@ -4,7 +4,7 @@ import type { Approval } from '../../types.js';
 import { registerResource } from '../crud.js';
 import { parseTimestamp } from '../../time.js';
 
-const filters = ['id', 'session_id', 'request_id', 'agent_group_id', 'kind', 'status', 'created_at', 'expires_at'];
+const filters = ['id', 'session_id', 'request_id', 'agent_group_id', 'kind', 'status', 'created_at'];
 registerResource({
   name: 'approval',
   plural: 'approvals',
@@ -23,7 +23,7 @@ registerResource({
           `SELECT * FROM interactions WHERE kind!='question'
           ${selected.map(([key]) => `AND ${key}=?`).join(' ')} LIMIT ?`,
           ...selected.map(([key, value]) => {
-            if (key !== 'created_at' && key !== 'expires_at') return value;
+            if (key !== 'created_at') return value;
             if (value === null) return null;
             if (typeof value !== 'string') throw new Error(`${key} must be a timestamp string`);
             return parseTimestamp(value);

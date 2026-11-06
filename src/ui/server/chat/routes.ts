@@ -14,7 +14,7 @@ import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
 import { UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../shared/time.js';
-import { getInteraction, legacyInteractionExpired } from '../../../db/interactions.js';
+import { getInteraction } from '../../../db/interactions.js';
 import { log } from '../../../log.js';
 import {
   listAccessibleAgentGroups,
@@ -657,7 +657,6 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   if (row.kind !== 'question') {
     if (row.status !== 'pending') return json(ctx, 409, { error: 'not_pending' });
     if (!canRespondToApproval(userId, row)) return json(ctx, 403, { error: 'forbidden' });
-    if (legacyInteractionExpired(row)) return json(ctx, 409, { error: 'request_expired' });
   }
 
   let body: { value?: unknown; responseType?: unknown; message?: unknown };
@@ -685,7 +684,6 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
     const question = row;
     if (question.status === 'cancelled') return json(ctx, 409, { error: 'question_cancelled' });
     if (!questionResponseOrigin(userId, question)) return json(ctx, 403, { error: 'forbidden' });
-    if (legacyInteractionExpired(question)) return json(ctx, 409, { error: 'request_expired' });
     if (
       !isQuestionResponse(body) ||
       !questionAcceptsResponse(question.input.responseMode, question.input.options, body)
