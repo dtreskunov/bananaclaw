@@ -166,7 +166,7 @@ function main(): void {
               const ob = new Database(obPath);
               ob.prepare(
                 "INSERT OR REPLACE INTO session_state (key, value, updated_at) VALUES ('continuation:claude', ?, ?)",
-              ).run(v1SessionId, new Date().toISOString());
+              ).run(v1SessionId, Date.now());
               ob.close();
             }
           }

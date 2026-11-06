@@ -2,12 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { closeDb, getDb, initTestDb } from '../connection.js';
 import { migrations, runMigrations } from './index.js';
+import { convertStoreTimes } from '../storage-lifecycle.js';
 
 beforeEach(() => {
   runMigrations(
     initTestDb(),
     migrations.filter((migration) => migration.name !== 'drop-legacy-transcription-config'),
   );
+  convertStoreTimes(getDb());
 });
 
 afterEach(() => closeDb());
@@ -20,12 +22,12 @@ describe('drop legacy transcription config migration', () => {
     { backend: '', enabled: 0 },
   ])('preserves web voice input and all other config: %j', ({ backend, enabled }) => {
     const db = getDb();
-    db.exec("INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 'now')");
+    db.exec("INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 1767225600000)");
     db.prepare(
       `INSERT INTO container_configs
         (agent_group_id, provider, model, voice_mode, transcription_model,
          voice_input_backend, voice_input_enabled, model_params, updated_at)
-       VALUES ('g', 'claude', 'test-model', 'audio', 'legacy/model', ?, ?, '{"max_tokens":1024}', 'now')`,
+       VALUES ('g', 'claude', 'test-model', 'audio', 'legacy/model', ?, ?, '{"max_tokens":1024}', 1767225600000)`,
     ).run(backend, enabled);
     const before = db.prepare('SELECT * FROM container_configs').get() as Record<string, unknown>;
     expect(before).toMatchObject({ voice_mode: 'audio', transcription_model: 'legacy/model' });
@@ -49,8 +51,8 @@ describe('drop legacy transcription config migration', () => {
     const db = getDb();
     runMigrations(db);
     db.exec(`
-      INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 'now');
-      INSERT INTO container_configs (agent_group_id, updated_at) VALUES ('g', 'now');
+      INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 1767225600000);
+      INSERT INTO container_configs (agent_group_id, updated_at) VALUES ('g', 1767225600000);
     `);
     expect(db.prepare('SELECT * FROM container_configs').get()).toMatchObject({
       voice_input_backend: null,

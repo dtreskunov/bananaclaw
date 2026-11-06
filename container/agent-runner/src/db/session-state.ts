@@ -32,7 +32,7 @@ function setValue(key: string, value: string): void {
   }
   getOutboundDb()
     .prepare('INSERT OR REPLACE INTO session_state (key, value, updated_at) VALUES (?, ?, ?)')
-    .run(key, value, new Date().toISOString());
+    .run(key, value, Date.now());
 }
 
 function deleteValue(key: string): void {
@@ -177,7 +177,7 @@ export function appendActivity(step: ActivityStep): void {
         SELECT ?, NULL, COALESCE(MAX(ordinal), -1) + 1, ?, ?, ? FROM turn_activity WHERE turn_id = ?
         RETURNING ordinal`,
         )
-        .get(turnId, ts, text, position, turnId) as { ordinal: number };
+        .get(turnId, Number(ts), text, position, turnId) as { ordinal: number };
       ordinal = row.ordinal;
     }
     return position;

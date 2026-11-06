@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 /**
  * Tests for `POST /api/groups` — the UI surface that lets an owner or
  * global admin create a new agent group end-to-end.
@@ -134,7 +135,7 @@ async function call(method: string, url: string, body?: unknown): Promise<Captur
 function seedUser(id: string, name = 'Test User'): void {
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`)
-    .run(id, name, now());
+    .run(id, name, toEpoch(now()));
 }
 
 beforeEach(() => {
@@ -163,7 +164,7 @@ describe('GET /api/groups', () => {
     ]) {
       getDb()
         .prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`)
-        .run(id, name, id, now());
+        .run(id, name, id, toEpoch(now()));
     }
     grantRole({
       user_id: 'web:admin',
@@ -221,7 +222,7 @@ describe('POST /api/groups', () => {
     // Seed an unrelated group + scoped admin role.
     getDb()
       .prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`)
-      .run('ag-existing', 'Existing', 'existing', now());
+      .run('ag-existing', 'Existing', 'existing', toEpoch(now()));
     grantRole({
       user_id: 'web:scoped',
       role: 'admin',

@@ -6,6 +6,7 @@
  * messages the new session actually processed.
  */
 import { getInboundDb } from './connection.js';
+import { decodeTimes } from './time.js';
 
 export interface ForkOriginRow {
   /** Session this branch was cut from. Informational — may no longer exist. */
@@ -28,10 +29,10 @@ export interface ForkOriginRow {
 }
 
 /**
- * Read the fork origin, or undefined if this session isn't a fork.
+ * Read the fork origin, or null if this session isn't a fork.
  */
-export function getForkOrigin(): ForkOriginRow | undefined {
+export function getForkOrigin(): ForkOriginRow | null {
   const db = getInboundDb();
 
-  return db.prepare('SELECT * FROM fork_origin WHERE id = 1').get() as ForkOriginRow | undefined;
+  return decodeTimes<ForkOriginRow | null>(db.prepare('SELECT * FROM fork_origin WHERE id = 1').get(), ['created_at']);
 }

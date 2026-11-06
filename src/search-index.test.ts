@@ -20,9 +20,11 @@ import {
   extractInboundText,
   indexMessage,
   initSearchDb,
+  migrateSearchStorage,
   searchMessages,
   type IndexableMessage,
 } from './search-index.js';
+import { toEpoch } from './db/time.js';
 
 function inspectIndex<T>(read: (connection: Database.Database) => T): T {
   const connection = new Database(path.join(TEST_DATA_DIR, 'search.db'));
@@ -146,25 +148,25 @@ describe('search occurrence identity', () => {
       const before = inspectIndex((connection) => {
         // Simulate an old index with stale FTS contents: migration must read the source table.
         connection.exec("INSERT INTO message_fts(message_fts) VALUES ('delete-all')");
-        return connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all();
+        return (connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all() as Record<string, unknown>[])
+          .map(row => ({ ...row, timestamp: toEpoch(row.timestamp as string) }));
       });
 
+      expect(() => initSearchDb()).toThrow('stop host AND runners');
+      inspectIndex(migrateSearchStorage);
       initSearchDb();
 
       expect(
         inspectIndex((connection) => connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all()),
       ).toEqual(before);
-      expect(inspectIndex((connection) => connection.pragma('user_version', { simple: true }))).toBe(1);
+      expect(inspectIndex((connection) => connection.pragma('user_version', { simple: true }))).toBe(2);
       expect(searchMessages('need*', { agentGroupId: 'agent' })).toMatchObject([
         { messageId: 'shared', sessionId: 'session-a', direction: 'in', snippet: 'legacy >>>needle<<<' },
       ]);
       expect(searchMessages('archiv*', { agentGroupId: 'other-agent' })).toMatchObject([
         { messageId: 'reply', sessionId: 'session-b', direction: 'out', snippet: '>>>archived<<< token' },
       ]);
-      expect(log.warn).toHaveBeenCalledExactlyOnceWith(
-        'Search index schema rebuilt; existing entries preserved',
-        expect.objectContaining({ migratedRows: 2, backfill: 'pnpm exec tsx scripts/backfill-search-index.ts' }),
-      );
+      expect(log.warn).not.toHaveBeenCalled();
 
       indexMessage(occurrence());
       indexMessage(occurrence({ sessionId: 'fork', threadId: 'fork-thread' }));
@@ -179,7 +181,7 @@ describe('search occurrence identity', () => {
       expect(
         inspectIndex((connection) => connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all()),
       ).toEqual(migrated);
-      expect(log.warn).toHaveBeenCalledTimes(1);
+      expect(log.warn).not.toHaveBeenCalled();
     });
 
     it('rolls back the complete legacy schema and rows if a row cannot migrate', () => {
@@ -196,7 +198,7 @@ describe('search occurrence identity', () => {
         rows: connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all(),
       }));
 
-      expect(() => initSearchDb()).toThrow('NOT NULL');
+      expect(() => inspectIndex(migrateSearchStorage)).toThrow('NOT NULL');
 
       expect(
         inspectIndex((connection) => ({
@@ -211,6 +213,7 @@ describe('search occurrence identity', () => {
         ),
       ).toHaveLength(1);
       inspectIndex((connection) => connection.exec('DELETE FROM message_index WHERE id IS NULL'));
+      inspectIndex(migrateSearchStorage);
       initSearchDb();
       expect(searchMessages('need*', { agentGroupId: 'agent' })).toHaveLength(1);
     });
@@ -218,12 +221,13 @@ describe('search occurrence identity', () => {
     it('rejects unknown schema versions without replacing existing entries', () => {
       createLegacyIndex();
       inspectIndex((connection) => connection.pragma('user_version = 99'));
-      expect(() => initSearchDb()).toThrow('Unsupported search index schema version: 99');
+      expect(() => initSearchDb()).toThrow('Unsupported search storage version 99');
       expect(
         inspectIndex((connection) => connection.prepare('SELECT id FROM message_index ORDER BY id').all()),
       ).toEqual([{ id: 'reply' }, { id: 'shared' }]);
       expect(inspectIndex((connection) => connection.pragma('user_version', { simple: true }))).toBe(99);
       inspectIndex((connection) => connection.pragma('user_version = 0'));
+      inspectIndex(migrateSearchStorage);
       initSearchDb();
       expect(searchMessages('need*', { agentGroupId: 'agent' })).toHaveLength(1);
     });
@@ -231,14 +235,26 @@ describe('search occurrence identity', () => {
     it('rejects an unfamiliar unversioned schema without discarding it', () => {
       createLegacyIndex();
       inspectIndex((connection) => connection.exec('ALTER TABLE message_index ADD COLUMN custom_data TEXT'));
-      expect(() => initSearchDb()).toThrow('Unrecognized unversioned search index schema');
+      expect(() => inspectIndex(migrateSearchStorage)).toThrow('Unrecognized unversioned search index schema');
       expect(
         inspectIndex((connection) => connection.prepare('SELECT count(*) AS count FROM message_index').get()),
       ).toEqual({
         count: 2,
       });
+
       expect(inspectIndex((connection) => connection.pragma('user_version', { simple: true }))).toBe(0);
     });
+  });
+
+  it('stores precise epoch milliseconds and returns canonical ISO timestamps', () => {
+    indexMessage(occurrence({ id: 'later', timestamp: '2026-07-22T02:00:00.124+02:00' }));
+    indexMessage(occurrence({ id: 'earlier', timestamp: '2026-07-22T00:00:00.123Z' }));
+    expect(searchMessages('need*', { agentGroupId: 'agent' }).map(row => [row.messageId, row.timestamp])).toEqual([
+      ['later', '2026-07-22T00:00:00.124Z'], ['earlier', '2026-07-22T00:00:00.123Z'],
+    ]);
+    expect(inspectIndex(connection => connection.prepare(
+      'SELECT DISTINCT typeof(timestamp) AS type FROM message_index',
+    ).all())).toEqual([{ type: 'integer' }]);
   });
 
   it('edits and deletes only the selected occurrence, preserving its stable FTS rowid', () => {

@@ -1,5 +1,6 @@
 import type { AgentGroupMember } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
+import { encodeTimes, decodeTimeRows } from '../../../db/time.js';
 import { isAdminOfAgentGroup, isGlobalAdmin, isOwner } from './user-roles.js';
 
 import { recordHostChange } from '../../../db/transaction.js';
@@ -10,7 +11,7 @@ export function addMember(row: AgentGroupMember): void {
       `INSERT OR IGNORE INTO agent_group_members (user_id, agent_group_id, added_by, added_at)
        VALUES (@user_id, @agent_group_id, @added_by, @added_at)`,
     )
-    .run(row);
+    .run(encodeTimes(row, ['added_at']));
   recordHostChange({ kind: 'access' });
 }
 
@@ -20,16 +21,16 @@ export function removeMember(userId: string, agentGroupId: string): void {
 }
 
 export function getMembers(agentGroupId: string): AgentGroupMember[] {
-  return getDb()
+  return decodeTimeRows<AgentGroupMember>(getDb()
     .prepare('SELECT * FROM agent_group_members WHERE agent_group_id = ? ORDER BY added_at')
-    .all(agentGroupId) as AgentGroupMember[];
+    .all(agentGroupId), ['added_at']);
 }
 
 /** All membership rows for a user. Does not include implicit admin/owner membership. */
 export function getMembershipsForUser(userId: string): AgentGroupMember[] {
-  return getDb()
+  return decodeTimeRows<AgentGroupMember>(getDb()
     .prepare('SELECT * FROM agent_group_members WHERE user_id = ? ORDER BY added_at')
-    .all(userId) as AgentGroupMember[];
+    .all(userId), ['added_at']);
 }
 
 /**

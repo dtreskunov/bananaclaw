@@ -9,6 +9,8 @@
 import { randomUUID } from 'crypto';
 
 import { getDb } from '../db/connection.js';
+import { INSTANT_COLUMNS } from '../db/storage-lifecycle.js';
+import { toEpoch, encodeTimes, decodeTimes, decodeTimeRows } from '../db/time.js';
 
 import { register } from './registry.js';
 import type { CallerContext } from './frame.js';
@@ -103,6 +105,10 @@ function visibleColumns(def: ResourceDef): string[] {
   return def.columns.map((c) => c.name);
 }
 
+function instantColumns(def: ResourceDef): string[] {
+  return visibleColumns(def).filter(column => INSTANT_COLUMNS.has(column));
+}
+
 function genericList(def: ResourceDef) {
   const cols = visibleColumns(def).join(', ');
   const filterableNames = new Set(def.columns.filter((c) => !c.generated).map((c) => c.name));
@@ -114,14 +120,14 @@ function genericList(def: ResourceDef) {
       if (k === 'id' || k === 'limit') continue;
       if (filterableNames.has(k)) {
         filters.push(`${k} = ?`);
-        params.push(v);
+        params.push(INSTANT_COLUMNS.has(k) ? toEpoch(v as string | null) : v);
       }
     }
     const where = filters.length > 0 ? ` WHERE ${filters.join(' AND ')}` : '';
     params.push(limit);
-    return getDb()
+    return decodeTimeRows<Record<string, unknown>>(getDb()
       .prepare(`SELECT ${cols} FROM ${def.table}${where} LIMIT ?`)
-      .all(...params);
+      .all(...params), instantColumns(def));
   };
 }
 
@@ -132,7 +138,7 @@ function genericGet(def: ResourceDef) {
     if (!id) throw new Error(`${def.name} id is required`);
     const row = getDb().prepare(`SELECT ${cols} FROM ${def.table} WHERE ${def.idColumn} = ?`).get(id);
     if (!row) throw new Error(`${def.name} not found: ${id}`);
-    return row;
+    return decodeTimes<Record<string, unknown>>(row, instantColumns(def));
   };
 }
 
@@ -169,7 +175,7 @@ function genericCreate(def: ResourceDef) {
     const placeholders = colNames.map((c) => `@${c}`);
     getDb()
       .prepare(`INSERT INTO ${def.table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')})`)
-      .run(values);
+      .run(encodeTimes(values, instantColumns(def)));
     recordHostChange({ kind: 'access' });
     return values;
   };
@@ -202,12 +208,12 @@ function genericUpdate(def: ResourceDef) {
       .join(', ');
     const result = getDb()
       .prepare(`UPDATE ${def.table} SET ${setClause} WHERE ${def.idColumn} = @_id`)
-      .run({ ...updates, _id: id });
+      .run(encodeTimes<Record<string, unknown>>({ ...updates, _id: id }, instantColumns(def)));
     if (result.changes === 0) throw new Error(`${def.name} not found: ${id}`);
     recordHostChange({ kind: 'access' });
 
     const cols = visibleColumns(def).join(', ');
-    return getDb().prepare(`SELECT ${cols} FROM ${def.table} WHERE ${def.idColumn} = ?`).get(id);
+    return decodeTimes<Record<string, unknown>>(getDb().prepare(`SELECT ${cols} FROM ${def.table} WHERE ${def.idColumn} = ?`).get(id), instantColumns(def));
   };
 }
 

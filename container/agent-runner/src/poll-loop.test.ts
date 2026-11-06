@@ -1,3 +1,4 @@
+import { toEpoch } from './db/time.js';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
@@ -127,9 +128,9 @@ function insertMessage(
   getInboundDb()
     .prepare(
       `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, on_wake, content)
-     VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?, ?)`,
+     VALUES (?, ?, (unixepoch('now')*1000), 'pending', ?, ?, ?, ?)`,
     )
-    .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, opts?.onWake ?? 0, JSON.stringify(content));
+    .run(id, kind, toEpoch(opts?.processAfter ?? null), opts?.trigger ?? 1, opts?.onWake ?? 0, JSON.stringify(content));
 }
 
 describe('formatter', () => {
@@ -254,7 +255,7 @@ describe('accumulate gate (trigger column)', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, content)
-         VALUES ('m1', 'chat', datetime('now'), 'pending', '{"text":"hi"}')`,
+         VALUES ('m1', 'chat', (unixepoch('now')*1000), 'pending', '{"text":"hi"}')`,
       )
       .run();
     const [msg] = getPendingMessages();
@@ -306,7 +307,7 @@ describe('on_wake filtering', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, content)
-         VALUES ('m1', 'chat', datetime('now'), 'pending', '{"text":"hi"}')`,
+         VALUES ('m1', 'chat', (unixepoch('now')*1000), 'pending', '{"text":"hi"}')`,
       )
       .run();
     // Should be returned even on non-first poll (on_wake=0)
@@ -319,7 +320,7 @@ describe('routing', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content)
-       VALUES ('m1', 'chat', datetime('now'), 'pending', 'chan-123', 'discord', 'thread-456', '{"text":"hi"}')`,
+       VALUES ('m1', 'chat', (unixepoch('now')*1000), 'pending', 'chan-123', 'discord', 'thread-456', '{"text":"hi"}')`,
       )
       .run();
 
@@ -346,7 +347,7 @@ describe('origin metadata (from= attribute)', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
-         VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?)`,
+         VALUES (?, ?, (unixepoch('now')*1000), 'pending', ?, ?, ?)`,
       )
       .run(id, kind, platformId, channelType, JSON.stringify(content));
   }

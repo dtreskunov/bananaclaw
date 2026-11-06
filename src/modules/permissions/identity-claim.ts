@@ -52,8 +52,8 @@ export function claimIdentity(args: { targetUserId: string; channel: string; han
       // Fresh insert.
       db.prepare(
         `INSERT INTO identities (user_id, channel, handle, verified_at, primary_for_channel)
-         VALUES (?, ?, ?, datetime('now'), 0)`,
-      ).run(targetUserId, channel, handle);
+         VALUES (?, ?, ?, ?, 0)`,
+      ).run(targetUserId, channel, handle, Date.now());
       return { outcome: 'transferred', donorUserId: null, donorDeleted: false };
     }
 
@@ -64,9 +64,9 @@ export function claimIdentity(args: { targetUserId: string; channel: string; han
     // want to silently overwrite that.
     db.prepare(
       `UPDATE identities
-       SET user_id = ?, primary_for_channel = 0, verified_at = datetime('now')
+       SET user_id = ?, primary_for_channel = 0, verified_at = ?
        WHERE channel = ? AND handle = ?`,
-    ).run(targetUserId, channel, handle);
+    ).run(targetUserId, Date.now(), channel, handle);
 
     // Anything left on the donor that lets them sign in?
     const remainingIdentities = (

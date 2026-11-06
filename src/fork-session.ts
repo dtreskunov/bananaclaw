@@ -44,6 +44,7 @@ import {
 } from './session-manager.js';
 import type { Session } from './types.js';
 import { transaction } from './db/transaction.js';
+import { toEpoch, fromEpoch } from './db/time.js';
 
 /** Message kinds that must never be inherited — a copied task would double-fire. */
 const EXCLUDED_INBOUND_KINDS = new Set(['task']);
@@ -83,18 +84,6 @@ export class ForkError extends Error {}
 type Row = Record<string, unknown>;
 
 /**
- * Milliseconds for a session-DB timestamp. The two DBs are written by
- * different processes in different formats — the host stores ISO
- * (`2026-01-01T00:00:00.000Z`), the container stores SQLite's `datetime('now')`
- * (`2026-01-01 00:00:00`, UTC, whole seconds). Comparing those as strings is
- * wrong in both directions ('T' sorts after ' '), so every cut goes through
- * here. Same normalization the chat history reader uses to interleave them.
- */
-function tsMs(s: string): number {
-  return Date.parse(s.includes('T') ? s : s.replace(' ', 'T') + 'Z');
-}
-
-/**
  * Use the same consumption order as the transcript, falling back to timestamps
  * for messages written before timeline metadata was available.
  */
@@ -114,22 +103,22 @@ function findAnchor(
       'SELECT id, timestamp, content FROM messages_in WHERE (id = ? OR id = ?) AND channel_type = ? AND thread_id = ? LIMIT 1',
     )
     .get(anchorMessageId, namespaced, channelType, threadId) as
-    | { id: string; timestamp: string; content: string }
+    | { id: string; timestamp: number; content: string }
     | undefined;
   if (inRow) {
     const state = readInputTimeline(outDb, inRow.id);
     if (state?.status === 'cancelled' || isCancelledInputContent(inRow.content))
       throw new ForkError('anchor_not_found');
     if (state?.queuedForNextTurn && state.status === 'queued') throw new ForkError('anchor_pending');
-    return { timestamp: inRow.timestamp, direction: 'in', timelinePosition: state?.timelinePosition };
+    return { timestamp: fromEpoch(inRow.timestamp), direction: 'in', timelinePosition: state?.timelinePosition };
   }
 
   const outRow = outDb
     .prepare('SELECT timestamp, content FROM messages_out WHERE id = ? AND channel_type = ? AND thread_id = ? LIMIT 1')
-    .get(anchorMessageId, channelType, threadId) as { timestamp: string; content: string } | undefined;
+    .get(anchorMessageId, channelType, threadId) as { timestamp: number; content: string } | undefined;
   if (outRow)
     return {
-      timestamp: outRow.timestamp,
+      timestamp: fromEpoch(outRow.timestamp),
       direction: 'out',
       timelinePosition: outboundTimelinePosition(outRow.content),
     };
@@ -235,18 +224,18 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
   try {
     const anchor = findAnchor(srcIn, srcOut, agentGroupId, channelType, parentThreadId, anchorMessageId);
     cutTs = anchor.timestamp;
-    const cutMs = tsMs(cutTs);
+    const cutMs = toEpoch(cutTs);
     const cutPosition = timelineSortKey(cutTs, anchor.timelinePosition);
-    // Outbound timestamps have whole-second resolution, so a reply written in
+    // Historical outbound timestamps can have whole-second resolution, so a reply written in
     // the same second as the inbound message it answers looks simultaneous.
     // When the user branches at their own message, resolve that ambiguity the
     // only way that can be right: the reply came after.
     const keepOut = (r: Row): boolean => {
       const position = outboundTimelinePosition(String(r.content));
       if (anchor.timelinePosition !== undefined || position !== undefined) {
-        return timelineSortKey(String(r.timestamp), position) <= cutPosition;
+        return timelineSortKey(fromEpoch(r.timestamp as number), position) <= cutPosition;
       }
-      const ms = tsMs(String(r.timestamp));
+      const ms = r.timestamp as number;
       return anchor.direction === 'in' && Math.floor(cutMs / 1000) === Math.floor(ms / 1000) ? false : ms <= cutMs;
     };
 
@@ -263,7 +252,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
       const state = readInputTimeline(srcOut, String(r.id));
       if (state?.status === 'cancelled' || isCancelledInputContent(String(r.content))) return false;
       if (state?.queuedForNextTurn && state.status === 'queued') return false;
-      return timelineSortKey(String(r.timestamp), state?.timelinePosition) <= cutPosition;
+      return timelineSortKey(fromEpoch(r.timestamp as number), state?.timelinePosition) <= cutPosition;
     });
 
     outRows = (
@@ -282,7 +271,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
       transcript.push({
         id: String(r.id),
         direction: 'in',
-        timestamp: String(r.timestamp),
+        timestamp: fromEpoch(r.timestamp as number),
         text: extractInboundText(String(r.content)),
         senderUserId: typeof r.sender_user_id === 'string' ? r.sender_user_id : null,
         timelinePosition: readInputTimeline(srcOut, String(r.id))?.timelinePosition,
@@ -294,7 +283,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
       transcript.push({
         id: String(r.id),
         direction: 'out',
-        timestamp: String(r.timestamp),
+        timestamp: fromEpoch(r.timestamp as number),
         text: extractOutboundText(String(r.content)),
         timelinePosition: outboundTimelinePosition(String(r.content)),
         searchable: true,
@@ -481,13 +470,13 @@ function populateForkSession(args: {
         message_out_id: String(r.id),
         platform_message_id: null,
         status: 'inherited',
-        delivered_at: args.createdAt,
+        delivered_at: toEpoch(args.createdAt),
       })),
     );
 
     if (args.titleRow) {
       insertRows(dstIn, 'thread_titles', [
-        { ...args.titleRow, thread_id: newThreadId, source: 'fork', published: 1, updated_at: args.createdAt },
+        { ...args.titleRow, thread_id: newThreadId, source: 'fork', published: 1, updated_at: toEpoch(args.createdAt) },
       ]);
     }
 
@@ -503,7 +492,7 @@ function populateForkSession(args: {
         provider: args.provider,
         anchor_ref: args.anchorRef,
         digest,
-        created_at: args.createdAt,
+        created_at: toEpoch(args.createdAt),
       });
 
     const inheritedEvenMax = [...inRows, ...outRows].reduce((maximum, row) => {
@@ -541,7 +530,7 @@ function populateForkSession(args: {
         {
           key: inputStateKey(String(row.id)),
           value: JSON.stringify(state),
-          updated_at: args.createdAt,
+          updated_at: toEpoch(args.createdAt),
         },
       ]);
     }
@@ -551,7 +540,7 @@ function populateForkSession(args: {
     insertRows(
       dstOut,
       'processing_ack',
-      inRows.map((r) => ({ message_id: String(r.id), status: 'completed', status_changed: args.createdAt })),
+      inRows.map((r) => ({ message_id: String(r.id), status: 'completed', status_changed: toEpoch(args.createdAt) })),
     );
   } finally {
     srcOut.close();

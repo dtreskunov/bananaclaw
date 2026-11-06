@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import { toEpoch } from '../src/db/time.js';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -63,9 +64,9 @@ try {
     [alice, 'Alice test'],
     [bob, 'Bob test'],
   ])
-    db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(id, 'test', label, now);
+    db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(id, 'test', label, toEpoch(now));
   for (const id of ['ag-host-one', 'ag-host-two'])
-    db.prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, id, id, now);
+    db.prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, id, id, toEpoch(now));
   grantRole({ user_id: alice, role: 'owner', agent_group_id: null, granted_by: null, granted_at: now });
   grantRole({ user_id: bob, role: 'admin', agent_group_id: 'ag-host-two', granted_by: alice, granted_at: now });
   await flushManagedUsers();

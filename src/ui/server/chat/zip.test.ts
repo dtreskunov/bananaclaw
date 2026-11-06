@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -76,14 +77,14 @@ beforeEach(() => {
   const db = initTestDb();
   runMigrations(db);
   const now = new Date().toISOString();
-  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`).run(ADMIN, ADMIN, now);
+  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`).run(ADMIN, ADMIN, toEpoch(now));
   db.prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`).run(
     GID,
     FOLDER,
     FOLDER,
-    now,
+    toEpoch(now),
   );
-  db.prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(GID, now);
+  db.prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(GID, toEpoch(now));
   grantRole({ user_id: ADMIN, role: 'admin', agent_group_id: GID, granted_by: ADMIN, granted_at: now });
 });
 

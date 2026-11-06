@@ -5,6 +5,12 @@ and `outbound.db`, plus runner-owned `runner-state.db`. Start with [db.md](db.md
 
 Schemas live in `src/db/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA` constants. Both files are created by `ensureSchema()` in `src/session-manager.ts` when a new session folder is provisioned.
 
+All maintained SQL instants are INTEGER UTC epoch milliseconds (including due
+times and activity `ts`); public records retain ISO strings and activity frames
+retain decimal epoch strings. Every host/runner/native store requires
+`PRAGMA user_version=1`. Existing stores are refused until the
+[offline cutover](db-storage-cutover.md); `IF NOT EXISTS` is not an upgrade path.
+
 ---
 
 ## 1. Session folder layout
@@ -49,9 +55,9 @@ CREATE TABLE messages_in (
   id             TEXT PRIMARY KEY,
   seq            INTEGER UNIQUE,           -- EVEN only (host assigns) — see §3
   kind           TEXT NOT NULL,
-  timestamp      TEXT NOT NULL,
+  timestamp      INTEGER NOT NULL,
   status         TEXT DEFAULT 'pending',   -- pending|completed|failed|paused
-  process_after  TEXT,
+  process_after  INTEGER,
   recurrence     TEXT,                     -- cron expr for recurring
   series_id      TEXT,                     -- groups occurrences of a recurring task
   tries          INTEGER DEFAULT 0,
@@ -90,7 +96,7 @@ CREATE TABLE delivered (
   message_out_id      TEXT PRIMARY KEY,
   platform_message_id TEXT,
   status              TEXT NOT NULL DEFAULT 'delivered',  -- delivered|failed
-  delivered_at        TEXT NOT NULL
+  delivered_at        INTEGER NOT NULL
 );
 ```
 
@@ -178,8 +184,8 @@ CREATE TABLE messages_out (
   id            TEXT PRIMARY KEY,
   seq           INTEGER UNIQUE,   -- ODD only (container assigns) — see §3
   in_reply_to   TEXT,
-  timestamp     TEXT NOT NULL,
-  deliver_after TEXT,
+  timestamp     INTEGER NOT NULL,
+  deliver_after INTEGER,
   recurrence    TEXT,
   kind          TEXT NOT NULL,    -- chat|chat-sdk|system|…
   platform_id   TEXT,
@@ -205,7 +211,7 @@ Projected status for each `messages_in.id` the runner has touched. A
 CREATE TABLE processing_ack (
   message_id     TEXT PRIMARY KEY,
   status         TEXT NOT NULL,      -- processing|completed|failed
-  status_changed TEXT NOT NULL
+  status_changed INTEGER NOT NULL
 );
 ```
 
@@ -221,7 +227,7 @@ local copy; acknowledged events keep this host copy current for forks and recove
 CREATE TABLE session_state (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at INTEGER NOT NULL
 );
 ```
 
@@ -232,7 +238,8 @@ Access: `container/agent-runner/src/db/session-state.ts`.
 The host projection and runner state have matching, runtime-local definitions
 in `src/db/turns.ts` and `container/agent-runner/src/db/turns.ts` (a host test
 asserts the schema text is identical). There are no cross-runtime imports. Both
-DB openers create this schema for every store; there is no migration path.
+Fresh-store openers create this schema. Older stores require the
+[explicit offline cutover](db-storage-cutover.md) before matching peers start.
 
 `turns` has these columns:
 

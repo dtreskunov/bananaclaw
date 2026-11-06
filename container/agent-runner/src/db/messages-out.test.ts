@@ -78,7 +78,7 @@ describe('writeMessageOut', () => {
     runner
       .prepare(
         `INSERT INTO messages_out (id, seq, timestamp, kind, content)
-         VALUES ('main-writer', 1, datetime('now'), 'chat', ?)`,
+         VALUES ('main-writer', 1, (unixepoch()*1000), 'chat', ?)`,
       )
       .run(JSON.stringify({ timelinePosition: mainPosition }));
 

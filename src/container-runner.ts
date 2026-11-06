@@ -596,8 +596,8 @@ function attachContainerWatcher(sessionId: string, containerName: string): void 
       try {
         restart = !!db.prepare(
           `SELECT 1 FROM messages_in WHERE status='pending' AND on_wake=1
-           AND (process_after IS NULL OR datetime(process_after) <= datetime('now')) LIMIT 1`,
-        ).get();
+           AND (process_after IS NULL OR process_after <= ?) LIMIT 1`,
+        ).get(Date.now());
       } finally {
         db.close();
       }

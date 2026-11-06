@@ -69,19 +69,19 @@ beforeEach(() => {
   fs.rmSync(ROOT, { recursive: true, force: true });
   runMigrations(initTestDb());
   getDb().exec(`
-    INSERT INTO users(id,kind,created_at) VALUES('viewer','web','now'),('admin','web','now');
-    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','g','now');
-    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g','now');
-    INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at) VALUES('mg','web','web','group:g',1,'now');
-    INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at) VALUES('wire','mg','g','agent-shared','now');
-    INSERT INTO sessions(id,agent_group_id,created_at) VALUES('s','g','now');
+    INSERT INTO users(id,kind,created_at) VALUES('viewer','web',1767225600000),('admin','web',1767225600000);
+    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','g',1767225600000);
+    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g',1767225600000);
+    INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at) VALUES('mg','web','web','group:g',1,1767225600000);
+    INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at) VALUES('wire','mg','g','agent-shared',1767225600000);
+    INSERT INTO sessions(id,agent_group_id,created_at) VALUES('s','g',1767225600000);
   `);
   initSessionFolder('g', 's');
   inbound = new Database(inboundDbPath('g', 's'));
   outbound = new Database(outboundDbPath('g', 's'));
   inbound.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
-    VALUES('input-a',2,'chat','2026-11-05T00:00:00Z','completed','web','group:g','a','{"text":"A"}'),
-      ('input-b',4,'chat','2026-11-05T00:00:00Z','completed','web','group:g','b','{"text":"B"}');`);
+    VALUES('input-a',2,'chat',1793836800000,'completed','web','group:g','a','{"text":"A"}'),
+      ('input-b',4,'chat',1793836800000,'completed','web','group:g','b','{"text":"B"}');`);
   refreshThreadSummaries('s');
   signal.turn = null;
   signal.connected = false;
@@ -105,9 +105,7 @@ describe('thread activity projection', () => {
       a: { activity: 'idle', stale: false },
       b: { activity: 'running', stale: false },
     });
-    expect(readAgentActivity('viewer', [], null, [])).toEqual([
-      { id: 'g', activity: 'running', threadCount: 2 },
-    ]);
+    expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'running', threadCount: 2 }]);
     turn('turn-b', 'b', 'running');
     signal.turn = { id: 'turn-b', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'b' };
     signal.connected = true;
@@ -122,8 +120,8 @@ describe('thread activity projection', () => {
     "status='paused'",
     "status='failed'",
     "kind='system'",
-    "trigger=0",
-    "process_after='2999-01-01T00:00:00Z'",
+    'trigger=0',
+    `process_after=${Date.parse('2999-01-01T00:00:00Z')}`,
   ])('does not spin for input excluded from runnable work: %s', async (exclude) => {
     inbound.exec(`UPDATE messages_in SET status='pending', ${exclude} WHERE id='input-b'`);
     refreshThreadSummaries('s');
@@ -138,8 +136,14 @@ describe('thread activity projection', () => {
     inbound.exec("UPDATE messages_in SET trigger=1 WHERE id='input-a'");
     refreshThreadSummaries('s');
     createQuestion({
-      id: 'queued-q', session_id: 's', message_out_id: 'queued-question', in_reply_to: null,
-      channel_type: 'web', platform_id: 'group:g', thread_id: 'a', created_at: 'now',
+      id: 'queued-q',
+      session_id: 's',
+      message_out_id: 'queued-question',
+      in_reply_to: null,
+      channel_type: 'web',
+      platform_id: 'group:g',
+      thread_id: 'a',
+      created_at: '2026-01-01T00:00:00.000Z',
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
@@ -151,18 +155,18 @@ describe('thread activity projection', () => {
     insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'person@example.com' });
     getDb().exec(`
       INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('dm-mg','resend','resend','person@example.com',0,'now');
+        VALUES('dm-mg','resend','resend','person@example.com',0,1767225600000);
       INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('dm-wire','dm-mg','g','shared','now');
-      INSERT INTO sessions(id,agent_group_id,messaging_group_id,created_at) VALUES('dm-session','g','dm-mg','now');
+        VALUES('dm-wire','dm-mg','g','shared',1767225600000);
+      INSERT INTO sessions(id,agent_group_id,messaging_group_id,created_at) VALUES('dm-session','g','dm-mg',1767225600000);
     `);
     initSessionFolder('g', 'dm-session');
     const source = new Database(inboundDbPath('g', 'dm-session'));
     const outputs = new Database(outboundDbPath('g', 'dm-session'));
     try {
       source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,content)
-        VALUES('own',2,'chat','now','completed','resend','person@example.com','{"text":"Own"}'),
-          ('other',4,'chat','now','completed','resend','other@example.com','{"text":"Other"}');`);
+        VALUES('own',2,'chat',1767225600000,'completed','resend','person@example.com','{"text":"Own"}'),
+          ('other',4,'chat',1767225600000,'completed','resend','other@example.com','{"text":"Other"}');`);
       const active = {
         id: 'dm-turn',
         origin_channel_type: 'resend',
@@ -207,7 +211,7 @@ describe('thread activity projection', () => {
         channel_type: 'resend',
         platform_id: 'person@example.com',
         thread_id: null,
-        created_at: 'now',
+        created_at: '2026-01-01T00:00:00.000Z',
         input: { question: 'Choose?', responseMode: 'text', options: [] },
       });
       expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'idle', waiting: true, stale: false });
@@ -252,7 +256,7 @@ describe('thread activity projection', () => {
       channel_type: 'web',
       platform_id: 'group:g',
       thread_id: 'a',
-      created_at: 'now',
+      created_at: '2026-01-01T00:00:00.000Z',
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
@@ -272,15 +276,23 @@ describe('thread activity projection', () => {
     expect((await activities()).a.activity).toBe('idle');
   });
   it('counts idle agents from the maintained projection and omits inaccessible groups', () => {
-    getDb().exec(`INSERT INTO agent_groups(id,name,folder,created_at) VALUES('private','Private','private','now');`);
+    getDb().exec(
+      `INSERT INTO agent_groups(id,name,folder,created_at) VALUES('private','Private','private',1767225600000);`,
+    );
     const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
     expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle', threadCount: 2 }]);
     expect(read).toHaveBeenCalledOnce();
   });
   it('combines running in one thread with waiting in another without hiding stale execution', async () => {
     createQuestion({
-      id: 'q', session_id: 's', message_out_id: 'question-output', in_reply_to: null,
-      channel_type: 'web', platform_id: 'group:g', thread_id: 'a', created_at: 'now',
+      id: 'q',
+      session_id: 's',
+      message_out_id: 'question-output',
+      in_reply_to: null,
+      channel_type: 'web',
+      platform_id: 'group:g',
+      thread_id: 'a',
+      created_at: '2026-01-01T00:00:00.000Z',
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     turn('turn-b', 'b', 'running');
@@ -303,25 +315,25 @@ describe('thread activity projection', () => {
     expect(readAgentActivity('viewer', [], 'g', selected)).toEqual([{ id: 'g', activity: 'running', threadCount: 2 }]);
     expect(read).not.toHaveBeenCalled();
     getDb().exec(`
-      INSERT INTO agent_groups(id,name,folder,created_at) VALUES('other','Other','other','now');
+      INSERT INTO agent_groups(id,name,folder,created_at) VALUES('other','Other','other',1767225600000);
       INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('other-mg','web','web','group:other',1,'now');
+        VALUES('other-mg','web','web','group:other',1,1767225600000);
       INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('other-wire','other-mg','other','per-thread','now');
+        VALUES('other-wire','other-mg','other','per-thread',1767225600000);
       INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
-        VALUES('other-session','other','other-mg','other-thread','now');
+        VALUES('other-session','other','other-mg','other-thread',1767225600000);
     `);
     initSessionFolder('other', 'other-session');
     const source = new Database(inboundDbPath('other', 'other-session'));
     const output = new Database(outboundDbPath('other', 'other-session'));
     try {
       source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
-        VALUES('other-input',2,'chat','now','completed','web','group:other','other-thread','{"text":"Other"}');`);
+        VALUES('other-input',2,'chat',1767225600000,'completed','web','group:other','other-thread','{"text":"Other"}');`);
       output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
-        VALUES('other-turn','running','pending','native','web','group:other','other-thread','now');`);
+        VALUES('other-turn','running','pending','native','web','group:other','other-thread',1767225600000);`);
       refreshThreadSummaries('other-session');
       expect(readAgentActivity('viewer', [], null, []).map((group) => group.id)).toEqual(['g']);
-      addMember({ user_id: 'viewer', agent_group_id: 'other', added_by: null, added_at: 'now' });
+      addMember({ user_id: 'viewer', agent_group_id: 'other', added_by: null, added_at: '2026-01-01T00:00:00.000Z' });
       expect(readAgentActivity('viewer', [], null, [])).toEqual([
         { id: 'g', activity: 'running', threadCount: 2 },
         { id: 'other', activity: 'running', activityStale: true, threadCount: 1 },
@@ -338,7 +350,10 @@ describe('thread activity projection', () => {
     const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
     expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'running', threadCount: 2 }]);
     expect(read).toHaveBeenCalledOnce();
-    expect(read.mock.results[0].value.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual(['a', 'b']);
+    expect(read.mock.results[0].value.threads.map((thread: { threadId: string }) => thread.threadId)).toEqual([
+      'a',
+      'b',
+    ]);
   });
   it('removes a group immediately after access is revoked and fails closed on broken projection state', () => {
     removeMember('viewer', 'g');
@@ -351,20 +366,20 @@ describe('thread activity projection', () => {
     insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'own@example.com' });
     getDb().exec(`
       INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('private-mg','resend','resend','bot@example.com',1,'now');
+        VALUES('private-mg','resend','resend','bot@example.com',1,1767225600000);
       INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('private-wire','private-mg','g','per-thread','now');
+        VALUES('private-wire','private-mg','g','per-thread',1767225600000);
       INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
-        VALUES('private-session','g','private-mg','private-thread','now');
+        VALUES('private-session','g','private-mg','private-thread',1767225600000);
     `);
     initSessionFolder('g', 'private-session');
     const source = new Database(inboundDbPath('g', 'private-session'));
     const output = new Database(outboundDbPath('g', 'private-session'));
     try {
       source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
-        VALUES('private-input',2,'chat','now','completed','resend','bot@example.com','private-thread','{"text":"Private","sender":"other@example.com"}');`);
+        VALUES('private-input',2,'chat',1767225600000,'completed','resend','bot@example.com','private-thread','{"text":"Private","sender":"other@example.com"}');`);
       output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
-        VALUES('private-turn','running','pending','native','resend','bot@example.com','private-thread','now');`);
+        VALUES('private-turn','running','pending','native','resend','bot@example.com','private-thread',1767225600000);`);
       refreshThreadSummaries('private-session');
       signal.turn = {
         id: 'private-turn',
@@ -375,7 +390,13 @@ describe('thread activity projection', () => {
       };
       signal.connected = true;
       expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle', threadCount: 2 }]);
-      grantRole({ user_id: 'admin', role: 'admin', agent_group_id: null, granted_by: null, granted_at: 'now' });
+      grantRole({
+        user_id: 'admin',
+        role: 'admin',
+        agent_group_id: null,
+        granted_by: null,
+        granted_at: '2026-01-01T00:00:00.000Z',
+      });
       expect(readAgentActivity('admin', [], null, [])).toEqual([{ id: 'g', activity: 'running', threadCount: 3 }]);
     } finally {
       source.close();
@@ -383,14 +404,20 @@ describe('thread activity projection', () => {
     }
   });
   it('does not expose approval waiting state to a viewer who cannot act on it', async () => {
-    grantRole({ user_id: 'admin', role: 'admin', agent_group_id: 'g', granted_by: null, granted_at: 'now' });
+    grantRole({
+      user_id: 'admin',
+      role: 'admin',
+      agent_group_id: 'g',
+      granted_by: null,
+      granted_at: '2026-01-01T00:00:00.000Z',
+    });
     createApproval({
       id: 'approval',
       request_id: 'approval',
       session_id: 's',
       agent_group_id: 'g',
       origin_message_id: 'input-a',
-      created_at: 'now',
+      created_at: '2026-01-01T00:00:00.000Z',
       input: {
         action: 'test',
         title: 'Approve?',

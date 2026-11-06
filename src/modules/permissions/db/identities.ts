@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { getDb } from '../../../db/connection.js';
+import { decodeTimes, decodeTimeRows } from '../../../db/time.js';
 
 import { recordHostChange, transaction } from '../../../db/transaction.js';
 
@@ -23,15 +24,13 @@ export interface Identity {
 }
 
 export function getIdentity(channel: string, handle: string): Identity | undefined {
-  return getDb().prepare('SELECT * FROM identities WHERE channel = ? AND handle = ?').get(channel, handle) as
-    | Identity
-    | undefined;
+  return decodeTimes<Identity | undefined>(getDb().prepare('SELECT * FROM identities WHERE channel = ? AND handle = ?').get(channel, handle), ['verified_at']);
 }
 
 export function getIdentitiesForUser(userId: string): Identity[] {
-  return getDb()
+  return decodeTimeRows<Identity>(getDb()
     .prepare('SELECT * FROM identities WHERE user_id = ? ORDER BY channel, handle')
-    .all(userId) as Identity[];
+    .all(userId), ['verified_at']);
 }
 
 /**
@@ -40,14 +39,14 @@ export function getIdentitiesForUser(userId: string): Identity[] {
  * earliest-verified.
  */
 export function getPrimaryIdentityForChannel(userId: string, channel: string): Identity | undefined {
-  return getDb()
+  return decodeTimes<Identity | undefined>(getDb()
     .prepare(
       `SELECT * FROM identities
        WHERE user_id = ? AND channel = ?
        ORDER BY primary_for_channel DESC, verified_at ASC
        LIMIT 1`,
     )
-    .get(userId, channel) as Identity | undefined;
+    .get(userId, channel), ['verified_at']);
 }
 
 export function insertIdentity(args: {
@@ -72,7 +71,7 @@ export function insertIdentity(args: {
       args.userId,
       args.channel,
       args.handle,
-      new Date().toISOString(),
+      Date.now(),
       (args.primary ?? false) ? 1 : 0,
       args.metadata ? JSON.stringify(args.metadata) : null,
     );
@@ -114,7 +113,7 @@ export function getOrCreateUserByIdentity(args: {
   }
 
   const userId = randomUUID();
-  const now = new Date().toISOString();
+  const now = Date.now();
 
   transaction(db, () => {
     db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, ?, ?, ?)`).run(

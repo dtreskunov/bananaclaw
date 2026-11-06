@@ -9,6 +9,7 @@ import type { Database } from 'bun:sqlite';
 import { isSafeAttachmentName } from '../attachment-safety.js';
 import { allocateTimelinePosition } from './timeline.js';
 import { getTurnContext } from '../current-batch.js';
+import { toEpoch, decodeTimeRows } from './time.js';
 
 const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
 const MAX_CONTENT_ARRAY_ITEMS = 100;
@@ -144,14 +145,15 @@ export function writeMessageOutWithConnections(
     outbound
       .prepare(
         `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content, turn_id)
-     VALUES ($id, $seq, $in_reply_to, datetime('now'), $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content, $turn_id)`,
+     VALUES ($id, $seq, $in_reply_to, $timestamp, $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content, $turn_id)`,
       )
       .run({
         $id: msg.id,
+        $timestamp: Date.now(),
         $turn_id: msg.turn_id ?? null,
         $seq: nextSeq,
         $in_reply_to: msg.in_reply_to ?? null,
-        $deliver_after: msg.deliver_after ?? null,
+        $deliver_after: toEpoch(msg.deliver_after),
         $recurrence: msg.recurrence ?? null,
         $kind: msg.kind,
         $platform_id: msg.platform_id ?? null,
@@ -218,11 +220,11 @@ export function getRoutingBySeq(
 
 /** Get undelivered messages (for host polling — reads from outbound.db). */
 export function getUndeliveredMessages(): MessageOutRow[] {
-  return getOutboundDb()
+  return decodeTimeRows<MessageOutRow>(getOutboundDb()
     .prepare(
       `SELECT * FROM messages_out
-       WHERE (deliver_after IS NULL OR deliver_after <= datetime('now'))
+       WHERE (deliver_after IS NULL OR deliver_after <= ?)
        ORDER BY timestamp ASC`,
     )
-    .all() as MessageOutRow[];
+    .all(Date.now()), ['timestamp', 'deliver_after']);
 }

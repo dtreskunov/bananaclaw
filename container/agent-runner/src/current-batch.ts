@@ -33,7 +33,7 @@ export function setTurnContext(context: TurnContext | null): void {
      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
   ).run(CONTEXT_KEY, JSON.stringify(context ? {
     turnId: context.turnId, inReplyTo: context.inReplyTo, startedAt: context.startedAt,
-  } : null), new Date().toISOString());
+  } : null), Date.now());
   currentInReplyTo = context?.inReplyTo ?? null;
 }
 
@@ -60,7 +60,7 @@ export function trackTurnTool(context: TurnContext, delta: 1 | -1): void {
   db.prepare(`INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(0, CAST(value AS INTEGER) + ?) AS TEXT),
       updated_at=excluded.updated_at`)
-    .run(key, String(Math.max(0, delta)), new Date().toISOString(), delta);
+    .run(key, String(Math.max(0, delta)), Date.now(), delta);
 }
 
 export async function waitForTurnTools(context: TurnContext): Promise<void> {
@@ -122,7 +122,7 @@ export function noteSendMessage(destination: string, text: string): boolean {
       else state.sent.push(digest);
       db.prepare(`INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
-        .run(key, JSON.stringify(state), new Date().toISOString());
+        .run(key, JSON.stringify(state), Date.now());
       return !duplicate;
     })();
   }

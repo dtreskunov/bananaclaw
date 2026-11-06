@@ -30,11 +30,11 @@ it('reads an authorized empty web conversation without provisioning a session or
   const db = initTestDb();
   runMigrations(db);
   db.exec(`
-    INSERT INTO users(id,kind,created_at) VALUES('viewer','web','created');
-    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('group','Group','group','created');
-    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','group','created');
+    INSERT INTO users(id,kind,created_at) VALUES('viewer','web',1767225600000);
+    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('group','Group','group',1767225600000);
+    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','group',1767225600000);
     INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-      VALUES('web-group','web','web','group:group',1,'created');
+      VALUES('web-group','web','web','group:group',1,1767225600000);
   `);
   expect(resolveTurnContext('viewer', 'group', 'thread')).toEqual({
     sessionId: undefined,

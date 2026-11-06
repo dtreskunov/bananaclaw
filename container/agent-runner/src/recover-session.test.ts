@@ -9,7 +9,7 @@ afterEach(() => closeSessionDb());
 it('drains a recorded failure before checking for abandoned turns, without invoking a provider', async () => {
   const db = getOutboundDb();
   db.prepare(
-    "INSERT INTO turns (id,phase,outcome,provenance,ended_at) VALUES ('failed-turn','settled','failed','native','2026-10-04T20:33:00.401Z')",
+    "INSERT INTO turns (id,phase,outcome,provenance,ended_at) VALUES ('failed-turn','settled','failed','native',1791145980401)",
   ).run();
   let drains = 0;
   await recoverSession(async () => {
@@ -24,10 +24,10 @@ it('drains a recorded failure before checking for abandoned turns, without invok
 it('settles truly abandoned turns and their compaction activity as interrupted only after replay', async () => {
   const db = getOutboundDb();
   db.prepare(
-    "INSERT INTO turns (id,phase,outcome,provenance,started_at) VALUES ('abandoned','running','pending','native','2026-10-04T20:22:46.000Z')",
+    "INSERT INTO turns (id,phase,outcome,provenance,started_at) VALUES ('abandoned','running','pending','native',1791145366000)",
   ).run();
   db.prepare(
-    "INSERT INTO turn_activity (turn_id,ordinal,ts,text,timeline_position) VALUES ('abandoned',0,'123',?,123)",
+    "INSERT INTO turn_activity (turn_id,ordinal,ts,text,timeline_position) VALUES ('abandoned',0,123,?,123)",
   ).run(JSON.stringify({ kind: 'compaction', id: 'compact-1', status: 'running' }));
   let drains = 0;
   await recoverSession(async () => {

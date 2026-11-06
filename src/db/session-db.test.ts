@@ -11,8 +11,9 @@ import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
 import { countDueMessages } from './session-db.js';
+import { toEpoch } from './time.js';
 
-const TEST_DIR = '/tmp/nanoclaw-session-db-test';
+const TEST_DIR = path.resolve('.test-session-db');
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
 
 function freshMessagesInDb(): Database.Database {
@@ -24,9 +25,9 @@ function freshMessagesInDb(): Database.Database {
       id             TEXT PRIMARY KEY,
       seq            INTEGER UNIQUE,
       kind           TEXT NOT NULL,
-      timestamp      TEXT NOT NULL,
+      timestamp      INTEGER NOT NULL,
       status         TEXT DEFAULT 'pending',
-      process_after  TEXT,
+      process_after  INTEGER,
       recurrence     TEXT,
       tries          INTEGER DEFAULT 0,
       trigger        INTEGER NOT NULL DEFAULT 1,
@@ -45,8 +46,8 @@ function addRow(
 ): void {
   db.prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, process_after, content)
-     VALUES (?, ?, ?, datetime('now'), ?, ?, ?, '{}')`,
-  ).run(opts.id, opts.seq, opts.kind, opts.status ?? 'pending', opts.trigger ?? 1, opts.processAfter ?? null);
+     VALUES (?, ?, ?, ?, ?, ?, ?, '{}')`,
+  ).run(opts.id, opts.seq, opts.kind, Date.now(), opts.status ?? 'pending', opts.trigger ?? 1, toEpoch(opts.processAfter));
 }
 
 afterEach(() => {

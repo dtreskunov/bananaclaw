@@ -17,7 +17,7 @@ const GROUP_ID = 'ag-private-web';
 beforeEach(() => {
   const db = initTestDb();
   runMigrations(db);
-  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, datetime('now'))`).run(
+  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, (unixepoch('now')*1000))`).run(
     USER_ID,
     'Test User',
   );
@@ -79,7 +79,7 @@ describe('private web session lifecycle', () => {
     const redeemed = redeemPrivateWebHandoff(privateSession.id, privateSession.handoffToken);
     expect(redeemed).not.toBeNull();
     getDb()
-      .prepare("UPDATE ui_private_web_sessions SET last_used = datetime('now', '-31 minutes') WHERE id = ?")
+      .prepare("UPDATE ui_private_web_sessions SET last_used = (unixepoch('now', '-31 minutes')*1000) WHERE id = ?")
       .run(privateSession.id);
     expect(redeemed && lookupPrivateWebSession(privateSession.id, redeemed.secureToken)).toBeNull();
   });

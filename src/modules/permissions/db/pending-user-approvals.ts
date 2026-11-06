@@ -11,6 +11,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import { getDb } from '../../../db/connection.js';
+import { decodeTimes, decodeTimeRows } from '../../../db/time.js';
 import { log } from '../../../log.js';
 import { addMember } from './agent-group-members.js';
 import { insertIdentity } from './identities.js';
@@ -52,21 +53,19 @@ function sha256Hex(s: string): string {
  * in-flight pending row per subject.
  */
 export function findPendingByOidcSub(provider: string, sub: string): PendingUserApproval | undefined {
-  return getDb()
+  return decodeTimes<PendingUserApproval | undefined>(getDb()
     .prepare(`SELECT * FROM pending_user_approvals WHERE provider = ? AND sub = ? AND status = 'pending'`)
-    .get(provider, sub) as PendingUserApproval | undefined;
+    .get(provider, sub), ['created_at', 'resolved_at']);
 }
 
 export function getPendingApproval(id: string): PendingUserApproval | undefined {
-  return getDb().prepare('SELECT * FROM pending_user_approvals WHERE id = ?').get(id) as
-    | PendingUserApproval
-    | undefined;
+  return decodeTimes<PendingUserApproval | undefined>(getDb().prepare('SELECT * FROM pending_user_approvals WHERE id = ?').get(id), ['created_at', 'resolved_at']);
 }
 
 export function listPendingApprovals(): PendingUserApproval[] {
-  return getDb()
+  return decodeTimeRows<PendingUserApproval>(getDb()
     .prepare(`SELECT * FROM pending_user_approvals WHERE status = 'pending' ORDER BY created_at`)
-    .all() as PendingUserApproval[];
+    .all(), ['created_at', 'resolved_at']);
 }
 
 /**
@@ -131,11 +130,11 @@ export function resolveApproval(args: {
   getDb()
     .prepare(
       `UPDATE pending_user_approvals
-       SET status = ?, resolved_at = datetime('now'),
+       SET status = ?, resolved_at = ?,
            resolved_by_user_id = ?, granted_agent_group_id = ?, resolution_note = ?
        WHERE id = ? AND status = 'pending'`,
     )
-    .run(args.status, args.resolved_by_user_id, args.granted_agent_group_id, args.note, args.id);
+    .run(args.status, Date.now(), args.resolved_by_user_id, args.granted_agent_group_id, args.note, args.id);
 }
 
 /**

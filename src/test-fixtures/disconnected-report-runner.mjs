@@ -43,13 +43,14 @@ try {
     db.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,?)').run(
       `runner:recovery:${event}`,
       'complete',
-      '2026-10-04T20:33:00.000Z',
+      Date.parse('2026-10-04T20:33:00.000Z'),
     );
   }
   db.prepare(
     `INSERT INTO messages_out(id,seq,timestamp,kind,platform_id,channel_type,thread_id,content,turn_id)
-    VALUES('saved-report',1,'2026-10-04 20:33:00','chat','chat','web',NULL,?,'saved-turn')`,
-  ).run(JSON.stringify({ text: 'Preserved final report', delivery_origin: 'response', timelinePosition: 1000 }));
+    VALUES('saved-report',1,?,'chat','chat','web',NULL,?,'saved-turn')`,
+  ).run(Date.parse('2026-10-04T20:33:00.000Z'),
+    JSON.stringify({ text: 'Preserved final report', delivery_origin: 'response', timelinePosition: 1000 }));
   putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-10-04T20:33:00.401Z' });
   if (db.prepare('SELECT count(*) AS n FROM pending_runner_events').get().n !== 91) {
     throw new Error('Expected the original 91-event report/settlement backlog');

@@ -1,3 +1,4 @@
+import { toEpoch } from './db/time.js';
 /**
  * Integration tests for the v2 host core.
  * Tests routing, session creation, message writing, and delivery
@@ -1144,11 +1145,11 @@ describe('agent-to-agent routing', () => {
     db.prepare(
       `INSERT OR IGNORE INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
        VALUES ('ag-pa', 'researcher', 'agent', 'ag-researcher', ?)`,
-    ).run(now());
+    ).run(toEpoch(now()));
     db.prepare(
       `INSERT OR IGNORE INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
        VALUES ('ag-researcher', 'pa', 'agent', 'ag-pa', ?)`,
-    ).run(now());
+    ).run(toEpoch(now()));
   });
 
   it('A2A outbound lands in a session for the target agent', async () => {
@@ -1300,7 +1301,7 @@ describe('delivery', () => {
     const db = new Database(dbPath);
     db.prepare(
       `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
-       VALUES ('out-1', datetime('now'), 'chat', 'chan-123', 'discord', ?)`,
+       VALUES ('out-1', (unixepoch('now')*1000), 'chat', 'chan-123', 'discord', ?)`,
     ).run(JSON.stringify({ text: 'Agent response' }));
 
     const undelivered = db.prepare('SELECT * FROM messages_out').all() as Array<{

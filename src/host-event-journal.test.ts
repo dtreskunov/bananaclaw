@@ -36,7 +36,7 @@ describe('host event journal', () => {
           (id, seq, kind, timestamp, status, process_after, recurrence, series_id,
            tries, trigger, platform_id, channel_type, thread_id, content,
            source_session_id, on_wake, sender_user_id, sender_identity)
-         VALUES ('in-1', 2, 'chat', '2026-09-01 00:00:00', 'pending', NULL, NULL,
+         VALUES ('in-1', 2, 'chat', 1788220800000, 'pending', NULL, NULL,
            'in-1', 0, 1, 'chat-1', 'web', NULL, '{"text":"hello"}', NULL, 0, NULL, 'web:user-1')`,
       ).run();
       retryWithBackoff(db, 'in-1', 5);
@@ -132,7 +132,7 @@ describe('host event journal', () => {
       expect(() =>
         db.prepare(
           `INSERT INTO messages_in (id, seq, kind, timestamp, content)
-           VALUES ('direct-too-large', 2, 'task', datetime('now'), ?)`,
+           VALUES ('direct-too-large', 2, 'task', (unixepoch('now')*1000), ?)`,
         ).run('x'.repeat(10 * 1024 * 1024 + 1)),
       ).toThrow('inbound message exceeds session-link limit');
       expect(db.prepare('SELECT COUNT(*) FROM pending_host_events').pluck().get()).toBe(0);
@@ -168,7 +168,7 @@ describe('host event journal', () => {
       expect(() =>
         db.prepare(
           `INSERT INTO messages_in (id, seq, kind, timestamp, recurrence, content)
-           VALUES ('direct-bad-envelope', 2, 'task', datetime('now'), ?, '{}')`,
+           VALUES ('direct-bad-envelope', 2, 'task', (unixepoch('now')*1000), ?, '{}')`,
         ).run('x'.repeat(1025)),
       ).toThrow('inbound message envelope exceeds session-link limit');
       expect(db.prepare('SELECT COUNT(*) FROM pending_host_events').pluck().get()).toBe(0);

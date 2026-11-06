@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 /**
  * Tests for `archiveAgentGroup`:
  *   - dumps every restorable row into `archive.json`
@@ -58,7 +59,7 @@ function seedGroup(id: string, folder: string) {
 function seedFullGroup(id: string, folder: string) {
   seedGroup(id, folder);
   // container config
-  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, NOW());
+  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, toEpoch(NOW()));
   // wiring
   createMessagingGroup({
     id: `mg-${id}`,
@@ -84,16 +85,16 @@ function seedFullGroup(id: string, folder: string) {
   // member
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'human', ?, ?)`)
-    .run(`u-${id}`, `User ${id}`, NOW());
+    .run(`u-${id}`, `User ${id}`, toEpoch(NOW()));
   getDb()
     .prepare(`INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, ?)`)
-    .run(`u-${id}`, id, NOW());
+    .run(`u-${id}`, id, toEpoch(NOW()));
   // scoped admin role
   getDb()
     .prepare(
       `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'admin', ?, NULL, ?)`,
     )
-    .run(`u-${id}`, id, NOW());
+    .run(`u-${id}`, id, toEpoch(NOW()));
   // session
   createSession({
     id: `sess-${id}`,

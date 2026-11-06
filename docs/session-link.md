@@ -80,7 +80,7 @@ sees a replacement socket after the host unlinks and rebinds it during restart.
 
 ## Protocol
 
-Version 5 is newline-delimited JSON. Every frame contains `v: 5` and a closed
+Version 6 is newline-delimited JSON. Every frame contains `v: 6` and a closed
 `type`. Live frames are capped at 16 KiB; durable frames are bounded by the
 configured output cap plus envelope overhead. Each session is limited to 256
 frames and 24 MiB per second,
@@ -414,7 +414,7 @@ a container that survived a host restart. The runner reconnects with bounded
 exponential backoff. Container exit closes the listener; graceful host shutdown
 closes all listeners. A host restart recreates each socket path and an adopted
 runner replays its current live snapshot. Containers carry a
-`nanoclaw-session-link=v5` label; startup stops rather than adopts a live
+`nanoclaw-session-link=v6` label; startup stops rather than adopts a live
 container with a missing or incompatible link version. Version 5 containers
 mount only their writable projection directory (`runner-state/`, containing
 `runner-state.db` and its rollback journal), a read-only inbox, a writable

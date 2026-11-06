@@ -94,7 +94,7 @@ it('runs real native editing and cancellation through runPollLoop without stoppi
   const insert = (id: string, seq: number, turnId?: string, mode: 'steer' | 'queue' = 'steer') => {
     getInboundDb().prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, channel_type, platform_id, thread_id, trigger, sender_identity, content)
-       VALUES (?, ?, 'chat', datetime('now'), 'pending', 'web', 'room', 'thread', 1, 'web:owner', ?)`,
+       VALUES (?, ?, 'chat', (unixepoch('now')*1000), 'pending', 'web', 'room', 'thread', 1, 'web:owner', ?)`,
     ).run(id, seq, JSON.stringify({
       text: id,
       ...(turnId ? { inputHandling: { mode, turnId } } : {}),
@@ -136,7 +136,7 @@ it('runs real native editing and cancellation through runPollLoop without stoppi
 
     getInboundDb().prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id, trigger, sender_identity, content)
-       VALUES (?, 6, 'system', datetime('now'), 'web', 'room', 'thread', 0, 'web:owner', ?)`,
+       VALUES (?, 6, 'system', (unixepoch('now')*1000), 'web', 'room', 'thread', 0, 'web:owner', ?)`,
     ).run(`edit-${editRequestId}`, JSON.stringify({
       action: 'edit_input', requestId: editRequestId, messageId: 'guidance',
       expectedText: 'guidance', replacementText: 'edited direction',
@@ -150,7 +150,7 @@ it('runs real native editing and cancellation through runPollLoop without stoppi
     for (const [index, request] of cancelRequests.entries()) {
       getInboundDb().prepare(
         `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id, trigger, sender_identity, content)
-         VALUES (?, ?, 'system', datetime('now'), 'web', 'room', 'thread', 0, 'web:owner', ?)`,
+         VALUES (?, ?, 'system', (unixepoch('now')*1000), 'web', 'room', 'thread', 0, 'web:owner', ?)`,
       ).run(`cancel-${request.requestId}`, 12 + index * 2, JSON.stringify(request));
     }
     link.emitHostEventForTesting();

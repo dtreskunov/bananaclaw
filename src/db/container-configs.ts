@@ -1,5 +1,6 @@
 import type { ContainerConfigRow } from '../types.js';
 import { getDb } from './connection.js';
+import { toEpoch, decodeTimes, decodeTimeRows } from './time.js';
 
 import { recordHostChange } from './transaction.js';
 
@@ -28,13 +29,11 @@ const JSON_COLUMNS = new Set([
 ]);
 
 export function getContainerConfig(agentGroupId: string): ContainerConfigRow | undefined {
-  return getDb().prepare('SELECT * FROM container_configs WHERE agent_group_id = ?').get(agentGroupId) as
-    | ContainerConfigRow
-    | undefined;
+  return decodeTimes<ContainerConfigRow | undefined>(getDb().prepare('SELECT * FROM container_configs WHERE agent_group_id = ?').get(agentGroupId), ['updated_at']);
 }
 
 export function getAllContainerConfigs(): ContainerConfigRow[] {
-  return getDb().prepare('SELECT * FROM container_configs').all() as ContainerConfigRow[];
+  return decodeTimeRows<ContainerConfigRow>(getDb().prepare('SELECT * FROM container_configs').all(), ['updated_at']);
 }
 
 /** Insert a new config row. Caller must supply all JSON fields (use defaults for empty). */
@@ -55,6 +54,7 @@ export function createContainerConfig(config: ContainerConfigRow): void {
     )
     .run({
       ...config,
+      updated_at: toEpoch(config.updated_at),
       voice_input_backend: config.voice_input_backend ?? null,
       voice_input_enabled: config.voice_input_enabled ?? 1,
       credential_backend: config.credential_backend ?? 'agent-vault',
@@ -69,7 +69,7 @@ export function ensureContainerConfig(agentGroupId: string): void {
       `INSERT OR IGNORE INTO container_configs (agent_group_id, updated_at)
        VALUES (?, ?)`,
     )
-    .run(agentGroupId, new Date().toISOString());
+    .run(agentGroupId, Date.now());
   recordHostChange({ kind: 'configuration', groupId: agentGroupId });
 }
 
@@ -106,7 +106,7 @@ export function updateContainerConfigScalars(
   if (fields.length === 0) return;
 
   fields.push('updated_at = @updated_at');
-  values.updated_at = new Date().toISOString();
+  values.updated_at = Date.now();
 
   getDb()
     .prepare(`UPDATE container_configs SET ${fields.join(', ')} WHERE agent_group_id = @agent_group_id`)
@@ -129,7 +129,7 @@ export function updateContainerConfigJson(
   value: unknown,
 ): void {
   if (!JSON_COLUMNS.has(column)) throw new Error(`Invalid JSON column: ${column}`);
-  const now = new Date().toISOString();
+  const now = Date.now();
   getDb()
     .prepare(`UPDATE container_configs SET ${column} = ?, updated_at = ? WHERE agent_group_id = ?`)
     .run(JSON.stringify(value), now, agentGroupId);

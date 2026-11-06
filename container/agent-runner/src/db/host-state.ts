@@ -1,4 +1,5 @@
 import { getOutboundDb } from './connection.js';
+import { toEpoch } from './time.js';
 
 const MAX_ID_CHARS = 256;
 const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
@@ -105,9 +106,9 @@ function applyMessage(payload: Record<string, unknown>): void {
       payload.id as string,
       Number(payload.seq),
       payload.kind as string,
-      payload.timestamp as string,
+      toEpoch(payload.timestamp as string),
       payload.status as string,
-      payload.process_after as string | null,
+      toEpoch(payload.process_after as string | null),
       payload.recurrence as string | null,
       payload.series_id as string | null,
       Number(payload.tries),
@@ -215,7 +216,7 @@ function applyFork(payload: Record<string, unknown>): void {
       payload.provider,
       payload.anchor_ref,
       payload.digest,
-      payload.created_at,
+      toEpoch(payload.created_at as string),
     );
 }
 
@@ -262,7 +263,7 @@ function applyThreadTitle(payload: Record<string, unknown>): void {
       payload.source as string,
       payload.request_message_id as string,
       Number(payload.published),
-      payload.updated_at as string,
+      toEpoch(payload.updated_at as string),
     );
 }
 

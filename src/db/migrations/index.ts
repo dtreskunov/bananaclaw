@@ -50,6 +50,7 @@ import { migration051 } from './051-conversation-reads.js';
 import { migration052 } from './052-integrity.js';
 import { migration053 } from './053-query-indexes.js';
 import { transaction } from '../transaction.js';
+import { assertStorageVersion, convertStoreTimes, STORAGE_VERSION } from '../storage-lifecycle.js';
 
 export interface Migration {
   version: number;
@@ -131,6 +132,9 @@ const fkIdentity = (v: FkViolation): string =>
   JSON.stringify({ table: v.table, rowid: v.rowid, parent: v.parent, fkid: v.fkid });
 
 export function runMigrations(db: Database.Database, list: Migration[] = migrations): void {
+  const managed = list === migrations;
+  const fresh = managed && db.pragma('user_version', { simple: true }) === 0;
+  if (managed) assertStorageVersion(db, 'central', true);
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,
@@ -192,7 +196,7 @@ export function runMigrations(db: Database.Database, list: Migration[] = migrati
         db.prepare('INSERT INTO schema_version (version, name, applied) VALUES (?, ?, ?)').run(
           next,
           m.name,
-          new Date().toISOString(),
+          db.pragma('user_version', { simple: true }) === STORAGE_VERSION ? Date.now() : new Date().toISOString(),
         );
       })();
     } finally {
@@ -200,4 +204,5 @@ export function runMigrations(db: Database.Database, list: Migration[] = migrati
     }
     log.info('Migration applied', { name: m.name });
   }
+  if (fresh) convertStoreTimes(db);
 }

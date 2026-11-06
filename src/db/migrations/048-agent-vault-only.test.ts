@@ -2,6 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { closeDb, initTestDb } from '../connection.js';
 import { migrations, runMigrations } from './index.js';
 import { migration048 } from './048-agent-vault-only.js';
+import { convertStoreTimes } from '../storage-lifecycle.js';
 
 afterEach(closeDb);
 function beforeRetirement() {
@@ -10,7 +11,8 @@ function beforeRetirement() {
     db,
     migrations.filter((migration) => migration.name !== migration048.name),
   );
-  db.exec("INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Agent','agent','created')");
+  convertStoreTimes(db);
+  db.exec("INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Agent','agent',1767225600000)");
   return db;
 }
 it('preserves approved groups, renames both skill selections and rejects retired backends', () => {
@@ -19,7 +21,7 @@ it('preserves approved groups, renames both skill selections and rejects retired
     'g',
     '["onecli-gateway","agent-vault","other"]',
     '["onecli-gateway"]',
-    'original',
+    1767225600000,
   );
   runMigrations(db);
   expect(
@@ -28,7 +30,7 @@ it('preserves approved groups, renames both skill selections and rejects retired
     skills: '["agent-vault","other"]',
     disabled_skills: '["agent-vault"]',
     credential_backend: 'agent-vault',
-    updated_at: 'original',
+    updated_at: 1767225600000,
   });
   expect(() => db.prepare("UPDATE container_configs SET credential_backend='onecli'").run()).toThrow();
   runMigrations(db);
@@ -37,7 +39,7 @@ it('preserves approved groups, renames both skill selections and rejects retired
 it('blocks an unmigrated installation without silently changing access', () => {
   const db = beforeRetirement();
   db.exec(
-    "INSERT INTO container_configs(agent_group_id,credential_backend,updated_at) VALUES('g','onecli','original')",
+    "INSERT INTO container_configs(agent_group_id,credential_backend,updated_at) VALUES('g','onecli',1767225600000)",
   );
   expect(() => runMigrations(db)).toThrow('Complete the reviewed credential cutovers');
   expect(db.prepare('SELECT credential_backend FROM container_configs').pluck().get()).toBe('onecli');

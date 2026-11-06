@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 /**
  * Integration tests for the unknown-channel registration flow (ACTION-ITEMS
  * item 22).
@@ -61,10 +62,10 @@ vi.mock('./user-dm.js', () => ({
 
 vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-channel-approval' };
+  return { ...actual, DATA_DIR: `${process.cwd()}/.test-channel-approval` };
 });
 
-const TEST_DIR = '/tmp/nanoclaw-test-channel-approval';
+const TEST_DIR = `${process.cwd()}/.test-channel-approval`;
 
 function now() {
   return new Date().toISOString();
@@ -106,7 +107,7 @@ beforeEach(async () => {
       `INSERT INTO user_dms (user_id, channel_type, messaging_group_id, resolved_at)
        VALUES (?, ?, ?, ?)`,
     )
-    .run(ownerId, 'telegram', 'mg-dm-owner', now());
+    .run(ownerId, 'telegram', 'mg-dm-owner', toEpoch(now()));
 
   deliverMock.mockClear();
 });
@@ -377,7 +378,7 @@ describe('unknown-channel registration flow', () => {
         `INSERT INTO user_dms (user_id, channel_type, messaging_group_id, resolved_at)
        VALUES (?, ?, ?, ?)`,
       )
-      .run(scopedAdminId, 'telegram', 'mg-dm-scoped-admin', now());
+      .run(scopedAdminId, 'telegram', 'mg-dm-scoped-admin', toEpoch(now()));
 
     await routeInbound(groupMention('chat-scoped-cross-group'));
     await new Promise((r) => setTimeout(r, 10));

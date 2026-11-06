@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
@@ -85,8 +86,8 @@ const session: Session = {
   status: 'active',
   container_status: 'stopped',
   agent_provider: null,
-  created_at: 'before',
-  last_active: 'before',
+  created_at: '2026-01-01T00:00:00.000Z',
+  last_active: '2026-01-01T00:00:00.000Z',
 };
 const input = { resource_url: 'https://api.example.com/v1/items', reason: 'Finish the requested report.' };
 let connection: SharedConnection;
@@ -95,11 +96,16 @@ beforeEach(() => {
   runMigrations(initTestDb());
   const db = getDb();
   for (const id of ['alice', 'bob', 'member'])
-    db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(id, 'test', id, 'before');
+    db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(
+      id,
+      'test',
+      id,
+      toEpoch('2026-01-01T00:00:00.000Z'),
+    );
   db.prepare(
-    "INSERT INTO agent_groups(id,name,folder,created_at) VALUES('ag-access','My Agent','agent','before')",
+    "INSERT INTO agent_groups(id,name,folder,created_at) VALUES('ag-access','My Agent','agent',1767225600000)",
   ).run();
-  db.prepare("INSERT INTO container_configs(agent_group_id,updated_at) VALUES('ag-access','before')").run();
+  db.prepare("INSERT INTO container_configs(agent_group_id,updated_at) VALUES('ag-access',1767225600000)").run();
   createSession(session);
   for (const id of ['alice', 'bob'])
     grantRole({
@@ -107,7 +113,7 @@ beforeEach(() => {
       role: 'admin',
       agent_group_id: session.agent_group_id,
       granted_by: null,
-      granted_at: 'before',
+      granted_at: '2026-01-01T00:00:00.000Z',
     });
   connection = {
     id: 'private-connection',
@@ -652,7 +658,7 @@ describe('assisted access approvals', () => {
       role: 'admin',
       agent_group_id: session.agent_group_id,
       granted_by: null,
-      granted_at: 'now',
+      granted_at: '2026-01-01T00:00:00.000Z',
     });
     connection.grants = [{ vault: session.agent_group_id, status: 'suspended', services: ['api'] }];
     expect((await applyAccessRequest('alice', request.id, selection())).status).toBe('completed');

@@ -15,6 +15,9 @@ import { getTurn, putTurn, linkTurnInput, type TurnRow } from './db/turns.js';
 import { isModelDurationMs } from './session-link-validate.js';
 import { log } from './log.js';
 import { transaction } from './db/transaction.js';
+import { encodeTimes, toEpoch } from './db/time.js';
+import { assertStorageVersion } from './db/storage-lifecycle.js';
+import { openOutboundDbRw } from './db/session-db.js';
 
 class DurableValidationError extends Error {}
 
@@ -189,7 +192,7 @@ function applyMessage(db: Database.Database, payload: Record<string, unknown>, m
       (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content, turn_id)
      VALUES (@id, @seq, @in_reply_to, @timestamp, @deliver_after, @recurrence, @kind,
        @platform_id, @channel_type, @thread_id, @content, @turn_id)`,
-  ).run(payload);
+  ).run(encodeTimes(payload, ['timestamp', 'deliver_after']));
   return payload.kind === 'system' || content.delivery_origin !== 'response';
 }
 
@@ -203,9 +206,9 @@ function applyProcessing(db: Database.Database, payload: Record<string, unknown>
     throw new Error('invalid processing.upsert payload');
   db.prepare(
     `INSERT INTO processing_ack (message_id, status, status_changed)
-     VALUES (@message_id, @status, datetime('now'))
+     VALUES (@message_id, @status, @status_changed)
      ON CONFLICT(message_id) DO UPDATE SET status=excluded.status, status_changed=excluded.status_changed`,
-  ).run(payload);
+  ).run({ ...payload, status_changed: Date.now() });
 }
 
 function applyState(db: Database.Database, payload: Record<string, unknown>): void {
@@ -253,7 +256,7 @@ function applyState(db: Database.Database, payload: Record<string, unknown>): vo
   db.prepare(
     `INSERT INTO session_state (key, value, updated_at) VALUES (@key, @value, @updated_at)
      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
-  ).run(payload);
+  ).run(encodeTimes(payload, ['updated_at']));
 }
 
 function applyContainerState(db: Database.Database, payload: Record<string, unknown>): void {
@@ -275,7 +278,7 @@ function applyContainerState(db: Database.Database, payload: Record<string, unkn
      ON CONFLICT(id) DO UPDATE SET current_tool=excluded.current_tool,
        tool_declared_timeout_ms=excluded.tool_declared_timeout_ms,
        tool_started_at=excluded.tool_started_at, updated_at=excluded.updated_at`,
-  ).run(payload);
+  ).run(encodeTimes(payload, ['tool_started_at', 'updated_at']));
 }
 
 function applyCheckpoint(db: Database.Database, payload: Record<string, unknown>): void {
@@ -295,7 +298,7 @@ function applyCheckpoint(db: Database.Database, payload: Record<string, unknown>
      ON CONFLICT(message_out_id) DO UPDATE SET provider=excluded.provider,
        continuation=excluded.continuation, provider_turn_ref=excluded.provider_turn_ref,
        created_at=excluded.created_at`,
-  ).run(payload);
+  ).run(encodeTimes(payload, ['created_at']));
 }
 
 function applyActivity(db: Database.Database, payload: Record<string, unknown>): void {
@@ -341,7 +344,7 @@ function applyActivity(db: Database.Database, payload: Record<string, unknown>):
     `INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position)
      VALUES (@message_out_id, @ordinal, @ts, @text, @turn_id, @timeline_position)
      ON CONFLICT DO UPDATE SET ts=excluded.ts, text=excluded.text`,
-  ).run(payload);
+  ).run(encodeTimes(payload, ['ts']));
 }
 
 function applyUsage(db: Database.Database, payload: Record<string, unknown>): void {
@@ -409,6 +412,7 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
        context_tokens=excluded.context_tokens, timestamp=excluded.timestamp`,
   ).run({
     ...payload,
+    timestamp: toEpoch(payload.timestamp as string),
     duration_api_ms: payload.duration_api_ms === null ? null : Math.round(payload.duration_api_ms),
   });
 }
@@ -536,7 +540,7 @@ function applyTaskAttempt(db: Database.Database, payload: Record<string, unknown
        duration_ms=excluded.duration_ms, exit_code=excluded.exit_code, signal=excluded.signal,
        stdout=excluded.stdout, stderr=excluded.stderr, error=excluded.error,
        wake_agent=excluded.wake_agent, provider_invoked=excluded.provider_invoked`,
-  ).run(payload);
+  ).run(encodeTimes(payload, ['started_at', 'completed_at']));
 }
 
 function applyOptionalTelemetry(db: Database.Database, event: DurableRunnerFrame['event']): string | undefined {
@@ -571,9 +575,7 @@ export function applyDurableRunnerEvent(
       typeof payload?.key === 'string' &&
       payload.key.startsWith('turn-metadata:'));
 
-  const db = new Database(dbPath(agentGroupId, sessionId, 'outbound.db'));
-  db.pragma('journal_mode = DELETE');
-  db.pragma('busy_timeout = 5000');
+  const db = openOutboundDbRw(dbPath(agentGroupId, sessionId, 'outbound.db'));
   let deliveryReady = false;
   let processingReady = false;
   let editedInput: EditedInput | undefined;
@@ -589,17 +591,18 @@ export function applyDurableRunnerEvent(
     .update(JSON.stringify({ type: frame.event.type, payload: frame.event.payload }))
     .digest('hex');
   let maxInboundSeq = 0;
-  if (frame.event.type === 'message.upsert') {
-    const inbound = new Database(dbPath(agentGroupId, sessionId, 'inbound.db'), { readonly: true });
-    try {
-      maxInboundSeq = (
-        inbound.prepare('SELECT COALESCE(MAX(seq), 0) AS value FROM messages_in').get() as { value: number }
-      ).value;
-    } finally {
-      inbound.close();
-    }
-  }
   try {
+    if (frame.event.type === 'message.upsert') {
+      const inbound = new Database(dbPath(agentGroupId, sessionId, 'inbound.db'), { readonly: true });
+      try {
+        assertStorageVersion(inbound, 'inbound');
+        maxInboundSeq = (
+          inbound.prepare('SELECT COALESCE(MAX(seq), 0) AS value FROM messages_in').get() as { value: number }
+        ).value;
+      } finally {
+        inbound.close();
+      }
+    }
     // DELETE journals make the receipt and host text one atomic multi-DB commit.
     if (isInputEdit)
       db.prepare('ATTACH DATABASE ? AS input_edit_host').run(dbPath(agentGroupId, sessionId, 'inbound.db'));
@@ -711,8 +714,8 @@ export function applyDurableRunnerEvent(
       }
       db.prepare(
         `INSERT INTO applied_runner_events (event_id, sequence, event_type, event_digest, applied_at)
-        VALUES (?, ?, ?, ?, datetime('now'))`,
-      ).run(frame.eventId, frame.sequence, frame.event.type, digest);
+        VALUES (?, ?, ?, ?, ?)`,
+      ).run(frame.eventId, frame.sequence, frame.event.type, digest, Date.now());
       db.prepare('DELETE FROM applied_runner_events WHERE sequence <= ?').run(frame.sequence - APPLIED_EVENT_RETENTION);
     })();
   } finally {

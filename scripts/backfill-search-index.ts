@@ -8,6 +8,8 @@
  * Existing rows are cleared first so migrated session metadata is refreshed.
  */
 import Database from 'better-sqlite3';
+import { fromEpoch } from '../src/db/time.js';
+import { assertStorageVersion } from '../src/db/storage-lifecycle.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -67,6 +69,7 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
     if (fs.existsSync(inboundPath)) {
       try {
         const inDb = new Database(inboundPath, { readonly: true });
+        assertStorageVersion(inDb, 'inbound');
         inDb.pragma('busy_timeout = 5000');
         const rows = inDb
           .prepare(
@@ -77,7 +80,7 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
           .all() as Array<{
           id: string;
           kind: string;
-          timestamp: string;
+          timestamp: number;
           channel_type: string | null;
           thread_id: string | null;
           content: string;
@@ -94,7 +97,7 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
             channelType: row.channel_type,
             threadId: row.thread_id ?? session?.thread_id ?? null,
             direction: 'in',
-            timestamp: row.timestamp,
+            timestamp: fromEpoch(row.timestamp),
             text,
             senderUserId: row.sender_user_id ?? null,
           });
@@ -111,6 +114,7 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
     if (fs.existsSync(outboundPath)) {
       try {
         const outDb = new Database(outboundPath, { readonly: true });
+        assertStorageVersion(outDb, 'outbound');
         outDb.pragma('busy_timeout = 5000');
         const rows = outDb
           .prepare(
@@ -121,7 +125,7 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
           .all() as Array<{
           id: string;
           kind: string;
-          timestamp: string;
+          timestamp: number;
           channel_type: string | null;
           thread_id: string | null;
           content: string;
@@ -137,7 +141,7 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
             channelType: row.channel_type,
             threadId: row.thread_id ?? session?.thread_id ?? null,
             direction: 'out',
-            timestamp: row.timestamp,
+            timestamp: fromEpoch(row.timestamp),
             text,
           });
           sessionMsgCount++;

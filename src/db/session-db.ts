@@ -12,11 +12,41 @@ import { CONTAINER_MAX_OUTPUT_SIZE } from '../config.js';
 import { assertUserUuid } from './uuid.js';
 import { assertActivityOrderSchema } from './turns.js';
 import { recordSessionDatabaseChange, transaction } from './transaction.js';
+import { assertStorageVersion, STORAGE_VERSION, EPOCH_NOW_SQL } from './storage-lifecycle.js';
+import { toEpoch, decodeTimes, decodeTimeRows } from './time.js';
+
+function openStore(
+  dbPath: string,
+  store: 'inbound' | 'outbound',
+  options: { readonly?: boolean; fresh?: boolean } = {},
+): Database.Database {
+  const db = new Database(dbPath, { readonly: options.readonly ?? false });
+  try {
+    assertStorageVersion(db, store, options.fresh);
+    db.pragma('busy_timeout = 5000');
+    db.pragma('foreign_keys = ON');
+    if (!options.readonly) db.pragma('journal_mode = DELETE');
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
 
 /** Apply the inbound or outbound schema to a DB file. Idempotent. */
 export function ensureSchema(dbPath: string, schema: 'inbound' | 'outbound'): void {
-  const db = new Database(dbPath);
-  db.pragma('journal_mode = DELETE');
+  const db = openStore(dbPath, schema, { fresh: true });
+  try {
+    db.transaction(() => {
+      applySessionSchema(db, schema);
+      db.pragma(`user_version=${STORAGE_VERSION}`);
+    })();
+  } finally {
+    db.close();
+  }
+}
+
+function applySessionSchema(db: Database.Database, schema: 'inbound' | 'outbound'): void {
   db.exec(schema === 'inbound' ? INBOUND_SCHEMA : OUTBOUND_SCHEMA);
   if (schema === 'outbound') assertActivityOrderSchema(db);
   if (schema === 'inbound') {
@@ -75,30 +105,21 @@ export function ensureSchema(dbPath: string, schema: 'inbound' | 'outbound'): vo
       END;
     `);
   }
-  db.close();
 }
 
 /** Open the inbound DB for a session (host reads/writes). */
 export function openInboundDb(dbPath: string): Database.Database {
-  const db = new Database(dbPath);
-  db.pragma('journal_mode = DELETE');
-  db.pragma('busy_timeout = 5000');
-  return db;
+  return openStore(dbPath, 'inbound');
 }
 
 /** Open the host-owned outbound DB for read-only queries. */
 export function openOutboundDb(dbPath: string): Database.Database {
-  const db = new Database(dbPath, { readonly: true });
-  db.pragma('busy_timeout = 5000');
-  return db;
+  return openStore(dbPath, 'outbound', { readonly: true });
 }
 
 /** Open the host-owned outbound DB for writes. */
 export function openOutboundDbRw(dbPath: string): Database.Database {
-  const db = new Database(dbPath);
-  db.pragma('journal_mode = DELETE');
-  db.pragma('busy_timeout = 5000');
-  return db;
+  return openStore(dbPath, 'outbound');
 }
 
 export function upsertSessionRouting(
@@ -157,7 +178,7 @@ export function replaceDestinations(db: Database.Database, entries: DestinationR
 export function enqueueHostEvent(db: Database.Database, eventType: string, payload: unknown): void {
   db.prepare(
     `INSERT INTO pending_host_events (event_id, event_type, payload, created_at)
-     VALUES (lower(hex(randomblob(16))), ?, ?, datetime('now'))`,
+     VALUES (lower(hex(randomblob(16))), ?, ?, ${EPOCH_NOW_SQL})`,
   ).run(eventType, JSON.stringify(payload));
 }
 
@@ -240,6 +261,8 @@ export function insertMessage(
      VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake, @senderUserId, @senderIdentity)`,
   ).run({
     ...message,
+    timestamp: toEpoch(message.timestamp),
+    processAfter: toEpoch(message.processAfter),
     trigger: message.trigger ?? 1,
     onWake: message.onWake ?? 0,
     sourceSessionId: message.sourceSessionId ?? null,
@@ -265,9 +288,9 @@ export function countDueMessages(db: Database.Database): number {
        WHERE status = 'pending'
          AND trigger = 1
          AND kind != 'system'
-         AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))`,
+         AND (process_after IS NULL OR process_after <= ?)`,
       )
-      .get() as { count: number }
+      .get(Date.now()) as { count: number }
   ).count;
 }
 
@@ -277,8 +300,8 @@ export function markMessageFailed(db: Database.Database, messageId: string): voi
 
 export function retryWithBackoff(db: Database.Database, messageId: string, backoffSec: number): void {
   db.prepare(
-    `UPDATE messages_in SET tries = tries + 1, process_after = datetime('now', '+${backoffSec} seconds') WHERE id = ?`,
-  ).run(messageId);
+    'UPDATE messages_in SET tries = tries + 1, process_after = ? WHERE id = ?',
+  ).run(Date.now() + backoffSec * 1000, messageId);
 }
 
 export function getMessageForRetry(
@@ -286,9 +309,9 @@ export function getMessageForRetry(
   messageId: string,
   status: string,
 ): { id: string; tries: number; processAfter: string | null } | undefined {
-  return db
+  return decodeTimes<{ id: string; tries: number; processAfter: string | null } | undefined>(db
     .prepare('SELECT id, tries, process_after as processAfter FROM messages_in WHERE id = ? AND status = ?')
-    .get(messageId, status) as { id: string; tries: number; processAfter: string | null } | undefined;
+    .get(messageId, status), ['processAfter']);
 }
 
 /** Routing fields for a message, used when the host must bounce a notice back. */
@@ -324,7 +347,7 @@ export function insertOutboundBounce(
   outDb
     .prepare(
       `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, kind, platform_id, channel_type, thread_id, content)
-       VALUES (@id, @seq, @inReplyTo, datetime('now'), 'chat', @platformId, @channelType, @threadId, @content)`,
+       VALUES (@id, @seq, @inReplyTo, ${EPOCH_NOW_SQL}, 'chat', @platformId, @channelType, @threadId, @content)`,
     )
     .run({
       id: msg.id,
@@ -377,9 +400,9 @@ export interface ProcessingClaim {
 
 /** Return processing_ack rows still in 'processing' with their claim timestamps. */
 export function getProcessingClaims(outDb: Database.Database): ProcessingClaim[] {
-  return outDb
+  return decodeTimeRows<ProcessingClaim>(outDb
     .prepare("SELECT message_id, status_changed FROM processing_ack WHERE status = 'processing'")
-    .all() as ProcessingClaim[];
+    .all(), ['status_changed']);
 }
 
 /**
@@ -407,12 +430,12 @@ export interface ContainerState {
  * declared timeout.
  */
 export function getContainerState(outDb: Database.Database): ContainerState | null {
-  const row = outDb
+  const row = decodeTimes<ContainerState | undefined>(outDb
     .prepare(
       `SELECT current_tool, tool_declared_timeout_ms, tool_started_at
            FROM container_state WHERE id = 1`,
     )
-    .get() as ContainerState | undefined;
+    .get(), ['tool_started_at']);
   return row ?? null;
 }
 
@@ -434,16 +457,16 @@ export interface OutboundMessage {
 export function getDueOutboundMessages(db: Database.Database, receiptsPath: string): OutboundMessage[] {
   db.prepare('ATTACH DATABASE ? AS delivery_receipts').run(receiptsPath);
   try {
-    return db
+    return decodeTimeRows<OutboundMessage>(db
       .prepare(
         `SELECT m.* FROM messages_out m
-         WHERE (deliver_after IS NULL OR julianday(deliver_after) <= julianday('now'))
+         WHERE (deliver_after IS NULL OR deliver_after <= ?)
            AND NOT EXISTS (
              SELECT 1 FROM delivery_receipts.delivered d WHERE d.message_out_id=m.id
            )
          ORDER BY timestamp ASC, id ASC`,
       )
-      .all() as OutboundMessage[];
+      .all(Date.now()), ['timestamp']);
   } finally {
     db.exec('DETACH DATABASE delivery_receipts');
   }
@@ -463,14 +486,14 @@ export function getDeliveredIds(db: Database.Database): Set<string> {
 
 export function markDelivered(db: Database.Database, messageOutId: string, platformMessageId: string | null): void {
   db.prepare(
-    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, ?, 'delivered', datetime('now'))",
-  ).run(messageOutId, platformMessageId ?? null);
+    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, ?, 'delivered', ?)",
+  ).run(messageOutId, platformMessageId ?? null, Date.now());
 }
 
 export function markDeliveryFailed(db: Database.Database, messageOutId: string): void {
   db.prepare(
-    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, NULL, 'failed', datetime('now'))",
-  ).run(messageOutId);
+    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, NULL, 'failed', ?)",
+  ).run(messageOutId, Date.now());
 }
 
 export interface InboundReturnRoute {

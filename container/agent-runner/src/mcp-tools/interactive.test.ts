@@ -70,7 +70,7 @@ describe('ask_user_question', () => {
     expect(JSON.stringify(journal[0])).not.toContain('cancelled');
     const questionId = JSON.parse(row.content).questionId;
     getInboundDb().prepare(`INSERT INTO messages_in (id, kind, timestamp, status, content)
-      VALUES (?, 'interactive_response', datetime('now'), 'pending', ?)`)
+      VALUES (?, 'interactive_response', (unixepoch('now')*1000), 'pending', ?)`)
       .run(`question-response:${questionId}`, JSON.stringify({
         type: 'question_response', questionId, question: 'Old question', responseType: 'text', value: 'yes',
       }));
@@ -85,7 +85,7 @@ describe('ask_user_question', () => {
       const row = getOutboundDb().prepare('SELECT id FROM messages_out').get() as { id: string };
       const id = `question-response:${row.id}`;
       getInboundDb().prepare(`INSERT INTO messages_in(id,kind,timestamp,status,content)
-        VALUES(?,'interactive_response',datetime('now'),'completed',?)`).run(id, JSON.stringify({
+        VALUES(?,'interactive_response',(unixepoch('now')*1000),'completed',?)`).run(id, JSON.stringify({
           type: 'question_response', questionId: row.id, question: 'Choose', responseType,
           ...(responseType === 'skipped' ? {} : { value: 'A' }),
         }));
@@ -98,7 +98,7 @@ describe('ask_user_question', () => {
     await askUserQuestion.handler({ question: 'Choose', responseMode: 'text' });
     const row = getOutboundDb().prepare('SELECT id FROM messages_out').get() as { id: string };
     const insert = getInboundDb().prepare(`INSERT INTO messages_in(id,kind,timestamp,content)
-      VALUES(?,?,datetime('now'),'{}')`);
+      VALUES(?,?,(unixepoch('now')*1000),'{}')`);
     insert.run(`question-response:${row.id}`, 'system');
     insert.run('question-response:other', 'interactive_response');
     expect((await askUserQuestion.handler({ question: 'Next', responseMode: 'text' })).isError).toBe(true);

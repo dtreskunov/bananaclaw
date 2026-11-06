@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ModelMessage } from 'ai';
+import { assertStorageVersion, epochSchema, STORAGE_VERSION } from '../../db/storage-lifecycle.js';
 
 const DEFAULT_PATH = '/workspace/native-state/native-state.db';
 
@@ -32,10 +33,12 @@ export class NativeStore {
   constructor(filename = process.env.NATIVE_STATE_PATH || DEFAULT_PATH) {
     this.directory = path.dirname(filename);
     this.db = new Database(filename, { create: true });
+    try { assertStorageVersion(this.db, 'native-provider'); }
+    catch (error) { this.db.close(); throw error; }
     this.db.exec('PRAGMA journal_mode = DELETE');
     this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec('PRAGMA foreign_keys = ON');
-    this.db.exec(`
+    this.db.exec(epochSchema(`
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
         created_at TEXT NOT NULL,
@@ -80,7 +83,8 @@ export class NativeStore {
         id TEXT PRIMARY KEY,
         content_json TEXT NOT NULL
       );
-    `);
+    `));
+    this.db.exec(`PRAGMA user_version=${STORAGE_VERSION}`);
     try {
       if (this.db.query('PRAGMA foreign_key_check').get()) {
         throw new Error('Native state has foreign-key violations; repair it offline before reopening');
@@ -116,7 +120,7 @@ export class NativeStore {
 
   createConversation(): string {
     const id = `native-${randomUUID()}`;
-    const now = new Date().toISOString();
+    const now = Date.now();
     this.db.prepare('INSERT INTO conversations (id, created_at, updated_at) VALUES (?, ?, ?)').run(id, now, now);
     return id;
   }
@@ -209,7 +213,7 @@ export class NativeStore {
 
   append(conversationId: string, messages: ModelMessage[]): string {
     if (messages.length === 0) return this.head(conversationId) ?? '0';
-    const now = new Date().toISOString();
+    const now = Date.now();
     const insert = this.db.prepare(
       'INSERT INTO messages (conversation_id, content_json, created_at) VALUES ($conversation_id, $content_json, $created_at)',
     );

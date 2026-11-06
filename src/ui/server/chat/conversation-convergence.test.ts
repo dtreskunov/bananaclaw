@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -104,7 +105,7 @@ async function connect(turnId: string) {
   socket.resume();
   socket.write(
     JSON.stringify({
-      v: 5,
+      v: 6,
       type: 'turn.state',
       turn: {
         id: turnId,
@@ -146,7 +147,7 @@ async function replay(frame: DurableRunnerFrame): Promise<void> {
       }
     };
     connection.on('data', receive);
-    connection.write(JSON.stringify({ v: 5, type: 'durable', ...frame }) + '\n');
+    connection.write(JSON.stringify({ v: 6, type: 'durable', ...frame }) + '\n');
   });
 }
 function browser(thread = 'thread') {
@@ -192,26 +193,31 @@ beforeEach(() => {
   sequence = 0;
   runMigrations(initTestDb());
   const db = getDb();
-  db.prepare("INSERT INTO users (id,kind,created_at) VALUES (?,'web',?)").run(user, now);
-  db.prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES (?,?,?,?)').run(group, group, group, now);
+  db.prepare("INSERT INTO users (id,kind,created_at) VALUES (?,'web',?)").run(user, toEpoch(now));
+  db.prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES (?,?,?,?)').run(
+    group,
+    group,
+    group,
+    toEpoch(now),
+  );
   db.prepare('INSERT INTO agent_group_members(user_id,agent_group_id,added_by,added_at) VALUES (?,?,?,?)').run(
     user,
     group,
     user,
-    now,
+    toEpoch(now),
   );
   db.prepare(
     `INSERT INTO messaging_groups(id,channel_type,platform_id,instance,is_group,created_at)
     VALUES ('web-mg','web',?,'web',1,?)`,
-  ).run(`group:${group}`, now);
+  ).run(`group:${group}`, toEpoch(now));
   db.prepare(
     `INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
     VALUES ('wire','web-mg',?,'agent-shared',?)`,
-  ).run(group, now);
+  ).run(group, toEpoch(now));
   db.prepare(
     `INSERT INTO sessions(id,agent_group_id,status,container_status,created_at)
     VALUES (?,?,'active','stopped',?)`,
-  ).run(session, group, now);
+  ).run(session, group, toEpoch(now));
   initSessionFolder(group, session);
 });
 afterEach(async () => {
@@ -231,7 +237,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
         `INSERT INTO messages_in (id,seq,kind,timestamp,content,channel_type,platform_id,thread_id)
       VALUES ('legacy-in',2,'chat',?,'{"text":"input"}','web',?,'thread')`,
       )
-      .run(now, `group:${group}`);
+      .run(toEpoch(now), `group:${group}`);
     input.close();
     const db = new Database(outboundDbPath(group, session));
     db.prepare(
@@ -244,7 +250,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
     db.prepare(
       `INSERT INTO messages_out(id,seq,in_reply_to,kind,timestamp,content,channel_type,platform_id,thread_id,turn_id)
       VALUES ('legacy-out',1,'legacy-in','chat',?,'{"text":"old answer"}','web',?,'thread','historical')`,
-    ).run(now, `group:${group}`);
+    ).run(toEpoch(now), `group:${group}`);
     db.prepare(
       "INSERT INTO turn_usage(id,message_out_id,turn_id,input_tokens) VALUES('partial-bill','legacy-out','historical',17)",
     ).run();
@@ -264,7 +270,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
       turn_id: 'previous',
       message_out_id: null,
       ordinal: 0,
-      ts: now,
+      ts: String(toEpoch(now)),
       text: 'original activity',
       timeline_position: 100,
     });
@@ -293,7 +299,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
     apply('turn.upsert', turn('successor'));
     socket!.write(
       JSON.stringify({
-        v: 5,
+        v: 6,
         type: 'turn.state',
         turn: {
           id: 'successor',
@@ -378,7 +384,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
       turn_id: 'private-turn',
       message_out_id: null,
       ordinal: 0,
-      ts: now,
+      ts: String(toEpoch(now)),
       text: 'private trace',
       timeline_position: 100,
     });

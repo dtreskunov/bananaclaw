@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./config.js')>()),
-  DATA_DIR: fs.mkdtempSync('/tmp/ncl-r-'),
+  DATA_DIR: fs.mkdtempSync(`${process.cwd()}/.test-rcv-`),
 }));
 
 import { DATA_DIR } from './config.js';

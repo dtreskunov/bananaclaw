@@ -284,12 +284,13 @@ including removal of the inbound agent suffix. Repeated IDs in different agents,
 sessions, forks or directions no longer suppress one another. Edits and
 cancellations affect only the selected occurrence.
 
-On opening an existing index, the host detects the unversioned legacy
-`id TEXT PRIMARY KEY` schema and rebuilds it transactionally as
-`PRAGMA user_version = 1`, preserving every existing entry and rebuilding FTS
-from those entries. A failed rebuild rolls back; unknown versions or
-unrecognized unversioned schemas fail without replacing their data.
-The upgrade logs the preserved count and the backfill command.
+Search storage now requires `PRAGMA user_version = 2`, with checked INTEGER
+UTC epoch-millisecond timestamps and ISO strings in search results. The host
+refuses older populated indexes rather than rebuilding them at startup. The
+[explicit offline cutover](db-storage-cutover.md) upgrades both the legacy
+unversioned `id TEXT PRIMARY KEY` schema and the version-1 occurrence schema,
+preserving every entry/rowid and rebuilding FTS. Preflight rejects invalid dates;
+failed verification leaves originals intact and backups are retained.
 
 The legacy global ID constraint already suppressed some occurrences, so those
 cannot be recovered from the search index alone. To restore occurrences still

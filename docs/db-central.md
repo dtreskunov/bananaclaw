@@ -2,7 +2,12 @@
 
 Complete reference for `data/v2.db`, the host-owned admin-plane database. Start with [db.md](db.md) for the three-DB overview, the map, and the cross-mount rules.
 
-Access layer: `src/db/`. Authoritative schema reference: `src/db/schema.ts` (comments only — actual creation runs via migrations in `src/db/migrations/`).
+Access layer: `src/db/`. Authoritative schema: migrations in
+`src/db/migrations/`, followed by the checked epoch storage definitions in
+`src/db/storage-lifecycle.ts`. The unused duplicate central DDL was removed.
+Maintained time instants below are INTEGER UTC epoch milliseconds, exposed as
+ISO strings by the DB access layer. `PRAGMA user_version=1` is required; existing
+stores use the [offline cutover](db-storage-cutover.md), not startup conversion.
 
 ### Integrity upgrades
 
@@ -82,7 +87,7 @@ CREATE TABLE agent_groups (
   name             TEXT NOT NULL,
   folder           TEXT NOT NULL UNIQUE,
   agent_provider   TEXT,
-  created_at       TEXT NOT NULL
+  created_at       INTEGER NOT NULL
 );
 ```
 
@@ -102,7 +107,7 @@ CREATE TABLE messaging_groups (
   name                  TEXT,
   is_group              INTEGER DEFAULT 0,
   unknown_sender_policy TEXT NOT NULL DEFAULT 'strict',
-  created_at            TEXT NOT NULL,
+  created_at            INTEGER NOT NULL,
   denied_at             TEXT,
   UNIQUE(channel_type, platform_id, instance)
 );
@@ -126,7 +131,7 @@ CREATE TABLE messaging_group_agents (
   response_scope     TEXT DEFAULT 'all',
   session_mode       TEXT DEFAULT 'shared',
   priority           INTEGER DEFAULT 0,
-  created_at         TEXT NOT NULL,
+  created_at         INTEGER NOT NULL,
   UNIQUE(messaging_group_id, agent_group_id)
 );
 ```
@@ -146,7 +151,7 @@ CREATE TABLE users (
   id           TEXT PRIMARY KEY,   -- UUID v4
   kind         TEXT NOT NULL,      -- primary channel type (informational)
   display_name TEXT,
-  created_at   TEXT NOT NULL
+  created_at   INTEGER NOT NULL
 );
 ```
 
@@ -188,7 +193,7 @@ CREATE TABLE user_roles (
   role           TEXT NOT NULL,
   agent_group_id TEXT REFERENCES agent_groups(id),
   granted_by     TEXT REFERENCES users(id),
-  granted_at     TEXT NOT NULL,
+  granted_at     INTEGER NOT NULL,
   PRIMARY KEY (user_id, role, agent_group_id)
 );
 CREATE INDEX idx_user_roles_scope ON user_roles(agent_group_id, role);
@@ -210,7 +215,7 @@ CREATE TABLE agent_group_members (
   user_id        TEXT NOT NULL REFERENCES users(id),
   agent_group_id TEXT NOT NULL REFERENCES agent_groups(id),
   added_by       TEXT REFERENCES users(id),
-  added_at       TEXT NOT NULL,
+  added_at       INTEGER NOT NULL,
   PRIMARY KEY (user_id, agent_group_id)
 );
 ```
@@ -224,7 +229,7 @@ CREATE TABLE user_dms (
   user_id            TEXT NOT NULL REFERENCES users(id),
   channel_type       TEXT NOT NULL,
   messaging_group_id TEXT NOT NULL REFERENCES messaging_groups(id),
-  resolved_at        TEXT NOT NULL,
+  resolved_at        INTEGER NOT NULL,
   PRIMARY KEY (user_id, channel_type)
 );
 ```
@@ -244,8 +249,8 @@ CREATE TABLE sessions (
   agent_provider     TEXT,
   status             TEXT DEFAULT 'active',
   container_status   TEXT DEFAULT 'stopped',
-  last_active        TEXT,
-  created_at         TEXT NOT NULL
+  last_active        INTEGER,
+  created_at         INTEGER NOT NULL
 );
 CREATE INDEX idx_sessions_agent_group ON sessions(agent_group_id);
 CREATE INDEX idx_sessions_lookup     ON sessions(messaging_group_id, thread_id);
@@ -300,7 +305,7 @@ CREATE TABLE agent_destinations (
   local_name     TEXT NOT NULL,
   target_type    TEXT NOT NULL,   -- 'channel' | 'agent'
   target_id      TEXT NOT NULL,   -- messaging_group_id | agent_group_id
-  created_at     TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
   PRIMARY KEY (agent_group_id, local_name)
 );
 CREATE INDEX idx_agent_dest_target ON agent_destinations(target_type, target_id);
@@ -401,7 +406,7 @@ Migration ledger, written by the migration runner (§2).
 CREATE TABLE schema_version (
   version INTEGER PRIMARY KEY,
   name    TEXT NOT NULL,
-  applied TEXT NOT NULL
+  applied INTEGER NOT NULL
 );
 ```
 
@@ -424,7 +429,7 @@ CREATE TABLE container_configs (
   packages_npm           TEXT NOT NULL DEFAULT '[]',
   additional_mounts      TEXT NOT NULL DEFAULT '[]',
   cli_scope              TEXT NOT NULL DEFAULT 'group',   -- disabled | group | global
-  updated_at             TEXT NOT NULL
+  updated_at             INTEGER NOT NULL
 );
 ```
 
@@ -458,4 +463,7 @@ Migration 028 was retired after offline upgrades; historical applied records rem
 Approval migrations 003, 007 and 045–047 are replaced by 049; their old applied
 names remain audit metadata, not compatibility behavior.
 
-Session DB schemas (`INBOUND_SCHEMA`, `OUTBOUND_SCHEMA`) are **not** versioned here. They describe the complete shape created for every new session; this deployment's existing session DBs are normalized before code begins relying on a newly required table or column. See [db-session.md](db-session.md).
+Session DB schemas (`INBOUND_SCHEMA`, `OUTBOUND_SCHEMA`) use their own
+`PRAGMA user_version`, not the central migration ledger. They describe the
+complete fresh-store shape; old files require the
+[explicit offline cutover](db-storage-cutover.md). See [db-session.md](db-session.md).

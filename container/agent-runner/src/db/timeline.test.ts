@@ -1,3 +1,4 @@
+import { toEpoch } from './time.js';
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
@@ -28,7 +29,7 @@ afterEach(() => {
 function input(id: string, seq: number): MessageInRow {
   getOutboundDb().prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, content)
-     VALUES (?, ?, 'chat', '2026-09-26T00:00:00.000Z', 'web', ?)`,
+     VALUES (?, ?, 'chat', 1790380800000, 'web', ?)`,
   ).run(id, seq, JSON.stringify({ text: id }));
   return getMessageIn(id)!;
 }
@@ -171,9 +172,9 @@ describe('durable consumption timeline', () => {
     });
     const inheritedOutput = JSON.stringify({ text: 'inherited output', timelinePosition: inheritedBase + 2 });
     db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)')
-      .run('input:inherited', inheritedInput, '2026-09-26T00:00:00.000Z');
+      .run('input:inherited', inheritedInput, toEpoch('2026-09-26T00:00:00.000Z'));
     db.prepare(
-      "INSERT INTO messages_out (id, seq, timestamp, kind, content) VALUES ('inherited', 1, datetime('now'), 'chat', ?)",
+      "INSERT INTO messages_out (id, seq, timestamp, kind, content) VALUES ('inherited', 1, (unixepoch('now')*1000), 'chat', ?)",
     ).run(inheritedOutput);
     if (mode === 'missing') db.exec('DROP TABLE timeline_clock');
     else if (mode === 'empty') db.exec('DELETE FROM timeline_clock');

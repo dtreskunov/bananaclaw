@@ -10,6 +10,7 @@
  */
 import { getConfig } from '../config.js';
 import { getInboundDb, getOutboundDb } from './connection.js';
+import { decodeTimes, decodeTimeRows } from './time.js';
 
 export const MAX_TIMER_DELAY_MS = 2_147_000_000;
 
@@ -66,11 +67,11 @@ export function getPendingMessages(
   const inbound = getInboundDb();
   const outbound = getOutboundDb();
 
-  const pending = inbound
+  const pending = decodeTimeRows<MessageInRow>(inbound
     .prepare(
       `SELECT * FROM messages_in
          WHERE status = 'pending'
-           AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
+           AND (process_after IS NULL OR process_after <= ?4)
            AND (on_wake = 0 OR (?1 = 1 AND (?3 IS NULL OR seq <= ?3)))
            AND NOT (kind = 'system' AND COALESCE(
              CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END, '') IN ('edit_input', 'cancel_input', 'restart'))
@@ -81,7 +82,8 @@ export function getPendingMessages(
       isFirstPoll ? 1 : 0,
       options.uncapped ? -1 : getMaxMessagesPerPrompt(),
       options.wakeThroughSeq ?? null,
-    ) as MessageInRow[];
+      Date.now(),
+    ), ['timestamp', 'process_after']);
 
   if (pending.length === 0) return [];
 
@@ -104,9 +106,9 @@ export function hasPendingRestart(afterSeq = -1): boolean {
   const pending = db
     .prepare(
       `SELECT id FROM messages_in WHERE status = 'pending' AND on_wake = 1 AND (?1 = -1 OR seq > ?1)
-         AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))`,
+         AND (process_after IS NULL OR process_after <= ?2)`,
     )
-    .all(afterSeq) as { id: string }[];
+    .all(afterSeq, Date.now()) as { id: string }[];
   const acknowledged = new Set(
     (getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as { message_id: string }[]).map(
       (row) => row.message_id,
@@ -122,10 +124,10 @@ export function completeRestartRequests(wakeThroughSeq: number): number {
   const rows = db
     .prepare(
       `SELECT id FROM messages_in WHERE status = 'pending' AND kind = 'system' AND on_wake = 1
-       AND seq <= ? AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
+       AND seq <= ? AND (process_after IS NULL OR process_after <= ?)
        AND CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END = 'restart'`,
     )
-    .all(wakeThroughSeq) as { id: string }[];
+    .all(wakeThroughSeq, Date.now()) as { id: string }[];
   const acknowledged = getOutboundDb().prepare('SELECT 1 FROM processing_ack WHERE message_id = ?');
   const ids = rows.filter((row) => !acknowledged.get(row.id)).map((row) => row.id);
   markCompleted(ids);
@@ -136,13 +138,13 @@ export function completeRestartRequests(wakeThroughSeq: number): number {
 export function getPendingInputEdits(): MessageInRow[] {
   const inbound = getInboundDb();
 
-  const rows = inbound
+  const rows = decodeTimeRows<MessageInRow>(inbound
     .prepare(
       `SELECT * FROM messages_in WHERE status = 'pending' AND kind = 'system'
        AND CASE WHEN json_valid(content) THEN json_extract(content, '$.action') END IN ('edit_input', 'cancel_input')
        ORDER BY seq ASC`,
     )
-    .all() as MessageInRow[];
+    .all(), ['timestamp', 'process_after']);
   const acknowledged = getOutboundDb().prepare('SELECT message_id FROM processing_ack').all() as {
     message_id: string;
   }[];
@@ -161,12 +163,12 @@ export function getSteeringCandidates(
   const exclude = JSON.stringify([...excludedIds, ...acknowledged.map((row) => row.message_id)]);
   const db = getInboundDb();
 
-  return db
+  return decodeTimeRows<MessageInRow>(db
     .prepare(
       `SELECT m.* FROM messages_in m
        WHERE m.status = 'pending' AND m.trigger = 1 AND m.on_wake = 0
          AND m.kind IN ('chat', 'chat-sdk') AND m.source_session_id IS NULL
-         AND (m.process_after IS NULL OR datetime(m.process_after) <= datetime('now'))
+         AND (m.process_after IS NULL OR m.process_after <= ?)
          AND m.channel_type = ? AND m.platform_id = ? AND COALESCE(m.thread_id, '') = ?
          AND m.id NOT IN (SELECT value FROM json_each(?))
          AND (m.channel_type != 'web' OR
@@ -174,12 +176,13 @@ export function getSteeringCandidates(
        ORDER BY m.seq ASC LIMIT ?`,
     )
     .all(
+      Date.now(),
       routing.channelType,
       routing.platformId,
       routing.threadId || '',
       exclude,
       getMaxMessagesPerPrompt(),
-    ) as MessageInRow[];
+    ), ['timestamp', 'process_after']);
 }
 
 /** Milliseconds until the next future pending row becomes due. */
@@ -188,12 +191,12 @@ export function nextPendingDueDelayMs(): number | undefined {
 
   const row = inbound
     .prepare(
-      `SELECT CAST(MAX(0, (julianday(MIN(process_after)) - julianday('now')) * 86400000) AS INTEGER) AS delay_ms
+      `SELECT MAX(0, MIN(process_after) - ?1) AS delay_ms
          FROM messages_in
          WHERE status = 'pending' AND process_after IS NOT NULL
-           AND datetime(process_after) > datetime('now')`,
+           AND process_after > ?1`,
     )
-    .get() as { delay_ms: number | null };
+    .get(Date.now()) as { delay_ms: number | null };
   return row.delay_ms === null ? undefined : Math.min(row.delay_ms, MAX_TIMER_DELAY_MS);
 }
 
@@ -202,13 +205,13 @@ export function markProcessing(ids: string[]): void {
   if (ids.length === 0) return;
   const db = getOutboundDb();
   const stmt = db.prepare(
-    "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'processing', datetime('now'))",
+    "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'processing', ?)",
   );
   const claim = db.prepare('INSERT OR IGNORE INTO claimed_inputs (message_id) VALUES (?)');
   db.transaction(() => {
     for (const id of ids) {
       claim.run(id);
-      stmt.run(id);
+      stmt.run(id, Date.now());
     }
   })();
 }
@@ -226,10 +229,10 @@ export function markCompleted(ids: string[]): void {
   if (ids.length === 0) return;
   const db = getOutboundDb();
   const stmt = db.prepare(
-    "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'completed', datetime('now'))",
+    "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'completed', ?)",
   );
   db.transaction(() => {
-    for (const id of ids) stmt.run(id);
+    for (const id of ids) stmt.run(id, Date.now());
   })();
 }
 
@@ -237,14 +240,14 @@ export function markCompleted(ids: string[]): void {
 export function markFailed(id: string): void {
   getOutboundDb()
     .prepare(
-      "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'failed', datetime('now'))",
+      "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'failed', ?)",
     )
-    .run(id);
+    .run(id, Date.now());
 }
 
 /** Get a message by ID (read from inbound.db). */
-export function getMessageIn(id: string): MessageInRow | undefined {
+export function getMessageIn(id: string): MessageInRow | null {
   const inbound = getInboundDb();
 
-  return inbound.prepare('SELECT * FROM messages_in WHERE id = ?').get(id) as MessageInRow | undefined;
+  return decodeTimes<MessageInRow | null>(inbound.prepare('SELECT * FROM messages_in WHERE id = ?').get(id), ['timestamp', 'process_after']);
 }

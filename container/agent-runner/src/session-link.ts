@@ -6,7 +6,7 @@ import { acknowledgeRunnerEvent, listPendingRunnerEvents } from './db/runner-sta
 import type { ActivityStep } from './providers/types.js';
 
 const DEFAULT_SOCKET_PATH = '/run/nanoclaw/runner.sock';
-const PROTOCOL_VERSION = 5;
+const PROTOCOL_VERSION = 6;
 const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES || '10485760', 10);
 const MAX_DURABLE_FRAME_BYTES = Math.ceil((MAX_OUTPUT_BYTES * 4) / 3) + 2 * 1024 * 1024;
@@ -16,11 +16,11 @@ const INITIAL_RECONNECT_MS = 100;
 const MAX_RECONNECT_MS = 5_000;
 
 type SignalFrame =
-  | { v: 5; type: 'turn.state'; turn: ActiveTurn | null }
-  | { v: 5; type: 'heartbeat' }
-  | { v: 5; type: 'activity.clear' }
+  | { v: 6; type: 'turn.state'; turn: ActiveTurn | null }
+  | { v: 6; type: 'heartbeat' }
+  | { v: 6; type: 'activity.clear' }
   | {
-      v: 5;
+      v: 6;
       type: 'activity';
       step: ActivityStep;
       turnId: string | null;
@@ -28,8 +28,8 @@ type SignalFrame =
       ordinal: number;
       timelinePosition: number;
     }
-  | { v: 5; type: 'turn.resume' }
-  | { v: 5; type: 'turn.end' };
+  | { v: 6; type: 'turn.resume' }
+  | { v: 6; type: 'turn.end' };
 
 export interface ActiveTurn {
   id: string;
@@ -80,7 +80,7 @@ export function requestToolStop(turnId: string, toolCallId: string): ToolStopRes
 }
 
 interface DurableFrame {
-  v: 5;
+  v: 6;
   type: 'durable';
   eventId: string;
   sequence: number;

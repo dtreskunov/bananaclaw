@@ -37,7 +37,7 @@ it('stamps standalone ncl sidecar requests using the existing durable timeline c
     const frame = { id: row!.id, ok: true, data: [{ id: 'group-1' }] };
     db.prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, content)
-       VALUES ('response', 2, 'system', datetime('now'), ?)`,
+       VALUES ('response', 2, 'system', (unixepoch('now')*1000), ?)`,
     ).run(JSON.stringify({ action: 'cli_response', requestId: row!.id, frame }));
     expect(await child.exited).toBe(0);
     expect(JSON.parse(await new Response(child.stdout).text())).toEqual(frame);

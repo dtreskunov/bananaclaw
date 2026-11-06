@@ -7,6 +7,11 @@ Orientation for the data model: the three databases, how they fit together, and 
 
 Related: [architecture.md](architecture.md) for the high-level design; [api-details.md](api-details.md) for inbound/outbound message content shapes; [isolation-model.md](isolation-model.md) for channel-to-agent wiring modes.
 
+Maintained SQL instants use INTEGER UTC epoch milliseconds; API and session-link
+records retain strings. All stores are version-gated, including optional native
+provider state and the search index. Existing stores require the
+[explicit offline cutover](db-storage-cutover.md), never startup conversion.
+
 ---
 
 ## 1. The four databases
@@ -108,7 +113,9 @@ session schema to stopped host session DBs to install those additive indexes.
   and ACKs only after the other side commits them locally.
 5. **One live-status channel.** A private per-session Unix socket replaces the
    former signal files and avoids serializing live UI updates behind DB writes.
-6. **Lazy session-DB migrations.** Central DB uses numbered migrations; per-session DBs use `IF NOT EXISTS` + ad-hoc `ALTER TABLE` helpers for older session folders.
+6. **Explicit storage lifecycle.** Central migrations define central DDL; fresh
+   session/runner/native stores create the current complete shape. Existing old
+   stores fail version checks and require stopped-host/stopped-runner cutover.
 7. **ACL = row existence.** `agent_destinations` membership is itself the permission — no separate `permissions` table.
 
 ---

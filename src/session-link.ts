@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -31,9 +30,10 @@ import {
 import { getSession } from './db/sessions.js';
 import { indexMessage, deleteMessageFromIndex } from './search-index.js';
 import { INPUT_EDIT_PREFIX, INPUT_CANCEL_PREFIX, type EditedInput } from './pending-input-edit.js';
+import { openInboundDb } from './db/session-db.js';
 
-const PROTOCOL_VERSION = 5;
-export const SESSION_LINK_VERSION = 'v5';
+const PROTOCOL_VERSION = 6;
+export const SESSION_LINK_VERSION = 'v6';
 const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_FRAME_BYTES = Math.ceil((CONTAINER_MAX_OUTPUT_SIZE * 4) / 3) + 2 * 1024 * 1024;
 const MAX_FRAME_BYTES_PER_SECOND = 24 * 1024 * 1024;
@@ -167,7 +167,7 @@ function hostWirePayload(eventType: string, value: unknown): unknown {
 function flushHostEvents(sessionId: string, entry: SessionSignalServer): void {
   const connection = entry.connection;
   if (!entry.agentGroupId || !connection?.writable || connection.connecting || entry.hostInFlight) return;
-  const db = new Database(inboundPath(entry.agentGroupId, sessionId));
+  const db = openInboundDb(inboundPath(entry.agentGroupId, sessionId));
   try {
     const pending = db
       .prepare('SELECT sequence, event_id, event_type, payload FROM pending_host_events ORDER BY sequence LIMIT 1')
@@ -209,7 +209,7 @@ function flushHostEvents(sessionId: string, entry: SessionSignalServer): void {
 function applyHostAck(frame: Record<string, unknown>, { sessionId, entry }: FrameContext): boolean {
   const inFlight = entry.hostInFlight;
   if (!entry.agentGroupId || !inFlight || inFlight.eventId !== frame.eventId) return false;
-  const db = new Database(inboundPath(entry.agentGroupId, sessionId));
+  const db = openInboundDb(inboundPath(entry.agentGroupId, sessionId));
   try {
     db.prepare('DELETE FROM pending_host_events WHERE event_id = ? AND sequence = ?').run(
       inFlight.eventId,

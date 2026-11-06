@@ -18,6 +18,7 @@ import { parseInputState, type InputHandling, type InputState } from '../../shar
 import { parseTimelinePosition, timelineSortKey } from '../../shared/timeline.js';
 import { inputStateKey, isCancelledInputContent } from '../../../input-timeline.js';
 import { isElevated, resolveTurnContext, viewerHandlesForChannel } from './conversation-context.js';
+import { fromEpoch } from '../../../db/time.js';
 export function parseInputHandling(value: unknown): InputHandling | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_input_handling');
@@ -153,7 +154,7 @@ export function readChatHistory(
         .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
         id: string;
         kind: string;
-        timestamp: string;
+        timestamp: number;
         content: string;
         status: string;
         sender_user_id: string | null;
@@ -184,7 +185,7 @@ export function readChatHistory(
             messages.push({
               direction: 'in',
               id,
-              timestamp: r.timestamp,
+              timestamp: fromEpoch(r.timestamp),
               text: '',
               inputState: { messageId: id, status: 'cancelled' },
             });
@@ -211,7 +212,7 @@ export function readChatHistory(
           messages.push({
             direction: 'in',
             id,
-            timestamp: r.timestamp,
+            timestamp: fromEpoch(r.timestamp),
             text,
             ...(parsed.questionId ? { questionId: parsed.questionId } : {}),
             ...(parsed.questionResponseType ? { questionResponseType: parsed.questionResponseType } : {}),
@@ -245,7 +246,7 @@ export function readChatHistory(
         )
         .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
         id: string;
-        timestamp: string;
+        timestamp: number;
         kind: string;
         content: string;
         turn_id: string | null;
@@ -269,7 +270,7 @@ export function readChatHistory(
               direction: 'out',
               id: r.id,
               ...(r.turn_id ? { turnId: r.turn_id } : {}),
-              timestamp: r.timestamp,
+              timestamp: fromEpoch(r.timestamp),
             });
           }
           continue;
@@ -289,7 +290,7 @@ export function readChatHistory(
             // user's own messages find their target bubble.
             const target = publicInboundMessageId(c.messageId, groupId);
             const arr = reactionsByTarget.get(target) ?? [];
-            arr.push({ emoji: shortcodeToEmoji(c.emoji), ts: r.timestamp });
+            arr.push({ emoji: shortcodeToEmoji(c.emoji), ts: fromEpoch(r.timestamp) });
             reactionsByTarget.set(target, arr);
             continue;
           }
@@ -301,7 +302,7 @@ export function readChatHistory(
           ...parsed,
           direction: 'out',
           id: r.id,
-          timestamp: r.timestamp,
+          timestamp: fromEpoch(r.timestamp),
           ...(r.turn_id ? { turnId: r.turn_id } : {}),
         });
       }
@@ -342,7 +343,7 @@ export function readChatHistory(
         )
         .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
         id: string;
-        process_after: string;
+        process_after: number;
         content: string;
         recurrence: string | null;
         series_id: string | null;
@@ -389,7 +390,7 @@ export function readChatHistory(
         messages.push({
           direction: 'event',
           id: r.id,
-          timestamp: r.process_after,
+          timestamp: fromEpoch(r.process_after),
           text: `${subject} ${verb}${autoPaused ? ' and was auto-paused' : ''}: ${summary}`,
           event: {
             kind: 'task-run',

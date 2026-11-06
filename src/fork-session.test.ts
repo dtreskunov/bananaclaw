@@ -48,6 +48,7 @@ import {
   runnerStateDbPath,
 } from './session-manager.js';
 import type { Session } from './types.js';
+import { toEpoch } from './db/time.js';
 
 const TEST_DIR = path.join(process.cwd(), '.test-conversation-fork');
 const AG = 'ag-1';
@@ -87,13 +88,13 @@ function seedParent(): void {
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, thread_id, content)
        VALUES (@id, @seq, @kind, @timestamp, 'processed', 1, 'chan-1', 'discord', @thread_id, @content)`,
     )
-    .run({ id: 'u1', seq: 2, kind: 'chat', timestamp: ts(1), thread_id: PARENT_THREAD, content: '{"text":"first"}' });
+    .run({ id: 'u1', seq: 2, kind: 'chat', timestamp: toEpoch(ts(1)), thread_id: PARENT_THREAD, content: '{"text":"first"}' });
   inDb
     .prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, thread_id, content)
        VALUES (@id, @seq, @kind, @timestamp, 'processed', 1, 'chan-1', 'discord', @thread_id, @content)`,
     )
-    .run({ id: 'u2', seq: 4, kind: 'chat', timestamp: ts(3), thread_id: PARENT_THREAD, content: '{"text":"second"}' });
+    .run({ id: 'u2', seq: 4, kind: 'chat', timestamp: toEpoch(ts(3)), thread_id: PARENT_THREAD, content: '{"text":"second"}' });
   inDb
     .prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, thread_id, content)
@@ -103,7 +104,7 @@ function seedParent(): void {
       id: 'task-1',
       seq: 6,
       kind: 'task',
-      timestamp: ts(1),
+      timestamp: toEpoch(ts(1)),
       thread_id: PARENT_THREAD,
       content: '{"text":"cron"}',
     });
@@ -116,7 +117,7 @@ function seedParent(): void {
       id: 'other',
       seq: 8,
       kind: 'chat',
-      timestamp: ts(1),
+      timestamp: toEpoch(ts(1)),
       thread_id: 'thread-other',
       content: '{"text":"nope"}',
     });
@@ -125,7 +126,7 @@ function seedParent(): void {
       `INSERT INTO thread_titles (channel_type, platform_id, thread_id, title, source, request_message_id, published, updated_at)
        VALUES ('discord', 'chan-1', @thread_id, 'Parent topic', 'model', 'u1', 1, @updated_at)`,
     )
-    .run({ thread_id: PARENT_THREAD, updated_at: ts(1) });
+    .run({ thread_id: PARENT_THREAD, updated_at: toEpoch(ts(1)) });
   inDb.close();
 
   const outDb = new Database(outboundDbPath(AG, PARENT_SESSION));
@@ -138,7 +139,7 @@ function seedParent(): void {
       id: 'a1',
       seq: 1,
       in_reply_to: 'u1',
-      timestamp: ts(2),
+      timestamp: toEpoch(ts(2)),
       thread_id: PARENT_THREAD,
       content: '{"text":"answer one"}',
     });
@@ -151,13 +152,13 @@ function seedParent(): void {
       id: 'a2',
       seq: 3,
       in_reply_to: 'u2',
-      timestamp: ts(4),
+      timestamp: toEpoch(ts(4)),
       thread_id: PARENT_THREAD,
       content: '{"text":"answer two"}',
     });
   outDb
     .prepare(`INSERT INTO session_state (key, value, updated_at) VALUES ('continuation:claude', 'sdk-abc', @now)`)
-    .run({ now: ts(4) });
+    .run({ now: toEpoch(ts(4)) });
   outDb.close();
 }
 
@@ -225,9 +226,9 @@ describe('forkThread', () => {
       INSERT INTO turn_usage (id, message_out_id, turn_id, cost_usd) VALUES ('second', 'a2', 'turn-parent', 2);
       INSERT INTO turn_usage (id, turn_id, cost_usd) VALUES ('turn-only', 'turn-parent', 3);
       INSERT INTO turn_usage (id, cost_usd) VALUES ('unattributed', 4);
-      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text, timeline_position) VALUES ('a1', 'turn-parent', 0, 'now', 'first', 1);
-      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text, timeline_position) VALUES ('a2', 'turn-parent', 1, 'now', 'second', 2);
-      INSERT INTO turn_activity (turn_id, ordinal, ts, text, timeline_position) VALUES ('turn-parent', 2, 'now', 'turn-only', 3);
+      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text, timeline_position) VALUES ('a1', 'turn-parent', 0, 1767225720000, 'first', 1);
+      INSERT INTO turn_activity (message_out_id, turn_id, ordinal, ts, text, timeline_position) VALUES ('a2', 'turn-parent', 1, 1767225840000, 'second', 2);
+      INSERT INTO turn_activity (turn_id, ordinal, ts, text, timeline_position) VALUES ('turn-parent', 2, 1767225840000, 'turn-only', 3);
       INSERT INTO turns (id, phase, outcome, provenance) VALUES ('unrelated', 'running', 'pending', 'native');
     `);
     db.close();
@@ -337,7 +338,7 @@ describe('forkThread', () => {
         db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
           inputStateKey('u2'),
           JSON.stringify({ messageId: 'u2', status: 'cancelled' }),
-          ts(4),
+          toEpoch(ts(4)),
         );
         db.close();
       }
@@ -354,7 +355,7 @@ describe('forkThread', () => {
   function seedTimeline(queued = false) {
     const base = Date.parse(ts(2)) * 1000;
     const input = new Database(inboundDbPath(AG, PARENT_SESSION));
-    input.prepare("UPDATE messages_in SET timestamp = ? WHERE id = 'u2'").run(ts(1));
+    input.prepare("UPDATE messages_in SET timestamp = ? WHERE id = 'u2'").run(toEpoch(ts(1)));
     input.close();
     const output = new Database(outboundDbPath(AG, PARENT_SESSION));
     output
@@ -371,7 +372,7 @@ describe('forkThread', () => {
         queuedForNextTurn: true,
         ...(!queued ? { timelinePosition: base + 2 } : {}),
       }),
-      ts(4),
+      toEpoch(ts(4)),
     );
     output.close();
     return base;
@@ -425,8 +426,8 @@ describe('forkThread', () => {
     try {
       input.exec(`
         INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, thread_id, content) VALUES
-          ('other-channel', 10, 'chat', '${ts(1)}', 'web', '${PARENT_THREAD}', '{"text":"channelword"}'),
-          ('system', 12, 'system', '${ts(1)}', 'discord', '${PARENT_THREAD}', '{"text":"systemword"}');
+          ('other-channel', 10, 'chat', ${toEpoch(ts(1))}, 'web', '${PARENT_THREAD}', '{"text":"channelword"}'),
+          ('system', 12, 'system', ${toEpoch(ts(1))}, 'discord', '${PARENT_THREAD}', '{"text":"systemword"}');
       `);
     } finally {
       input.close();
@@ -435,8 +436,8 @@ describe('forkThread', () => {
     try {
       output.exec(`
         INSERT INTO messages_out (id, seq, kind, timestamp, channel_type, thread_id, content) VALUES
-          ('u1', 5, 'chat-sdk', '${ts(1)}', 'discord', '${PARENT_THREAD}', '{"markdown":"echoedword"}'),
-          ('other-output-channel', 7, 'chat', '${ts(1)}', 'web', '${PARENT_THREAD}', '{"text":"outputchannelword"}');
+          ('u1', 5, 'chat-sdk', ${toEpoch(ts(1))}, 'discord', '${PARENT_THREAD}', '{"markdown":"echoedword"}'),
+          ('other-output-channel', 7, 'chat', ${toEpoch(ts(1))}, 'web', '${PARENT_THREAD}', '{"text":"outputchannelword"}');
       `);
     } finally {
       output.close();
@@ -687,7 +688,7 @@ describe('forkThread — mixed timestamp formats', () => {
 
   function setOutTs(id: string, timestamp: string): void {
     const outDb = new Database(outboundDbPath(AG, PARENT_SESSION));
-    outDb.prepare('UPDATE messages_out SET timestamp = ? WHERE id = ?').run(timestamp, id);
+    outDb.prepare('UPDATE messages_out SET timestamp = ? WHERE id = ?').run(toEpoch(timestamp), id);
     outDb.close();
   }
 
@@ -757,13 +758,13 @@ describe('forkThread — native fidelity', () => {
     const outDb = new Database(outboundDbPath(AG, PARENT_SESSION));
     outDb
       .prepare(`INSERT INTO session_state (key, value, updated_at) VALUES ('continuation:opencode', 'ses_1', @now)`)
-      .run({ now: ts(4) });
+      .run({ now: toEpoch(ts(4)) });
     outDb
       .prepare(
         `INSERT INTO turn_checkpoints (message_out_id, provider, continuation, provider_turn_ref, created_at)
          VALUES ('a1', 'opencode', 'ses_1', 'msg_a1', @now)`,
       )
-      .run({ now: ts(2) });
+      .run({ now: toEpoch(ts(2)) });
     outDb.close();
 
     const ocDir = path.join(sessionDir(AG, PARENT_SESSION), 'opencode-xdg', 'opencode');

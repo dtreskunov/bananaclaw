@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 /**
  * Tests for the first-login onboarding flow.
  *
@@ -131,7 +132,7 @@ async function call(method: string, url: string, body?: { contentType: string; r
 function seedUser(id: string, displayName: string | null): void {
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'oidc', ?, ?)`)
-    .run(id, displayName, now());
+    .run(id, displayName, toEpoch(now()));
 }
 
 /** Create the per-user agent group the way approvePendingUser would.
@@ -176,7 +177,7 @@ describe('GET /ui/onboarding', () => {
 
   it('redirects already-onboarded users to /ui/chat/', async () => {
     seedUser('u1', 'Ada Lovelace');
-    getDb().prepare(`UPDATE users SET onboarded_at = ? WHERE id = ?`).run(now(), 'u1');
+    getDb().prepare(`UPDATE users SET onboarded_at = ? WHERE id = ?`).run(toEpoch(now()), 'u1');
     mockUserId = 'u1';
     const res = await call('GET', '/ui/onboarding');
     expect(res.status()).toBe(303);
@@ -367,7 +368,7 @@ describe('postLoginRedirect', () => {
 
   it('returns the requested next path for already-onboarded users', () => {
     seedUser('u10', 'Test');
-    getDb().prepare(`UPDATE users SET onboarded_at = ? WHERE id = ?`).run(now(), 'u10');
+    getDb().prepare(`UPDATE users SET onboarded_at = ? WHERE id = ?`).run(toEpoch(now()), 'u10');
     expect(postLoginRedirect('u10', '/ui/chat/')).toBe('/ui/chat/');
   });
 });

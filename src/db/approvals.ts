@@ -48,7 +48,7 @@ export function updateApprovalStatus(
       .run({
         id,
         status,
-        now: new Date().toISOString(),
+        now: Date.now(),
         revision: expectedRevision ?? null,
         decision: response?.decision ?? null,
         userId: response?.userId ?? null,

@@ -4,6 +4,12 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING]** SQLite maintained time instants now use checked INTEGER UTC
+  epoch milliseconds across central, session, runner, native-provider and search
+  stores. Existing stores require the explicit stopped-host/stopped-runner
+  [offline cutover](docs/db-storage-cutover.md) (detect / why / fix / verify /
+  rollback); startup does not convert them. Deploy the matching v6 runner image.
+
 - **[BREAKING] Unified waiting-first activity indicators.** Waiting replaces
   attention-count badges and wins over running on threads and agents. Non-idle
   thread titles use trace-colored filled circles; agent tabs and mobile picker

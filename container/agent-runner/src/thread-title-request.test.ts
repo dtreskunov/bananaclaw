@@ -25,7 +25,7 @@ function insertChat(id: string, seq: number, text: string): void {
     .prepare(
       `INSERT INTO messages_in
          (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content)
-       VALUES (?, ?, 'chat', datetime('now'), 'pending', 'group-1', 'web', 'thread-1', ?)`,
+       VALUES (?, ?, 'chat', (unixepoch('now')*1000), 'pending', 'group-1', 'web', 'thread-1', ?)`,
     )
     .run(id, seq, JSON.stringify({ sender: 'User', text }));
 }
@@ -46,7 +46,7 @@ describe('thread title request', () => {
       .prepare(
         `INSERT INTO thread_titles
            (channel_type, platform_id, thread_id, title, request_message_id, updated_at)
-         VALUES ('web', 'group-1', 'thread-1', 'OAuth token refresh failure', 'in-1', datetime('now'))`,
+         VALUES ('web', 'group-1', 'thread-1', 'OAuth token refresh failure', 'in-1', (unixepoch('now')*1000))`,
       )
       .run();
     expect(threadTitleInstruction()).toBeNull();

@@ -19,7 +19,7 @@ export function writeTurnUsage(id: string, messageOutId: string | null, data: Tu
        VALUES ($id, $message_out_id, $turn_id, $cost_usd, $input_tokens, $output_tokens,
           $cache_read_tokens, $cache_write_tokens, $reasoning_tokens,
           $num_turns, $duration_ms, $duration_api_ms,
-          $model, $context_window, $max_output_tokens, $context_tokens, datetime('now'))
+          $model, $context_window, $max_output_tokens, $context_tokens, $timestamp)
        ON CONFLICT(id) DO UPDATE SET message_out_id=excluded.message_out_id,
          cost_usd=excluded.cost_usd, input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
          cache_read_tokens=excluded.cache_read_tokens, cache_write_tokens=excluded.cache_write_tokens,
@@ -30,6 +30,7 @@ export function writeTurnUsage(id: string, messageOutId: string | null, data: Tu
     )
     .run({
       $id: id,
+      $timestamp: Date.now(),
       $turn_id: turnId,
       $message_out_id: messageOutId,
       $cost_usd: data.cost_usd,

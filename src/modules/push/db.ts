@@ -7,6 +7,7 @@
 import crypto from 'crypto';
 
 import { getDb } from '../../db/connection.js';
+import { decodeTimes, decodeTimeRows } from '../../db/time.js';
 
 export interface PushSubscriptionRow {
   id: string;
@@ -32,7 +33,7 @@ export interface UpsertSubscriptionInput {
 /** Idempotent: re-binds an existing endpoint to the current user/keys. */
 export function upsertSubscription(input: UpsertSubscriptionInput): PushSubscriptionRow {
   const db = getDb();
-  const now = new Date().toISOString();
+  const now = Date.now();
   const existing = db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(input.endpoint) as
     | PushSubscriptionRow
     | undefined;
@@ -42,14 +43,14 @@ export function upsertSubscription(input: UpsertSubscriptionInput): PushSubscrip
          SET user_id = ?, p256dh = ?, auth = ?, ua = ?, last_used_at = ?, last_error = NULL, fail_count = 0
          WHERE id = ?`,
     ).run(input.userId, input.p256dh, input.auth, input.ua ?? null, now, existing.id);
-    return db.prepare('SELECT * FROM push_subscriptions WHERE id = ?').get(existing.id) as PushSubscriptionRow;
+    return decodeTimes<PushSubscriptionRow>(db.prepare('SELECT * FROM push_subscriptions WHERE id = ?').get(existing.id), ['created_at', 'last_used_at']);
   }
   const id = `pushsub-${crypto.randomBytes(8).toString('hex')}`;
   db.prepare(
     `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, ua, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(id, input.userId, input.endpoint, input.p256dh, input.auth, input.ua ?? null, now);
-  return db.prepare('SELECT * FROM push_subscriptions WHERE id = ?').get(id) as PushSubscriptionRow;
+  return decodeTimes<PushSubscriptionRow>(db.prepare('SELECT * FROM push_subscriptions WHERE id = ?').get(id), ['created_at', 'last_used_at']);
 }
 
 export function deleteSubscriptionByEndpoint(endpoint: string): void {
@@ -57,14 +58,14 @@ export function deleteSubscriptionByEndpoint(endpoint: string): void {
 }
 
 export function listSubscriptionsForUser(userId: string): PushSubscriptionRow[] {
-  return getDb()
+  return decodeTimeRows<PushSubscriptionRow>(getDb()
     .prepare('SELECT * FROM push_subscriptions WHERE user_id = ? ORDER BY created_at')
-    .all(userId) as PushSubscriptionRow[];
+    .all(userId), ['created_at', 'last_used_at']);
 }
 
 export function markSubscriptionFailure(endpoint: string, err: string): number {
   const db = getDb();
-  const now = new Date().toISOString();
+  const now = Date.now();
   const result = db
     .prepare(
       `UPDATE push_subscriptions
@@ -79,11 +80,11 @@ export function markSubscriptionFailure(endpoint: string, err: string): number {
 export function markSubscriptionSuccess(endpoint: string): void {
   getDb()
     .prepare('UPDATE push_subscriptions SET last_used_at = ?, last_error = NULL WHERE endpoint = ?')
-    .run(new Date().toISOString(), endpoint);
+    .run(Date.now(), endpoint);
 }
 
 export function pruneExpiredSubscriptions(maxFails: number, idleDays: number): number {
-  const cutoff = new Date(Date.now() - idleDays * 86400_000).toISOString();
+  const cutoff = Date.now() - idleDays * 86400_000;
   const result = getDb()
     .prepare(
       `DELETE FROM push_subscriptions

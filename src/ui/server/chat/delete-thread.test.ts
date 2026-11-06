@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -84,14 +85,14 @@ function seedMessagingGroup(id: string, channelType: string, platformId: string,
          (id, channel_type, platform_id, instance, name, is_group, unknown_sender_policy, created_at)
        VALUES (?, ?, ?, ?, ?, 0, 'strict', ?)`,
     )
-    .run(id, channelType, platformId, channelType, id, NOW);
+    .run(id, channelType, platformId, channelType, id, toEpoch(NOW));
   getDb()
     .prepare(
       `INSERT INTO messaging_group_agents
          (id, messaging_group_id, agent_group_id, session_mode, created_at)
        VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(`wire-${id}`, id, GROUP_ID, sessionMode, NOW);
+    .run(`wire-${id}`, id, GROUP_ID, sessionMode, toEpoch(NOW));
 }
 
 function seedSession(id: string, messagingGroupId: string, threadId: string | null): string {
@@ -101,7 +102,7 @@ function seedSession(id: string, messagingGroupId: string, threadId: string | nu
          (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at)
        VALUES (?, ?, ?, ?, 'active', 'stopped', ?)`,
     )
-    .run(id, GROUP_ID, messagingGroupId, threadId, NOW);
+    .run(id, GROUP_ID, messagingGroupId, threadId, toEpoch(NOW));
   const dir = path.join(TEST_DATA_DIR, 'v2-sessions', GROUP_ID, id);
   initSessionFolder(GROUP_ID, id);
   return dir;
@@ -144,12 +145,12 @@ beforeEach(() => {
   runMigrations(db);
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', 'Admin', ?)`)
-    .run(USER_ID, NOW);
+    .run(USER_ID, toEpoch(NOW));
   getDb()
     .prepare(
       `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, 'Agent', 'agent', NULL, ?) `,
     )
-    .run(GROUP_ID, NOW);
+    .run(GROUP_ID, toEpoch(NOW));
   grantRole({ user_id: USER_ID, role: 'admin', agent_group_id: GROUP_ID, granted_by: USER_ID, granted_at: NOW });
   vi.mocked(killContainer).mockReset();
   vi.mocked(wakeContainer).mockReset().mockResolvedValue(true);
@@ -195,9 +196,9 @@ describe('DELETE chat thread', () => {
         `INSERT INTO interactions
         (id, kind, session_id, message_out_id, input_json, status, response_json, responded_at, created_at, updated_at)
        VALUES ('question', 'question', 'web-session', 'message', '{"question":"Continue?","responseMode":"choice","options":[]}', ?,
-       CASE WHEN ?='answered' THEN '{"responseType":"skipped"}' END, CASE WHEN ?='answered' THEN 'answered' END, ?, 'updated')`,
+       CASE WHEN ?='answered' THEN '{"responseType":"skipped"}' END, CASE WHEN ?='answered' THEN 1767225600000 END, ?, 1767225600000)`,
       )
-      .run(status, status, status, NOW);
+      .run(status, status, status, toEpoch(NOW));
 
     expect(await deleteThread('web-thread', '')).toEqual({
       status: 200,

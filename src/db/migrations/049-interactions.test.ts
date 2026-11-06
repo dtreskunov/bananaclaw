@@ -3,6 +3,7 @@ import { closeDb, initTestDb } from '../connection.js';
 import { createApproval, getApproval } from '../approvals.js';
 import { migrations, runMigrations } from './index.js';
 import { migration049 } from './049-interactions.js';
+import { convertStoreTimes } from '../storage-lifecycle.js';
 
 afterEach(closeDb);
 
@@ -26,7 +27,7 @@ it('creates one public lifecycle and private progress without mirrored status or
   createApproval({
     id: 'c',
     request_id: 'c',
-    created_at: 'created',
+    created_at: '2026-01-01T00:00:00.000Z',
     input: { action: 'install_packages', payload: {}, title: '', options: [] },
   });
   expect(() => db.exec("UPDATE interactions SET status='completed'")).toThrow('CHECK');
@@ -43,6 +44,7 @@ it.each(['questions', 'pending_questions', 'approvals', 'pending_approvals', 'ap
       db,
       migrations.slice(0, migrations.indexOf(migration049)),
     );
+    convertStoreTimes(db);
     db.exec(`CREATE TABLE ${table}(id TEXT); INSERT INTO ${table} VALUES('preserved')`);
     expect(() => runMigrations(db)).toThrow('explicit offline cutover');
     expect(db.prepare(`SELECT id FROM ${table}`).all()).toEqual([{ id: 'preserved' }]);

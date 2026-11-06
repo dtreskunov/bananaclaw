@@ -14,6 +14,7 @@ import { getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
 import type { ArchiveDump } from './archive-group.js';
 import { transaction } from '../../db/transaction.js';
+import { legacyEpoch, INSTANT_COLUMNS } from '../../db/storage-lifecycle.js';
 
 export interface RestoreOptions {
   /** Replay `sessions`, `pending_*` rows too. Default false. */
@@ -67,7 +68,7 @@ function insertAgentGroup(row: Record<string, unknown>): void {
       `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at${'site_slug' in row ? ', site_slug' : ''}${'site_enabled' in row ? ', site_enabled' : ''})
        VALUES (@id, @name, @folder, @agent_provider, @created_at${'site_slug' in row ? ', @site_slug' : ''}${'site_enabled' in row ? ', @site_enabled' : ''})`,
     )
-    .run(row);
+    .run({ ...row, created_at: legacyEpoch(row.created_at) });
 }
 
 /** Generic dynamic insert — uses the row keys for both column list and named params. */
@@ -76,7 +77,9 @@ function insertRow(table: string, row: Record<string, unknown>): void {
   if (cols.length === 0) return;
   const colList = cols.join(', ');
   const paramList = cols.map((c) => `@${c}`).join(', ');
-  getDb().prepare(`INSERT INTO ${table} (${colList}) VALUES (${paramList})`).run(row);
+  const values = { ...row };
+  for (const column of cols) if (INSTANT_COLUMNS.has(column)) values[column] = legacyEpoch(values[column]);
+  getDb().prepare(`INSERT INTO ${table} (${colList}) VALUES (${paramList})`).run(values);
 }
 
 export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}): RestoreResult {

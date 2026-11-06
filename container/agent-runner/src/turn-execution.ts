@@ -8,6 +8,7 @@ import { accumulateCallUsage } from './providers/usage.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import type { Database } from 'bun:sqlite';
 import { allocateTimelinePosition } from './db/timeline.js';
+import { toEpoch, decodeTimeRows } from './db/time.js';
 
 export interface TurnExecution extends TurnContext {
   routing: RoutingContext;
@@ -132,7 +133,7 @@ export function persistTurnMetadata(context: TurnExecution, final: boolean): voi
   };
   db.prepare(`INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
-    .run(`turn-metadata:${context.turnId}`, JSON.stringify(metadata), new Date().toISOString());
+    .run(`turn-metadata:${context.turnId}`, JSON.stringify(metadata), Date.now());
 }
 
 export function markTurnStopping(context: TurnExecution): void {
@@ -153,7 +154,7 @@ function finishTurnActivity(db: Database, turnId: string, outcome: TurnOutcome, 
     const status = ['stopped', 'interrupted', 'failed'].includes(outcome) ? 'interrupted' : 'unknown';
     db.prepare(`INSERT INTO turn_activity (turn_id, message_out_id, ordinal, ts, text, timeline_position)
       SELECT ?, NULL, COALESCE(MAX(ordinal), -1) + 1, ?, ?, ? FROM turn_activity WHERE turn_id = ?`)
-      .run(turnId, String(Date.parse(endedAt)), JSON.stringify({
+      .run(turnId, Date.parse(endedAt), JSON.stringify({
         ...step, status, error: 'Turn ended without a confirmed tool result; external side effects may have occurred.',
       }), allocateTimelinePosition(db), turnId);
   }
@@ -183,7 +184,7 @@ export async function settleTurn(context: TurnExecution, outcome: Exclude<TurnOu
 export function interruptAbandonedTurns(): void {
   const db = getOutboundDb();
   db.transaction(() => {
-    const rows = db.prepare("SELECT * FROM turns WHERE phase != 'settled'").all() as TurnRow[];
+    const rows = decodeTimeRows<TurnRow>(db.prepare("SELECT * FROM turns WHERE phase != 'settled'").all(), ['started_at', 'ended_at']);
     for (const row of rows) {
       const endedAt = new Date().toISOString();
       const key = `turn-metadata:${row.id}`;
@@ -196,7 +197,7 @@ export function interruptAbandonedTurns(): void {
           turnId: row.id, durationMs: metadata.durationMs ?? null,
           model: metadata.model ?? null, usageId: metadata.usageId ?? null,
           status: metadata.usageId ? 'partial' : 'unavailable', final: true,
-        }), endedAt);
+        }), toEpoch(endedAt));
       putTurn(db, { ...row, phase: 'settled', outcome: 'interrupted', ended_at: endedAt });
     }
     setTurnContext(null);

@@ -11,6 +11,7 @@
 import { getOutboundDb } from './connection.js';
 import type { ActivityLine } from './session-state.js';
 import { getTurnContext } from '../current-batch.js';
+import { activityEpoch } from './time.js';
 
 /**
  * Persist a turn's activity lines against its last outbound row.
@@ -36,7 +37,7 @@ export function writeTurnActivity(
         $message_out_id: messageOutId,
         $turn_id: turnId,
         $ordinal: startOrdinal + i,
-        $ts: rows[i].ts,
+        $ts: activityEpoch(rows[i].ts),
         $text: rows[i].text,
         $timeline_position: rows[i].timelinePosition,
       });

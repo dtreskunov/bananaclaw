@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { decodeTimes } from './db/time.js';
 
 export const INPUT_EDIT_PREFIX = 'input-edit:';
 export const INPUT_CANCEL_PREFIX = 'input-cancel:';
@@ -95,7 +96,7 @@ export function projectInputEditResult(
   )
     throw new Error('input edit result mismatches host request');
   if (result.status === 'conflict') return undefined;
-  const target = db
+  const target = decodeTimes<(Omit<EditedInput, 'text'> & { content: string }) | undefined>(db
     .prepare(
       `SELECT id, timestamp, content, channel_type, thread_id, sender_user_id
        FROM input_edit_host.messages_in WHERE id = ? AND kind IN ('chat', 'chat-sdk')
@@ -103,9 +104,7 @@ export function projectInputEditResult(
          AND source_session_id IS NULL AND trigger = 1
          AND thread_id IS ? AND sender_user_id = ?`,
     )
-    .get(result.messageId, request.channel_type, request.platform_id, request.thread_id, request.sender_user_id) as
-    | (Omit<EditedInput, 'text'> & { content: string })
-    | undefined;
+    .get(result.messageId, request.channel_type, request.platform_id, request.thread_id, request.sender_user_id), ['timestamp']);
   if (!target) throw new Error('input edit target mismatches host request');
   const original: unknown = JSON.parse(target.content);
   if (

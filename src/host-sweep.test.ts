@@ -1,3 +1,4 @@
+import { toEpoch } from './db/time.js';
 /**
  * Unit tests for the stuck-container decision logic introduced by
  * ACTION-ITEMS item 9. Lives on the pure helper `decideStuckAction` so we
@@ -230,9 +231,9 @@ function makeSessionDbs(): { inDb: Database.Database; outDb: Database.Database }
       id            TEXT PRIMARY KEY,
       seq           INTEGER UNIQUE,
       kind          TEXT NOT NULL,
-      timestamp     TEXT NOT NULL,
+      timestamp     INTEGER NOT NULL,
       status        TEXT DEFAULT 'pending',
-      process_after TEXT,
+      process_after INTEGER,
       recurrence    TEXT,
       series_id     TEXT,
       tries         INTEGER DEFAULT 0,
@@ -248,7 +249,7 @@ function makeSessionDbs(): { inDb: Database.Database; outDb: Database.Database }
     CREATE TABLE processing_ack (
       message_id     TEXT PRIMARY KEY,
       status         TEXT NOT NULL,
-      status_changed TEXT NOT NULL
+      status_changed INTEGER NOT NULL
     );
   `);
   outDb.exec(`
@@ -256,7 +257,7 @@ function makeSessionDbs(): { inDb: Database.Database; outDb: Database.Database }
       id            TEXT PRIMARY KEY,
       seq           INTEGER UNIQUE,
       in_reply_to   TEXT,
-      timestamp     TEXT NOT NULL,
+      timestamp     INTEGER NOT NULL,
       deliver_after TEXT,
       recurrence    TEXT,
       kind          TEXT NOT NULL,
@@ -286,7 +287,7 @@ function fakeSession(): Session {
 describe('deleteOrphanProcessingClaims', () => {
   it('removes only processing rows, leaves completed/failed alone', () => {
     const { outDb } = makeSessionDbs();
-    const ts = new Date().toISOString();
+    const ts = Date.now();
     outDb.prepare("INSERT INTO processing_ack VALUES ('m-proc', 'processing', ?)").run(ts);
     outDb.prepare("INSERT INTO processing_ack VALUES ('m-done', 'completed', ?)").run(ts);
     outDb.prepare("INSERT INTO processing_ack VALUES ('m-fail', 'failed', ?)").run(ts);
@@ -319,8 +320,8 @@ describe('resetStuckProcessingRows — orphan claim cleanup', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, content) VALUES ('m-1', 1, 'chat', ?, 'pending', '{}')",
       )
-      .run(claimedAt);
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-1', 'processing', ?)").run(claimedAt);
+      .run(toEpoch(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-1', 'processing', ?)").run(toEpoch(claimedAt));
 
     // Sanity: the orphan claim is what would trip claim-stuck.
     expect(getProcessingClaims(outDb)).toHaveLength(1);
@@ -354,8 +355,8 @@ describe('resetStuckProcessingRows — orphan claim cleanup', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, process_after, tries, content) VALUES ('m-2', 2, 'chat', ?, 'pending', ?, 1, '{}')",
       )
-      .run(claimedAt, future);
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-2', 'processing', ?)").run(claimedAt);
+      .run(toEpoch(claimedAt), toEpoch(future));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-2', 'processing', ?)").run(toEpoch(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -388,9 +389,9 @@ describe('resetStuckProcessingRows — failure bounce', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, thread_id, content) VALUES ('m-3', 2, 'chat', ?, 'pending', 5, 'chan-1', 'web', 'thread-1', '{\"text\":\"hi\"}')",
       )
-      .run(claimedAt);
+      .run(toEpoch(claimedAt));
     inDb.prepare('UPDATE host_sequence SET last_even = 2 WHERE id = 1').run();
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-3', 'processing', ?)").run(claimedAt);
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-3', 'processing', ?)").run(toEpoch(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -420,8 +421,8 @@ describe('resetStuckProcessingRows — failure bounce', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, content) VALUES ('m-4', 2, 'system', ?, 'pending', 5, 'chan-1', 'web', '{}')",
       )
-      .run(claimedAt);
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-4', 'processing', ?)").run(claimedAt);
+      .run(toEpoch(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-4', 'processing', ?)").run(toEpoch(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -436,8 +437,8 @@ describe('resetStuckProcessingRows — failure bounce', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, content) VALUES ('m-5', 2, 'chat', ?, 'pending', 5, '{}')",
       )
-      .run(claimedAt);
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-5', 'processing', ?)").run(claimedAt);
+      .run(toEpoch(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-5', 'processing', ?)").run(toEpoch(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -452,8 +453,8 @@ describe('resetStuckProcessingRows — failure bounce', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, content) VALUES ('m-6', 2, 'chat', ?, 'pending', 0, 'chan-1', 'web', '{}')",
       )
-      .run(claimedAt);
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-6', 'processing', ?)").run(claimedAt);
+      .run(toEpoch(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-6', 'processing', ?)").run(toEpoch(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 

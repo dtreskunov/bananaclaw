@@ -32,7 +32,7 @@ function seedForkOrigin(opts: Partial<Record<string, string | null>> = {}): void
     .prepare(
       `INSERT INTO fork_origin
          (id, parent_session_id, parent_continuation, provider, anchor_ref, digest, created_at)
-       VALUES (1, ?, ?, ?, ?, ?, datetime('now'))`,
+       VALUES (1, ?, ?, ?, ?, ?, (unixepoch('now')*1000))`,
     )
     .run(
       (opts.parentSessionId as string) ?? 'sess-parent',
@@ -47,7 +47,7 @@ function insertMessage(id: string, text: string): void {
   getInboundDb()
     .prepare(
       `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
-       VALUES (?, 'chat', datetime('now'), 'pending', 'chan-1', 'discord', ?)`,
+       VALUES (?, 'chat', (unixepoch('now')*1000), 'pending', 'chan-1', 'discord', ?)`,
     )
     .run(id, JSON.stringify({ sender: 'Alice', text }));
   emitHostEventForTesting();

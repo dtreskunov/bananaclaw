@@ -21,7 +21,7 @@ import {
   type RecurringMessage,
 } from './db.js';
 
-const TEST_DIR = '/tmp/nanoclaw-scheduling-db-test';
+const TEST_DIR = path.resolve('.test-scheduling-db');
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
 
 function freshDb() {
@@ -184,10 +184,10 @@ describe('updateTask', () => {
 
     const row = db.prepare('SELECT recurrence, process_after FROM messages_in WHERE id = ?').get('task-1') as {
       recurrence: string;
-      process_after: string;
+      process_after: number;
     };
     expect(row.recurrence).toBe('0 18 * * *');
-    expect(row.process_after).toBe('2026-02-01T00:00:00Z');
+    expect(row.process_after).toBe(Date.parse('2026-02-01T00:00:00Z'));
   });
 
   it('clears recurrence when null is passed', () => {

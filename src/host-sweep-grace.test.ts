@@ -1,3 +1,4 @@
+import { toEpoch } from './db/time.js';
 /**
  * Regression test for the wake-tick SLA race in the host sweep.
  *
@@ -52,7 +53,7 @@ function seedStaleClaim(messageId: string, ageMs: number): void {
     db.prepare('INSERT INTO processing_ack (message_id, status, status_changed) VALUES (?, ?, ?)').run(
       messageId,
       'processing',
-      new Date(Date.now() - ageMs).toISOString(),
+      toEpoch(new Date(Date.now() - ageMs).toISOString()),
     );
   } finally {
     db.close();
@@ -161,7 +162,7 @@ describe('host sweep justWoke grace period', () => {
       const db = openOutboundDbRw(AG, SESS);
       try {
         db.prepare(
-          "UPDATE processing_ack SET status='completed',status_changed=datetime('now') WHERE message_id='m-1'",
+          "UPDATE processing_ack SET status='completed',status_changed=(unixepoch('now')*1000) WHERE message_id='m-1'",
         ).run();
       } finally {
         db.close();

@@ -2,6 +2,7 @@ import type { Approval, Question, Session } from '../types.js';
 import type { QuestionResponse } from '../ui/shared/question.js';
 import { getDb, hasTable } from './connection.js';
 import { createInteraction, getInteraction, mutateInteraction } from './interactions.js';
+import { toEpoch, encodeTimes, decodeTimes, decodeTimeRows } from './time.js';
 
 import { recordHostChange, transaction } from './transaction.js';
 
@@ -13,23 +14,23 @@ export function createSession(session: Session): void {
       `INSERT INTO sessions (id, agent_group_id, messaging_group_id, thread_id, agent_provider, status, container_status, last_active, created_at)
        VALUES (@id, @agent_group_id, @messaging_group_id, @thread_id, @agent_provider, @status, @container_status, @last_active, @created_at)`,
     )
-    .run(session);
+    .run(encodeTimes(session, ['last_active', 'created_at']));
   recordHostChange({ kind: 'sessions', groupId: session.agent_group_id });
 }
 
 export function getSession(id: string): Session | undefined {
-  return getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Session | undefined;
+  return decodeTimes<Session | undefined>(getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(id), ['last_active', 'created_at']);
 }
 
 export function findSession(messagingGroupId: string, threadId: string | null): Session | undefined {
   if (threadId) {
-    return getDb()
+    return decodeTimes<Session | undefined>(getDb()
       .prepare('SELECT * FROM sessions WHERE messaging_group_id = ? AND thread_id = ? AND status = ?')
-      .get(messagingGroupId, threadId, 'active') as Session | undefined;
+      .get(messagingGroupId, threadId, 'active'), ['last_active', 'created_at']);
   }
-  return getDb()
+  return decodeTimes<Session | undefined>(getDb()
     .prepare('SELECT * FROM sessions WHERE messaging_group_id = ? AND thread_id IS NULL AND status = ?')
-    .get(messagingGroupId, 'active') as Session | undefined;
+    .get(messagingGroupId, 'active'), ['last_active', 'created_at']);
 }
 
 /**
@@ -44,36 +45,36 @@ export function findSessionForAgent(
   threadId: string | null,
 ): Session | undefined {
   if (threadId) {
-    return getDb()
+    return decodeTimes<Session | undefined>(getDb()
       .prepare(
         "SELECT * FROM sessions WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id = ? AND status = 'active'",
       )
-      .get(agentGroupId, messagingGroupId, threadId) as Session | undefined;
+      .get(agentGroupId, messagingGroupId, threadId), ['last_active', 'created_at']);
   }
-  return getDb()
+  return decodeTimes<Session | undefined>(getDb()
     .prepare(
       "SELECT * FROM sessions WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NULL AND status = 'active'",
     )
-    .get(agentGroupId, messagingGroupId) as Session | undefined;
+    .get(agentGroupId, messagingGroupId), ['last_active', 'created_at']);
 }
 
 /** Find an active session scoped to an agent group (ignoring messaging group). */
 export function findSessionByAgentGroup(agentGroupId: string): Session | undefined {
-  return getDb()
+  return decodeTimes<Session | undefined>(getDb()
     .prepare("SELECT * FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1")
-    .get(agentGroupId) as Session | undefined;
+    .get(agentGroupId), ['last_active', 'created_at']);
 }
 
 export function getSessionsByAgentGroup(agentGroupId: string): Session[] {
-  return getDb().prepare('SELECT * FROM sessions WHERE agent_group_id = ?').all(agentGroupId) as Session[];
+  return decodeTimeRows<Session>(getDb().prepare('SELECT * FROM sessions WHERE agent_group_id = ?').all(agentGroupId), ['last_active', 'created_at']);
 }
 
 export function getActiveSessions(): Session[] {
-  return getDb().prepare("SELECT * FROM sessions WHERE status = 'active'").all() as Session[];
+  return decodeTimeRows<Session>(getDb().prepare("SELECT * FROM sessions WHERE status = 'active'").all(), ['last_active', 'created_at']);
 }
 
 export function getRunningSessions(): Session[] {
-  return getDb().prepare("SELECT * FROM sessions WHERE container_status IN ('running', 'idle')").all() as Session[];
+  return decodeTimeRows<Session>(getDb().prepare("SELECT * FROM sessions WHERE container_status IN ('running', 'idle')").all(), ['last_active', 'created_at']);
 }
 
 export function updateSession(
@@ -86,7 +87,7 @@ export function updateSession(
   for (const [key, value] of Object.entries(updates)) {
     if (value !== undefined) {
       fields.push(`${key} = @${key}`);
-      values[key] = value;
+      values[key] = key === 'last_active' ? toEpoch(value) : value;
     }
   }
   if (fields.length === 0) return;
@@ -205,7 +206,7 @@ export function answerQuestion(
       .run({
         questionId,
         userId: answer.userId,
-        answeredAt: answer.answeredAt,
+        answeredAt: toEpoch(answer.answeredAt),
         response: JSON.stringify(answer, ['responseType', 'value']),
       });
     return result.changes > 0;

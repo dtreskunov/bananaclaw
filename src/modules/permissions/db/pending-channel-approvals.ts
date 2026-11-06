@@ -10,6 +10,7 @@
  * instead of spamming the owner.
  */
 import { getDb } from '../../../db/connection.js';
+import { encodeTimes, decodeTimes } from '../../../db/time.js';
 
 export interface PendingChannelApproval {
   messaging_group_id: string;
@@ -35,13 +36,13 @@ export function createPendingChannelApproval(row: PendingChannelApproval): void 
          @approver_user_id, @created_at, @title, @options_json
        )`,
     )
-    .run(row);
+    .run(encodeTimes(row, ['created_at']));
 }
 
 export function getPendingChannelApproval(messagingGroupId: string): PendingChannelApproval | undefined {
-  return getDb()
+  return decodeTimes<PendingChannelApproval | undefined>(getDb()
     .prepare('SELECT * FROM pending_channel_approvals WHERE messaging_group_id = ?')
-    .get(messagingGroupId) as PendingChannelApproval | undefined;
+    .get(messagingGroupId), ['created_at']);
 }
 
 export function hasInFlightChannelApproval(messagingGroupId: string): boolean {

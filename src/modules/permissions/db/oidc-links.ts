@@ -5,6 +5,7 @@
  * lookup but is NOT the matching key.
  */
 import { getDb } from '../../../db/connection.js';
+import { decodeTimes, decodeTimeRows } from '../../../db/time.js';
 
 export interface OidcLink {
   provider: string;
@@ -17,13 +18,11 @@ export interface OidcLink {
 }
 
 export function getOidcLink(provider: string, sub: string): OidcLink | undefined {
-  return getDb().prepare('SELECT * FROM oidc_links WHERE provider = ? AND sub = ?').get(provider, sub) as
-    | OidcLink
-    | undefined;
+  return decodeTimes<OidcLink | undefined>(getDb().prepare('SELECT * FROM oidc_links WHERE provider = ? AND sub = ?').get(provider, sub), ['linked_at', 'last_seen_at']);
 }
 
 export function getOidcLinksForUser(userId: string): OidcLink[] {
-  return getDb().prepare('SELECT * FROM oidc_links WHERE user_id = ? ORDER BY linked_at').all(userId) as OidcLink[];
+  return decodeTimeRows<OidcLink>(getDb().prepare('SELECT * FROM oidc_links WHERE user_id = ? ORDER BY linked_at').all(userId), ['linked_at', 'last_seen_at']);
 }
 
 export function insertOidcLink(args: {
@@ -36,18 +35,18 @@ export function insertOidcLink(args: {
   getDb()
     .prepare(
       `INSERT INTO oidc_links (provider, sub, user_id, email, claims_json, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(args.provider, args.sub, args.user_id, args.email, args.claims ? JSON.stringify(args.claims) : null);
+    .run(args.provider, args.sub, args.user_id, args.email, args.claims ? JSON.stringify(args.claims) : null, Date.now());
 }
 
 export function touchOidcLink(provider: string, sub: string, claims: Record<string, unknown> | null): void {
   getDb()
     .prepare(
       `UPDATE oidc_links
-       SET last_seen_at = datetime('now'),
+       SET last_seen_at = ?,
            claims_json = COALESCE(?, claims_json)
        WHERE provider = ? AND sub = ?`,
     )
-    .run(claims ? JSON.stringify(claims) : null, provider, sub);
+    .run(Date.now(), claims ? JSON.stringify(claims) : null, provider, sub);
 }

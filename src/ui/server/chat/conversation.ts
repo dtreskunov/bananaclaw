@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { decodeTimes, decodeTimeRows } from '../../../db/time.js';
 import { reduceActivityLines } from '../../../activity.js';
 import type { Question } from '../../../types.js';
 import type { ConversationApproval } from '../../shared/approval.js';
@@ -103,7 +104,7 @@ export function projectConversation(
   signals: Signals,
   approvals: ConversationApproval[] = [],
 ): Conversation {
-  const records = outDb ? (outDb.prepare('SELECT * FROM turns ORDER BY started_at, id').all() as TurnRow[]) : [];
+  const records = outDb ? decodeTimeRows<TurnRow>(outDb.prepare('SELECT * FROM turns ORDER BY started_at, id').all(), ['started_at', 'ended_at']) : [];
   const byId = new Map(records.map((turn) => [turn.id, turn]));
   for (const message of history) {
     if (message.turnId && !byId.has(message.turnId)) throw new Error('Missing conversation turn association');
@@ -116,9 +117,8 @@ export function projectConversation(
   const questionAnchors = new Map(
     visibleQuestions.map((q) => [
       q.message_out_id,
-      outDb?.prepare('SELECT turn_id, content, timestamp FROM messages_out WHERE id = ?').get(q.message_out_id) as
-        | { turn_id: string | null; content: string; timestamp: string }
-        | undefined,
+      decodeTimes<{ turn_id: string | null; content: string; timestamp: string } | undefined>(
+        outDb?.prepare('SELECT turn_id, content, timestamp FROM messages_out WHERE id = ?').get(q.message_out_id), ['timestamp']),
     ]),
   );
   const messages: ConversationMessage[] = history
@@ -163,7 +163,7 @@ export function projectConversation(
       if (owned || (line.message_out_id !== null && visibleOutputIds.has(line.message_out_id)))
         trace.set(line.ordinal, {
           ordinal: line.ordinal,
-          ts: line.ts,
+          ts: String(line.ts),
           text: line.text,
           timelinePosition: line.timeline_position,
         });

@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OUTBOUND_SCHEMA } from '../../../db/schema.js';
@@ -118,13 +119,13 @@ describe('authoritative conversation projection', () => {
     db.prepare('INSERT INTO turn_activity (turn_id, ordinal, ts, text, timeline_position) VALUES (?, ?, ?, ?, ?)').run(
       turn.id,
       0,
-      '1000',
+      Number('1000'),
       step('running'),
       100,
     );
     db.prepare(
       'INSERT INTO turn_activity (turn_id, message_out_id, ordinal, ts, text, timeline_position) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(turn.id, 'out', 1, '999', step('completed'), 300);
+    ).run(turn.id, 'out', 1, Number('999'), step('completed'), 300);
     putTurn(db, { ...turn, phase: 'settled', outcome: 'replied' });
     const view = read([{ ...output, timelinePosition: 200 }]);
     expect(view.turns[0].activity[0]).toMatchObject({ ordinal: 0, timelinePosition: 100, ts: '1000' });
@@ -218,7 +219,7 @@ describe('authoritative conversation projection', () => {
       db.prepare('INSERT INTO messages_out (id, kind, timestamp, content, turn_id) VALUES (?, ?, ?, ?, ?)').run(
         question.message_out_id,
         'system_action',
-        question.created_at,
+        toEpoch(question.created_at),
         JSON.stringify(questionInput),
         turn.id,
       );
@@ -227,7 +228,7 @@ describe('authoritative conversation projection', () => {
     it('uses canonical turn ownership and scopes questions by channel, platform and thread', () => {
       db.prepare(
         'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
-      ).run(question.message_out_id, 3, '1', 'question work', turn.id);
+      ).run(question.message_out_id, 3, Number('1'), 'question work', turn.id);
       const readQuestions = (status: Question['status']) =>
         projectConversation(
           db,
@@ -439,7 +440,7 @@ describe('authoritative conversation projection', () => {
         }
         db.prepare(
           'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
-        ).run(question.message_out_id, 3, '1', 'old activity', missing === 'missing output' ? turn.id : null);
+        ).run(question.message_out_id, 3, Number('1'), 'old activity', missing === 'missing output' ? turn.id : null);
         expect(() => projectConversation(db, context, 't', 'g', [], [question], signals)).toThrow(
           'Missing conversation question turn association',
         );
@@ -460,7 +461,7 @@ describe('authoritative conversation projection', () => {
     });
     db.prepare(
       'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
-    ).run('out', 1, '1', 'durable', 'turn');
+    ).run('out', 1, Number('1'), 'durable', 'turn');
     putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
     const after = read([output]);
     expect(after.messages).toEqual([output]);
@@ -509,12 +510,12 @@ describe('authoritative conversation projection', () => {
         status: 'provisional',
         final: false,
       }),
-      'now',
+      1767225600000,
     );
     expect(read().turns[0].metadata).toEqual({ status: 'provisional', model: 'm', durationMs: null });
     putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
     expect(read().turns[0].metadata).toEqual({ status: 'unavailable', model: 'm', durationMs: null });
-    expect(read().turns[0].endedAt).toBe('2026-09-29T00:00:02Z');
+    expect(read().turns[0].endedAt).toBe('2026-09-29T00:00:02.000Z');
   });
 
   it.each(['silent', 'warning', 'interrupted', 'failed', 'stopped'] as const)(
@@ -551,13 +552,13 @@ describe('authoritative conversation projection', () => {
     });
     db.prepare(
       'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
-    ).run('out', 0, '1', 'visible', 'turn');
+    ).run('out', 0, Number('1'), 'visible', 'turn');
     db.prepare(
       'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 200)',
-    ).run('private-out', 1, '2', 'private', 'turn');
+    ).run('private-out', 1, Number('2'), 'private', 'turn');
     db.prepare(
       'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 300)',
-    ).run(null, 2, '3', 'unanchored', 'turn');
+    ).run(null, 2, Number('3'), 'unanchored', 'turn');
     expect(read([output]).turns[0].activity.map((a) => a.text)).toEqual(['visible']);
     expect(read([]).turns).toEqual([]);
   });
@@ -567,7 +568,7 @@ describe('authoritative conversation projection', () => {
     db.prepare(
       `INSERT INTO turn_usage
       (id, timestamp, turn_id, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
-      VALUES ('bill', 'now', 'turn', 'model', 0.25, 20, 10, 0, 0)`,
+      VALUES ('bill', 1767225600000, 'turn', 'model', 0.25, 20, 10, 0, 0)`,
     ).run();
     const result = read([output, { ...output, id: 'out-2' }]);
     expect(result.turns[0].outputIds).toEqual(['out', 'out-2']);

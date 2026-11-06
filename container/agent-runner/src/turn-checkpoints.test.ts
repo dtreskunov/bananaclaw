@@ -77,7 +77,7 @@ function insertMessage(id: string, text: string): void {
   getInboundDb()
     .prepare(
       `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
-       VALUES (?, 'chat', datetime('now'), 'pending', 'chan-1', 'discord', ?)`,
+       VALUES (?, 'chat', (unixepoch()*1000), 'pending', 'chan-1', 'discord', ?)`,
     )
     .run(id, JSON.stringify({ sender: 'Alice', text }));
 }
@@ -91,7 +91,7 @@ function checkpoints(): Array<Record<string, string>> {
 async function runTurn(provider: AgentProvider): Promise<void> {
   const controller = new AbortController();
   const loop = Promise.race([
-    runPollLoop({ provider, providerName: 'mock', cwd: '/tmp', signal: controller.signal }),
+    runPollLoop({ provider, providerName: 'mock', cwd: process.cwd(), signal: controller.signal }),
     new Promise<void>((_, reject) => {
       controller.signal.addEventListener('abort', () => reject(new Error('aborted')));
     }),

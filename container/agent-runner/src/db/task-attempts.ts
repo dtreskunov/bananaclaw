@@ -49,7 +49,7 @@ export function startTaskAttempt(message: MessageInRow): void {
         (task_message_id, series_id, trigger_source, status, started_at)
        VALUES (?, ?, ?, 'running', ?)`,
     )
-    .run(message.id, seriesId, triggerSource, new Date().toISOString());
+    .run(message.id, seriesId, triggerSource, Date.now());
 }
 
 export function recordTaskScriptResult(taskMessageId: string, result: TaskScriptAttemptResult): void {
@@ -63,7 +63,7 @@ export function recordTaskScriptResult(taskMessageId: string, result: TaskScript
     )
     .run(
       result.status,
-      terminal ? new Date().toISOString() : null,
+      terminal ? Date.now() : null,
       result.durationMs,
       result.exitCode,
       result.signal,
@@ -87,10 +87,10 @@ export function markTaskAttemptsProviderInvoked(taskMessageIds: string[]): void 
 
 export function completeTaskAttempts(taskMessageIds: string[], failed: boolean): void {
   if (taskMessageIds.length === 0) return;
-  const completedAt = new Date().toISOString();
+  const completedAt = Date.now();
   const statement = getOutboundDb().prepare(
     `UPDATE task_attempts SET status = ?, completed_at = ?,
-       duration_ms = CAST((julianday(?) - julianday(started_at)) * 86400000 AS INTEGER)
+       duration_ms = MAX(0, ? - started_at)
      WHERE task_message_id = ? AND status IN ('running', 'ready')`,
   );
   getOutboundDb().transaction(() => {

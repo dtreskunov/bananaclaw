@@ -154,7 +154,7 @@ describe('startTypingRefresh — runner signals', () => {
     expect(calls).toHaveLength(0);
 
     const socket = await connectSignal();
-    socket.write(`${JSON.stringify({ v: 5, type: 'heartbeat' })}\n`);
+    socket.write(`${JSON.stringify({ v: 6, type: 'heartbeat' })}\n`);
     await vi.advanceTimersByTimeAsync(100);
     await vi.advanceTimersByTimeAsync(4_000);
 
@@ -167,7 +167,7 @@ describe('startTypingRefresh — runner signals', () => {
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-tester');
     await vi.advanceTimersByTimeAsync(100);
     const socket = await connectSignal();
-    socket.write(`${JSON.stringify({ v: 5, type: 'turn.end' })}\n`);
+    socket.write(`${JSON.stringify({ v: 6, type: 'turn.end' })}\n`);
     await vi.advanceTimersByTimeAsync(100);
     calls.length = 0;
 

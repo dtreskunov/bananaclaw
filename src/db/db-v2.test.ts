@@ -377,9 +377,9 @@ describe('sessions', () => {
       .prepare(
         `INSERT INTO interactions
         (id, kind, session_id, message_out_id, input_json, created_at, updated_at)
-       VALUES ('q-delete', 'question', 'sess-1', 'msg-delete', '{"question":"Continue?","responseMode":"choice","options":[]}', ?, 'created')`,
+       VALUES ('q-delete', 'question', 'sess-1', 'msg-delete', '{"question":"Continue?","responseMode":"choice","options":[]}', ?, ?)`,
       )
-      .run(now());
+      .run(Date.now(), Date.now());
     createApproval({
       id: 'appr-delete',
       session_id: 'sess-1',

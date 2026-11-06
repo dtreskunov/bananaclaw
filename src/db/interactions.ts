@@ -1,5 +1,8 @@
 import type { Interaction } from '../types.js';
 import { getDb } from './connection.js';
+import { encodeTimes, decodeTimes } from './time.js';
+
+const interactionTimes = ['created_at', 'updated_at', 'expires_at', 'responded_at', 'resolved_at'] as const;
 
 import { recordHostChange, transaction } from './transaction.js';
 import { interactionRoute, projectInteractionPublications } from '../conversation-publications.js';
@@ -12,7 +15,7 @@ export function queryInteractions<T extends Interaction>(sql: string, ...params:
   ).map(
     ({ input_json, response_json, ...record }) =>
       ({
-        ...record,
+        ...decodeTimes<typeof record>(record, interactionTimes),
         input: JSON.parse(input_json),
         response: response_json === null ? null : JSON.parse(response_json),
       }) as T,
@@ -64,7 +67,7 @@ export function createInteraction(
         `INSERT INTO interactions(${keys}) VALUES(${keys.map((key) => `@${key}`)})
     ON CONFLICT(id) DO NOTHING`,
       )
-      .run(values);
+      .run(encodeTimes(values, interactionTimes));
     if (!result.changes && getInteraction(record.id)?.kind !== record.kind)
       throw new Error(`Global interaction ID collision: ${record.id}`);
     return result.changes > 0;

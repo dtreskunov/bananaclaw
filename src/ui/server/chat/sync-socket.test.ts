@@ -107,16 +107,16 @@ beforeEach(async () => {
   fs.rmSync('.test-sync-socket', { recursive: true, force: true });
   runMigrations(initTestDb());
   getDb().exec(`
-    INSERT INTO users(id,kind,created_at) VALUES('viewer','web','now'),('other','web','now');
-    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','group','now'),('other','Other','other','now');
-    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g','now');
-    INSERT INTO user_roles(user_id,role,agent_group_id,granted_at) VALUES('viewer','admin','g','now');
+    INSERT INTO users(id,kind,created_at) VALUES('viewer','web',1767225600000),('other','web',1767225600000);
+    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','group',1767225600000),('other','Other','other',1767225600000);
+    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g',1767225600000);
+    INSERT INTO user_roles(user_id,role,agent_group_id,granted_at) VALUES('viewer','admin','g',1767225600000);
     INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-      VALUES('mg','web','web','group:g',1,'now');
+      VALUES('mg','web','web','group:g',1,1767225600000);
     INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-      VALUES('wire','mg','g','per-thread','now');
+      VALUES('wire','mg','g','per-thread',1767225600000);
     INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
-      VALUES('session','g','mg','thread','now');
+      VALUES('session','g','mg','thread',1767225600000);
   `);
   token = createSession('viewer', 60_000).token;
   initSessionFolder('g', 'session');
@@ -172,11 +172,11 @@ async function connect(
 
 describe('unified sync WebSocket integration', () => {
   it('synchronizes reads across the same user’s sockets without invalidating another user', async () => {
-    getDb().exec("INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('other','g','now')");
+    getDb().exec("INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('other','g',1767225600000)");
     const output = new Database(outboundDbPath('g', 'session'));
     try {
       output.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
-        VALUES('reply',1,'chat','now','web','group:g','thread','{"text":"Reply"}');`);
+        VALUES('reply',1,'chat',1767225600000,'web','group:g','thread','{"text":"Reply"}');`);
       refreshThreadSummaries('session');
       await connect();
       const peer = async (user: string) => {
@@ -186,49 +186,61 @@ describe('unified sync WebSocket integration', () => {
           headers: { Cookie: `${COOKIE_NAME}=${cookie}` },
         });
         clients.push(client);
-        client.on('message', raw => received.push(parseSyncFrame(JSON.parse(raw.toString()))));
+        client.on('message', (raw) => received.push(parseSyncFrame(JSON.parse(raw.toString()))));
         await once(client, 'open');
-        client.send(JSON.stringify({ kind: 'subscribe', protocolVersion: SYNC_PROTOCOL_VERSION, subscriptionId: 1,
-          groupId: null, conversation: null, globalCursor: null }));
-        await vi.waitFor(() => expect(received.some(frame => frame.global)).toBe(true));
+        client.send(
+          JSON.stringify({
+            kind: 'subscribe',
+            protocolVersion: SYNC_PROTOCOL_VERSION,
+            subscriptionId: 1,
+            groupId: null,
+            conversation: null,
+            globalCursor: null,
+          }),
+        );
+        await vi.waitFor(() => expect(received.some((frame) => frame.global)).toBe(true));
         return received;
       };
       const same = await peer('viewer');
       const other = await peer('other');
-      expect(globalView()?.agentActivity.find(group => group.id === 'g')?.unreadThreadCount).toBe(1);
+      expect(globalView()?.agentActivity.find((group) => group.id === 'g')?.unreadThreadCount).toBe(1);
       const cursor = readConversation('viewer', 'g', 'thread').readCursor;
       if (!cursor) throw new Error('Expected publication cursor');
       acknowledgeRead('viewer', 'g', 'thread', cursor);
-      await vi.waitFor(() => expect(globalView()?.agentActivity.find(group => group.id === 'g')?.unreadThreadCount).toBeUndefined());
-      await vi.waitFor(() => expect(same.some(frame => frame.global?.kind === 'update')).toBe(true));
+      await vi.waitFor(() =>
+        expect(globalView()?.agentActivity.find((group) => group.id === 'g')?.unreadThreadCount).toBeUndefined(),
+      );
+      await vi.waitFor(() => expect(same.some((frame) => frame.global?.kind === 'update')).toBe(true));
       const patch = same.at(-1)?.global;
       if (patch?.kind !== 'update') throw new Error('Expected unread metadata patch');
       expect(patch.changes.group).toBeUndefined();
-      expect(patch.changes.agentActivity?.upserts.find(group => group.id === 'g')?.unreadThreadCount).toBeUndefined();
+      expect(patch.changes.agentActivity?.upserts.find((group) => group.id === 'g')?.unreadThreadCount).toBeUndefined();
       expect(other).toHaveLength(1);
-    } finally { output.close(); }
+    } finally {
+      output.close();
+    }
   });
   it('updates an unselected agent from runtime notices using only an agent status patch', async () => {
     grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
     getDb().exec(`
       INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('other-mg','web','web','group:other',1,'now');
+        VALUES('other-mg','web','web','group:other',1,1767225600000);
       INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('other-wire','other-mg','other','per-thread','now');
+        VALUES('other-wire','other-mg','other','per-thread',1767225600000);
       INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
-        VALUES('other-session','other','other-mg','other-thread','now');
+        VALUES('other-session','other','other-mg','other-thread',1767225600000);
     `);
     initSessionFolder('other', 'other-session');
     const source = new Database(inboundDbPath('other', 'other-session'));
     const output = new Database(outboundDbPath('other', 'other-session'));
     try {
       source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
-        VALUES('other-input',2,'chat','now','completed','web','group:other','other-thread','{"text":"Other"}');`);
+        VALUES('other-input',2,'chat',1767225600000,'completed','web','group:other','other-thread','{"text":"Other"}');`);
       refreshThreadSummaries('other-session');
       await connect('g');
       expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.activity).toBe('idle');
       output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
-        VALUES('other-turn','running','pending','native','web','group:other','other-thread','now');`);
+        VALUES('other-turn','running','pending','native','web','group:other','other-thread',1767225600000);`);
       refreshThreadSummaries('other-session');
       publishHostChange({ kind: 'runtime', sessionId: 'other-session' });
       await vi.waitFor(() =>
@@ -250,10 +262,10 @@ describe('unified sync WebSocket integration', () => {
     grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
     getDb().exec(`
       INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('other-mg','web','web','group:other',1,'now');
+        VALUES('other-mg','web','web','group:other',1,1767225600000);
       INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('other-wire','other-mg','other','agent-shared','now');
-      INSERT INTO sessions(id,agent_group_id,created_at) VALUES('other-session','other','now');
+        VALUES('other-wire','other-mg','other','agent-shared',1767225600000);
+      INSERT INTO sessions(id,agent_group_id,created_at) VALUES('other-session','other',1767225600000);
     `);
     initSessionFolder('other', 'other-session');
     const source = new Database(inboundDbPath('other', 'other-session'));
@@ -261,8 +273,8 @@ describe('unified sync WebSocket integration', () => {
       await connect('g');
       expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.threadCount).toBe(0);
       source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
-        VALUES('one',2,'chat','now','web','group:other','one','{"text":"One"}'),
-          ('two',4,'chat','now','web','group:other','two','{"text":"Two"}');`);
+        VALUES('one',2,'chat',1767225600000,'web','group:other','one','{"text":"One"}'),
+          ('two',4,'chat',1767225600000,'web','group:other','two','{"text":"Two"}');`);
       refreshThreadSummaries('other-session');
       await vi.waitFor(() =>
         expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.threadCount).toBe(2),
@@ -403,7 +415,7 @@ describe('unified sync WebSocket integration', () => {
   it('expires authentication even when the first metadata scan has not completed', async () => {
     getDb()
       .prepare('UPDATE ui_sessions SET expires_at=?')
-      .run(new Date(Date.now() + 500).toISOString());
+      .run(Date.now() + 500);
     let finish!: (value: never[]) => void;
     listThreads.mockImplementationOnce(
       () =>
@@ -434,11 +446,11 @@ describe('unified sync WebSocket integration', () => {
     grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
     getDb().exec(`
       INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('other-mg','web','web','group:other',1,'now');
+        VALUES('other-mg','web','web','group:other',1,1767225600000);
       INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('other-wire','other-mg','other','per-thread','now');
+        VALUES('other-wire','other-mg','other','per-thread',1767225600000);
       INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
-        VALUES('other-session','other','other-mg','other-thread','now');
+        VALUES('other-session','other','other-mg','other-thread',1767225600000);
     `);
     initSessionFolder('other', 'other-session');
     await connect('g');
@@ -668,7 +680,7 @@ describe('unified sync WebSocket integration', () => {
   it('uses the authenticated session expiry to disconnect without another state mutation', async () => {
     getDb()
       .prepare('UPDATE ui_sessions SET expires_at=?')
-      .run(new Date(Date.now() + 700).toISOString());
+      .run(Date.now() + 700);
     const client = await connect('g');
     expect(listThreads).toHaveBeenCalledOnce();
     const [code] = await once(client, 'close');

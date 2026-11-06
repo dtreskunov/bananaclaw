@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -161,40 +162,45 @@ beforeEach(() => {
   runMigrations(initTestDb());
   const db = getDb();
   for (const id of ['web:member', 'web:other', 'web:owner']) {
-    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(id, NOW);
+    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(id, toEpoch(NOW));
   }
   db.prepare(
     `INSERT INTO ui_sessions (token_hash, user_id, created_at, expires_at, last_used)
     VALUES ('test', 'web:member', ?, ?, ?)`,
-  ).run(NOW, new Date(Date.now() + 60_000).toISOString(), NOW);
+  ).run(toEpoch(NOW), toEpoch(new Date(Date.now() + 60_000).toISOString()), toEpoch(NOW));
   for (const id of ['agent', 'other']) {
-    db.prepare('INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)').run(id, id, id, NOW);
+    db.prepare('INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)').run(
+      id,
+      id,
+      id,
+      toEpoch(NOW),
+    );
   }
   for (const id of ['web:member', 'web:other']) {
     db.prepare('INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)').run(
       id,
       'agent',
       id,
-      NOW,
+      toEpoch(NOW),
     );
   }
   db.prepare(
     "INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES ('web:owner', 'owner', NULL, 'web:owner', ?)",
-  ).run(NOW);
+  ).run(toEpoch(NOW));
   for (const [id, channel, platform] of [
     ['web-mg', 'web', 'group:agent'],
     ['mail-mg', 'resend', 'bot@example.com'],
   ]) {
     db.prepare(
       "INSERT INTO messaging_groups (id, channel_type, platform_id, instance, is_group, unknown_sender_policy, created_at) VALUES (?, ?, ?, ?, 1, 'strict', ?)",
-    ).run(id, channel, platform, channel, NOW);
+    ).run(id, channel, platform, channel, toEpoch(NOW));
     db.prepare(
       "INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, session_mode, created_at) VALUES (?, ?, 'agent', 'agent-shared', ?)",
-    ).run(`wire-${id}`, id, NOW);
+    ).run(`wire-${id}`, id, toEpoch(NOW));
   }
   db.prepare(
     "INSERT INTO sessions (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at) VALUES ('session-1', 'agent', NULL, NULL, 'active', 'stopped', ?)",
-  ).run(NOW);
+  ).run(toEpoch(NOW));
   initSessionFolder('agent', 'session-1');
   const out = openOutboundDbRw('agent', 'session-1');
   putTurn(out, {
@@ -364,7 +370,7 @@ describe('native steering submissions', () => {
           turnId: 'turn-1',
           timelinePosition: 300,
         }),
-        NOW,
+        toEpoch(NOW),
       );
       db.close();
       expect(readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE)).toEqual([
@@ -484,7 +490,7 @@ function inputRow(
       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 2 FROM messages_in), 'chat', ?, ?, 1, ?, ?, ?, ?)`,
     ).run(
       `${id}:agent`,
-      NOW,
+      toEpoch(NOW),
       options.status ?? 'pending',
       options.platform ?? 'group:agent',
       options.channel ?? 'web',
@@ -508,7 +514,7 @@ function receipt(
     db.prepare('INSERT OR REPLACE INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
       `input:${createHash('sha256').update(messageId).digest('hex')}`,
       JSON.stringify({ messageId, status, turnId: TURN.id, ...(reason ? { reason } : {}), ...placement }),
-      NOW,
+      toEpoch(NOW),
     );
   } finally {
     db.close();
@@ -525,7 +531,7 @@ describe('durable input state history', () => {
     db.prepare(
       `INSERT INTO messages_out (id, seq, kind, timestamp, channel_type, platform_id, thread_id, content)
        VALUES ('out-test', 1, 'chat', ?, 'web', 'group:agent', 'thread-1', ?)`,
-    ).run(NOW, JSON.stringify(content));
+    ).run(toEpoch(NOW), JSON.stringify(content));
     db.close();
     const frames: Record<string, unknown>[] = [];
     const ws = connectConversation(frames);
@@ -551,8 +557,8 @@ describe('durable input state history', () => {
       `INSERT INTO messages_out (id, seq, kind, timestamp, platform_id, channel_type, thread_id, content)
        VALUES (?, ?, 'chat', ?, 'group:agent', 'web', 'thread-1', ?)`,
     );
-    insert.run('out-a', 1, NOW, JSON.stringify({ text: 'answer A', timelinePosition: base + 2 }));
-    insert.run('out-b', 3, NOW, JSON.stringify({ text: 'answer B', timelinePosition: base + 4 }));
+    insert.run('out-a', 1, toEpoch(NOW), JSON.stringify({ text: 'answer A', timelinePosition: base + 2 }));
+    insert.run('out-b', 3, toEpoch(NOW), JSON.stringify({ text: 'answer B', timelinePosition: base + 4 }));
     outDb.close();
     for (let reload = 0; reload < 2; reload++) {
       const messages = history();
@@ -598,7 +604,7 @@ describe('durable input state history', () => {
     inputRow('waiting', { handling: { mode: 'queue' } });
     receipt('waiting', 'queued', undefined, { queuedForNextTurn: true });
     const db = openOutboundDbRw('agent', 'session-1');
-    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('waiting:agent', NOW);
+    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('waiting:agent', toEpoch(NOW));
     db.close();
     expect(history()[0]).toMatchObject({
       canEditPending: false,
@@ -633,7 +639,7 @@ describe('durable input state history', () => {
     const db = openOutboundDbRw('agent', 'session-1');
     db.prepare(
       "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('pending:agent', 'processing', ?)",
-    ).run(NOW);
+    ).run(toEpoch(NOW));
     db.close();
     expect(history()[0].inputState?.status).toBe('processing');
     receipt('pending', 'applied');
@@ -670,9 +676,13 @@ describe('durable input state history', () => {
     db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
       'input:forged',
       JSON.stringify({ messageId: 'visible:agent', status: 'applied' }),
-      NOW,
+      toEpoch(NOW),
     );
-    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run('input:broken', '{', NOW);
+    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
+      'input:broken',
+      '{',
+      toEpoch(NOW),
+    );
     db.close();
     expect(history()[0].inputState?.status).toBe('queued');
   });
@@ -691,7 +701,7 @@ describe('durable input state history', () => {
     const db = openOutboundDbRw('agent', 'session-1');
     db.prepare(
       "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('visible:agent', 'processing', ?)",
-    ).run(NOW);
+    ).run(toEpoch(NOW));
     db.close();
     await flushConversation();
     expect(socketView(frames).messages).toMatchObject([
@@ -834,12 +844,12 @@ describe('pending web input editing', () => {
   };
   beforeEach(() => {
     const db = getDb();
-    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(userId, NOW);
+    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(userId, toEpoch(NOW));
     db.prepare('INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)').run(
       userId,
       'agent',
       userId,
-      NOW,
+      toEpoch(NOW),
     );
     signal.turn = { ...TURN, supportsSteering: true, supportsInputEditing: true, supportsInputCancellation: true };
     writeSessionMessage('agent', 'session-1', {
@@ -1017,7 +1027,7 @@ describe('pending web input editing', () => {
     expect((await edit()).status).toBe(409);
     signal.turn = { ...TURN, supportsInputEditing: true };
     const db = openOutboundDbRw('agent', 'session-1');
-    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('pending:agent', NOW);
+    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('pending:agent', toEpoch(NOW));
     db.close();
     expect((await edit()).body.error).toBe('input_not_pending');
     const message = readChatHistory(userId, 'agent', 'thread-1', OVERRIDE)[0];
@@ -1177,7 +1187,7 @@ describe('chat turn snapshots and events', () => {
         .run(
           'question-output',
           'chat-sdk',
-          NOW,
+          toEpoch(NOW),
           '{"type":"ask_question","questionId":"q","question":"Continue?","responseMode":"text","options":[]}',
           'turn-1',
           'group:agent',

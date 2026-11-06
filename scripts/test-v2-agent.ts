@@ -19,21 +19,21 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.exec(`
   CREATE TABLE messages_in (
-    id TEXT PRIMARY KEY, kind TEXT NOT NULL, timestamp TEXT NOT NULL,
-    status TEXT DEFAULT 'pending', status_changed TEXT, process_after TEXT,
+    id TEXT PRIMARY KEY, kind TEXT NOT NULL, timestamp INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending', status_changed INTEGER, process_after INTEGER,
     recurrence TEXT, tries INTEGER DEFAULT 0, platform_id TEXT,
     channel_type TEXT, thread_id TEXT, content TEXT NOT NULL
   );
   CREATE TABLE messages_out (
-    id TEXT PRIMARY KEY, in_reply_to TEXT, timestamp TEXT NOT NULL,
-    delivered INTEGER DEFAULT 0, deliver_after TEXT, recurrence TEXT,
+    id TEXT PRIMARY KEY, in_reply_to TEXT, timestamp INTEGER NOT NULL,
+    delivered INTEGER DEFAULT 0, deliver_after INTEGER, recurrence TEXT,
     kind TEXT NOT NULL, platform_id TEXT, channel_type TEXT,
     thread_id TEXT, content TEXT NOT NULL
   );
 `);
 
 // Insert test message
-db.prepare(`INSERT INTO messages_in (id, kind, timestamp, status, content) VALUES (?, 'chat', datetime('now'), 'pending', ?)`).run(
+db.prepare(`INSERT INTO messages_in (id, kind, timestamp, status, content) VALUES (?, 'chat', (unixepoch()*1000), 'pending', ?)`).run(
   'test-1',
   JSON.stringify({ sender: 'Gavriel', text: 'Say "Hello from v2!" and nothing else. Do not use any tools.' }),
 );

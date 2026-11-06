@@ -1,4 +1,6 @@
 import type { Database } from 'bun:sqlite';
+import { toEpoch, decodeTimes } from './time.js';
+import { epochSchema } from './storage-lifecycle.js';
 
 // Mirrored in the host's src/db/turns.ts; neither runtime imports the other.
 export type TurnPhase = 'running' | 'stopping' | 'settling' | 'settled';
@@ -32,7 +34,7 @@ export interface TurnInputRow {
   association: 'consumed' | 'applied' | 'reply';
 }
 
-export const TURN_SCHEMA = `
+export const TURN_SCHEMA = epochSchema(`
 CREATE TABLE IF NOT EXISTS turns (
   id TEXT PRIMARY KEY NOT NULL CHECK (length(id) > 0),
   origin_channel_type TEXT,
@@ -55,9 +57,9 @@ CREATE TABLE IF NOT EXISTS turn_inputs (
   PRIMARY KEY (turn_id, message_in_id)
 );
 CREATE INDEX IF NOT EXISTS idx_turn_inputs_message ON turn_inputs(message_in_id);
-`;
+`);
 
-export const TURN_ACTIVITY_SCHEMA = `
+export const TURN_ACTIVITY_SCHEMA = epochSchema(`
 CREATE TABLE IF NOT EXISTS turn_activity (
   message_out_id TEXT,
   ordinal INTEGER NOT NULL,
@@ -68,7 +70,7 @@ CREATE TABLE IF NOT EXISTS turn_activity (
   PRIMARY KEY (message_out_id, ordinal),
   CHECK (message_out_id IS NOT NULL OR turn_id IS NOT NULL)
 );
-`;
+`);
 
 export const TURN_INDEX_SCHEMA = `
 CREATE INDEX IF NOT EXISTS idx_messages_out_turn ON messages_out(turn_id);
@@ -79,7 +81,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_activity_unanchored
 `;
 
 export function getTurn(db: Database, id: string): TurnRow | undefined {
-  return (db.query('SELECT * FROM turns WHERE id = ?').get(id) as TurnRow | null) ?? undefined;
+  return decodeTimes<TurnRow | undefined>(db.query('SELECT * FROM turns WHERE id = ?').get(id) ?? undefined, ['started_at', 'ended_at']);
 }
 
 /** Storage upsert; callers own lifecycle validation and runner journal triggers. */
@@ -104,8 +106,8 @@ export function putTurn(db: Database, turn: TurnRow): void {
     turn.origin_platform_id,
     turn.origin_thread_id,
     turn.origin_source_session_id,
-    turn.started_at,
-    turn.ended_at,
+    toEpoch(turn.started_at),
+    toEpoch(turn.ended_at),
     turn.phase,
     turn.outcome,
     turn.provenance,

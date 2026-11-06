@@ -3,16 +3,18 @@ import { closeDb, getDb, initTestDb } from '../connection.js';
 import { agentVaultBackendGroups, ensureContainerConfig, getContainerConfig } from '../container-configs.js';
 import { usesAgentVault } from '../../modules/credentials/agent-vault-client.js';
 import { migrations, runMigrations } from './index.js';
+import { convertStoreTimes } from '../storage-lifecycle.js';
 
 beforeEach(() => {
   runMigrations(
     initTestDb(),
     migrations.filter((m) => m.version < 44),
   );
+  convertStoreTimes(getDb());
 });
 afterEach(() => closeDb());
 const group = (id: string): void => {
-  getDb().prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, id, id, 'before');
+  getDb().prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, id, id, 1767225600000);
 };
 
 describe('AgentVault defaults for new groups', () => {
@@ -20,8 +22,8 @@ describe('AgentVault defaults for new groups', () => {
     const db = getDb();
     for (const id of ['implicit', 'explicit', 'vault', 'missing']) group(id);
     db.exec(`INSERT INTO container_configs(agent_group_id,credential_backend,provider,model,mcp_servers,updated_at)
-      VALUES ('implicit',NULL,'native','existing-model','{"api":{"type":"http","url":"https://example.test/mcp"}}','original'),
-        ('explicit','onecli',NULL,NULL,'{}','original'),('vault','agent-vault',NULL,NULL,'{}','original');`);
+      VALUES ('implicit',NULL,'native','existing-model','{"api":{"type":"http","url":"https://example.test/mcp"}}',1767225600000),
+        ('explicit','onecli',NULL,NULL,'{}',1767225600000),('vault','agent-vault',NULL,NULL,'{}',1767225600000);`);
     const before = getContainerConfig('implicit')!;
     runMigrations(
       db,
@@ -63,7 +65,7 @@ describe('AgentVault defaults for new groups', () => {
     const db = getDb();
     group('bad');
     db.exec(
-      "INSERT INTO container_configs(agent_group_id,credential_backend,updated_at) VALUES('bad','unexpected','before')",
+      "INSERT INTO container_configs(agent_group_id,credential_backend,updated_at) VALUES('bad','unexpected',1767225600000)",
     );
     expect(() => runMigrations(db)).toThrow('Unsupported credential backend');
     expect(getContainerConfig('bad')?.credential_backend).toBe('unexpected');

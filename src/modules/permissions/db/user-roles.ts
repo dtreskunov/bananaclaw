@@ -1,5 +1,6 @@
 import type { UserRole, UserRoleKind } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
+import { encodeTimes, decodeTimeRows } from '../../../db/time.js';
 
 import { recordHostChange } from '../../../db/transaction.js';
 
@@ -16,7 +17,7 @@ export function grantRole(row: UserRole): void {
       `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at)
        VALUES (@user_id, @role, @agent_group_id, @granted_by, @granted_at)`,
     )
-    .run(row);
+    .run(encodeTimes(row, ['granted_at']));
   recordHostChange({ kind: 'access' });
 }
 
@@ -34,7 +35,7 @@ export function revokeRole(userId: string, role: UserRoleKind, agentGroupId: str
 }
 
 export function getUserRoles(userId: string): UserRole[] {
-  return getDb().prepare('SELECT * FROM user_roles WHERE user_id = ?').all(userId) as UserRole[];
+  return decodeTimeRows<UserRole>(getDb().prepare('SELECT * FROM user_roles WHERE user_id = ?').all(userId), ['granted_at']);
 }
 
 export function isOwner(userId: string): boolean {
@@ -64,9 +65,9 @@ export function hasAdminPrivilege(userId: string, agentGroupId: string): boolean
 }
 
 export function getOwners(): UserRole[] {
-  return getDb()
+  return decodeTimeRows<UserRole>(getDb()
     .prepare('SELECT * FROM user_roles WHERE role = ? AND agent_group_id IS NULL ORDER BY granted_at')
-    .all('owner') as UserRole[];
+    .all('owner'), ['granted_at']);
 }
 
 export function hasAnyOwner(): boolean {
@@ -77,13 +78,13 @@ export function hasAnyOwner(): boolean {
 }
 
 export function getGlobalAdmins(): UserRole[] {
-  return getDb()
+  return decodeTimeRows<UserRole>(getDb()
     .prepare('SELECT * FROM user_roles WHERE role = ? AND agent_group_id IS NULL ORDER BY granted_at')
-    .all('admin') as UserRole[];
+    .all('admin'), ['granted_at']);
 }
 
 export function getAdminsOfAgentGroup(agentGroupId: string): UserRole[] {
-  return getDb()
+  return decodeTimeRows<UserRole>(getDb()
     .prepare('SELECT * FROM user_roles WHERE role = ? AND agent_group_id = ? ORDER BY granted_at')
-    .all('admin', agentGroupId) as UserRole[];
+    .all('admin', agentGroupId), ['granted_at']);
 }

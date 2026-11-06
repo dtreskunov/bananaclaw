@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 import { transaction } from './transaction.js';
+import { toEpoch, decodeTimes } from './time.js';
+import { epochSchema } from './storage-lifecycle.js';
 
 // Mirrored in the Bun runner's db/turns.ts; neither runtime imports the other.
 export type TurnPhase = 'running' | 'stopping' | 'settling' | 'settled';
@@ -33,7 +35,7 @@ export interface TurnInputRow {
   association: 'consumed' | 'applied' | 'reply';
 }
 
-export const TURN_SCHEMA = `
+export const TURN_SCHEMA = epochSchema(`
 CREATE TABLE IF NOT EXISTS turns (
   id TEXT PRIMARY KEY NOT NULL CHECK (length(id) > 0),
   origin_channel_type TEXT,
@@ -56,9 +58,9 @@ CREATE TABLE IF NOT EXISTS turn_inputs (
   PRIMARY KEY (turn_id, message_in_id)
 );
 CREATE INDEX IF NOT EXISTS idx_turn_inputs_message ON turn_inputs(message_in_id);
-`;
+`);
 
-export const TURN_ACTIVITY_SCHEMA = `
+export const TURN_ACTIVITY_SCHEMA = epochSchema(`
 CREATE TABLE IF NOT EXISTS turn_activity (
   message_out_id TEXT,
   ordinal INTEGER NOT NULL,
@@ -69,7 +71,7 @@ CREATE TABLE IF NOT EXISTS turn_activity (
   PRIMARY KEY (message_out_id, ordinal),
   CHECK (message_out_id IS NOT NULL OR turn_id IS NOT NULL)
 );
-`;
+`);
 
 export function assertActivityOrderSchema(db: Database.Database): void {
   const columns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{ name: string; notnull: number }>;
@@ -89,7 +91,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_activity_unanchored
 `;
 
 export function getTurn(db: Database.Database, id: string): TurnRow | undefined {
-  return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as TurnRow | undefined;
+  return decodeTimes<TurnRow | undefined>(db.prepare('SELECT * FROM turns WHERE id = ?').get(id), ['started_at', 'ended_at']);
 }
 
 /** Storage upsert; callers own lifecycle validation and runner journal triggers. */
@@ -114,8 +116,8 @@ export function putTurn(db: Database.Database, turn: TurnRow): void {
     turn.origin_platform_id,
     turn.origin_thread_id,
     turn.origin_source_session_id,
-    turn.started_at,
-    turn.ended_at,
+    toEpoch(turn.started_at),
+    toEpoch(turn.ended_at),
     turn.phase,
     turn.outcome,
     turn.provenance,

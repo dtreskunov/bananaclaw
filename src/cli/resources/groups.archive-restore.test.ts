@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 /**
  * Load-bearing round-trip test for `ncl groups archive` + `ncl groups restore`.
  *
@@ -91,7 +92,7 @@ function seedGroup(id: string, folder: string): SeedRefs {
   const sessionId = `sess-${id}`;
 
   createAgentGroup({ id, name: folder, folder, agent_provider: null, created_at: NOW() });
-  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, NOW());
+  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, toEpoch(NOW()));
   createMessagingGroup({
     id: messagingGroupId,
     channel_type: 'web',
@@ -115,15 +116,15 @@ function seedGroup(id: string, folder: string): SeedRefs {
   });
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'human', ?, ?)`)
-    .run(userId, `User ${id}`, NOW());
+    .run(userId, `User ${id}`, toEpoch(NOW()));
   getDb()
     .prepare(`INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, ?)`)
-    .run(userId, id, NOW());
+    .run(userId, id, toEpoch(NOW()));
   getDb()
     .prepare(
       `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'admin', ?, NULL, ?)`,
     )
-    .run(userId, id, NOW());
+    .run(userId, id, toEpoch(NOW()));
   createSession({
     id: sessionId,
     agent_group_id: id,
@@ -308,9 +309,9 @@ describe('ncl groups archive ↔ restore round trip', () => {
       `INSERT INTO interactions(
       id,kind,request_id,session_id,input_json,created_at,updated_at,status,responded_by,response_json)
       VALUES('retained-approval','confirmation','retained-approval',?,
-      '{"action":"install_packages","payload":{},"title":"Install package","options":[]}',?,'updated','approved',?,
+      '{"action":"install_packages","payload":{},"title":"Install package","options":[]}',?,1767225600000,'approved',?,
       '{"decision":"approve","message":"Keep existing work."}')`,
-    ).run(refs.sessionId, NOW(), refs.userId);
+    ).run(refs.sessionId, toEpoch(NOW()), refs.userId);
     const approval = db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get();
 
     await archive(refs.id);

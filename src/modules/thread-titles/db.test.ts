@@ -71,7 +71,7 @@ describe('thread title metadata', () => {
     };
     db.prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id, content)
-       VALUES ('in-2', 2, 'chat', datetime('now'), @channelType, @platformId, @threadId, '{"text":"Update thread title"}')`,
+       VALUES ('in-2', 2, 'chat', (unixepoch('now')*1000), @channelType, @platformId, @threadId, '{"text":"Update thread title"}')`,
     ).run(key);
     upsertThreadTitle(db, { ...key, title: 'Greeting', requestMessageId: 'in-1' });
     const action = { ...key, title: 'Wedding photos transfer', requestMessageId: 'in-2' };

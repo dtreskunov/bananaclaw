@@ -9,6 +9,7 @@
  * still pending is silently dropped instead of spamming the admin.
  */
 import { getDb } from '../../../db/connection.js';
+import { encodeTimes, decodeTimes } from '../../../db/time.js';
 
 export interface PendingSenderApproval {
   id: string;
@@ -39,13 +40,11 @@ export function createPendingSenderApproval(row: PendingSenderApproval): void {
          @title, @options_json
        )`,
     )
-    .run(row);
+    .run(encodeTimes(row, ['created_at']));
 }
 
 export function getPendingSenderApproval(id: string): PendingSenderApproval | undefined {
-  return getDb().prepare('SELECT * FROM pending_sender_approvals WHERE id = ?').get(id) as
-    | PendingSenderApproval
-    | undefined;
+  return decodeTimes<PendingSenderApproval | undefined>(getDb().prepare('SELECT * FROM pending_sender_approvals WHERE id = ?').get(id), ['created_at']);
 }
 
 export function hasInFlightSenderApproval(messagingGroupId: string, senderIdentity: string): boolean {

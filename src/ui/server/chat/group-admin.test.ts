@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 /**
  * Tests for `POST /api/groups/:gid/admin/archive` — the UI archive surface.
  *
@@ -139,14 +140,14 @@ async function call(method: string, url: string, body?: unknown): Promise<Captur
 function seedUser(id: string, name = 'Test'): void {
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`)
-    .run(id, name, NOW());
+    .run(id, name, toEpoch(NOW()));
 }
 
 function seedGroup(id: string, folder: string): void {
   getDb()
     .prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`)
-    .run(id, folder, folder, NOW());
-  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, NOW());
+    .run(id, folder, folder, toEpoch(NOW()));
+  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, toEpoch(NOW()));
   fs.mkdirSync(path.join(TEST_GROUPS_DIR, folder), { recursive: true });
   fs.writeFileSync(path.join(TEST_GROUPS_DIR, folder, 'CLAUDE.local.md'), '# seed\n', 'utf-8');
 }
@@ -636,8 +637,8 @@ describe('GET /api/groups/:gid/admin/settings (extended fields)', () => {
         (id, agent_group_id, messaging_group_id, thread_id, agent_provider, status, container_status, last_active, created_at)
       VALUES (?, 'ag-running', NULL, NULL, NULL, 'active', ?, ?, ?)
     `);
-    insert.run('sess-live', 'running', NOW(), NOW());
-    insert.run('sess-stopped', 'stopped', NOW(), NOW());
+    insert.run('sess-live', 'running', toEpoch(NOW()), toEpoch(NOW()));
+    insert.run('sess-stopped', 'stopped', toEpoch(NOW()), toEpoch(NOW()));
     initSessionFolder('ag-running', 'sess-live');
     initSessionFolder('ag-running', 'sess-stopped');
     vi.mocked(isContainerRunning).mockImplementation((sessionId) => sessionId === 'sess-live');

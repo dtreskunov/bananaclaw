@@ -5,6 +5,7 @@ import path from 'node:path';
 import { DATA_DIR } from './config.js';
 import { getDb, hasTable } from './db/connection.js';
 import { ensureSchema } from './db/session-db.js';
+import { fromEpoch, decodeTimes } from './db/time.js';
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from './channels/homeassistant-text.js';
 import { onHostChange, publishHostChange } from './host-changes.js';
 import type { LiveTaskDto } from './ui/shared/thread.js';
@@ -145,13 +146,13 @@ function latest(values: (string | null)[]): string {
 function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
   const params = [route.channel_type, route.platform_id, route.thread_id];
   const where = `channel_type = ? AND COALESCE(platform_id, '') = ? AND COALESCE(thread_id, '') = ?`;
-  const count = db
+  const count = decodeTimes<Pick<InboundSummary, 'count' | 'last' | 'pendingAt'>>(db
     .prepare(`SELECT COUNT(*) AS count, MAX(timestamp) AS last,
       MIN(CASE WHEN status = 'pending' AND trigger = 1 AND kind != 'system'
         THEN CASE WHEN process_after IS NULL THEN 0
-          ELSE CAST(strftime('%s', process_after) AS INTEGER) * 1000 END END) AS pendingAt
+          ELSE process_after END END) AS pendingAt
       FROM messages_in WHERE ${where}`)
-    .get(...params) as Pick<InboundSummary, 'count' | 'last' | 'pendingAt'>;
+    .get(...params), ['last']);
   const first = db
     .prepare(`SELECT seq, content, platform_id FROM messages_in WHERE ${where} ORDER BY seq LIMIT 5`)
     .all(...params) as { seq: number; content: string; platform_id: string }[];
@@ -170,7 +171,7 @@ function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
     .all(...params) as {
     series_id: string;
     status: string;
-    process_after: string | null;
+    process_after: number | null;
     recurrence: string | null;
     content: string;
     seq: number;
@@ -186,7 +187,7 @@ function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
     title: explicit?.title ?? null,
     tasks: tasks.map((task) => ({
       seriesId: task.series_id,
-      nextRunAt: task.process_after,
+      nextRunAt: fromEpoch(task.process_after),
       recurrence: task.recurrence,
       summary: summarizeTaskPrompt(task.content),
       paused: task.status === 'paused',
@@ -206,7 +207,7 @@ function summarizeSource(db: Database.Database, source: SummaryRow['source'], ro
       )
       .get();
   if (route.kind === 'turn')
-    return (
+    return decodeTimes<SummaryTurn | null>(
       db
         .prepare(
           `
@@ -215,10 +216,10 @@ function summarizeSource(db: Database.Database, source: SummaryRow['source'], ro
     ORDER BY started_at DESC, id DESC LIMIT 1
   `,
         )
-        .get(route.channel_type, route.platform_id, route.thread_id) ?? null
+        .get(route.channel_type, route.platform_id, route.thread_id) ?? null, ['started_at']
     );
   if (source === 'inbound') return summarizeInbound(db, route);
-  return db
+  return decodeTimes<OutboundSummary>(db
     .prepare(
       `
     SELECT COUNT(*) AS count, MAX(timestamp) AS last FROM messages_out
@@ -226,7 +227,7 @@ function summarizeSource(db: Database.Database, source: SummaryRow['source'], ro
       AND kind IN ('chat','text')
   `,
     )
-    .get(route.channel_type, route.platform_id, route.thread_id);
+    .get(route.channel_type, route.platform_id, route.thread_id), ['last']);
 }
 
 export function assertThreadSummariesReady(): void {

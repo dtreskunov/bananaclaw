@@ -20,7 +20,7 @@ afterEach(() => { resetHostEventsForTesting(); closeSessionDb(); });
 
 function input() {
   getInboundDb().exec(`INSERT INTO messages_in (id, seq, kind, timestamp, content, channel_type, platform_id, thread_id)
-    VALUES ('input', 2, 'chat', 'now', '{"text":"hello"}', 'web', 'room', 'thread')`);
+    VALUES ('input', 2, 'chat', 1767225600000, '{"text":"hello"}', 'web', 'room', 'thread')`);
 }
 async function until(predicate: () => boolean) {
   for (let n = 0; n < 300; n++) {

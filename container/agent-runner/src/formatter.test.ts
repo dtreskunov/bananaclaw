@@ -1,3 +1,4 @@
+import { toEpoch } from './db/time.js';
 /**
  * v1-parity tests for formatter behavior.
  *
@@ -37,7 +38,7 @@ function insertMessage(
       `INSERT INTO messages_in (id, kind, timestamp, status, content, sender_user_id, sender_identity)
        VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
     )
-    .run(id, kind, timestamp, JSON.stringify(content), opts?.senderUserId ?? null, opts?.senderIdentity ?? null);
+    .run(id, kind, toEpoch(timestamp), JSON.stringify(content), opts?.senderUserId ?? null, opts?.senderIdentity ?? null);
 }
 
 describe('sender provenance', () => {
@@ -246,7 +247,7 @@ describe('origin attribute', () => {
         `INSERT INTO messages_in (id, kind, timestamp, status, channel_type, platform_id, content)
          VALUES (?, 'chat', ?, 'pending', ?, ?, ?)`,
       )
-      .run(id, new Date().toISOString(), channelType, platformId, JSON.stringify({ sender: 'system', text: 'hi' }));
+      .run(id, toEpoch(new Date().toISOString()), channelType, platformId, JSON.stringify({ sender: 'system', text: 'hi' }));
   }
 
   afterEach(() => {

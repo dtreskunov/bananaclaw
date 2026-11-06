@@ -14,6 +14,7 @@ import {
   updateContainerConfigScalars,
 } from '../../../db/container-configs.js';
 import { migrations, runMigrations } from '../../../db/migrations/index.js';
+import { convertStoreTimes } from '../../../db/storage-lifecycle.js';
 import { readEnvFile } from '../../../env.js';
 import { log } from '../../../log.js';
 import {
@@ -36,11 +37,12 @@ beforeEach(() => {
     ),
   );
   db.exec(`
-    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 'now');
+    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', '2026-01-01T00:00:00.000Z');
     INSERT INTO container_configs (agent_group_id, voice_mode, transcription_model, updated_at)
-    VALUES ('g', 'audio', 'legacy/audio-model', 'now');
+    VALUES ('g', 'audio', 'legacy/audio-model', '2026-01-01T00:00:00.000Z');
   `);
-  runMigrations(db);
+  runMigrations(db, [...migrations]);
+  convertStoreTimes(db);
 });
 
 afterEach(() => {
@@ -178,7 +180,7 @@ describe('host voice input configuration', () => {
     for (const id of ['default', 'explicit']) {
       getDb()
         .prepare('INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)')
-        .run(id, id, id, 'now');
+        .run(id, id, id, 1767225600000);
     }
     createContainerConfig({ ...row, agent_group_id: 'default' });
     createContainerConfig({

@@ -32,16 +32,16 @@ const root = `${process.cwd()}/.test-tmp/nanoclaw-approval-transcript-${process.
 beforeEach(() => {
   runMigrations(initTestDb());
   getDb().exec(`
-    INSERT INTO users(id,kind,display_name,created_at) VALUES('owner','web','Owner','now'),('member','web','Member','now');
-    INSERT INTO user_roles(user_id,role,granted_at) VALUES('owner','owner','now');
-    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Agent','agent','now');
-    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('member','g','now');
+    INSERT INTO users(id,kind,display_name,created_at) VALUES('owner','web','Owner',1767225600000),('member','web','Member',1767225600000);
+    INSERT INTO user_roles(user_id,role,granted_at) VALUES('owner','owner',1767225600000);
+    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Agent','agent',1767225600000);
+    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('member','g',1767225600000);
     INSERT INTO messaging_groups(id,channel_type,platform_id,instance,is_group,created_at)
-      VALUES('web','web','group:g','web',1,'now'),('telegram','telegram','remote','telegram',1,'now');
+      VALUES('web','web','group:g','web',1,1767225600000),('telegram','telegram','remote','telegram',1,1767225600000);
     INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-      VALUES('w-web','web','g','agent-shared','now'),('w-telegram','telegram','g','agent-shared','now');
+      VALUES('w-web','web','g','agent-shared',1767225600000),('w-telegram','telegram','g','agent-shared',1767225600000);
     INSERT INTO sessions(id,agent_group_id,messaging_group_id,status,created_at)
-      VALUES('s','g','web','active','now');
+      VALUES('s','g','web','active',1767225600000);
   `);
   initSessionFolder('g', 's');
   writeSessionMessage('g', 's', {

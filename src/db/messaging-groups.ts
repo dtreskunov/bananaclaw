@@ -15,6 +15,7 @@ import {
   normalizeName,
 } from '../modules/agent-to-agent/db/agent-destinations.js';
 import { getDb, hasTable } from './connection.js';
+import { toEpoch, encodeTimes, decodeTimes, decodeTimeRows } from './time.js';
 
 import { recordHostChange } from './transaction.js';
 
@@ -26,12 +27,12 @@ export function createMessagingGroup(group: MessagingGroup): void {
       `INSERT INTO messaging_groups (id, channel_type, platform_id, instance, name, is_group, unknown_sender_policy, created_at)
        VALUES (@id, @channel_type, @platform_id, @instance, @name, @is_group, @unknown_sender_policy, @created_at)`,
     )
-    .run({ ...group, instance: group.instance ?? group.channel_type });
+    .run(encodeTimes({ ...group, instance: group.instance ?? group.channel_type }, ['created_at']));
   recordHostChange({ kind: 'access' });
 }
 
 export function getMessagingGroup(id: string): MessagingGroup | undefined {
-  return getDb().prepare('SELECT * FROM messaging_groups WHERE id = ?').get(id) as MessagingGroup | undefined;
+  return decodeTimes<MessagingGroup | undefined>(getDb().prepare('SELECT * FROM messaging_groups WHERE id = ?').get(id), ['created_at', 'denied_at']);
 }
 
 /**
@@ -50,18 +51,18 @@ export function getMessagingGroupByPlatform(
   instance?: string,
 ): MessagingGroup | undefined {
   if (instance !== undefined) {
-    return getDb()
+    return decodeTimes<MessagingGroup | undefined>(getDb()
       .prepare('SELECT * FROM messaging_groups WHERE channel_type = ? AND platform_id = ? AND instance = ?')
-      .get(channelType, platformId, instance) as MessagingGroup | undefined;
+      .get(channelType, platformId, instance), ['created_at', 'denied_at']);
   }
-  return getDb()
+  return decodeTimes<MessagingGroup | undefined>(getDb()
     .prepare(
       `SELECT * FROM messaging_groups
         WHERE channel_type = ? AND platform_id = ?
      ORDER BY (instance = channel_type) DESC, instance ASC
         LIMIT 1`,
     )
-    .get(channelType, platformId) as MessagingGroup | undefined;
+    .get(channelType, platformId), ['created_at', 'denied_at']);
 }
 
 /**
@@ -89,7 +90,7 @@ export function getMessagingGroupWithAgentCount(
   platformId: string,
   instance: string = channelType,
 ): { mg: MessagingGroup; agentCount: number } | null {
-  const row = getDb()
+  const row = decodeTimes<(MessagingGroup & { agent_count: number }) | undefined>(getDb()
     .prepare(
       `SELECT mg.*, COUNT(mga.id) AS agent_count
          FROM messaging_groups mg
@@ -97,14 +98,14 @@ export function getMessagingGroupWithAgentCount(
         WHERE mg.channel_type = ? AND mg.platform_id = ? AND mg.instance = ?
      GROUP BY mg.id`,
     )
-    .get(channelType, platformId, instance) as (MessagingGroup & { agent_count: number }) | undefined;
+    .get(channelType, platformId, instance), ['created_at', 'denied_at']);
   if (!row) return null;
   const { agent_count, ...mg } = row;
   return { mg: mg as MessagingGroup, agentCount: agent_count };
 }
 
 export function getAllMessagingGroups(): MessagingGroup[] {
-  return getDb().prepare('SELECT * FROM messaging_groups ORDER BY name').all() as MessagingGroup[];
+  return decodeTimeRows<MessagingGroup>(getDb().prepare('SELECT * FROM messaging_groups ORDER BY name').all(), ['created_at', 'denied_at']);
 }
 
 /**
@@ -114,7 +115,7 @@ export function getAllMessagingGroups(): MessagingGroup[] {
  * a single instance's rows, filter on `mg.instance`.
  */
 export function getMessagingGroupsByChannel(channelType: string): MessagingGroup[] {
-  return getDb().prepare('SELECT * FROM messaging_groups WHERE channel_type = ?').all(channelType) as MessagingGroup[];
+  return decodeTimeRows<MessagingGroup>(getDb().prepare('SELECT * FROM messaging_groups WHERE channel_type = ?').all(channelType), ['created_at', 'denied_at']);
 }
 
 export function updateMessagingGroup(
@@ -154,7 +155,7 @@ export function deleteMessagingGroup(id: string): void {
  * admin command).
  */
 export function setMessagingGroupDeniedAt(id: string, deniedAt: string | null): void {
-  getDb().prepare('UPDATE messaging_groups SET denied_at = ? WHERE id = ?').run(deniedAt, id);
+  getDb().prepare('UPDATE messaging_groups SET denied_at = ? WHERE id = ?').run(toEpoch(deniedAt), id);
 }
 
 // ── Messaging Group Agents ──
@@ -186,7 +187,7 @@ export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
          @session_mode, @priority, @created_at
        )`,
     )
-    .run(mga);
+    .run(encodeTimes(mga, ['created_at']));
   recordHostChange({ kind: 'access' });
 
   // Auto-create an agent_destinations row so delivery's ACL doesn't block
@@ -236,24 +237,22 @@ export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
 }
 
 export function getMessagingGroupAgents(messagingGroupId: string): MessagingGroupAgent[] {
-  return getDb()
+  return decodeTimeRows<MessagingGroupAgent>(getDb()
     .prepare('SELECT * FROM messaging_group_agents WHERE messaging_group_id = ? ORDER BY priority DESC')
-    .all(messagingGroupId) as MessagingGroupAgent[];
+    .all(messagingGroupId), ['created_at']);
 }
 
 export function getMessagingGroupAgentByPair(
   messagingGroupId: string,
   agentGroupId: string,
 ): MessagingGroupAgent | undefined {
-  return getDb()
+  return decodeTimes<MessagingGroupAgent | undefined>(getDb()
     .prepare('SELECT * FROM messaging_group_agents WHERE messaging_group_id = ? AND agent_group_id = ?')
-    .get(messagingGroupId, agentGroupId) as MessagingGroupAgent | undefined;
+    .get(messagingGroupId, agentGroupId), ['created_at']);
 }
 
 export function getMessagingGroupAgent(id: string): MessagingGroupAgent | undefined {
-  return getDb().prepare('SELECT * FROM messaging_group_agents WHERE id = ?').get(id) as
-    | MessagingGroupAgent
-    | undefined;
+  return decodeTimes<MessagingGroupAgent | undefined>(getDb().prepare('SELECT * FROM messaging_group_agents WHERE id = ?').get(id), ['created_at']);
 }
 
 export function updateMessagingGroupAgent(
@@ -289,11 +288,11 @@ export function deleteMessagingGroupAgent(id: string): void {
 
 /** Get all messaging groups wired to an agent group (reverse lookup). */
 export function getMessagingGroupsByAgentGroup(agentGroupId: string): MessagingGroup[] {
-  return getDb()
+  return decodeTimeRows<MessagingGroup>(getDb()
     .prepare(
       `SELECT mg.* FROM messaging_groups mg
        JOIN messaging_group_agents mga ON mga.messaging_group_id = mg.id
        WHERE mga.agent_group_id = ?`,
     )
-    .all(agentGroupId) as MessagingGroup[];
+    .all(agentGroupId), ['created_at', 'denied_at']);
 }

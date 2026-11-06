@@ -57,7 +57,7 @@ describe('poll loop — /upload-trace command', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
-         VALUES ('m-upload-trace', 'chat', datetime('now'), 'pending', 'chan-1', 'discord', ?)`,
+         VALUES ('m-upload-trace', 'chat', (unixepoch('now')*1000), 'pending', 'chan-1', 'discord', ?)`,
       )
       .run(JSON.stringify({ text: '/upload-trace' }));
 

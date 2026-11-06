@@ -30,7 +30,7 @@ function insert(
 ): MessageInRow {
   getInboundDb().prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, status, channel_type, platform_id, thread_id, trigger, content, sender_identity)
-     VALUES (?, ?, ?, datetime('now'), 'pending', ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, (unixepoch('now')*1000), 'pending', ?, ?, ?, ?, ?, ?)`,
   ).run(
     id, sequence += 2, options.kind ?? 'chat', options.channel ?? 'web', options.platform ?? 'room',
     options.thread === undefined ? 'thread' : options.thread, options.trigger ?? 1,

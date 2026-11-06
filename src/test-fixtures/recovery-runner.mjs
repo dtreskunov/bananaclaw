@@ -37,14 +37,15 @@ if (process.argv[3] === 'failed') {
       status: 'unavailable',
       final: true,
     }),
-    '2026-10-04T20:33:00.401Z',
+    Date.parse('2026-10-04T20:33:00.401Z'),
   );
   db.prepare(
     `
     INSERT INTO messages_out (id,seq,timestamp,kind,platform_id,channel_type,thread_id,content,turn_id)
-    VALUES ('saved-error',1,'2026-10-04 20:33:00','chat','chat','web',NULL,?,'saved-turn')
+    VALUES ('saved-error',1,?,'chat','chat','web',NULL,?,'saved-turn')
   `,
   ).run(
+    Date.parse('2026-10-04T20:33:00.000Z'),
     JSON.stringify({
       text: 'Agent provider error: context window exceeds limit (2013)',
       system_generated: true,

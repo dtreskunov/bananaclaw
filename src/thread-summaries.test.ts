@@ -40,15 +40,15 @@ function message(id: string, platform = 'group:g', thread: string | null = 't', 
   inbound
     .prepare(
       `INSERT INTO messages_in(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
-    VALUES (?,(SELECT COALESCE(MAX(seq),0)+2 FROM messages_in),'chat','2026-11-05T00:00:00Z',?,?,?,?)`,
+    VALUES (?,(SELECT COALESCE(MAX(seq),0)+2 FROM messages_in),'chat',1793836800000,?,?,?,?)`,
     )
     .run(id, channel, platform, thread, JSON.stringify({ text }));
 }
 beforeEach(() => {
   fs.rmSync(ROOT, { recursive: true, force: true });
   runMigrations(initDb(path.join(ROOT, 'v2.db')));
-  getDb().exec(`INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','g','now');
-    INSERT INTO sessions(id,agent_group_id,created_at) VALUES('s','g','now');`);
+  getDb().exec(`INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','g',1793836800000);
+    INSERT INTO sessions(id,agent_group_id,created_at) VALUES('s','g',1793836800000);`);
   initSessionFolder('g', 's');
   inbound = new Database(inboundDbPath('g', 's'));
   outbound = new Database(outboundDbPath('g', 's'));
@@ -80,7 +80,7 @@ describe('maintained thread summaries', () => {
 
   it('evaluates a future input becoming runnable without rebuilding its summary', () => {
     message('one');
-    inbound.exec("UPDATE messages_in SET process_after='2999-01-01T00:00:00Z'");
+    inbound.exec(`UPDATE messages_in SET process_after=${Date.parse('2999-01-01T00:00:00Z')}`);
     refreshThreadSummaries('s');
     expect(readSummaryQueuedRoutes('s')).toHaveLength(0);
     vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2999-01-01T00:00:01Z'));
@@ -99,11 +99,11 @@ describe('maintained thread summaries', () => {
     message('one');
     message('two');
     outbound.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
-      VALUES('reply',1,'chat','2026-11-05T00:01:00Z','web','group:g','t','{"text":"Done"}');
+      VALUES('reply',1,'chat',1793836860000,'web','group:g','t','{"text":"Done"}');
       INSERT INTO turn_usage(id,cost_usd,input_tokens,output_tokens) VALUES('usage',0.5,100,20);`);
     upsertThreadTitle(inbound, { ...spec.thread!, title: 'Published title', requestMessageId: 'one' });
     inbound.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,series_id,process_after,content)
-      VALUES('task',6,'task','2026-11-05T00:00:00Z','pending','web','group:g','t','series','2026-11-06T00:00:00Z','{"prompt":"Do the scheduled thing"}');`);
+      VALUES('task',6,'task',1793836800000,'pending','web','group:g','t','series',1793923200000,'{"prompt":"Do the scheduled thing"}');`);
     refreshThreadSummaries('s');
     expect(readSessionThreadSummary(spec)).toEqual(scanThreadSession(ROOT, spec));
     expect(inbound.prepare('SELECT COUNT(*) FROM thread_summary_dirty').pluck().get()).toBe(0);
@@ -120,12 +120,12 @@ describe('maintained thread summaries', () => {
   it('does not invent DM reply groups for non-chat output or deleted replies', () => {
     message('one');
     outbound.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,content)
-      VALUES('internal',1,'state','2026-11-05T00:00:00Z','{}');`);
+      VALUES('internal',1,'state',1793836800000,'{}');`);
     refreshThreadSummaries('s');
     expect(readSessionThreadSummary(spec)).toEqual(scanThreadSession(ROOT, spec));
     expect(readSessionThreadSummary(spec).dmReplies).toEqual([]);
     outbound.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,content)
-      VALUES('dm-reply',3,'chat','2026-11-05T00:01:00Z','telegram','person','{"text":"Reply"}');`);
+      VALUES('dm-reply',3,'chat',1793836860000,'telegram','person','{"text":"Reply"}');`);
     refreshThreadSummaries('s');
     expect(readSessionThreadSummary(spec).dmReplies).toHaveLength(1);
     outbound.exec(`DELETE FROM messages_out WHERE id='dm-reply'`);
@@ -149,7 +149,7 @@ describe('maintained thread summaries', () => {
       inbound
         .prepare(
           `INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,series_id,content)
-        VALUES('task',4,'task','now','pending','web','group:g','t','series',?)`,
+        VALUES('task',4,'task',1793836800000,'pending','web','group:g','t','series',?)`,
         )
         .run(content);
       refreshThreadSummaries('s');
@@ -159,7 +159,7 @@ describe('maintained thread summaries', () => {
   it('surfaces malformed task data and retains its dirty route for repair', () => {
     message('one');
     inbound.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,series_id,content)
-      VALUES('task',4,'task','now','pending','web','group:g','t','series','not JSON');`);
+      VALUES('task',4,'task',1793836800000,'pending','web','group:g','t','series','not JSON');`);
     expect(() => refreshThreadSummaries('s')).toThrow(/JSON/);
     expect(() => readSessionThreadSummary(spec)).toThrow('projection unavailable');
     inbound.prepare('UPDATE messages_in SET content=? WHERE id=?').run('{"prompt":"Repaired"}', 'task');
@@ -204,8 +204,8 @@ describe('maintained thread summaries', () => {
   it('keeps the latest task occurrence across platform contributions in a per-thread session', () => {
     message('one');
     inbound.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,series_id,process_after,content)
-      VALUES('task-old',4,'task','now','pending','web','group:g','t','series','2026-11-06T00:00:00Z','{"prompt":"Old"}'),
-        ('task-new',6,'task','now','paused','web','alternate','t','series',NULL,'{"prompt":"Latest"}');`);
+      VALUES('task-old',4,'task',1793836800000,'pending','web','group:g','t','series',1793923200000,'{"prompt":"Old"}'),
+        ('task-new',6,'task',1793836800000,'paused','web','alternate','t','series',NULL,'{"prompt":"Latest"}');`);
     refreshThreadSummaries('s');
     expect(readSessionThreadSummary(spec)).toEqual(scanThreadSession(ROOT, spec));
     expect(readSessionThreadSummary(spec).threads[0].liveTasks).toEqual([

@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 /**
  * Regression test for #2525 — `ncl groups delete` must cascade dependent
  * rows in FK order so the final `DELETE FROM agent_groups` succeeds even
@@ -87,51 +88,51 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     // entities.
     db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'telegram', 'someone', ?)`).run(
       UID,
-      now(),
+      toEpoch(now()),
     );
     db.prepare(
       `INSERT INTO messaging_groups (id, channel_type, platform_id, instance, name, is_group, unknown_sender_policy, created_at)
        VALUES (?, 'telegram', 'tg-1', 'telegram', 'chat', 1, 'strict', ?)`,
-    ).run(MGID, now());
+    ).run(MGID, toEpoch(now()));
 
     db.prepare(
       `INSERT INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
        VALUES (?, 'chan', 'channel', ?, ?)`,
-    ).run(GID, MGID, now());
+    ).run(GID, MGID, toEpoch(now()));
 
     db.prepare(
       `INSERT INTO interactions
          (id, kind, session_id, message_out_id, input_json, status, created_at, updated_at)
-       VALUES (?, 'question', ?, 'mout-1', '{"question":"question","responseMode":"choice","options":[]}', 'pending', ?, 'updated')`,
-    ).run('q-1', SID, now());
+       VALUES (?, 'question', ?, 'mout-1', '{"question":"question","responseMode":"choice","options":[]}', 'pending', ?, 1767225600000)`,
+    ).run('q-1', SID, toEpoch(now()));
 
     db.prepare(
       `INSERT INTO interactions (id, kind, session_id, request_id, input_json, response_json, created_at, updated_at, agent_group_id, status)
-       VALUES (?, 'confirmation', ?, 'req-1', '{"action":"cli_command","payload":{},"title":"","options":[]}', '{"decision":null,"message":null}', ?, 'updated', ?, 'pending')`,
-    ).run('pa-1', SID, now(), GID);
+       VALUES (?, 'confirmation', ?, 'req-1', '{"action":"cli_command","payload":{},"title":"","options":[]}', '{"decision":null,"message":null}', ?, 1767225600000, ?, 'pending')`,
+    ).run('pa-1', SID, toEpoch(now()), GID);
 
     db.prepare(
       `INSERT INTO pending_sender_approvals (id, messaging_group_id, agent_group_id, sender_identity, sender_name, original_message, approver_user_id, created_at)
        VALUES ('psa-1', ?, ?, 'tg:99', 'them', '{}', ?, ?)`,
-    ).run(MGID, GID, UID, now());
+    ).run(MGID, GID, UID, toEpoch(now()));
 
     db.prepare(
       `INSERT INTO pending_channel_approvals (messaging_group_id, agent_group_id, original_message, approver_user_id, created_at)
        VALUES (?, ?, '{}', ?, ?)`,
-    ).run(MGID, GID, UID, now());
+    ).run(MGID, GID, UID, toEpoch(now()));
 
     db.prepare(
       `INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, engage_mode, sender_scope, ignored_message_policy, session_mode, priority, created_at)
        VALUES ('mga-1', ?, ?, 'mention', 'all', 'drop', 'shared', 0, ?)`,
-    ).run(MGID, GID, now());
+    ).run(MGID, GID, toEpoch(now()));
 
     db.prepare(
       `INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, ?)`,
-    ).run(UID, GID, now());
+    ).run(UID, GID, toEpoch(now()));
 
     db.prepare(
       `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'admin', ?, NULL, ?)`,
-    ).run(UID, GID, now());
+    ).run(UID, GID, toEpoch(now()));
 
     // Container config row exercises the ON DELETE CASCADE on container_configs.
     db.prepare(
@@ -139,7 +140,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
          (agent_group_id, provider, model, effort, image_tag, assistant_name, max_messages_per_prompt,
           skills, mcp_servers, packages_apt, packages_npm, additional_mounts, cli_scope, updated_at)
        VALUES (?, NULL, NULL, NULL, NULL, NULL, NULL, '"all"', '{}', '[]', '[]', '[]', 'group', ?)`,
-    ).run(GID, now());
+    ).run(GID, toEpoch(now()));
 
     const resp = await dispatch({ id: 'req-del', command: 'groups-delete', args: { id: GID } }, { caller: 'host' });
 
@@ -193,7 +194,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     db.prepare(
       `INSERT INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
        VALUES (?, 'sibling', 'agent', ?, ?)`,
-    ).run(B, A, now());
+    ).run(B, A, toEpoch(now()));
 
     const resp = await dispatch({ id: 'req-del-a', command: 'groups-delete', args: { id: A } }, { caller: 'host' });
 

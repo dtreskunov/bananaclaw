@@ -102,7 +102,7 @@ describe('applyDurableRunnerEvent', () => {
       apply(3, 'message.upsert', { ...messagePayload({ text: 'Saved reply' }), turn_id: turn.id });
       apply(4, 'state.upsert', {
         key: `turn-metadata:${turn.id}`,
-        updated_at: 'now',
+        updated_at: '2026-09-01T00:00:00.000Z',
         value: JSON.stringify({
           turnId: turn.id,
           durationMs: 27900,
@@ -182,7 +182,7 @@ describe('applyDurableRunnerEvent', () => {
       {
         key: 'turn-metadata:optional-turn',
         value: '{',
-        updated_at: 'now',
+        updated_at: '2026-09-01T00:00:00.000Z',
       },
       'invalid turn metadata JSON',
     ],
@@ -192,7 +192,7 @@ describe('applyDurableRunnerEvent', () => {
       {
         key: 'turn-metadata:optional-turn',
         value: '{}',
-        updated_at: 'now',
+        updated_at: '2026-09-01T00:00:00.000Z',
       },
       'invalid turn metadata',
     ],
@@ -202,7 +202,7 @@ describe('applyDurableRunnerEvent', () => {
       {
         key: 'turn-metadata:optional-turn',
         value: null,
-        updated_at: 'now',
+        updated_at: '2026-09-01T00:00:00.000Z',
       },
       'invalid state.upsert payload',
     ],
@@ -211,7 +211,7 @@ describe('applyDurableRunnerEvent', () => {
       'state.upsert',
       {
         key: 'turn-metadata:optional-turn',
-        updated_at: 'now',
+        updated_at: '2026-09-01T00:00:00.000Z',
         value: JSON.stringify({
           turnId: 'optional-turn',
           durationMs: 1000,
@@ -321,7 +321,7 @@ describe('applyDurableRunnerEvent', () => {
       origin_platform_id: 'chat',
       origin_thread_id: null,
       origin_source_session_id: null,
-      started_at: 'now',
+      started_at: '2026-09-01T00:00:00.000Z',
       ended_at: null,
       phase: 'running',
       outcome: 'pending',
@@ -418,12 +418,12 @@ describe('applyDurableRunnerEvent', () => {
     db.prepare(
       `INSERT INTO messages_in
         (id, seq, kind, timestamp, content, sender_user_id, channel_type, platform_id, thread_id)
-        VALUES (?, ?, ?, 'now', ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
+        VALUES (?, ?, ?, 1788220800000, ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
     ).run('in-1', 2, 'chat', JSON.stringify({ text: 'before', files: [{ filename: 'keep.txt' }] }));
     db.prepare(
       `INSERT INTO messages_in
         (id, seq, kind, timestamp, content, sender_user_id, channel_type, platform_id, thread_id)
-        VALUES (?, 4, 'system', 'now', ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
+        VALUES (?, 4, 'system', 1788220800000, ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
     ).run(
       `edit-${editId}`,
       JSON.stringify({
@@ -445,7 +445,7 @@ describe('applyDurableRunnerEvent', () => {
         payload: {
           key: `input-edit:${editId}`,
           value: JSON.stringify({ requestId: editId, messageId: 'in-1', status }),
-          updated_at: 'now',
+          updated_at: '2026-09-01T00:00:00.000Z',
         },
       },
     };
@@ -568,7 +568,7 @@ describe('applyDurableRunnerEvent', () => {
       .prepare(
         `INSERT INTO messages_in
         (id, seq, kind, timestamp, content, sender_user_id, channel_type, platform_id, thread_id)
-        VALUES (?, 6, 'system', 'now', ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
+        VALUES (?, 6, 'system', 1788220800000, ?, '11111111-1111-4111-8111-111111111111', 'web', 'platform', 'thread')`,
       )
       .run(
         `edit-${secondId}`,
@@ -589,7 +589,7 @@ describe('applyDurableRunnerEvent', () => {
         payload: {
           key: `input-edit:${secondId}`,
           value: JSON.stringify({ requestId: secondId, messageId: 'in-1', status: 'accepted' }),
-          updated_at: 'now',
+          updated_at: '2026-09-01T00:00:00.000Z',
         },
       },
     });
@@ -724,7 +724,7 @@ describe('applyDurableRunnerEvent', () => {
             turn_id: null,
             seq: 1,
             in_reply_to: null,
-            timestamp: 'now',
+            timestamp: '2026-09-01T00:00:00.000Z',
             deliver_after: null,
             recurrence: null,
             kind: 'chat',
@@ -881,7 +881,7 @@ describe('applyDurableRunnerEvent', () => {
         type: 'state.upsert',
         payload: {
           key: `turn-metadata:${turn.id}`,
-          updated_at: 'now',
+          updated_at: '2026-09-01T00:00:00.000Z',
           value: JSON.stringify({
             turnId: turn.id,
             durationMs: 1000,

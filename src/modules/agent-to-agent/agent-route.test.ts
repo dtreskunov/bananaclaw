@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -448,7 +449,7 @@ describe('routeAgentMessage return-path', () => {
         `INSERT INTO messages_out (id, seq, kind, timestamp, platform_id, channel_type, thread_id, content)
          VALUES ('prior-ack', 1, 'chat', ?, ?, 'agent', NULL, ?)`,
       )
-      .run(now(), B, sameContent);
+      .run(toEpoch(now()), B, sameContent);
     outDb.close();
 
     await routeAgentMessage({ id: 'duplicate-ack', platform_id: B, content: sameContent, in_reply_to: null }, S1);
@@ -464,7 +465,7 @@ describe('routeAgentMessage return-path', () => {
         `INSERT INTO messages_out (id, seq, kind, timestamp, platform_id, channel_type, thread_id, content)
          VALUES ('prior', 1, 'chat', ?, ?, 'agent', NULL, ?)`,
       )
-      .run(now(), B, JSON.stringify({ text: 'first thought' }));
+      .run(toEpoch(now()), B, JSON.stringify({ text: 'first thought' }));
     outDb.close();
 
     await routeAgentMessage(

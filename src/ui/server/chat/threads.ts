@@ -1,4 +1,5 @@
 import { getDb } from '../../../db/connection.js';
+import { decodeTimeRows } from '../../../db/time.js';
 import { getMessagingGroupByPlatform, getMessagingGroupAgentByPair } from '../../../db/messaging-groups.js';
 import { getSessionsByAgentGroup, findSessionByAgentGroup } from '../../../db/sessions.js';
 import { getThreadForksForAgentGroup } from '../../../db/thread-forks.js';
@@ -314,15 +315,12 @@ function collectThreadsForContexts(
   const plans: Plan[] = [];
   const sharedPlans: Plan[] = [];
   for (const ctx of ctxs) {
-    const perThread = getDb()
+    const perThread = decodeTimeRows<Pick<(typeof sessions)[number], 'id' | 'thread_id' | 'last_active' | 'created_at'>>(getDb()
       .prepare(
         `SELECT id, thread_id, last_active, created_at FROM sessions
        WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NOT NULL`,
       )
-      .all(agentGroupId, ctx.messagingGroupId) as Pick<
-      (typeof sessions)[number],
-      'id' | 'thread_id' | 'last_active' | 'created_at'
-    >[];
+      .all(agentGroupId, ctx.messagingGroupId), ['last_active', 'created_at']);
     for (const session of perThread) {
       if (session.thread_id === null) continue;
       plans.push({

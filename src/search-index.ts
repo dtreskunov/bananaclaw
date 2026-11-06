@@ -12,12 +12,14 @@ import path from 'path';
 
 import { DATA_DIR } from './config.js';
 import { log } from './log.js';
+import { epochSchema, legacyEpoch } from './db/storage-lifecycle.js';
+import { toEpoch, decodeTimeRows } from './db/time.js';
 
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
 
-const SEARCH_SCHEMA_VERSION = 1;
+const SEARCH_SCHEMA_VERSION = 2;
 const MESSAGE_COLUMNS = [
   'id',
   'session_id',
@@ -31,7 +33,7 @@ const MESSAGE_COLUMNS = [
   'sender_user_id',
 ];
 
-const SEARCH_SCHEMA = `
+const SEARCH_SCHEMA = epochSchema(`
   CREATE TABLE message_index (
     rowid              INTEGER PRIMARY KEY,
     id                 TEXT NOT NULL,
@@ -47,7 +49,7 @@ const SEARCH_SCHEMA = `
     UNIQUE(session_id, direction, id)
   );
 
-  CREATE INDEX idx_mi_agent_group ON message_index(agent_group_id);
+  CREATE INDEX idx_mi_agent_group ON message_index(agent_group_id, timestamp DESC);
   CREATE INDEX idx_mi_messaging_group ON message_index(messaging_group_id);
 
   CREATE VIRTUAL TABLE message_fts USING fts5(
@@ -70,7 +72,7 @@ const SEARCH_SCHEMA = `
     INSERT INTO message_fts(message_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
     INSERT INTO message_fts(rowid, text) VALUES (new.rowid, new.text);
   END;
-`;
+`);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -131,12 +133,13 @@ function getSearchDb(): Database.Database {
   return db;
 }
 
-function initializeSearchSchema(connection: Database.Database): number | null {
+/** Explicit offline upgrade; runtime startup never converts an existing index. */
+export function migrateSearchStorage(connection: Database.Database): number | null {
   return connection
     .transaction(() => {
       const version = connection.pragma('user_version', { simple: true }) as number;
       if (version === SEARCH_SCHEMA_VERSION) return null;
-      if (version !== 0) throw new Error(`Unsupported search index schema version: ${version}`);
+      if (version !== 0 && version !== 1) throw new Error(`Unsupported search index schema version: ${version}`);
 
       const columns = connection.pragma('table_info(message_index)') as Array<{
         name: string;
@@ -144,22 +147,26 @@ function initializeSearchSchema(connection: Database.Database): number | null {
         pk: number;
       }>;
       let migratedRows: number | null = null;
+      let legacyRows: Record<string, unknown>[] = [];
       if (columns.length > 0) {
-        // Only the deployed, unversioned TEXT-primary-key schema is migratable.
+        // Only the deployed legacy and version-1 occurrence schemas are migratable.
         // Never replace an unfamiliar schema or rely on its potentially stale FTS rowids.
         if (
-          columns.length !== MESSAGE_COLUMNS.length ||
-          columns.some(
+          (version === 0 && (columns.length !== MESSAGE_COLUMNS.length || columns.some(
             (column, i) =>
               column.name !== MESSAGE_COLUMNS[i] ||
               column.type.toUpperCase() !== 'TEXT' ||
               column.pk !== (i === 0 ? 1 : 0),
-          )
+          ))) || (version === 1 && (columns.length !== MESSAGE_COLUMNS.length + 1 ||
+            columns[0].name !== 'rowid' || columns[0].type.toUpperCase() !== 'INTEGER' ||
+            MESSAGE_COLUMNS.some((name, i) => columns[i + 1].name !== name)))
         ) {
           throw new Error('Unrecognized unversioned search index schema; existing data left intact');
         }
         migratedRows = (connection.prepare('SELECT count(*) AS count FROM message_index').get() as { count: number })
           .count;
+        legacyRows = connection.prepare('SELECT rowid, * FROM message_index').all() as Record<string, unknown>[];
+        for (const row of legacyRows) row.timestamp = legacyEpoch(row.timestamp);
         connection.exec(`
           DROP TRIGGER IF EXISTS mi_ai;
           DROP TRIGGER IF EXISTS mi_ad;
@@ -174,12 +181,13 @@ function initializeSearchSchema(connection: Database.Database): number | null {
 
       connection.exec(SEARCH_SCHEMA);
       if (migratedRows !== null) {
-        const names = MESSAGE_COLUMNS.join(', ');
-        connection.exec(`
-          INSERT INTO message_index (rowid, ${names})
-          SELECT rowid, ${names} FROM message_index_legacy;
-          DROP TABLE message_index_legacy;
-        `);
+        const names = ['rowid', ...MESSAGE_COLUMNS];
+        const insert = connection.prepare(`INSERT INTO message_index (${names}) VALUES (${names.map(() => '?')})`);
+        for (const row of legacyRows) insert.run(...names.map(name => row[name]));
+        connection.exec('DROP TABLE message_index_legacy');
+        const count = connection.prepare('SELECT count(*) AS n FROM message_index').get() as { n: number };
+        if (count.n !== migratedRows) throw new Error('Search conversion changed row counts');
+        connection.exec("INSERT INTO message_fts(message_fts,rank) VALUES('integrity-check',1)");
       }
       connection.pragma(`user_version = ${SEARCH_SCHEMA_VERSION}`);
       return migratedRows;
@@ -197,14 +205,11 @@ export function initSearchDb(): void {
   try {
     connection.pragma('busy_timeout = 5000');
     connection.pragma('journal_mode = WAL');
-    const migratedRows = initializeSearchSchema(connection);
-    if (migratedRows !== null) {
-      log.warn('Search index schema rebuilt; existing entries preserved', {
-        migratedRows,
-        note: 'Previously suppressed duplicate occurrences require backfill from session DBs.',
-        backfill: 'pnpm exec tsx scripts/backfill-search-index.ts',
-      });
-    }
+    const version = connection.pragma('user_version', { simple: true });
+    if (version === 0 && !connection.prepare("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").get())
+      migrateSearchStorage(connection);
+    else if (version !== SEARCH_SCHEMA_VERSION)
+      throw new Error(`Unsupported search storage version ${version}; stop host AND runners and follow docs/db-storage-cutover.md`);
     db = connection;
   } catch (err) {
     connection.close();
@@ -258,18 +263,6 @@ export function deleteSessionFromIndex(sessionId: string): number {
   }
 }
 
-/**
- * Normalize a timestamp to "YYYY-MM-DD HH:MM:SS" so mixed ISO/space formats
- * sort correctly (T > space in ASCII breaks ordering within the same day).
- * Every timestamp written to or compared against the index goes through here.
- */
-function normalizeIndexTimestamp(ts: string): string {
-  return ts
-    .replace('T', ' ')
-    .replace(/\.\d+Z$/, '')
-    .replace(/Z$/, '');
-}
-
 // ---------------------------------------------------------------------------
 // Indexing
 // ---------------------------------------------------------------------------
@@ -287,9 +280,7 @@ export function indexMessage(msg: IndexableMessage, options: { replaceText?: boo
   const suffix = msg.agentGroupId ? `:${msg.agentGroupId}` : '';
   const id = suffix && msg.id.endsWith(suffix) ? msg.id.slice(0, -suffix.length) : msg.id;
 
-  // Normalize timestamp to "YYYY-MM-DD HH:MM:SS" so mixed ISO/space formats
-  // sort correctly (T > space in ASCII breaks ordering within the same day).
-  const ts = normalizeIndexTimestamp(msg.timestamp);
+  const ts = toEpoch(msg.timestamp);
 
   try {
     getSearchDb()
@@ -372,7 +363,7 @@ export function searchMessages(query: string, opts: SearchOptions): SearchResult
   const where = conditions.join(' AND ');
 
   try {
-    return getSearchDb()
+    return decodeTimeRows<SearchResultRow>(getSearchDb()
       .prepare(
         `SELECT
            mi.id          AS messageId,
@@ -391,7 +382,7 @@ export function searchMessages(query: string, opts: SearchOptions): SearchResult
          ORDER BY mi.timestamp DESC
          LIMIT @limit`,
       )
-      .all(params) as SearchResultRow[];
+      .all(params), ['timestamp']);
   } catch (err) {
     // FTS5 MATCH can throw on malformed queries (unbalanced quotes, etc.).
     // Fall back to a LIKE scan so the user still gets results.
@@ -431,7 +422,7 @@ function likeFallback(query: string, opts: SearchOptions, limit: number): Search
 
   const where = conditions.join(' AND ');
 
-  return getSearchDb()
+  return decodeTimeRows<SearchResultRow>(getSearchDb()
     .prepare(
       `SELECT
          id           AS messageId,
@@ -448,7 +439,7 @@ function likeFallback(query: string, opts: SearchOptions, limit: number): Search
        ORDER BY timestamp DESC
        LIMIT @limit`,
     )
-    .all(params) as SearchResultRow[];
+    .all(params), ['timestamp']);
 }
 
 // ---------------------------------------------------------------------------

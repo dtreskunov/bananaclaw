@@ -7,6 +7,7 @@
  * the admin privilege that deletion does.
  */
 import Database from 'better-sqlite3';
+import { toEpoch } from '../../../db/time.js';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -123,14 +124,14 @@ function seedMessagingGroup(id: string, channelType: string, platformId: string,
          (id, channel_type, platform_id, instance, name, is_group, unknown_sender_policy, created_at)
        VALUES (?, ?, ?, ?, ?, 0, 'strict', ?)`,
     )
-    .run(id, channelType, platformId, channelType, id, NOW);
+    .run(id, channelType, platformId, channelType, id, toEpoch(NOW));
   getDb()
     .prepare(
       `INSERT INTO messaging_group_agents
          (id, messaging_group_id, agent_group_id, session_mode, created_at)
        VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(`wire-${id}`, id, GROUP_ID, sessionMode, NOW);
+    .run(`wire-${id}`, id, GROUP_ID, sessionMode, toEpoch(NOW));
 }
 
 function seedThread(): void {
@@ -140,14 +141,14 @@ function seedThread(): void {
          (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at)
        VALUES (?, ?, ?, ?, 'active', 'stopped', ?)`,
     )
-    .run(SESSION, GROUP_ID, WEB_MG, THREAD, NOW);
+    .run(SESSION, GROUP_ID, WEB_MG, THREAD, toEpoch(NOW));
   initSessionFolder(GROUP_ID, SESSION);
 
   const inDb = new Database(inboundDbPath(GROUP_ID, SESSION));
   inDb
     .prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, platform_id, channel_type, thread_id, content)
-       VALUES ('u1', 2, 'chat', '2026-01-01T00:01:00.000Z', 'processed', 1, ?, 'web', ?, '{"text":"hello"}')`,
+       VALUES ('u1', 2, 'chat', 1767225660000, 'processed', 1, ?, 'web', ?, '{"text":"hello"}')`,
     )
     .run(WEB_PLATFORM_ID, THREAD);
   inDb.close();
@@ -156,13 +157,13 @@ function seedThread(): void {
   outDb
     .prepare(
       `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, kind, platform_id, channel_type, thread_id, content)
-       VALUES ('a1', 1, 'u1', '2026-01-01T00:02:00.000Z', 'chat', ?, 'web', ?, '{"text":"hi back"}')`,
+       VALUES ('a1', 1, 'u1', 1767225720000, 'chat', ?, 'web', ?, '{"text":"hi back"}')`,
     )
     .run(WEB_PLATFORM_ID, THREAD);
   outDb
     .prepare(
       `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, kind, platform_id, channel_type, thread_id, content)
-       VALUES ('a2', 3, 'u1', '2026-01-01T00:03:00.000Z', 'chat', ?, 'web', ?, '{"text":"and more"}')`,
+       VALUES ('a2', 3, 'u1', 1767225780000, 'chat', ?, 'web', ?, '{"text":"and more"}')`,
     )
     .run(WEB_PLATFORM_ID, THREAD);
   outDb.close();
@@ -195,18 +196,18 @@ beforeEach(() => {
   runMigrations(db);
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', 'Member', ?)`)
-    .run(USER_ID, NOW);
+    .run(USER_ID, toEpoch(NOW));
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', 'Admin', ?)`)
-    .run(ADMIN_ID, NOW);
+    .run(ADMIN_ID, toEpoch(NOW));
   getDb()
     .prepare(
       `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, 'Agent', 'agent', NULL, ?)`,
     )
-    .run(GROUP_ID, NOW);
+    .run(GROUP_ID, toEpoch(NOW));
   getDb()
     .prepare(`INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)`)
-    .run(USER_ID, GROUP_ID, USER_ID, NOW);
+    .run(USER_ID, GROUP_ID, USER_ID, toEpoch(NOW));
   grantRole({ user_id: ADMIN_ID, role: 'admin', agent_group_id: null, granted_by: ADMIN_ID, granted_at: NOW });
   stopProjection = threadSummaries.startThreadSummaryProjection();
 });
@@ -228,14 +229,14 @@ describe('asynchronous thread listing', () => {
        (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at)
        VALUES ('other', ?, ?, 'thread-0', 'active', 'stopped', ?)`,
       )
-      .run(GROUP_ID, WEB_MG, NOW);
+      .run(GROUP_ID, WEB_MG, toEpoch(NOW));
     initSessionFolder(GROUP_ID, 'other');
     const inbound = new Database(inboundDbPath(GROUP_ID, 'other'));
     try {
       inbound
         .prepare(
           `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id, content)
-         VALUES ('other', 2, 'chat', '2026-01-01T00:03:00.000Z', 'web', ?, 'thread-0', '{"text":"Other"}')`,
+         VALUES ('other', 2, 'chat', 1767225780000, 'web', ?, 'thread-0', '{"text":"Other"}')`,
         )
         .run(WEB_PLATFORM_ID);
     } finally {
@@ -296,8 +297,8 @@ describe('asynchronous thread listing', () => {
         `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, content)
          VALUES (?, ?, 'chat', ?, 'resend', ?, '{"text":"DM"}')`,
       );
-      insert.run('own', 4, NOW, 'member@example.com');
-      insert.run('other', 6, NOW, 'other@example.com');
+      insert.run('own', 4, toEpoch(NOW), 'member@example.com');
+      insert.run('other', 6, toEpoch(NOW), 'other@example.com');
     } finally {
       inbound.close();
     }

@@ -68,8 +68,8 @@ describe('writeOutboundDirect', () => {
       origin_platform_id: 'chat',
       origin_thread_id: null,
       origin_source_session_id: null,
-      started_at: 'original start',
-      ended_at: 'original end',
+      started_at: '2026-01-01T00:00:00.000Z',
+      ended_at: '2026-01-01T00:01:00.000Z',
       imported_from_session_id: null,
       imported_from_turn_id: null,
     });

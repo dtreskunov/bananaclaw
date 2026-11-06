@@ -1,3 +1,4 @@
+import { toEpoch } from '../db/time.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { closeDb, initTestDb } from '../db/connection.js';
@@ -19,23 +20,23 @@ describe('shared web chat', () => {
     db.prepare(
       `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at)
        VALUES ('ag-team', 'Team', 'team', NULL, ?)`,
-    ).run(now);
+    ).run(toEpoch(now));
     for (const id of ['member', 'owner', 'global-admin', 'scoped-admin']) {
       db.prepare(
         `INSERT INTO users (id, kind, display_name, created_at)
          VALUES (?, 'web', ?, ?)`,
-      ).run(id, id, now);
+      ).run(id, id, toEpoch(now));
     }
     db.prepare(
       `INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at)
        VALUES ('member', 'ag-team', NULL, ?)`,
-    ).run(now);
+    ).run(toEpoch(now));
     db.prepare(
       `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at)
        VALUES ('owner', 'owner', NULL, NULL, ?),
               ('global-admin', 'admin', NULL, NULL, ?),
               ('scoped-admin', 'admin', 'ag-team', NULL, ?)`,
-    ).run(now, now, now);
+    ).run(toEpoch(now), toEpoch(now), toEpoch(now));
 
     expect(getWebPushRecipientIds('ag-team')).toEqual(['member']);
   });

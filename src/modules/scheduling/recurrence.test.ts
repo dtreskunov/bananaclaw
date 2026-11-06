@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 /**
  * Tests for `handleRecurrence` — specifically the timezone-aware cron
  * interpretation ported from v1 (src/v1/task-scheduler.ts).
@@ -120,9 +121,9 @@ describe('handleRecurrence', () => {
         (task_message_id, series_id, trigger_source, status, started_at)
        VALUES (?, 'task-1', 'scheduled', 'failed', ?)`,
     );
-    insertAttempt.run('attempt-1', '2026-08-16T10:00:00Z');
-    insertAttempt.run('attempt-2', '2026-08-16T11:00:00Z');
-    insertAttempt.run('attempt-3', '2026-08-16T12:00:00Z');
+    insertAttempt.run('attempt-1', toEpoch('2026-08-16T10:00:00Z'));
+    insertAttempt.run('attempt-2', toEpoch('2026-08-16T11:00:00Z'));
+    insertAttempt.run('attempt-3', toEpoch('2026-08-16T12:00:00Z'));
 
     await handleRecurrence(db, fakeSession(), outDb);
 
@@ -155,7 +156,7 @@ describe('handleRecurrence', () => {
       .prepare(
         `INSERT INTO task_attempts
         (task_message_id, series_id, trigger_source, status, started_at)
-       VALUES ('attempt-ok', 'task-1', 'scheduled', 'completed', '2026-08-16T12:00:00Z')`,
+       VALUES ('attempt-ok', 'task-1', 'scheduled', 'completed', 1786881600000)`,
       )
       .run();
 

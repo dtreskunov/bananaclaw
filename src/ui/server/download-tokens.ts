@@ -8,6 +8,7 @@
 import crypto from 'crypto';
 
 import { getDb } from '../../db/connection.js';
+import { toEpoch, decodeTimes } from '../../db/time.js';
 import { hashToken } from './db.js';
 
 export interface DownloadTokenRow {
@@ -47,8 +48,8 @@ export function createDownloadToken(args: {
       args.recipientUserId ?? null,
       args.groupId,
       args.relPath,
-      now.toISOString(),
-      expiresAt,
+      now.getTime(),
+      toEpoch(expiresAt),
       args.uses,
     );
   return { token, expiresAt };
@@ -61,28 +62,25 @@ export function createDownloadToken(args: {
 export function redeemDownloadToken(token: string, ip: string | null, ua: string | null): DownloadTokenRow | null {
   const db = getDb();
   const hash = hashToken(token);
-  const row = db.prepare('SELECT * FROM ui_download_tokens WHERE token_hash = ?').get(hash) as
-    | DownloadTokenRow
-    | undefined;
+  const row = decodeTimes<DownloadTokenRow | undefined>(db.prepare('SELECT * FROM ui_download_tokens WHERE token_hash = ?').get(hash), ['created_at', 'expires_at', 'first_redeemed_at']);
   if (!row) return null;
   if (row.uses_left <= 0) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) return null;
 
-  const isFirst = row.first_redeemed_at === null;
   const res = db
     .prepare(
       `UPDATE ui_download_tokens
          SET uses_left = uses_left - 1,
-             first_redeemed_at = COALESCE(first_redeemed_at, datetime('now')),
+             first_redeemed_at = COALESCE(first_redeemed_at, ?),
              first_redeemed_ip = COALESCE(first_redeemed_ip, ?),
              first_redeemed_ua = COALESCE(first_redeemed_ua, ?)
        WHERE token_hash = ? AND uses_left > 0`,
     )
-    .run(ip, ua, hash);
+    .run(Date.now(), ip, ua, hash);
   if (res.changes !== 1) return null;
   return { ...row, uses_left: row.uses_left - 1, first_redeemed_at: row.first_redeemed_at ?? new Date().toISOString() };
 }
 
 export function purgeExpiredDownloadTokens(): void {
-  getDb().prepare("DELETE FROM ui_download_tokens WHERE expires_at < datetime('now') OR uses_left <= 0").run();
+  getDb().prepare("DELETE FROM ui_download_tokens WHERE expires_at < ? OR uses_left <= 0").run(Date.now());
 }

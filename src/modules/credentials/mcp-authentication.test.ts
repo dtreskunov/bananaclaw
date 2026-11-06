@@ -1,3 +1,4 @@
+import { toEpoch } from '../../db/time.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -68,10 +69,12 @@ afterAll(async () => {
 beforeEach(() => {
   runMigrations(initTestDb());
   for (const id of ['group-one', 'group-two']) {
-    getDb().prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, id, id, 'before');
+    getDb()
+      .prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)')
+      .run(id, id, id, toEpoch('2026-01-01T00:00:00.000Z'));
     getDb()
       .prepare('INSERT INTO container_configs(agent_group_id,mcp_servers,updated_at) VALUES(?,?,?)')
-      .run(id, JSON.stringify(configured), 'before');
+      .run(id, JSON.stringify(configured), toEpoch('2026-01-01T00:00:00.000Z'));
   }
   status = 200;
   scopes.length = 0;

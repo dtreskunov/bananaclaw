@@ -9,12 +9,12 @@ beforeEach(() => {
   runMigrations(db);
   db.prepare(
     `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at)
-     VALUES ('ag-1', 'Agent', 'agent', NULL, datetime('now'))`,
+     VALUES ('ag-1', 'Agent', 'agent', NULL, (unixepoch('now')*1000))`,
   ).run();
   db.prepare(
     `INSERT INTO sessions
        (id, agent_group_id, messaging_group_id, thread_id, agent_provider, status, container_status, created_at)
-     VALUES ('session-1', 'ag-1', NULL, NULL, NULL, 'active', 'stopped', datetime('now'))`,
+     VALUES ('session-1', 'ag-1', NULL, NULL, NULL, 'active', 'stopped', (unixepoch('now')*1000))`,
   ).run();
 });
 

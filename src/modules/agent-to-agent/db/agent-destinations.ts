@@ -34,6 +34,7 @@
  */
 import type { AgentDestination } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
+import { encodeTimes, decodeTimes, decodeTimeRows } from '../../../db/time.js';
 
 /**
  * ⚠️  Caller responsibility: after this returns, call
@@ -47,19 +48,19 @@ export function createDestination(row: AgentDestination): void {
       `INSERT INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at, created_by)
        VALUES (@agent_group_id, @local_name, @target_type, @target_id, @created_at, @created_by)`,
     )
-    .run(row);
+    .run(encodeTimes(row, ['created_at']));
 }
 
 export function getDestinations(agentGroupId: string): AgentDestination[] {
-  return getDb()
+  return decodeTimeRows<AgentDestination>(getDb()
     .prepare('SELECT * FROM agent_destinations WHERE agent_group_id = ?')
-    .all(agentGroupId) as AgentDestination[];
+    .all(agentGroupId), ['created_at']);
 }
 
 export function getDestinationByName(agentGroupId: string, localName: string): AgentDestination | undefined {
-  return getDb()
+  return decodeTimes<AgentDestination | undefined>(getDb()
     .prepare('SELECT * FROM agent_destinations WHERE agent_group_id = ? AND local_name = ?')
-    .get(agentGroupId, localName) as AgentDestination | undefined;
+    .get(agentGroupId, localName), ['created_at']);
 }
 
 /** Reverse lookup: what does this agent call the given target? */
@@ -68,9 +69,9 @@ export function getDestinationByTarget(
   targetType: 'channel' | 'agent',
   targetId: string,
 ): AgentDestination | undefined {
-  return getDb()
+  return decodeTimes<AgentDestination | undefined>(getDb()
     .prepare('SELECT * FROM agent_destinations WHERE agent_group_id = ? AND target_type = ? AND target_id = ?')
-    .get(agentGroupId, targetType, targetId) as AgentDestination | undefined;
+    .get(agentGroupId, targetType, targetId), ['created_at']);
 }
 
 /** Permission check: can this agent send to this target? */

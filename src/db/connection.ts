@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { log } from '../log.js';
+import { assertStorageVersion } from './storage-lifecycle.js';
 
 let _db: Database.Database | null = null;
 
@@ -14,6 +15,8 @@ export function getDb(): Database.Database {
 export function initDb(dbPath: string): Database.Database {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   _db = new Database(dbPath);
+  try { assertStorageVersion(_db, 'central', true); }
+  catch (error) { _db.close(); _db = null; throw error; }
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
   log.info('Central DB initialized', { path: dbPath });

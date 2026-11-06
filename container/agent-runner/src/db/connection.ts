@@ -8,6 +8,7 @@
 import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import { ensureRunnerStateSchema } from './runner-state.js';
+import { epochSchema } from './storage-lifecycle.js';
 
 const DEFAULT_RUNNER_STATE_PATH = '/workspace/runner-state/runner-state.db';
 const MAX_DECLARED_TOOL_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -30,11 +31,14 @@ export function getOutboundDb(): Database {
     if (!_testMode && !fs.existsSync(DEFAULT_RUNNER_STATE_PATH)) {
       throw new Error('runner-state.db is missing; refusing to reset durable session state');
     }
-    _outbound = new Database(DEFAULT_RUNNER_STATE_PATH);
-    _outbound.exec('PRAGMA journal_mode = DELETE');
-    _outbound.exec('PRAGMA busy_timeout = 5000');
-    _outbound.exec('PRAGMA foreign_keys = ON');
-    ensureRunnerStateSchema(_outbound);
+    const db = new Database(DEFAULT_RUNNER_STATE_PATH);
+    try {
+      db.exec('PRAGMA journal_mode = DELETE');
+      db.exec('PRAGMA busy_timeout = 5000');
+      db.exec('PRAGMA foreign_keys = ON');
+      ensureRunnerStateSchema(db);
+      _outbound = db;
+    } catch (error) { db.close(); throw error; }
   }
   return _outbound;
 }
@@ -45,7 +49,7 @@ export function getOutboundDb(): Database {
  * omit for tools with no declared timeout.
  */
 export function setContainerToolInFlight(tool: string, declaredTimeoutMs: number | null): void {
-  const now = new Date().toISOString();
+  const now = Date.now();
   const boundedTimeoutMs =
     declaredTimeoutMs !== null && Number.isFinite(declaredTimeoutMs) && declaredTimeoutMs >= 0
       ? Math.min(Math.floor(declaredTimeoutMs), MAX_DECLARED_TOOL_TIMEOUT_MS)
@@ -65,7 +69,7 @@ export function setContainerToolInFlight(tool: string, declaredTimeoutMs: number
 
 /** Clear the in-flight tool — called on PostToolUse / PostToolUseFailure. */
 export function clearContainerToolInFlight(): void {
-  const now = new Date().toISOString();
+  const now = Date.now();
   getOutboundDb()
     .prepare(
       `INSERT INTO container_state (id, current_tool, tool_declared_timeout_ms, tool_started_at, updated_at)
@@ -102,7 +106,7 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
   _testMode = true;
   _inbound = new Database(':memory:');
   _inbound.exec('PRAGMA foreign_keys = ON');
-  _inbound.exec(`
+  _inbound.exec(epochSchema(`
     CREATE TABLE messages_in (
       id             TEXT PRIMARY KEY,
       seq            INTEGER UNIQUE,
@@ -169,7 +173,7 @@ export function initTestSessionDb(options: { unifiedHostProjection?: boolean } =
       digest              TEXT NOT NULL,
       created_at          TEXT NOT NULL
     );
-  `);
+  `));
 
   _outbound = new Database(':memory:');
   _outbound.exec('PRAGMA foreign_keys = ON');

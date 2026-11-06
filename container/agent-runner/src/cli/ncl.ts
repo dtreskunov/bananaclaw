@@ -67,8 +67,9 @@ function writeRequest(req: RequestFrame): void {
 
     db.prepare(
       `INSERT INTO messages_out (id, seq, timestamp, kind, content)
-       VALUES ($id, $seq, datetime('now'), 'system', $content)`,
+       VALUES ($id, $seq, $timestamp, 'system', $content)`,
     ).run({
+      $timestamp: Date.now(),
       $id: req.id,
       $seq: nextSeq,
       $content: JSON.stringify({
@@ -112,9 +113,9 @@ function pollResponse(requestId: string, timeoutMs: number): ResponseFrame | nul
         outDb.exec('PRAGMA busy_timeout = 5000');
         outDb
           .prepare(
-            "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'completed', datetime('now'))",
+            "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'completed', ?)",
           )
-          .run(row.id);
+          .run(row.id, Date.now());
         outDb.close();
 
         const parsed = JSON.parse(row.content);

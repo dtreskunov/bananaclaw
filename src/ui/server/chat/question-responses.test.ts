@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import { Readable } from 'node:stream';
@@ -43,14 +44,14 @@ beforeEach(() => {
   runMigrations(initTestDb());
   const db = getDb();
   db.exec(`
-    INSERT INTO users (id, kind, created_at) VALUES ('web:member', 'web', '${NOW}'), ('web:other', 'web', '${NOW}');
-    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('agent', 'Agent', 'agent', '${NOW}');
-    INSERT INTO agent_group_members (user_id, agent_group_id, added_at) VALUES ('web:member', 'agent', '${NOW}');
+    INSERT INTO users (id, kind, created_at) VALUES ('web:member', 'web', ${toEpoch(NOW)}), ('web:other', 'web', ${toEpoch(NOW)});
+    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('agent', 'Agent', 'agent', ${toEpoch(NOW)});
+    INSERT INTO agent_group_members (user_id, agent_group_id, added_at) VALUES ('web:member', 'agent', ${toEpoch(NOW)});
     INSERT INTO messaging_groups (id, channel_type, platform_id, instance, is_group, created_at)
-      VALUES ('mg', 'web', 'group:agent', 'web', 1, '${NOW}');
+      VALUES ('mg', 'web', 'group:agent', 'web', 1, ${toEpoch(NOW)});
     INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, session_mode, created_at)
-      VALUES ('wiring', 'mg', 'agent', 'agent-shared', '${NOW}');
-    INSERT INTO sessions (id, agent_group_id, created_at) VALUES ('session', 'agent', '${NOW}');
+      VALUES ('wiring', 'mg', 'agent', 'agent-shared', ${toEpoch(NOW)});
+    INSERT INTO sessions (id, agent_group_id, created_at) VALUES ('session', 'agent', ${toEpoch(NOW)});
   `);
   initSessionFolder('agent', 'session');
   createQuestion({
@@ -102,7 +103,7 @@ function respond(body: unknown, id = 'q') {
 
 describe('global attention sync', () => {
   it('does not make a legacy expired question actionable or mutate it during reads', async () => {
-    getDb().prepare("UPDATE interactions SET expires_at='2000-01-01' WHERE id='q'").run();
+    getDb().prepare("UPDATE interactions SET expires_at=946684800000 WHERE id='q'").run();
     const before = getQuestion('q');
     expect((await request('GET', '/ui/chat/api/sync')).body.attention).toEqual([]);
     expect(await respond({ responseType: 'choice', value: 'yes' })).toMatchObject({
@@ -137,7 +138,7 @@ describe('approval response messages', () => {
   beforeEach(() => {
     applied.mockReset();
     getDb().exec(`
-      INSERT INTO user_roles(user_id,role,granted_at) VALUES('web:member','owner','${NOW}');
+      INSERT INTO user_roles(user_id,role,granted_at) VALUES('web:member','owner',${toEpoch(NOW)});
       UPDATE sessions SET messaging_group_id='mg',thread_id='thread' WHERE id='session';
     `);
     createApproval({
@@ -159,7 +160,7 @@ describe('approval response messages', () => {
   });
 
   it('rejects a legacy expired approval before applying any effects', async () => {
-    getDb().prepare("UPDATE interactions SET expires_at='2000-01-01' WHERE id='message-approval'").run();
+    getDb().prepare("UPDATE interactions SET expires_at=946684800000 WHERE id='message-approval'").run();
     expect(await respond({ value: 'approve' }, 'message-approval')).toMatchObject({
       status: 409,
       body: { error: 'request_expired' },
@@ -214,7 +215,7 @@ describe('approval response messages', () => {
   });
   it('uses the requesting session group for scoped-admin authorization', async () => {
     getDb().exec(
-      "DELETE FROM user_roles; INSERT INTO user_roles(user_id,role,agent_group_id,granted_at) VALUES('web:member','admin','agent','now')",
+      "DELETE FROM user_roles; INSERT INTO user_roles(user_id,role,agent_group_id,granted_at) VALUES('web:member','admin','agent',1767225600000)",
     );
     expect((await respond({ value: 'approve', message: 'Keep existing work.' }, 'message-approval')).status).toBe(200);
     expect(applied).toHaveBeenCalledOnce();
@@ -307,7 +308,7 @@ describe('typed responses through the existing endpoint', () => {
     expect((await respond({ responseType: 'skipped' }, 'missing')).status).toBe(404);
     getDb().exec("UPDATE interactions SET status = 'cancelled' WHERE id = 'q'");
     expect((await respond({ responseType: 'skipped' })).status).toBe(409);
-    getDb().exec(`INSERT INTO user_roles (user_id, role, granted_at) VALUES ('web:member', 'owner', '${NOW}')`);
+    getDb().exec(`INSERT INTO user_roles (user_id, role, granted_at) VALUES ('web:member', 'owner', ${toEpoch(NOW)})`);
     createApproval({
       id: 'approval',
       session_id: 'session',

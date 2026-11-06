@@ -195,7 +195,7 @@ export function archiveAgentGroup(
          WHERE status='pending' AND
        (agent_group_id=? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id=?))`,
       )
-      .run(archivedAt, archivedAt, groupId, groupId);
+      .run(Date.parse(archivedAt), Date.parse(archivedAt), groupId, groupId);
     const dump: ArchiveDump = { version: 3, archived_at: archivedAt, archived_by: actor, ...dumpRows(groupId) };
     fs.writeFileSync(archiveJsonPath, JSON.stringify(dump, null, 2), 'utf-8');
     fs.writeFileSync(

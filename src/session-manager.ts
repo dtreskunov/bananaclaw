@@ -454,8 +454,8 @@ export function writeOutboundDirect(
     const seq = nextEvenSeq(inDb);
     db.prepare(
       `INSERT OR IGNORE INTO messages_out (id, seq, timestamp, kind, platform_id, channel_type, thread_id, content)
-       VALUES (?, ?, datetime('now'), ?, ?, ?, ?, ?)`,
-    ).run(message.id, seq, message.kind, message.platformId, message.channelType, message.threadId, message.content);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(message.id, seq, Date.now(), message.kind, message.platformId, message.channelType, message.threadId, message.content);
   } finally {
     inDb.close();
     db.close();

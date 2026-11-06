@@ -24,7 +24,7 @@ function insert(id: string, content: Record<string, unknown>, kind = 'chat'): Me
   getInboundDb().prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id,
       sender_user_id, sender_identity, trigger, content)
-     VALUES (?, ?, ?, datetime('now'), 'web', 'room', 'thread', ?, 'web:owner', ?, ?)`,
+     VALUES (?, ?, ?, (unixepoch('now')*1000), 'web', 'room', 'thread', ?, 'web:owner', ?, ?)`,
   ).run(id, sequence += 2, kind, owner, kind === 'system' ? 0 : 1, JSON.stringify(content));
   return getMessageIn(id)!;
 }
@@ -221,7 +221,7 @@ describe('pending input edit CAS', () => {
     const before = insert('target', { text: 'before' });
     if (version === 'current') markProcessing(['target']);
     else getOutboundDb().prepare(
-      "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('target', 'processing', datetime('now'))",
+      "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('target', 'processing', (unixepoch('now')*1000))",
     ).run();
     clearStaleProcessingAcks();
     expect(getPendingMessages().map((row) => row.id)).toEqual(['target']);

@@ -91,7 +91,7 @@ export function processPendingInputEdits(
           }
         }
         db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)')
-          .run(`input-${operation}:${requestId}`, JSON.stringify(receipt), new Date().toISOString());
+          .run(`input-${operation}:${requestId}`, JSON.stringify(receipt), Date.now());
         if (cancelling && receipt.status === 'accepted') {
           writeInputState({ messageId, status: 'cancelled' });
           markCompleted([messageId]);
@@ -191,7 +191,7 @@ export function writeInputState(state: InputState): void {
       `INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
        WHERE session_state.value != excluded.value`,
-    ).run(key, value, new Date().toISOString());
+    ).run(key, value, Date.now());
   }).immediate();
 }
 

@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA, TURN_SCHEMA } from './turns.js';
+import { epochSchema, assertStorageVersion, STORAGE_VERSION, EPOCH_NOW_SQL } from './storage-lifecycle.js';
 
 export interface PendingRunnerEvent {
   event_id: string;
@@ -10,23 +11,27 @@ export interface PendingRunnerEvent {
 
 const enqueue = (eventType: string, payload: string): string => `
   INSERT INTO pending_runner_events (event_id, event_type, payload, created_at)
-  VALUES (lower(hex(randomblob(16))), '${eventType}', ${payload}, datetime('now'));
+  VALUES (lower(hex(randomblob(16))), '${eventType}', ${payload}, ${EPOCH_NOW_SQL});
 `;
 
 export function ensureRunnerStateSchema(db: Database): void {
-  db.transaction(() => applyRunnerStateSchema(db))();
+  assertStorageVersion(db, 'runner-state');
+  db.transaction(() => {
+    applyRunnerStateSchema(db);
+    db.exec(`PRAGMA user_version=${STORAGE_VERSION}`);
+  })();
 }
 
 function applyRunnerStateSchema(db: Database): void {
-  db.exec(TURN_SCHEMA);
-  db.exec(TURN_ACTIVITY_SCHEMA);
+  db.exec(epochSchema(TURN_SCHEMA));
+  db.exec(epochSchema(TURN_ACTIVITY_SCHEMA));
   const columns = db.prepare('PRAGMA table_info(turn_activity)').all() as Array<{ name: string; notnull: number }>;
   if (!columns.some((column) => column.name === 'timeline_position' && column.notnull === 1)) {
     throw new Error(
       'Unsupported activity-order schema: turn_activity.timeline_position must be NOT NULL. See docs/ui.md#activity-order-storage.',
     );
   }
-  db.exec(`
+  db.exec(epochSchema(`
     CREATE TABLE IF NOT EXISTS messages_in (
       id TEXT PRIMARY KEY,
       seq INTEGER UNIQUE,
@@ -389,10 +394,10 @@ function applyRunnerStateSchema(db: Database): void {
       )`,
       )}
     END;
-  `);
+  `));
   db.exec(TURN_INDEX_SCHEMA);
   for (const operation of ['INSERT', 'UPDATE']) {
-    db.exec(`
+    db.exec(epochSchema(`
       CREATE TRIGGER IF NOT EXISTS journal_turn_${operation.toLowerCase()}
       AFTER ${operation} ON turns BEGIN
         ${enqueue(
@@ -407,9 +412,9 @@ function applyRunnerStateSchema(db: Database): void {
           'imported_from_turn_id', NEW.imported_from_turn_id)`,
         )}
       END;
-    `);
+    `));
   }
-  db.exec(`
+  db.exec(epochSchema(`
     CREATE TRIGGER IF NOT EXISTS journal_turn_input_insert AFTER INSERT ON turn_inputs BEGIN
       ${enqueue(
         'turn-input.upsert',
@@ -417,7 +422,7 @@ function applyRunnerStateSchema(db: Database): void {
         'message_in_id', NEW.message_in_id, 'association', NEW.association)`,
       )}
     END;
-  `);
+  `));
 }
 
 export function listPendingRunnerEvents(db: Database, limit = 32): PendingRunnerEvent[] {
@@ -436,6 +441,6 @@ export function acknowledgeRunnerEvent(db: Database, eventId: string): void {
 export function markBatchPersisted(db: Database): void {
   db.prepare(
     `INSERT INTO pending_runner_events (event_id, event_type, payload, created_at)
-       VALUES (lower(hex(randomblob(16))), 'batch.persisted', '{}', datetime('now'))`,
+       VALUES (lower(hex(randomblob(16))), 'batch.persisted', '{}', ${EPOCH_NOW_SQL})`,
   ).run();
 }

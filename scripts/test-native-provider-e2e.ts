@@ -40,7 +40,7 @@ inbound
   )
   .run(
     'native-e2e-message',
-    new Date().toISOString(),
+    Date.now(),
     JSON.stringify({ sender: 'Native smoke test', text: 'Send the smoke-test message.' }),
   );
 inbound.close();

@@ -67,7 +67,7 @@ function insertOutbound(agentGroupId: string, sessionId: string, msgId: string):
   const db = new Database(outboundDbPath(agentGroupId, sessionId));
   db.prepare(
     `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
-     VALUES (?, datetime('now'), 'chat', 'telegram:123', 'telegram', ?)`,
+     VALUES (?, (unixepoch('now')*1000), 'chat', 'telegram:123', 'telegram', ?)`,
   ).run(msgId, JSON.stringify({ text: 'hello' }));
   db.close();
 }
@@ -118,7 +118,7 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     try {
       db.prepare(
         `INSERT INTO messages_out(id,timestamp,kind,in_reply_to,content)
-        VALUES('approval-request',datetime('now'),'system','original-input','{"action":"approval-origin-test"}')`,
+        VALUES('approval-request',(unixepoch('now')*1000),'system','original-input','{"action":"approval-origin-test"}')`,
       ).run();
     } finally {
       db.close();
@@ -143,7 +143,7 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     out
       .prepare(
         `INSERT INTO messages_out(id,timestamp,kind,platform_id,channel_type,content)
-      VALUES('question-output',datetime('now'),'chat-sdk','telegram:123','telegram',?)`,
+      VALUES('question-output',(unixepoch('now')*1000),'chat-sdk','telegram:123','telegram',?)`,
       )
       .run(JSON.stringify({ type: 'ask_question', questionId: 'question', ...input, timelinePosition: 100 }));
     out.close();
@@ -166,8 +166,8 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     outDb
       .prepare(
         `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
-         VALUES ('original', datetime('now'), 'chat', 'telegram:123', 'telegram', '{"text":"before"}'),
-                ('edit-op', datetime('now'), 'chat', 'telegram:123', 'telegram',
+         VALUES ('original', (unixepoch('now')*1000), 'chat', 'telegram:123', 'telegram', '{"text":"before"}'),
+                ('edit-op', (unixepoch('now')*1000), 'chat', 'telegram:123', 'telegram',
                  '{"operation":"edit","messageId":"original","text":"after"}')`,
       )
       .run();
@@ -410,7 +410,7 @@ describe('deliverSessionMessages — instance resolution', () => {
     const db = new Database(outboundDbPath('ag-1', session.id));
     db.prepare(
       `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
-       VALUES ('out-inst', datetime('now'), 'chat', 'slack:C1', 'slack', ?)`,
+       VALUES ('out-inst', (unixepoch('now')*1000), 'chat', 'slack:C1', 'slack', ?)`,
     ).run(JSON.stringify({ text: 'hi' }));
     db.close();
 
@@ -467,7 +467,7 @@ describe('deliverSessionMessages — permission check', () => {
     outDb
       .prepare(
         `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
-       VALUES (?, datetime('now'), 'chat', 'discord:456', 'discord', ?)`,
+       VALUES (?, (unixepoch('now')*1000), 'chat', 'discord:456', 'discord', ?)`,
       )
       .run('out-unauth', JSON.stringify({ text: 'sneaky' }));
     outDb.close();
@@ -531,7 +531,7 @@ describe('deliverSessionMessages — delivery-failure bounce-back', () => {
     outDb
       .prepare(
         `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
-         VALUES (?, datetime('now'), 'chat', 'resend:bob@example.com', 'resend', ?)`,
+         VALUES (?, (unixepoch('now')*1000), 'chat', 'resend:bob@example.com', 'resend', ?)`,
       )
       .run('out-misroute', JSON.stringify({ text: 'the wedding site is live' }));
     outDb.close();

@@ -312,14 +312,14 @@ registerChannelAdapter('resend', {
     const selectRoot = db.prepare<[string], { root_message_id: string }>(
       'SELECT root_message_id FROM resend_thread_roots WHERE thread_id = ?',
     );
-    const insertRoot = db.prepare<[string, string, string]>(
+    const insertRoot = db.prepare<[string, string, number]>(
       'INSERT OR IGNORE INTO resend_thread_roots (thread_id, root_message_id, created_at) VALUES (?, ?, ?)',
     );
     const recordRoot = (threadId: string, rootMessageId: string): void => {
       // INSERT OR IGNORE makes this first-writer-wins, so a later message
       // can't clobber the true root.
       try {
-        insertRoot.run(threadId, rootMessageId, new Date().toISOString());
+        insertRoot.run(threadId, rootMessageId, Date.now());
       } catch (err) {
         log.warn('resend: failed to persist thread root', { err, threadId });
       }

@@ -29,7 +29,7 @@ function insert(id: string) {
     .prepare(
       `INSERT INTO messages_in
     (id, kind, timestamp, status, channel_type, platform_id, content)
-    VALUES (?, 'chat', datetime('now'), 'pending', 'web', 'chat-1', ?)`,
+    VALUES (?, 'chat', (unixepoch('now')*1000), 'pending', 'web', 'chat-1', ?)`,
     )
     .run(id, JSON.stringify({ text: id }));
   link.emitHostEventForTesting();

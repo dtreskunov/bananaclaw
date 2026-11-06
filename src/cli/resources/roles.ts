@@ -43,9 +43,9 @@ registerResource({
         getDb()
           .prepare(
             `INSERT OR IGNORE INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at)
-             VALUES (?, ?, ?, ?, datetime('now'))`,
+             VALUES (?, ?, ?, ?, ?)`,
           )
-          .run(userId, role, groupId, grantedBy);
+          .run(userId, role, groupId, grantedBy, Date.now());
         recordHostChange({ kind: 'access' });
         return { user_id: userId, role, agent_group_id: groupId };
       },

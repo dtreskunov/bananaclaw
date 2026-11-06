@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,16 +20,16 @@ const NOW = '2026-10-05T18:00:00Z';
 beforeEach(() => {
   runMigrations(initTestDb());
   getDb().exec(`
-    INSERT INTO users(id,kind,created_at) VALUES('viewer','web','${NOW}'),('other','web','${NOW}');
+    INSERT INTO users(id,kind,created_at) VALUES('viewer','web',${toEpoch(NOW)}),('other','web',${toEpoch(NOW)});
     INSERT INTO agent_groups(id,name,folder,created_at)
-      VALUES('g','Group','group','${NOW}'),('g2','Other','other','${NOW}');
-    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g','${NOW}');
+      VALUES('g','Group','group',${toEpoch(NOW)}),('g2','Other','other',${toEpoch(NOW)});
+    INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g',${toEpoch(NOW)});
     INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-      VALUES('mg','web','web','group:g',1,'${NOW}'),('mg2','web','web','group:g2',1,'${NOW}');
+      VALUES('mg','web','web','group:g',1,${toEpoch(NOW)}),('mg2','web','web','group:g2',1,${toEpoch(NOW)});
     INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-      VALUES('w','mg','g','per-thread','${NOW}'),('w2','mg2','g2','per-thread','${NOW}');
+      VALUES('w','mg','g','per-thread',${toEpoch(NOW)}),('w2','mg2','g2','per-thread',${toEpoch(NOW)});
     INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
-      VALUES('s','g','mg','t','${NOW}'),('s2','g2','mg2','t2','${NOW}');
+      VALUES('s','g','mg','t',${toEpoch(NOW)}),('s2','g2','mg2','t2',${toEpoch(NOW)});
   `);
   initSessionFolder('g', 's');
   initSessionFolder('g2', 's2');
@@ -71,7 +72,7 @@ function approval(id: string, account = false) {
 function admin(user = 'viewer', group: string | null = 'g') {
   getDb()
     .prepare('INSERT INTO user_roles(user_id,role,agent_group_id,granted_at) VALUES(?,?,?,?)')
-    .run(user, group === null ? 'owner' : 'admin', group, NOW);
+    .run(user, group === null ? 'owner' : 'admin', group, toEpoch(NOW));
 }
 
 describe('authorized global input attention', () => {
@@ -122,7 +123,7 @@ describe('authorized global input attention', () => {
     approval('applying');
     approval('rejected');
     approval('expired');
-    getDb().exec("UPDATE interactions SET expires_at='2000-01-01T00:00:00Z' WHERE id='expired'");
+    getDb().exec("UPDATE interactions SET expires_at=946684800000 WHERE id='expired'");
     updateApprovalStatus('applying', 'applying');
     updateApprovalStatus('rejected', 'rejected');
     expect(readInteractionSync('viewer').attention.map((row) => row.id)).toEqual(['q']);
@@ -150,7 +151,7 @@ describe('authorized global input attention', () => {
     expect(readInteractionSync('viewer').attention).toHaveLength(1);
     getDb().exec("DELETE FROM agent_group_members WHERE user_id='viewer'");
     expect(readInteractionSync('viewer').attention).toEqual([]);
-    getDb().exec(`INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g','${NOW}')`);
+    getDb().exec(`INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g',${toEpoch(NOW)})`);
     getDb().exec("UPDATE interactions SET platform_id='different' WHERE id='q'");
     expect(readInteractionSync('viewer').attention).toEqual([]);
   });
@@ -168,12 +169,12 @@ describe('authorized global input attention', () => {
     question('a');
     question('b');
     getDb().exec(`
-      INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('other','g','${NOW}');
+      INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('other','g',${toEpoch(NOW)});
       UPDATE sessions SET messaging_group_id=NULL,thread_id=NULL WHERE id='s';
       INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('a','resend','resend','resend:a',0,'${NOW}'),('b','resend','resend','resend:b',0,'${NOW}');
+        VALUES('a','resend','resend','resend:a',0,${toEpoch(NOW)}),('b','resend','resend','resend:b',0,${toEpoch(NOW)});
       INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('a','a','g','agent-shared','${NOW}'),('b','b','g','agent-shared','${NOW}');
+        VALUES('a','a','g','agent-shared',${toEpoch(NOW)}),('b','b','g','agent-shared',${toEpoch(NOW)});
       UPDATE interactions SET channel_type='resend',thread_id=NULL,platform_id='resend:'||id;
     `);
     insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'a' });

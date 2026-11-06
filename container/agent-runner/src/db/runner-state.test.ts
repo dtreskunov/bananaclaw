@@ -27,7 +27,7 @@ describe('runner state journal', () => {
         message_out_id TEXT, ordinal INTEGER, ts TEXT, text TEXT, turn_id TEXT,
         PRIMARY KEY (message_out_id, ordinal));
         INSERT INTO turn_activity VALUES ('legacy', 0, 'same-time', 'work', NULL)`);
-      expect(() => ensureRunnerStateSchema(db)).toThrow('Unsupported activity-order schema');
+      expect(() => ensureRunnerStateSchema(db)).toThrow('Unsupported runner-state storage version');
       expect(db.prepare('PRAGMA table_info(turn_activity)').all()).toHaveLength(5);
     } finally { db.close(); }
   });
@@ -47,7 +47,7 @@ describe('runner state journal', () => {
     db.prepare(
       `INSERT INTO messages_out
         (id, seq, timestamp, kind, content)
-       VALUES ('out-1', 1, datetime('now'), 'chat', '{"text":"hello"}')`,
+       VALUES ('out-1', 1, (unixepoch()*1000), 'chat', '{"text":"hello"}')`,
     ).run();
     markProcessing(['in-1']);
     markCompleted(['in-1']);

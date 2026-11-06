@@ -10,8 +10,8 @@ let off = () => {};
 beforeEach(() => {
   runMigrations(initTestDb());
   getDb().exec(`
-    INSERT INTO users(id,kind,created_at) VALUES('u','web','now');
-    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','group','now');
+    INSERT INTO users(id,kind,created_at) VALUES('u','web',1767225600000);
+    INSERT INTO agent_groups(id,name,folder,created_at) VALUES('g','Group','group',1767225600000);
   `);
 });
 afterEach(() => {
@@ -43,7 +43,7 @@ describe('committed host changes', () => {
     off = onHostChange((_change: HostChange) => {
       counts.push((getDb().prepare('SELECT COUNT(*) AS n FROM agent_group_members').get() as { n: number }).n);
     });
-    const member = { user_id: 'u', agent_group_id: 'g', added_by: null, added_at: 'now' };
+    const member = { user_id: 'u', agent_group_id: 'g', added_by: null, added_at: '2026-01-01T00:00:00.000Z' };
     expect(() =>
       transaction(getDb(), () => {
         addMember(member);
@@ -98,12 +98,12 @@ describe('committed host changes', () => {
   });
 
   it('retains the originating session when a mutation deletes an interaction', async () => {
-    getDb().exec("INSERT INTO sessions(id,agent_group_id,created_at) VALUES('session','g','now')");
+    getDb().exec("INSERT INTO sessions(id,agent_group_id,created_at) VALUES('session','g',1767225600000)");
     createApproval({
       id: 'a',
       request_id: 'a',
       session_id: 'session',
-      created_at: 'now',
+      created_at: '2026-01-01T00:00:00.000Z',
       input: { action: 'test', payload: {}, title: 'Review', options: [] },
     });
     await Promise.resolve();

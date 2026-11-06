@@ -1,3 +1,4 @@
+import { toEpoch } from '../../../db/time.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -62,19 +63,19 @@ beforeEach(async () => {
   runMigrations(initTestDb());
   const db = getDb();
   for (const id of [USER, 'web:outsider']) {
-    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(id, new Date().toISOString());
+    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(id, toEpoch(new Date().toISOString()));
   }
   db.prepare('INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)').run(
     GROUP,
     GROUP,
     GROUP,
-    new Date().toISOString(),
+    toEpoch(new Date().toISOString()),
   );
   db.prepare('INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)').run(
     USER,
     GROUP,
     USER,
-    new Date().toISOString(),
+    toEpoch(new Date().toISOString()),
   );
   vi.mocked(wakeContainer).mockReset().mockResolvedValue(true);
   vi.mocked(killContainer).mockReset();

@@ -30,6 +30,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
+import { fromEpoch } from '../../../db/time.js';
 import {
   createMessagingGroup,
   createMessagingGroupAgent,
@@ -1368,8 +1369,8 @@ function readTaskAttempts(groupId: string, sessionId: string, seriesId: string):
         task_message_id: string;
         trigger_source: string;
         status: TaskAttemptDto['status'];
-        started_at: string;
-        completed_at: string | null;
+        started_at: number;
+        completed_at: number | null;
         duration_ms: number | null;
         exit_code: number | null;
         signal: string | null;
@@ -1381,8 +1382,8 @@ function readTaskAttempts(groupId: string, sessionId: string, seriesId: string):
         taskMessageId: row.task_message_id,
         triggerSource: row.trigger_source === 'manual' ? 'manual' : 'scheduled',
         status: row.status,
-        startedAt: row.started_at,
-        completedAt: row.completed_at,
+        startedAt: fromEpoch(row.started_at),
+        completedAt: fromEpoch(row.completed_at),
         durationMs: row.duration_ms,
         exitCode: row.exit_code,
         signal: row.signal,
@@ -1476,7 +1477,7 @@ function readLiveTaskDetails(
       ) as {
         id: string;
         status: string;
-        process_after: string | null;
+        process_after: number | null;
         recurrence: string | null;
         content: string;
       }[];
@@ -1485,7 +1486,7 @@ function readLiveTaskDetails(
         out.push({
           seriesId: r.id,
           status: r.status === 'paused' ? 'paused' : 'pending',
-          nextRunAt: r.process_after,
+          nextRunAt: fromEpoch(r.process_after),
           recurrence: r.recurrence,
           summary: summarizeTaskPrompt(r.content),
           prompt,

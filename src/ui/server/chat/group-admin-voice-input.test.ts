@@ -57,12 +57,12 @@ beforeEach(() => {
   const db = initTestDb();
   runMigrations(db);
   db.exec(`
-    INSERT INTO users (id, kind, display_name, created_at) VALUES ('web:owner', 'web', 'Owner', 'now');
+    INSERT INTO users (id, kind, display_name, created_at) VALUES ('web:owner', 'web', 'Owner', 1767225600000);
     INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at)
-    VALUES ('web:owner', 'owner', NULL, 'web:owner', 'now');
-    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 'now');
+    VALUES ('web:owner', 'owner', NULL, 'web:owner', 1767225600000);
+    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('g', 'Group', 'group', 1767225600000);
     INSERT INTO container_configs (agent_group_id, updated_at)
-    VALUES ('g', 'now');
+    VALUES ('g', 1767225600000);
   `);
 });
 

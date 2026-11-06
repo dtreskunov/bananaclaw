@@ -25,10 +25,11 @@ export function writeTurnCheckpoint(
     .prepare(
       `INSERT OR REPLACE INTO turn_checkpoints
          (message_out_id, provider, continuation, provider_turn_ref, created_at)
-       VALUES ($message_out_id, $provider, $continuation, $provider_turn_ref, datetime('now'))`,
+       VALUES ($message_out_id, $provider, $continuation, $provider_turn_ref, $created_at)`,
     )
     .run({
       $message_out_id: messageOutId,
+      $created_at: Date.now(),
       $provider: provider,
       $continuation: continuation,
       $provider_turn_ref: providerTurnRef,

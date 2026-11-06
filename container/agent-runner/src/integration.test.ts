@@ -40,7 +40,7 @@ function insertMessage(id: string, content: object, opts?: { platformId?: string
   getInboundDb()
     .prepare(
       `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content)
-       VALUES (?, 'chat', datetime('now'), 'pending', ?, ?, ?, ?)`,
+       VALUES (?, 'chat', (unixepoch('now')*1000), 'pending', ?, ?, ?, ?)`,
     )
     .run(id, opts?.platformId ?? null, opts?.channelType ?? null, opts?.threadId ?? null, JSON.stringify(content));
   emitHostEventForTesting();
@@ -122,7 +122,7 @@ describe('poll loop integration', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
-         VALUES ('m-no-event', 'chat', datetime('now'), 'pending', 'chan-1', 'discord', ?)`,
+         VALUES ('m-no-event', 'chat', (unixepoch('now')*1000), 'pending', 'chan-1', 'discord', ?)`,
       )
       .run(JSON.stringify({ sender: 'Alice', text: 'wait for event' }));
     await sleep(200);
@@ -577,7 +577,7 @@ describe('poll loop integration', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
-         VALUES ('t-task', 'task', datetime('now'), 'pending', 'chan-1', 'discord', ?)`,
+         VALUES ('t-task', 'task', (unixepoch('now')*1000), 'pending', 'chan-1', 'discord', ?)`,
       )
       .run(JSON.stringify({ prompt: 'daily check' }));
 
@@ -771,7 +771,7 @@ describe('poll loop — /clear command', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
-         VALUES ('m-clear', 'chat', datetime('now'), 'pending', 'chan-1', 'discord', ?)`,
+         VALUES ('m-clear', 'chat', (unixepoch('now')*1000), 'pending', 'chan-1', 'discord', ?)`,
       )
       .run(JSON.stringify({ text: '/clear' }));
 
@@ -912,7 +912,7 @@ describe('poll loop — scheduled task during active query', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, platform_id, channel_type, content)
-         VALUES ('task-fired', 'task', datetime('now'), 'pending', datetime('now', '-1 minute'), 1, 'chan-1', 'discord', ?)`,
+         VALUES ('task-fired', 'task', (unixepoch('now')*1000), 'pending', (unixepoch('now', '-1 minute')*1000), 1, 'chan-1', 'discord', ?)`,
       )
       .run(JSON.stringify({ prompt: 'Send a message to discord-test containing exactly: scheduled msg' }));
     emitHostEventForTesting();
@@ -938,7 +938,7 @@ describe('poll loop — isolated task turns', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, platform_id, channel_type, content)
-         VALUES ('task-only', 'task', datetime('now'), 'pending', datetime('now', '-1 minute'), 1, 'chan-1', 'discord', ?)`,
+         VALUES ('task-only', 'task', (unixepoch('now')*1000), 'pending', (unixepoch('now', '-1 minute')*1000), 1, 'chan-1', 'discord', ?)`,
       )
       .run(JSON.stringify({ prompt: 'Send a message to discord-test containing exactly: scheduled msg' }));
 

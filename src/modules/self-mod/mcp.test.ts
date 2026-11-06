@@ -29,14 +29,20 @@ const session: Session = {
   status: 'active',
   container_status: 'running',
   last_active: null,
-  created_at: 'now',
+  created_at: '2026-01-01T00:00:00.000Z',
 };
 const initial = { unrelated: { command: 'keep', args: ['unchanged'] } };
 const servers = () => JSON.parse(getContainerConfig(session.agent_group_id)!.mcp_servers);
 
 beforeEach(() => {
   runMigrations(initTestDb());
-  createAgentGroup({ id: 'agent', name: 'Agent', folder: 'agent', agent_provider: null, created_at: 'now' });
+  createAgentGroup({
+    id: 'agent',
+    name: 'Agent',
+    folder: 'agent',
+    agent_provider: null,
+    created_at: '2026-01-01T00:00:00.000Z',
+  });
   ensureContainerConfig('agent');
   updateContainerConfigJson('agent', 'mcp_servers', initial);
   vi.clearAllMocks();

@@ -84,9 +84,9 @@ registerResource({
         getDb()
           .prepare(
             `INSERT INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at, created_by)
-             VALUES (?, ?, ?, ?, datetime('now'), NULL)`,
+             VALUES (?, ?, ?, ?, ?, NULL)`,
           )
-          .run(agentGroupId, localName, targetType, targetId);
+          .run(agentGroupId, localName, targetType, targetId, Date.now());
         await projectDestinationsToSessions(agentGroupId);
         return { agent_group_id: agentGroupId, local_name: localName, target_type: targetType, target_id: targetId };
       },

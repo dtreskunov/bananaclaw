@@ -10,6 +10,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import { getDb } from '../../../db/connection.js';
+import { toEpoch, decodeTimes, decodeTimeRows } from '../../../db/time.js';
 
 export interface IdentityLinkChallenge {
   id: string;
@@ -59,26 +60,24 @@ export function countActiveForUser(userId: string): number {
   const row = getDb()
     .prepare(
       `SELECT COUNT(*) AS n FROM identity_link_challenges
-       WHERE user_id = ? AND consumed_at IS NULL AND expires_at > datetime('now')`,
+       WHERE user_id = ? AND consumed_at IS NULL AND expires_at > ?`,
     )
-    .get(userId) as { n: number };
+    .get(userId, Date.now()) as { n: number };
   return row.n;
 }
 
 export function listActiveForUser(userId: string): IdentityLinkChallenge[] {
-  return getDb()
+  return decodeTimeRows<IdentityLinkChallenge>(getDb()
     .prepare(
       `SELECT * FROM identity_link_challenges
-       WHERE user_id = ? AND consumed_at IS NULL AND expires_at > datetime('now')
+       WHERE user_id = ? AND consumed_at IS NULL AND expires_at > ?
        ORDER BY created_at DESC`,
     )
-    .all(userId) as IdentityLinkChallenge[];
+    .all(userId, Date.now()), ['expires_at', 'created_at', 'consumed_at']);
 }
 
 export function getChallenge(id: string): IdentityLinkChallenge | undefined {
-  return getDb().prepare('SELECT * FROM identity_link_challenges WHERE id = ?').get(id) as
-    | IdentityLinkChallenge
-    | undefined;
+  return decodeTimes<IdentityLinkChallenge | undefined>(getDb().prepare('SELECT * FROM identity_link_challenges WHERE id = ?').get(id), ['expires_at', 'created_at', 'consumed_at']);
 }
 
 export function createChallenge(args: { user_id: string; channel_type: string; handle: string; ttl_ms?: number }): {
@@ -95,7 +94,7 @@ export function createChallenge(args: { user_id: string; channel_type: string; h
        (id, user_id, channel_type, handle, code_hash, expires_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, args.user_id, args.channel_type, args.handle, sha256Hex(code), expiresAt);
+    .run(id, args.user_id, args.channel_type, args.handle, sha256Hex(code), toEpoch(expiresAt));
   return { row: getChallenge(id)!, code };
 }
 
@@ -116,7 +115,7 @@ export function verifyCode(id: string, plaintext: string): boolean {
 }
 
 export function consumeChallenge(id: string): void {
-  getDb().prepare(`UPDATE identity_link_challenges SET consumed_at = datetime('now') WHERE id = ?`).run(id);
+  getDb().prepare(`UPDATE identity_link_challenges SET consumed_at = ? WHERE id = ?`).run(Date.now(), id);
 }
 
 /**
@@ -138,7 +137,7 @@ export function createDeepLinkChallenge(args: { user_id: string; channel_type: s
        (id, user_id, channel_type, handle, code_hash, expires_at)
        VALUES (?, ?, ?, '', ?, ?)`,
     )
-    .run(id, args.user_id, args.channel_type, sha256Hex(token), expiresAt);
+    .run(id, args.user_id, args.channel_type, sha256Hex(token), toEpoch(expiresAt));
   return { row: getChallenge(id)!, token };
 }
 
@@ -152,14 +151,14 @@ export function findActiveDeepLinkChallengeByCode(
   channel_type: string,
   plaintext: string,
 ): IdentityLinkChallenge | null {
-  const rows = getDb()
+  const rows = decodeTimeRows<IdentityLinkChallenge>(getDb()
     .prepare(
       `SELECT * FROM identity_link_challenges
        WHERE channel_type = ? AND handle = '' AND code_hash = ?
-         AND consumed_at IS NULL AND expires_at > datetime('now')
+         AND consumed_at IS NULL AND expires_at > ?
        LIMIT 2`,
     )
-    .all(channel_type, sha256Hex(plaintext)) as IdentityLinkChallenge[];
+    .all(channel_type, sha256Hex(plaintext), Date.now()), ['expires_at', 'created_at', 'consumed_at']);
   if (rows.length !== 1) return null;
   return rows[0];
 }

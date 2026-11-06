@@ -119,7 +119,7 @@ beforeEach(() => {
   const database = initTestDb();
   runMigrations(database);
   database
-    .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, datetime('now'))`)
+    .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, (unixepoch('now')*1000))`)
     .run(USER_ID, 'Private Issuer');
   createAgentGroup({
     id: GROUP_ID,

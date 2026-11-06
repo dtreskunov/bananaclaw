@@ -132,7 +132,7 @@ beforeAll(async () => {
   const database = db.initTestDb();
   db.runMigrations(database);
   database
-    .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, datetime('now'))`)
+    .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, (unixepoch('now')*1000))`)
     .run(USER_ID, 'Private Member');
   db.createAgentGroup({
     id: GROUP_ID,
@@ -143,7 +143,7 @@ beforeAll(async () => {
   });
   database
     .prepare(
-      `INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, datetime('now'))`,
+      `INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, (unixepoch('now')*1000))`,
     )
     .run(USER_ID, GROUP_ID);
   groupRoot = path.join(config.GROUPS_DIR, FOLDER);
@@ -315,7 +315,7 @@ describe('private web host', () => {
     expect((await call({ host, url: '/report/index.html', cookie })).status()).toBe(404);
     db.getDb()
       .prepare(
-        `INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, datetime('now'))`,
+        `INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, (unixepoch('now')*1000))`,
       )
       .run(USER_ID, GROUP_ID);
   });

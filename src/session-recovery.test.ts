@@ -42,7 +42,7 @@ describe('needsStoppedRunnerRecovery', () => {
   it('recovers an outstanding processing projection before applying stale-claim retries', () => {
     const db = openOutboundDbRw(session.agent_group_id, session.id);
     try {
-      db.prepare("INSERT INTO processing_ack VALUES ('input-1','processing','2026-10-04 20:22:46')").run();
+      db.prepare("INSERT INTO processing_ack VALUES ('input-1','processing',1791145366000)").run();
     } finally {
       db.close();
     }

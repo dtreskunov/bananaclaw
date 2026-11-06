@@ -35,14 +35,14 @@ export function upsertThreadTitle(db: Database.Database, input: ThreadTitleUpdat
     .prepare(
       `INSERT INTO thread_titles
          (channel_type, platform_id, thread_id, title, source, request_message_id, published, updated_at)
-       VALUES (@channelType, @platformId, @threadId, @title, 'model', @requestMessageId, 1, datetime('now'))
+       VALUES (@channelType, @platformId, @threadId, @title, 'model', @requestMessageId, 1, @updatedAt)
        ON CONFLICT(channel_type, platform_id, thread_id) DO UPDATE SET
          title = excluded.title,
          request_message_id = excluded.request_message_id,
          published = 1,
          updated_at = excluded.updated_at`,
     )
-    .run({ ...keyParams(input), title, requestMessageId: input.requestMessageId });
+    .run({ ...keyParams(input), title, requestMessageId: input.requestMessageId, updatedAt: Date.now() });
   if (result.changes) recordSessionDatabaseChange(db);
   return result.changes > 0;
 }
