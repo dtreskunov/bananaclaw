@@ -17,7 +17,7 @@ beforeEach(() => {
 afterEach(() => closeDb());
 
 function seedGroup(id: string, name: string): void {
-  createAgentGroup({ id, name, folder: id, agent_provider: null, created_at: new Date().toISOString() });
+  createAgentGroup({ id, name, folder: id, agent_provider: null, created_at: Date.now() });
 }
 
 describe('agent email routing', () => {

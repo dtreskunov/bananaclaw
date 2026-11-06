@@ -90,7 +90,7 @@ export async function applyAgentLink(input: ApplyAgentLinkInput): Promise<ApplyA
     }
   }
 
-  const now = new Date().toISOString();
+  const now = Date.now();
 
   createDestination({
     agent_group_id: source.id,

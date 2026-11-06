@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import fs from 'node:fs';
 
 import Database from 'better-sqlite3';
@@ -112,7 +113,7 @@ describe('host event journal', () => {
       writeSessionMessage(AGENT_GROUP_ID, SESSION_ID, {
         id: 'too-large',
         kind: 'chat',
-        timestamp: '2026-09-01 00:00:00',
+        timestamp: parseTimestamp('2026-09-01 00:00:00'),
         content: 'x'.repeat(10 * 1024 * 1024 + 1),
       }),
     ).toThrow('exceeds the 10485760-byte session-link limit');
@@ -161,7 +162,7 @@ describe('host event journal', () => {
         writeSessionMessage(AGENT_GROUP_ID, SESSION_ID, {
           id: 'x'.repeat(257),
           kind: 'chat',
-          timestamp: '2026-09-01 00:00:00',
+          timestamp: parseTimestamp('2026-09-01 00:00:00'),
           content: '{"text":"hello"}',
         }),
       ).toThrow('insertMessage.id exceeds session-link limit');

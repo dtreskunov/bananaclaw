@@ -1,27 +1,30 @@
 import { getDb } from '../../db/connection.js';
-import { encodeTimes, decodeTimes } from '../../db/time.js';
+import { assertTimestampFields } from '../../db/validate-timestamps.js';
 
 export interface ResendOutboundCorrelation {
   correlation_token: string;
   origin_session_id: string;
   email_thread_id: string;
-  created_at: string;
+  created_at: number;
 }
 
 export function createResendOutboundCorrelation(
   row: Pick<ResendOutboundCorrelation, 'correlation_token' | 'origin_session_id' | 'email_thread_id' | 'created_at'>,
 ): void {
+  assertTimestampFields(row, ['created_at']);
   getDb()
     .prepare(
       `INSERT INTO resend_outbound_correlations
          (correlation_token, origin_session_id, email_thread_id, created_at)
        VALUES (@correlation_token, @origin_session_id, @email_thread_id, @created_at)`,
     )
-    .run(encodeTimes(row, ['created_at']));
+    .run(row);
 }
 
 export function getResendOutboundCorrelationByToken(token: string): ResendOutboundCorrelation | undefined {
-  return decodeTimes<ResendOutboundCorrelation | undefined>(getDb().prepare('SELECT * FROM resend_outbound_correlations WHERE correlation_token = ?').get(token), ['created_at']);
+  return getDb().prepare('SELECT * FROM resend_outbound_correlations WHERE correlation_token = ?').get(token) as
+    | ResendOutboundCorrelation
+    | undefined;
 }
 
 export function deleteResendOutboundCorrelation(token: string): void {

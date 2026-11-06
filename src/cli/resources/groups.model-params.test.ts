@@ -15,18 +15,18 @@ vi.mock('../../container-runner.js', () => ({
 
 vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-cli-model-params' };
+  return { ...actual, DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-cli-model-params` };
 });
 
-const TEST_DIR = '/tmp/nanoclaw-test-cli-model-params';
+const TEST_DIR = `${process.cwd()}/.test-state/nanoclaw-test-cli-model-params`;
 
 import { initTestDb, closeDb, runMigrations, createAgentGroup } from '../../db/index.js';
 import { createContainerConfig, getContainerConfig } from '../../db/container-configs.js';
 import { dispatch } from '../dispatch.js';
 import './groups.js';
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 function seedGroup(id: string): void {

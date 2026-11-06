@@ -7,7 +7,6 @@
 import crypto from 'crypto';
 
 import { getDb } from '../../db/connection.js';
-import { decodeTimes, decodeTimeRows } from '../../db/time.js';
 
 export interface PushSubscriptionRow {
   id: string;
@@ -16,8 +15,8 @@ export interface PushSubscriptionRow {
   p256dh: string;
   auth: string;
   ua: string | null;
-  created_at: string;
-  last_used_at: string | null;
+  created_at: number;
+  last_used_at: number | null;
   last_error: string | null;
   fail_count: number;
 }
@@ -43,14 +42,14 @@ export function upsertSubscription(input: UpsertSubscriptionInput): PushSubscrip
          SET user_id = ?, p256dh = ?, auth = ?, ua = ?, last_used_at = ?, last_error = NULL, fail_count = 0
          WHERE id = ?`,
     ).run(input.userId, input.p256dh, input.auth, input.ua ?? null, now, existing.id);
-    return decodeTimes<PushSubscriptionRow>(db.prepare('SELECT * FROM push_subscriptions WHERE id = ?').get(existing.id), ['created_at', 'last_used_at']);
+    return db.prepare('SELECT * FROM push_subscriptions WHERE id = ?').get(existing.id) as PushSubscriptionRow;
   }
   const id = `pushsub-${crypto.randomBytes(8).toString('hex')}`;
   db.prepare(
     `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, ua, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(id, input.userId, input.endpoint, input.p256dh, input.auth, input.ua ?? null, now);
-  return decodeTimes<PushSubscriptionRow>(db.prepare('SELECT * FROM push_subscriptions WHERE id = ?').get(id), ['created_at', 'last_used_at']);
+  return db.prepare('SELECT * FROM push_subscriptions WHERE id = ?').get(id) as PushSubscriptionRow;
 }
 
 export function deleteSubscriptionByEndpoint(endpoint: string): void {
@@ -58,9 +57,9 @@ export function deleteSubscriptionByEndpoint(endpoint: string): void {
 }
 
 export function listSubscriptionsForUser(userId: string): PushSubscriptionRow[] {
-  return decodeTimeRows<PushSubscriptionRow>(getDb()
+  return getDb()
     .prepare('SELECT * FROM push_subscriptions WHERE user_id = ? ORDER BY created_at')
-    .all(userId), ['created_at', 'last_used_at']);
+    .all(userId) as PushSubscriptionRow[];
 }
 
 export function markSubscriptionFailure(endpoint: string, err: string): number {

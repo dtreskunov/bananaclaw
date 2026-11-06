@@ -56,7 +56,7 @@ export async function handleRecurrence(
       // by an agent running in a user's local TZ fires at 09:00 UTC instead of
       // 09:00 user-local.
       const interval = CronExpressionParser.parse(msg.recurrence, { tz: TIMEZONE });
-      const nextRun = interval.next().toISOString();
+      const nextRun = interval.next().getTime();
       const prefix = msg.kind === 'task' ? 'task' : 'msg';
       const newId = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const failureCount = msg.kind === 'task' ? consecutiveScheduledFailures(outDb, msg.series_id) : 0;

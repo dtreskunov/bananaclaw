@@ -13,7 +13,7 @@ import path from 'path';
 import { DATA_DIR } from './config.js';
 import { log } from './log.js';
 import { epochSchema, legacyEpoch } from './db/storage-lifecycle.js';
-import { toEpoch, decodeTimeRows } from './db/time.js';
+import { epochMs } from './time.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -86,7 +86,7 @@ export interface IndexableMessage {
   channelType: string | null;
   threadId: string | null;
   direction: 'in' | 'out';
-  timestamp: string;
+  timestamp: number;
   text: string;
   senderUserId?: string | null;
 }
@@ -98,7 +98,7 @@ export interface SearchResultRow {
   channelType: string | null;
   messagingGroupId: string | null;
   direction: string;
-  timestamp: string;
+  timestamp: number;
   snippet: string;
   rank: number;
 }
@@ -280,7 +280,7 @@ export function indexMessage(msg: IndexableMessage, options: { replaceText?: boo
   const suffix = msg.agentGroupId ? `:${msg.agentGroupId}` : '';
   const id = suffix && msg.id.endsWith(suffix) ? msg.id.slice(0, -suffix.length) : msg.id;
 
-  const ts = toEpoch(msg.timestamp);
+  const ts = epochMs(msg.timestamp);
 
   try {
     getSearchDb()
@@ -363,7 +363,7 @@ export function searchMessages(query: string, opts: SearchOptions): SearchResult
   const where = conditions.join(' AND ');
 
   try {
-    return decodeTimeRows<SearchResultRow>(getSearchDb()
+    return getSearchDb()
       .prepare(
         `SELECT
            mi.id          AS messageId,
@@ -382,7 +382,7 @@ export function searchMessages(query: string, opts: SearchOptions): SearchResult
          ORDER BY mi.timestamp DESC
          LIMIT @limit`,
       )
-      .all(params), ['timestamp']);
+      .all(params) as SearchResultRow[];
   } catch (err) {
     // FTS5 MATCH can throw on malformed queries (unbalanced quotes, etc.).
     // Fall back to a LIKE scan so the user still gets results.
@@ -422,7 +422,7 @@ function likeFallback(query: string, opts: SearchOptions, limit: number): Search
 
   const where = conditions.join(' AND ');
 
-  return decodeTimeRows<SearchResultRow>(getSearchDb()
+  return getSearchDb()
     .prepare(
       `SELECT
          id           AS messageId,
@@ -439,7 +439,7 @@ function likeFallback(query: string, opts: SearchOptions, limit: number): Search
        ORDER BY timestamp DESC
        LIMIT @limit`,
     )
-    .all(params), ['timestamp']);
+    .all(params) as SearchResultRow[];
 }
 
 // ---------------------------------------------------------------------------

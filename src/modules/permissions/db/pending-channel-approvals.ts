@@ -10,14 +10,14 @@
  * instead of spamming the owner.
  */
 import { getDb } from '../../../db/connection.js';
-import { encodeTimes, decodeTimes } from '../../../db/time.js';
+import { assertTimestampFields } from '../../../db/validate-timestamps.js';
 
 export interface PendingChannelApproval {
   messaging_group_id: string;
   agent_group_id: string;
   original_message: string;
   approver_user_id: string;
-  created_at: string;
+  created_at: number;
   /** Card title shown at creation and re-used by getAskQuestionRender on click. */
   title: string;
   /** Normalized options (JSON-encoded NormalizedOption[]) — same shape persisted on approvals. */
@@ -25,6 +25,7 @@ export interface PendingChannelApproval {
 }
 
 export function createPendingChannelApproval(row: PendingChannelApproval): void {
+  assertTimestampFields(row, ['created_at']);
   getDb()
     .prepare(
       `INSERT INTO pending_channel_approvals (
@@ -36,13 +37,13 @@ export function createPendingChannelApproval(row: PendingChannelApproval): void 
          @approver_user_id, @created_at, @title, @options_json
        )`,
     )
-    .run(encodeTimes(row, ['created_at']));
+    .run(row);
 }
 
 export function getPendingChannelApproval(messagingGroupId: string): PendingChannelApproval | undefined {
-  return decodeTimes<PendingChannelApproval | undefined>(getDb()
+  return getDb()
     .prepare('SELECT * FROM pending_channel_approvals WHERE messaging_group_id = ?')
-    .get(messagingGroupId), ['created_at']);
+    .get(messagingGroupId) as PendingChannelApproval | undefined;
 }
 
 export function hasInFlightChannelApproval(messagingGroupId: string): boolean {

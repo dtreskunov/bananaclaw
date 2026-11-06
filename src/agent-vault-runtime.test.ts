@@ -16,7 +16,7 @@ afterEach(() => {
 
 import { buildContainerArgs } from './container-runner.js';
 
-const group = { id: 'g', name: 'Group', folder: 'group', agent_provider: null, created_at: 'created' };
+const group = { id: 'g', name: 'Group', folder: 'group', agent_provider: null, created_at: 0 };
 const config = {
   mcpServers: {},
   packages: { apt: [], npm: [], pip: [] },

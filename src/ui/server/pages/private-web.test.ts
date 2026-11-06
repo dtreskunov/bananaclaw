@@ -141,7 +141,7 @@ beforeAll(async () => {
     name: 'Private Web',
     folder: FOLDER,
     agent_provider: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   database
     .prepare(

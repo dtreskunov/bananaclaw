@@ -256,7 +256,7 @@ function ensureMessagingGroup(agentGroupId: string): void {
       is_group: 0,
       unknown_sender_policy: 'public',
       denied_at: null,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
     mg = getMessagingGroupByPlatform(HA_CHANNEL_TYPE, platformId)!;
   }
@@ -272,7 +272,7 @@ function ensureMessagingGroup(agentGroupId: string): void {
       ignored_message_policy: 'drop',
       session_mode: 'per-thread',
       priority: 0,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
   }
 }

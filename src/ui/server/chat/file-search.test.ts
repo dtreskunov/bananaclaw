@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { compareEntriesByDate, searchFilesByName } from './file-search.js';
 
-const ROOT = '/tmp/nanoclaw-file-search-test';
+const ROOT = `${process.cwd()}/.test-state/nanoclaw-file-search-test`;
 
 function write(relativePath: string, content = relativePath): void {
   const absolute = path.join(ROOT, relativePath);

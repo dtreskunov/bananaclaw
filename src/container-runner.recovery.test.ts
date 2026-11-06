@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChildProcess, spawn } from 'child_process';
 
@@ -81,7 +82,7 @@ it('deduplicates warmup and Send wakes and allows retry after admission deferral
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: '2026-10-17T22:41:22.527Z',
+    created_at: parseTimestamp('2026-10-17T22:41:22.527Z'),
   };
   admission.memoryBudgetMb.mockReturnValue(100);
   admission.decideAdmission.mockReturnValue({ action: 'reject', reason: 'busy' });
@@ -102,7 +103,7 @@ it('runs recovery with only the provided mounts, no networking, and no gateway c
     name: 'Recovery',
     folder: 'recovery',
     agent_provider: null,
-    created_at: '2026-10-04T20:22:46.000Z',
+    created_at: parseTimestamp('2026-10-04T20:22:46.000Z'),
   };
   const config: ContainerConfig = {
     mcpServers: {},
@@ -137,7 +138,7 @@ it('runs recovery in the agent group image, like agent containers', async () => 
     name: 'Recovery',
     folder: 'recovery',
     agent_provider: null,
-    created_at: '2026-10-04T20:22:46.000Z',
+    created_at: parseTimestamp('2026-10-04T20:22:46.000Z'),
   };
   const config: ContainerConfig = {
     mcpServers: {},
@@ -162,7 +163,7 @@ it('recovers a stopped session in its agent group image without materializing co
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: '2026-10-04T20:22:46.000Z',
+    created_at: parseTimestamp('2026-10-04T20:22:46.000Z'),
   };
   getAgentGroup.mockReturnValue({
     id: session.agent_group_id,
@@ -194,7 +195,7 @@ it('deduplicates recovery and does not start a provider wake after a failed reco
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: '2026-10-04T20:22:46.000Z',
+    created_at: parseTimestamp('2026-10-04T20:22:46.000Z'),
   };
   getAgentGroup.mockReturnValue({
     id: session.agent_group_id,
@@ -227,7 +228,7 @@ it('does not evict a recovery container to admit another agent', async () => {
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: '2026-10-04T20:22:46.000Z',
+    created_at: parseTimestamp('2026-10-04T20:22:46.000Z'),
   };
   getAgentGroup.mockReturnValue({
     id: session.agent_group_id,

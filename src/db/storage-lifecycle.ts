@@ -1,5 +1,6 @@
+import { parseTimestamp } from '../time.js';
 import type Database from 'better-sqlite3';
-import { toEpoch, activityEpoch } from './time.js';
+import { activityEpoch } from './time.js';
 
 export const STORAGE_VERSION = 1;
 export const EPOCH_NOW_SQL =
@@ -50,7 +51,7 @@ export function legacyEpoch(value: unknown): number | null {
     return value;
   }
   if (typeof value !== 'string') throw new Error(`Invalid timestamp: ${String(value)}`);
-  return toEpoch(value);
+  return parseTimestamp(value);
 }
 
 export function assertStorageVersion(db: Database.Database, store: string, allowFresh = false): void {
@@ -104,7 +105,7 @@ function preflightJournal(table: string, payload: unknown): void {
     if (INSTANT_COLUMNS.has(column) && value !== null) {
       if (typeof value !== 'string') throw new Error(`${table}.${column}: journal instants must retain wire strings`);
       if (column === 'ts') activityEpoch(value);
-      else toEpoch(value);
+      else parseTimestamp(value);
     }
 }
 

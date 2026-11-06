@@ -448,7 +448,7 @@ export async function runMcpProbeContainer(
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   };
   const probeDir = sessionDir(agentGroup.id, probeId);
   fs.mkdirSync(probeDir, { recursive: true });

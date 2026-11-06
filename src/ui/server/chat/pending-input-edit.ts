@@ -203,7 +203,7 @@ async function mutatePendingInput(ctx: MutationContext): Promise<EditResponse> {
       writeSessionMessage(ctx.groupId, ctx.sessionId, {
         id: `${ctx.operation}-${ctx.requestId}`,
         kind: 'system',
-        timestamp: new Date().toISOString(),
+        timestamp: Date.now(),
         channelType: 'web',
         platformId: target.platform_id,
         threadId: ctx.threadId,

@@ -17,16 +17,15 @@ const GROUP_ID = 'ag-private-web';
 beforeEach(() => {
   const db = initTestDb();
   runMigrations(db);
-  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, (unixepoch('now')*1000))`).run(
-    USER_ID,
-    'Test User',
-  );
+  db.prepare(
+    `INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, (unixepoch('now')*1000))`,
+  ).run(USER_ID, 'Test User');
   createAgentGroup({
     id: GROUP_ID,
     name: 'Private Web',
     folder: 'private-web',
     agent_provider: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
 });
 

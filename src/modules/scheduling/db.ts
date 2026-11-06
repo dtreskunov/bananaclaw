@@ -13,7 +13,7 @@
 import type Database from 'better-sqlite3';
 
 import { nextEvenSeq } from '../../db/session-db.js';
-import { toEpoch, decodeTimeRows } from '../../db/time.js';
+import { assertTimestampFields } from '../../db/validate-timestamps.js';
 import { EPOCH_NOW_SQL } from '../../db/storage-lifecycle.js';
 
 import { recordSessionDatabaseChange, transaction } from '../../db/transaction.js';
@@ -28,7 +28,7 @@ export function insertTask(
   db: Database.Database,
   task: {
     id: string;
-    processAfter: string;
+    processAfter: number;
     recurrence: string | null;
     platformId: string | null;
     channelType: string | null;
@@ -36,12 +36,12 @@ export function insertTask(
     content: string;
   },
 ): void {
+  assertTimestampFields(task, ['processAfter']);
   db.prepare(
     `INSERT INTO messages_in (id, seq, timestamp, status, tries, process_after, recurrence, kind, platform_id, channel_type, thread_id, content, series_id)
      VALUES (@id, @seq, ${EPOCH_NOW_SQL}, 'pending', 0, @processAfter, @recurrence, 'task', @platformId, @channelType, @threadId, @content, @id)`,
   ).run({
     ...task,
-    processAfter: toEpoch(task.processAfter),
     seq: nextEvenSeq(db),
   });
   recordSessionDatabaseChange(db);
@@ -78,7 +78,7 @@ export interface TaskUpdate {
   prompt?: string;
   script?: string | null;
   recurrence?: string | null;
-  processAfter?: string;
+  processAfter?: number;
   scriptTimeoutMs?: number;
 }
 
@@ -87,6 +87,7 @@ export interface TaskUpdate {
 // occurrence of a recurring task is updated, not just the completed row the
 // agent last saw. Returns the number of rows touched.
 export function updateTask(db: Database.Database, taskId: string, update: TaskUpdate): number {
+  assertTimestampFields(update, ['processAfter']);
   const rows = db
     .prepare(
       `SELECT id, content FROM messages_in
@@ -118,7 +119,7 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
       const params: unknown[] = [content];
       if (setProcessAfter) {
         sets.push('process_after = ?');
-        params.push(toEpoch(update.processAfter));
+        params.push(update.processAfter);
       }
       if (setRecurrence) {
         sets.push('recurrence = ?');
@@ -137,7 +138,8 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
 /** Queue a distinct non-recurring occurrence without consuming the live
  * scheduled row. Returns the occurrence id, or null when the series is paused
  * or missing. */
-export function runTaskNow(db: Database.Database, taskId: string, processAfter: string): string | null {
+export function runTaskNow(db: Database.Database, taskId: string, processAfter: number): string | null {
+  assertTimestampFields({ processAfter }, ['processAfter']);
   const row = db
     .prepare(
       `SELECT series_id, platform_id, channel_type, thread_id, content
@@ -168,7 +170,7 @@ export function runTaskNow(db: Database.Database, taskId: string, processAfter: 
   ).run(
     id,
     nextEvenSeq(db),
-    toEpoch(processAfter),
+    processAfter,
     row.platform_id,
     row.channel_type,
     row.thread_id,
@@ -184,7 +186,7 @@ export interface RecurringMessage {
   kind: string;
   content: string;
   recurrence: string;
-  process_after: string | null;
+  process_after: number | null;
   platform_id: string | null;
   channel_type: string | null;
   thread_id: string | null;
@@ -192,17 +194,18 @@ export interface RecurringMessage {
 }
 
 export function getCompletedRecurring(db: Database.Database): RecurringMessage[] {
-  return decodeTimeRows<RecurringMessage>(db
+  return db
     .prepare("SELECT * FROM messages_in WHERE status = 'completed' AND recurrence IS NOT NULL")
-    .all(), ['process_after']);
+    .all() as RecurringMessage[];
 }
 
 export function insertRecurrence(
   db: Database.Database,
   msg: RecurringMessage,
   newId: string,
-  nextRun: string | null,
+  nextRun: number | null,
 ): void {
+  assertTimestampFields({ nextRun }, ['nextRun']);
   db.prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, status, process_after, recurrence, platform_id, channel_type, thread_id, content, series_id)
      VALUES (?, ?, ?, ${EPOCH_NOW_SQL}, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
@@ -210,7 +213,7 @@ export function insertRecurrence(
     newId,
     nextEvenSeq(db),
     msg.kind,
-    toEpoch(nextRun),
+    nextRun,
     msg.recurrence,
     msg.platform_id,
     msg.channel_type,

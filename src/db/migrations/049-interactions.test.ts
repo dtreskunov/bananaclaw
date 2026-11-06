@@ -27,7 +27,7 @@ it('creates one public lifecycle and private progress without mirrored status or
   createApproval({
     id: 'c',
     request_id: 'c',
-    created_at: '2026-01-01T00:00:00.000Z',
+    created_at: 1767225600000,
     input: { action: 'install_packages', payload: {}, title: '', options: [] },
   });
   expect(() => db.exec("UPDATE interactions SET status='completed'")).toThrow('CHECK');
@@ -40,10 +40,7 @@ it.each(['questions', 'pending_questions', 'approvals', 'pending_approvals', 'ap
   'refuses existing %s storage without runtime conversion or record loss',
   (table) => {
     const db = initTestDb();
-    runMigrations(
-      db,
-      migrations.slice(0, migrations.indexOf(migration049)),
-    );
+    runMigrations(db, migrations.slice(0, migrations.indexOf(migration049)));
     convertStoreTimes(db);
     db.exec(`CREATE TABLE ${table}(id TEXT); INSERT INTO ${table} VALUES('preserved')`);
     expect(() => runMigrations(db)).toThrow('explicit offline cutover');

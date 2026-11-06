@@ -211,7 +211,7 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
     agent_group_id: referenceGroup.id,
     original_message: JSON.stringify(event),
     approver_user_id: delivery.userId,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
     title,
     options_json: JSON.stringify(options),
   });
@@ -289,7 +289,7 @@ export function createNewAgentGroup(name: string): AgentGroup {
     name,
     folder,
     agent_provider: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
 
   const ag = getAgentGroup(agId)!;

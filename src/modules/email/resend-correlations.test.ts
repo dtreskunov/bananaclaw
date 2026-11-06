@@ -26,7 +26,7 @@ describe('Resend outbound correlations', () => {
       correlation_token: 'token-1',
       origin_session_id: 'session-1',
       email_thread_id: 'resend:agent@example.com:recipient@example.net:hash',
-      created_at: '2026-08-05T00:00:00.000Z',
+      created_at: 1785888000000,
     });
 
     expect(getResendOutboundCorrelationByToken('token-1')).toMatchObject({
@@ -41,7 +41,7 @@ describe('Resend outbound correlations', () => {
       correlation_token: 'token-1',
       origin_session_id: 'session-1',
       email_thread_id: 'resend:agent@example.com:recipient@example.net:hash',
-      created_at: '2026-08-05T00:00:00.000Z',
+      created_at: 1785888000000,
     });
 
     getDb().prepare("DELETE FROM sessions WHERE id = 'session-1'").run();

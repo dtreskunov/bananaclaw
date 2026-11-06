@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,7 +57,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
   async (mode) => {
     runMigrations(initTestDb());
     const timestamp = new Date().toISOString();
-    createAgentGroup({ id: 'group', name: 'Group', folder: 'group', agent_provider: null, created_at: timestamp });
+    createAgentGroup({ id: 'group', name: 'Group', folder: 'group', agent_provider: null, created_at: parseTimestamp(timestamp) });
     createMessagingGroup({
       id: 'web-group',
       channel_type: 'web',
@@ -65,16 +66,16 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
       name: 'Web',
       is_group: 1,
       unknown_sender_policy: 'strict',
-      created_at: timestamp,
+      created_at: parseTimestamp(timestamp),
     });
     const session = resolveSession('group', 'web-group', 'thread', 'per-thread').session;
-    upsertUser({ id: 'owner', kind: 'web', display_name: 'Owner', created_at: timestamp });
-    grantRole({ user_id: 'owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: timestamp });
+    upsertUser({ id: 'owner', kind: 'web', display_name: 'Owner', created_at: parseTimestamp(timestamp) });
+    grantRole({ user_id: 'owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: parseTimestamp(timestamp) });
     const write = (id: string, text: string) =>
       writeSessionMessage('group', session.id, {
         id,
         kind: 'chat',
-        timestamp,
+        timestamp: parseTimestamp(timestamp),
         channelType: 'web',
         platformId: 'web-room',
         threadId: 'thread',
@@ -119,7 +120,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
         session_id: session.id,
         request_id: 'approval',
         origin_message_id: 'original',
-        created_at: timestamp,
+        created_at: parseTimestamp(timestamp),
         input: {
           action: 'cross-runtime-approval',
           payload: JSON.parse('{}'),

@@ -1,9 +1,8 @@
-import { toEpoch } from '../../db/time.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-const root = vi.hoisted(() => `/tmp/nanoclaw-mcp-bindings-${process.pid}`);
+const root = vi.hoisted(() => `${process.cwd()}/.test-state/nanoclaw-mcp-bindings-${process.pid}`);
 vi.mock('../../config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../config.js')>()),
   DATA_DIR: `${root}/data`,
@@ -71,10 +70,10 @@ beforeEach(() => {
   for (const id of ['group-one', 'group-two']) {
     getDb()
       .prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)')
-      .run(id, id, id, toEpoch('2026-01-01T00:00:00.000Z'));
+      .run(id, id, id, 1767225600000);
     getDb()
       .prepare('INSERT INTO container_configs(agent_group_id,mcp_servers,updated_at) VALUES(?,?,?)')
-      .run(id, JSON.stringify(configured), toEpoch('2026-01-01T00:00:00.000Z'));
+      .run(id, JSON.stringify(configured), 1767225600000);
   }
   status = 200;
   scopes.length = 0;

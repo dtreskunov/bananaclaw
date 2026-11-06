@@ -1,4 +1,3 @@
-import { toEpoch } from '../../db/time.js';
 /**
  * Integration tests for the unknown-sender request_approval flow
  * (ACTION-ITEMS item 5).
@@ -67,8 +66,10 @@ vi.mock('../../config.js', async () => {
 
 const TEST_DIR = `${process.cwd()}/.test-sender-approval`;
 
+import { formatTimestamp } from '../../time.js';
+
 function now() {
-  return new Date().toISOString();
+  return Date.now();
 }
 
 beforeEach(async () => {
@@ -132,7 +133,7 @@ beforeEach(async () => {
       `INSERT INTO user_dms (user_id, channel_type, messaging_group_id, resolved_at)
        VALUES (?, ?, ?, ?)`,
     )
-    .run(ownerId, 'telegram', 'mg-dm-owner', toEpoch(now()));
+    .run(ownerId, 'telegram', 'mg-dm-owner', now());
 
   deliverMock.mockClear();
 });
@@ -155,7 +156,7 @@ function stranger(text: string) {
         senderName: 'Stranger',
         text,
       }),
-      timestamp: now(),
+      timestamp: formatTimestamp(now()),
     },
   };
 }

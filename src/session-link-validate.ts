@@ -6,6 +6,7 @@
  */
 import type { ActivityStep } from './activity.js';
 import type { SessionActiveTurn } from './session-link.js';
+import { isEpochMs } from './time.js';
 
 const MAX_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 2_000;
@@ -55,7 +56,8 @@ export function isModelDurationMs(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
 }
 /** Millisecond epoch encoded as a decimal string. */
-export const isTimestamp: Check = (value) => typeof value === 'string' && /^\d{1,16}$/.test(value);
+export const isTimestamp: Check = (value) =>
+  typeof value === 'string' && /^\d{1,16}$/.test(value) && isEpochMs(Number(value));
 
 /** Non-empty string of at most `max` characters. */
 const text =

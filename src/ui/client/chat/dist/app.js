@@ -15472,12 +15472,14 @@ function A3() {
   if (1 === p4.push(this)) (l.requestAnimationFrame || k3)(x3);
 }
 
-// ../../shared/time.ts
-var UI_TIMESTAMP_PROTOCOL_VERSION = 16;
-var UI_PROTOCOL_HEADER = "X-NanoClaw-UI-Protocol";
+// ../../../time.ts
 function isEpochMs(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && Math.abs(value) <= 864e13;
 }
+
+// ../../shared/time.ts
+var UI_TIMESTAMP_PROTOCOL_VERSION = 16;
+var UI_PROTOCOL_HEADER = "X-NanoClaw-UI-Protocol";
 
 // src/api.ts
 var UnauthorizedError = class extends Error {

@@ -1,37 +1,37 @@
 import type { AgentGroup } from '../types.js';
 import { getDb } from './connection.js';
-import { encodeTimes, decodeTimes, decodeTimeRows } from './time.js';
-
+import { assertTimestampFields } from './validate-timestamps.js';
 import { recordHostChange } from './transaction.js';
 
 export function createAgentGroup(group: AgentGroup): void {
+  assertTimestampFields(group, ['created_at']);
   getDb()
     .prepare(
       `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at)
        VALUES (@id, @name, @folder, @agent_provider, @created_at)`,
     )
-    .run(encodeTimes(group, ['created_at']));
+    .run(group);
   recordHostChange({ kind: 'access' });
 }
 
 export function getAgentGroup(id: string): AgentGroup | undefined {
-  return decodeTimes<AgentGroup | undefined>(getDb().prepare('SELECT * FROM agent_groups WHERE id = ?').get(id), ['created_at']);
+  return getDb().prepare('SELECT * FROM agent_groups WHERE id = ?').get(id) as AgentGroup | undefined;
 }
 
 export function getAgentGroupByFolder(folder: string): AgentGroup | undefined {
-  return decodeTimes<AgentGroup | undefined>(getDb().prepare('SELECT * FROM agent_groups WHERE folder = ?').get(folder), ['created_at']);
+  return getDb().prepare('SELECT * FROM agent_groups WHERE folder = ?').get(folder) as AgentGroup | undefined;
 }
 
 export function getAgentGroupBySiteSlug(slug: string): AgentGroup | undefined {
-  return decodeTimes<AgentGroup | undefined>(getDb().prepare('SELECT * FROM agent_groups WHERE site_slug = ?').get(slug), ['created_at']);
+  return getDb().prepare('SELECT * FROM agent_groups WHERE site_slug = ?').get(slug) as AgentGroup | undefined;
 }
 
 export function getAgentGroupByEmailSlug(slug: string): AgentGroup | undefined {
-  return decodeTimes<AgentGroup | undefined>(getDb().prepare('SELECT * FROM agent_groups WHERE email_slug = ?').get(slug), ['created_at']);
+  return getDb().prepare('SELECT * FROM agent_groups WHERE email_slug = ?').get(slug) as AgentGroup | undefined;
 }
 
 export function getAllAgentGroups(): AgentGroup[] {
-  return decodeTimeRows<AgentGroup>(getDb().prepare('SELECT * FROM agent_groups ORDER BY name').all(), ['created_at']);
+  return getDb().prepare('SELECT * FROM agent_groups ORDER BY name').all() as AgentGroup[];
 }
 
 export function updateAgentGroup(

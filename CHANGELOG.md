@@ -4,6 +4,15 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Numeric internal host records.** Central entities, sessions,
+  approvals, claims, scheduling and maintained metadata use epoch milliseconds
+  end to end. Redundant DB decode/encode and UI re-parsing are removed; only
+  genuine channel/runner/CLI/archive boundaries convert strings. Installed
+  host customizations must pass numeric timestamps. Before deploying, run the
+  [stopped-host derived-summary rebuild](docs/db.md) and retain backups.
+  Durable INTEGER timestamp storage and runner protocol v6 are unchanged;
+  this is not another full database cutover.
+
 - **[BREAKING] Numeric UI timestamps.** UI-owned REST/sync records and browser
   state use checked UTC epoch milliseconds, including message/activity,
   turn/request, task, group and file timestamps. Date strings are parsed only

@@ -53,8 +53,8 @@ const catalog: MarketplaceRecord = {
   label: null,
   description: null,
   commit,
-  addedAt: '2026-01-01T00:00:00Z',
-  refreshedAt: '2026-01-01T00:00:00Z',
+  addedAt: 1767225600000,
+  refreshedAt: 1767225600000,
 };
 const skill = {
   marketplaceId: catalog.id,
@@ -74,7 +74,7 @@ beforeEach(() => {
     name: 'Group',
     folder: 'test-group',
     agent_provider: null,
-    created_at: catalog.addedAt,
+    created_at: 1767225600000,
   });
   vi.mocked(readMarketplaceRecords).mockReturnValue([catalog]);
   vi.mocked(getMarketplaceRecord).mockReturnValue(catalog);
@@ -204,16 +204,16 @@ describe('cached skill update endpoint', () => {
 
 describe('catalog refresh endpoint', () => {
   it('waits for refresh and returns the new successful timestamp', async () => {
-    const updated = { ...catalog, refreshedAt: '2026-09-23T20:30:00Z', lastRefreshError: null };
+    const updated = { ...catalog, refreshedAt: 1790195400000, lastRefreshError: null };
     vi.mocked(refreshMarketplace).mockResolvedValue(updated);
     expect(await refreshCatalog(catalog.id, 'owner')).toEqual({
       status: 200,
       body: {
         catalog: {
           ...updated,
-          addedAt: Date.parse(updated.addedAt),
-          refreshedAt: Date.parse(updated.refreshedAt),
-          lastRefreshAttemptAt: updated.lastRefreshAttemptAt ? Date.parse(updated.lastRefreshAttemptAt) : null,
+          addedAt: updated.addedAt,
+          refreshedAt: updated.refreshedAt,
+          lastRefreshAttemptAt: updated.lastRefreshAttemptAt ?? null,
         },
       },
     });
@@ -224,7 +224,7 @@ describe('catalog refresh endpoint', () => {
     const retained = {
       ...catalog,
       lastRefreshError: 'Repository not found',
-      lastRefreshAttemptAt: '2026-09-23T20:30:00Z',
+      lastRefreshAttemptAt: 1790195400000,
     };
     vi.mocked(refreshMarketplace).mockRejectedValue(new MarketplaceError('Repository not found'));
     vi.mocked(getMarketplaceRecord).mockReturnValue(retained);
@@ -234,9 +234,9 @@ describe('catalog refresh endpoint', () => {
         error: 'Repository not found',
         catalog: {
           ...retained,
-          addedAt: Date.parse(retained.addedAt),
-          refreshedAt: retained.refreshedAt === null ? null : Date.parse(retained.refreshedAt),
-          lastRefreshAttemptAt: Date.parse(retained.lastRefreshAttemptAt),
+          addedAt: retained.addedAt,
+          refreshedAt: retained.refreshedAt,
+          lastRefreshAttemptAt: retained.lastRefreshAttemptAt,
         },
       },
     });

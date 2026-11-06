@@ -9,7 +9,6 @@ import { getUser } from '../../../modules/permissions/db/users.js';
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
 import { getAccountRequest } from '../../../modules/approvals/workflows.js';
 import type { AccountInteraction, AccountRequestData } from '../../shared/approval.js';
-import { parseTimestamp } from '../../shared/time.js';
 import { interactionRoute } from '../../../conversation-publications.js';
 import type { ApprovalOrigin, ConversationApproval } from '../../shared/approval.js';
 import { presentApproval } from './approval-presentation.js';
@@ -67,9 +66,6 @@ export function projectAccountInteraction(userId: string, account: AccountReques
   return {
     ...responseContext(userId, approval),
     ...account,
-    createdAt: parseTimestamp(account.createdAt),
-    expiresAt: parseTimestamp(account.expiresAt),
-    resolvedAt: parseTimestamp(account.resolvedAt),
   };
 }
 
@@ -87,10 +83,10 @@ export function projectApproval(userId: string, row: Approval): ConversationAppr
     options: row.input.options,
     agentGroupId: groupId,
     agentGroupName: groupId ? (getAgentGroup(groupId)?.name ?? null) : null,
-    createdAt: parseTimestamp(row.created_at),
+    createdAt: row.created_at,
     supportsResponseMessage: row.session_id !== null,
     status: legacyInteractionExpired(row) ? 'expired' : row.status,
-    resolvedAt: parseTimestamp(row.resolved_at),
+    resolvedAt: row.resolved_at,
     outcomeMessage: row.outcome_message,
   };
 }

@@ -38,7 +38,7 @@ createAgentGroup({
   name: 'E2E Test Agent',
   folder: 'test-agent-e2e',
   agent_provider: 'claude',
-  created_at: new Date().toISOString(),
+  created_at: Date.now(),
 });
 
 createMessagingGroup({
@@ -48,7 +48,7 @@ createMessagingGroup({
   name: 'E2E Test Channel',
   is_group: 0,
   unknown_sender_policy: 'public',
-  created_at: new Date().toISOString(),
+  created_at: Date.now(),
 });
 
 createMessagingGroupAgent({
@@ -61,7 +61,7 @@ createMessagingGroupAgent({
   ignored_message_policy: 'drop',
   session_mode: 'shared',
   priority: 0,
-  created_at: new Date().toISOString(),
+  created_at: Date.now(),
 });
 
 console.log('✓ Central DB initialized');

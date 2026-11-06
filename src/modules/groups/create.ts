@@ -94,7 +94,7 @@ export function createGroup(input: CreateGroupInput): AgentGroup {
     name,
     folder,
     agent_provider: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   };
 
   createAgentGroup(group);

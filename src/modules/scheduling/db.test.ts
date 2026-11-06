@@ -1,3 +1,4 @@
+import { parseTimestamp } from '../../time.js';
 /**
  * Tests for the scheduling module's task DB helpers — focused on the
  * series_id invariant that lets cancel/pause/resume/update reach the live
@@ -34,7 +35,7 @@ function freshDb() {
 function insertBasicTask(db: ReturnType<typeof openInboundDb>, id: string, recurrence: string | null) {
   insertTask(db, {
     id,
-    processAfter: new Date().toISOString(),
+    processAfter: Date.now(),
     recurrence,
     platformId: null,
     channelType: null,
@@ -48,6 +49,29 @@ afterEach(() => {
 });
 
 describe('insertTask', () => {
+  it('rejects invalid numeric scheduling instants before advancing the durable sequence', () => {
+    const db = freshDb();
+    try {
+      const task = {
+        id: 'invalid',
+        processAfter: 0,
+        recurrence: null,
+        platformId: null,
+        channelType: null,
+        threadId: null,
+        content: '{"prompt":"noop"}',
+      };
+      for (const processAfter of [NaN, Infinity, 0.5, 8640000000000001])
+        expect(() => insertTask(db, { ...task, processAfter })).toThrow('Invalid epoch-millisecond timestamp');
+      expect(db.prepare('SELECT last_even FROM host_sequence').get()).toEqual({ last_even: 0 });
+      expect(db.prepare('SELECT count(*) n FROM messages_in').get()).toEqual({ n: 0 });
+      insertTask(db, { ...task, id: 'zero' });
+      expect(db.prepare("SELECT process_after FROM messages_in WHERE id='zero'").get()).toEqual({ process_after: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it('stamps series_id = id on insert', () => {
     const db = freshDb();
     insertBasicTask(db, 'task-1', null);
@@ -78,7 +102,7 @@ describe('cancelTask / pauseTask / resumeTask series matching', () => {
       thread_id: null,
       series_id: 'task-orig',
     };
-    insertRecurrence(db, msg, 'task-next', new Date(Date.now() + 86400000).toISOString());
+    insertRecurrence(db, msg, 'task-next', new Date(Date.now() + 86400000).getTime());
   }
 
   it('cancel by original id reaches the live follow-up via series_id', () => {
@@ -139,7 +163,7 @@ describe('updateTask', () => {
     const db = freshDb();
     insertTask(db, {
       id: 'task-1',
-      processAfter: new Date().toISOString(),
+      processAfter: Date.now(),
       recurrence: null,
       platformId: null,
       channelType: null,
@@ -172,7 +196,7 @@ describe('updateTask', () => {
     const db = freshDb();
     insertTask(db, {
       id: 'task-1',
-      processAfter: '2026-01-01T00:00:00Z',
+      processAfter: parseTimestamp('2026-01-01T00:00:00Z'),
       recurrence: '0 9 * * *',
       platformId: null,
       channelType: null,
@@ -180,7 +204,7 @@ describe('updateTask', () => {
       content: JSON.stringify({ prompt: 'p' }),
     });
 
-    updateTask(db, 'task-1', { recurrence: '0 18 * * *', processAfter: '2026-02-01T00:00:00Z' });
+    updateTask(db, 'task-1', { recurrence: '0 18 * * *', processAfter: parseTimestamp('2026-02-01T00:00:00Z') });
 
     const row = db.prepare('SELECT recurrence, process_after FROM messages_in WHERE id = ?').get('task-1') as {
       recurrence: string;
@@ -194,7 +218,7 @@ describe('updateTask', () => {
     const db = freshDb();
     insertTask(db, {
       id: 'task-1',
-      processAfter: '2026-01-01T00:00:00Z',
+      processAfter: parseTimestamp('2026-01-01T00:00:00Z'),
       recurrence: '0 9 * * *',
       platformId: null,
       channelType: null,
@@ -214,7 +238,7 @@ describe('updateTask', () => {
     const db = freshDb();
     insertTask(db, {
       id: 'task-orig',
-      processAfter: new Date().toISOString(),
+      processAfter: Date.now(),
       recurrence: '0 9 * * *',
       platformId: null,
       channelType: null,
@@ -234,7 +258,7 @@ describe('updateTask', () => {
       thread_id: null,
       series_id: 'task-orig',
     };
-    insertRecurrence(db, msg, 'task-next', new Date(Date.now() + 86400000).toISOString());
+    insertRecurrence(db, msg, 'task-next', new Date(Date.now() + 86400000).getTime());
 
     const touched = updateTask(db, 'task-orig', { prompt: 'new' });
     // Only the live follow-up should be touched — completed rows are excluded.
@@ -252,7 +276,7 @@ describe('updateTask', () => {
     const db = freshDb();
     insertTask(db, {
       id: 'task-1',
-      processAfter: new Date().toISOString(),
+      processAfter: Date.now(),
       recurrence: null,
       platformId: null,
       channelType: null,
@@ -271,7 +295,7 @@ describe('runTaskNow', () => {
     const db = freshDb();
     insertBasicTask(db, 'task-series', '0 6 * * *');
 
-    const manualId = runTaskNow(db, 'task-series', '2026-08-16T20:00:00Z');
+    const manualId = runTaskNow(db, 'task-series', parseTimestamp('2026-08-16T20:00:00Z'));
 
     expect(manualId).toMatch(/^task-run-/);
     const scheduled = db
@@ -314,7 +338,7 @@ describe('insertRecurrence', () => {
       thread_id: null,
       series_id: 'task-orig',
     };
-    insertRecurrence(db, msg, 'task-next', new Date().toISOString());
+    insertRecurrence(db, msg, 'task-next', Date.now());
 
     const row = db.prepare('SELECT series_id FROM messages_in WHERE id = ?').get('task-next') as {
       series_id: string;

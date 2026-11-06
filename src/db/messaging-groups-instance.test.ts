@@ -1,4 +1,3 @@
-import { toEpoch } from './time.js';
 /**
  * Channel-instance dimension tests (migration 016 + messaging-groups queries).
  *
@@ -27,8 +26,8 @@ import {
 } from './messaging-groups.js';
 import type { MessagingGroup } from '../types.js';
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 function mg(overrides: Partial<MessagingGroup> & { id: string }): MessagingGroup {
@@ -112,19 +111,19 @@ describe('migration 016 — wired legacy DB upgrade (the FK recreate arm)', () =
     // Seed a wired install: messaging_groups with live FK children
     // (messaging_group_agents + sessions reference messaging_groups.id).
     // Raw SQL — the new createMessagingGroup expects the instance column.
-    db.prepare("INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('ag-1', 'A', 'a', ?)").run(toEpoch(now()));
+    db.prepare("INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('ag-1', 'A', 'a', ?)").run(now());
     db.prepare(
       `INSERT INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at)
        VALUES ('mg-1', 'telegram', 'telegram:123', 'Chat', 0, 'public', ?)`,
-    ).run(toEpoch(now()));
+    ).run(now());
     db.prepare(
       `INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, engage_mode, sender_scope, ignored_message_policy, created_at)
        VALUES ('mga-1', 'mg-1', 'ag-1', 'pattern', 'all', 'drop', ?)`,
-    ).run(toEpoch(now()));
+    ).run(now());
     db.prepare(
       `INSERT INTO sessions (id, agent_group_id, messaging_group_id, created_at)
        VALUES ('sess-1', 'ag-1', 'mg-1', ?)`,
-    ).run(toEpoch(now()));
+    ).run(now());
 
     // Upgrade: only 016 is pending now. Without disableForeignKeys this
     // throws 'FOREIGN KEY constraint failed' at DROP TABLE.
@@ -154,12 +153,12 @@ describe('migration 016 — wired legacy DB upgrade (the FK recreate arm)', () =
     // messaging_group was deleted through a FK-OFF connection — the
     // sqlite3 CLI ships with foreign_keys OFF, and operators are told to
     // poke v2.db when troubleshooting.
-    db.prepare("INSERT INTO users (id, kind, created_at) VALUES ('slack:U1', 'slack', ?)").run(toEpoch(now()));
+    db.prepare("INSERT INTO users (id, kind, created_at) VALUES ('slack:U1', 'slack', ?)").run(now());
     db.pragma('foreign_keys = OFF');
     db.prepare(
       `INSERT INTO user_dms (user_id, channel_type, messaging_group_id, resolved_at)
        VALUES ('slack:U1', 'slack', 'mg-deleted-via-cli', ?)`,
-    ).run(toEpoch(now()));
+    ).run(now());
     db.pragma('foreign_keys = ON');
     expect(db.pragma('foreign_key_check')).toHaveLength(1);
 
@@ -183,7 +182,9 @@ describe('migration 016 — wired legacy DB upgrade (the FK recreate arm)', () =
       name: 'test-rogue-fk-violation',
       disableForeignKeys: true,
       up: (d) => {
-        d.prepare("INSERT INTO users (id, kind, created_at) VALUES ('slack:U-rogue', 'slack', (unixepoch('now')*1000))").run();
+        d.prepare(
+          "INSERT INTO users (id, kind, created_at) VALUES ('slack:U-rogue', 'slack', (unixepoch('now')*1000))",
+        ).run();
         d.prepare(
           `INSERT INTO user_dms (user_id, channel_type, messaging_group_id, resolved_at)
            VALUES ('slack:U-rogue', 'slack', 'mg-never-existed', (unixepoch('now')*1000))`,

@@ -1,3 +1,4 @@
+import { parseTimestamp } from '../time.js';
 /**
  * Tests for core per-session messages_in schema maintenance.
  *
@@ -11,7 +12,6 @@ import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
 import { countDueMessages } from './session-db.js';
-import { toEpoch } from './time.js';
 
 const TEST_DIR = path.resolve('.test-session-db');
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
@@ -47,7 +47,15 @@ function addRow(
   db.prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, process_after, content)
      VALUES (?, ?, ?, ?, ?, ?, ?, '{}')`,
-  ).run(opts.id, opts.seq, opts.kind, Date.now(), opts.status ?? 'pending', opts.trigger ?? 1, toEpoch(opts.processAfter));
+  ).run(
+    opts.id,
+    opts.seq,
+    opts.kind,
+    Date.now(),
+    opts.status ?? 'pending',
+    opts.trigger ?? 1,
+    parseTimestamp(opts.processAfter),
+  );
 }
 
 afterEach(() => {

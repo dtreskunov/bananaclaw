@@ -42,7 +42,7 @@ registerDeliveryAction('cli_request', async (content, session, inDb, context) =>
   insertMessage(inDb, {
     id: `cli-resp-${requestId}`,
     kind: 'system',
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
     platformId: null,
     channelType: null,
     threadId: null,

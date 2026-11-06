@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -24,7 +25,7 @@ import {
   searchMessages,
   type IndexableMessage,
 } from './search-index.js';
-import { toEpoch } from './db/time.js';
+
 
 function inspectIndex<T>(read: (connection: Database.Database) => T): T {
   const connection = new Database(path.join(TEST_DATA_DIR, 'search.db'));
@@ -44,7 +45,7 @@ function occurrence(overrides: Partial<IndexableMessage> = {}): IndexableMessage
     channelType: 'web',
     threadId: 'thread-a',
     direction: 'in',
-    timestamp: '2026-07-22T00:00:00.000Z',
+    timestamp: parseTimestamp('2026-07-22T00:00:00.000Z'),
     text: 'searchable needle',
     ...overrides,
   };
@@ -105,7 +106,7 @@ function addMessage(
     channelType,
     threadId,
     direction: 'in',
-    timestamp: '2026-07-22T00:00:00.000Z',
+    timestamp: parseTimestamp('2026-07-22T00:00:00.000Z'),
     text,
   });
 }
@@ -149,7 +150,7 @@ describe('search occurrence identity', () => {
         // Simulate an old index with stale FTS contents: migration must read the source table.
         connection.exec("INSERT INTO message_fts(message_fts) VALUES ('delete-all')");
         return (connection.prepare('SELECT rowid, * FROM message_index ORDER BY rowid').all() as Record<string, unknown>[])
-          .map(row => ({ ...row, timestamp: toEpoch(row.timestamp as string) }));
+          .map(row => ({ ...row, timestamp: parseTimestamp(row.timestamp as string) }));
       });
 
       expect(() => initSearchDb()).toThrow('stop host AND runners');
@@ -246,11 +247,11 @@ describe('search occurrence identity', () => {
     });
   });
 
-  it('stores precise epoch milliseconds and returns canonical ISO timestamps', () => {
-    indexMessage(occurrence({ id: 'later', timestamp: '2026-07-22T02:00:00.124+02:00' }));
-    indexMessage(occurrence({ id: 'earlier', timestamp: '2026-07-22T00:00:00.123Z' }));
+  it('stores and returns exact numeric epoch timestamps without internal string conversion', () => {
+    indexMessage(occurrence({ id: 'later', timestamp: parseTimestamp('2026-07-22T02:00:00.124+02:00') }));
+    indexMessage(occurrence({ id: 'earlier', timestamp: parseTimestamp('2026-07-22T00:00:00.123Z') }));
     expect(searchMessages('need*', { agentGroupId: 'agent' }).map(row => [row.messageId, row.timestamp])).toEqual([
-      ['later', '2026-07-22T00:00:00.124Z'], ['earlier', '2026-07-22T00:00:00.123Z'],
+      ['later', parseTimestamp('2026-07-22T00:00:00.124Z')], ['earlier', parseTimestamp('2026-07-22T00:00:00.123Z')],
     ]);
     expect(inspectIndex(connection => connection.prepare(
       'SELECT DISTINCT typeof(timestamp) AS type FROM message_index',
@@ -291,7 +292,7 @@ describe('search occurrence identity', () => {
     indexMessage(occurrence());
     indexMessage(occurrence({ sessionId: 'fork', threadId: 'fork-thread', text: 'forked needle' }));
     indexMessage(occurrence({ sessionId: 'sibling', threadId: 'sibling-thread' }));
-    indexMessage(occurrence({ id: 'after-cut', timestamp: '2026-07-23T00:00:00.000Z' }));
+    indexMessage(occurrence({ id: 'after-cut', timestamp: parseTimestamp('2026-07-23T00:00:00.000Z') }));
 
     expect(deleteSessionFromIndex('session-a')).toBe(2);
     expect(searchMessages('forked', { agentGroupId: 'agent' }).map((row) => row.sessionId)).toEqual(['fork']);
@@ -390,7 +391,7 @@ describe('search index rebuild', () => {
         channelType: 'web',
         threadId: 'thread-a',
         direction: 'in',
-        timestamp: '2026-07-22T00:00:00.000Z',
+        timestamp: parseTimestamp('2026-07-22T00:00:00.000Z'),
         text: 'newword',
       },
       { replaceText: true },

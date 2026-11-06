@@ -402,7 +402,10 @@ describe('applyDurableRunnerEvent', () => {
       text: 'work',
       timeline_position: 1,
     });
-    expect(() => apply(5, 'turn.upsert', { ...turn, started_at: 'different' })).toThrow('immutable turn identity');
+    expect(() => apply(5, 'turn.upsert', { ...turn, started_at: '2026-09-01T00:00:01.000Z' }))
+      .toThrow('immutable turn identity');
+    expect(() => apply(5, 'turn.upsert', { ...turn, started_at: 'invalid' })).toThrow('Invalid timestamp');
+    apply(5, 'turn.upsert', { ...turn, started_at: '2026-09-01T02:00:00.000+02:00' });
     const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
     try {
       expect(db.prepare('SELECT turn_id FROM messages_out').pluck().get()).toBe(turn.id);

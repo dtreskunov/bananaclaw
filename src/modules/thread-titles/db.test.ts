@@ -67,7 +67,7 @@ describe('thread title metadata', () => {
       status: 'active',
       container_status: 'running',
       last_active: null,
-      created_at: '2026-10-20T00:00:00.000Z',
+      created_at: 1792454400000,
     };
     db.prepare(
       `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, thread_id, content)

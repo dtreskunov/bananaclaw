@@ -7,7 +7,6 @@
  * the admin privilege that deletion does.
  */
 import Database from 'better-sqlite3';
-import { toEpoch } from '../../../db/time.js';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -40,7 +39,7 @@ import { handleChatRequest, listThreadsForViewer } from './chat.js';
 import * as threadSummaries from '../../../thread-summaries.js';
 
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
-const NOW = new Date().toISOString();
+const NOW = Date.now();
 const USER_ID = 'web:member';
 const ADMIN_ID = 'web:admin';
 const GROUP_ID = 'agent';
@@ -125,14 +124,14 @@ function seedMessagingGroup(id: string, channelType: string, platformId: string,
          (id, channel_type, platform_id, instance, name, is_group, unknown_sender_policy, created_at)
        VALUES (?, ?, ?, ?, ?, 0, 'strict', ?)`,
     )
-    .run(id, channelType, platformId, channelType, id, toEpoch(NOW));
+    .run(id, channelType, platformId, channelType, id, NOW);
   getDb()
     .prepare(
       `INSERT INTO messaging_group_agents
          (id, messaging_group_id, agent_group_id, session_mode, created_at)
        VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(`wire-${id}`, id, GROUP_ID, sessionMode, toEpoch(NOW));
+    .run(`wire-${id}`, id, GROUP_ID, sessionMode, NOW);
 }
 
 function seedThread(): void {
@@ -142,7 +141,7 @@ function seedThread(): void {
          (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at)
        VALUES (?, ?, ?, ?, 'active', 'stopped', ?)`,
     )
-    .run(SESSION, GROUP_ID, WEB_MG, THREAD, toEpoch(NOW));
+    .run(SESSION, GROUP_ID, WEB_MG, THREAD, NOW);
   initSessionFolder(GROUP_ID, SESSION);
 
   const inDb = new Database(inboundDbPath(GROUP_ID, SESSION));
@@ -173,9 +172,9 @@ function seedThread(): void {
 
 /** The parent's messages as the host would have indexed them. */
 const INDEXED = [
-  { id: 'u1', direction: 'in' as const, timestamp: '2026-01-01T00:01:00.000Z', text: 'hello' },
-  { id: 'a1', direction: 'out' as const, timestamp: '2026-01-01T00:02:00.000Z', text: 'hi back' },
-  { id: 'a2', direction: 'out' as const, timestamp: '2026-01-01T00:03:00.000Z', text: 'and more' },
+  { id: 'u1', direction: 'in' as const, timestamp: 1767225660000, text: 'hello' },
+  { id: 'a1', direction: 'out' as const, timestamp: 1767225720000, text: 'hi back' },
+  { id: 'a2', direction: 'out' as const, timestamp: 1767225780000, text: 'and more' },
 ].map((m) => ({
   ...m,
   sessionId: SESSION,
@@ -197,18 +196,18 @@ beforeEach(() => {
   runMigrations(db);
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', 'Member', ?)`)
-    .run(USER_ID, toEpoch(NOW));
+    .run(USER_ID, NOW);
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', 'Admin', ?)`)
-    .run(ADMIN_ID, toEpoch(NOW));
+    .run(ADMIN_ID, NOW);
   getDb()
     .prepare(
       `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, 'Agent', 'agent', NULL, ?)`,
     )
-    .run(GROUP_ID, toEpoch(NOW));
+    .run(GROUP_ID, NOW);
   getDb()
     .prepare(`INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)`)
-    .run(USER_ID, GROUP_ID, USER_ID, toEpoch(NOW));
+    .run(USER_ID, GROUP_ID, USER_ID, NOW);
   grantRole({ user_id: ADMIN_ID, role: 'admin', agent_group_id: null, granted_by: ADMIN_ID, granted_at: NOW });
   stopProjection = threadSummaries.startThreadSummaryProjection();
 });
@@ -230,7 +229,7 @@ describe('asynchronous thread listing', () => {
        (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at)
        VALUES ('other', ?, ?, 'thread-0', 'active', 'stopped', ?)`,
       )
-      .run(GROUP_ID, WEB_MG, toEpoch(NOW));
+      .run(GROUP_ID, WEB_MG, NOW);
     initSessionFolder(GROUP_ID, 'other');
     const inbound = new Database(inboundDbPath(GROUP_ID, 'other'));
     try {
@@ -298,8 +297,8 @@ describe('asynchronous thread listing', () => {
         `INSERT INTO messages_in (id, seq, kind, timestamp, channel_type, platform_id, content)
          VALUES (?, ?, 'chat', ?, 'resend', ?, '{"text":"DM"}')`,
       );
-      insert.run('own', 4, toEpoch(NOW), 'member@example.com');
-      insert.run('other', 6, toEpoch(NOW), 'other@example.com');
+      insert.run('own', 4, NOW, 'member@example.com');
+      insert.run('other', 6, NOW, 'other@example.com');
     } finally {
       inbound.close();
     }

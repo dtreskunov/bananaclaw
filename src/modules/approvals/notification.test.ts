@@ -38,7 +38,7 @@ const session: Session = {
   status: 'active',
   container_status: 'running',
   last_active: null,
-  created_at: '2026-01-01T00:00:00.000Z',
+  created_at: 1767225600000,
 };
 const origin = { channelType: 'web', platformId: 'original-room', threadId: 'original-thread' };
 
@@ -58,17 +58,17 @@ beforeEach(() => {
     is_group: 1,
     unknown_sender_policy: 'strict',
     denied_at: null,
-    created_at: '2026-01-01T00:00:00.000Z',
+    created_at: 1767225600000,
   });
   createSession(session);
   initSessionFolder(session.agent_group_id, session.id);
-  upsertUser({ id: 'owner', kind: 'web', display_name: 'Owner', created_at: '2026-01-01T00:00:00.000Z' });
+  upsertUser({ id: 'owner', kind: 'web', display_name: 'Owner', created_at: 1767225600000 });
   grantRole({
     user_id: 'owner',
     role: 'owner',
     agent_group_id: null,
     granted_by: null,
-    granted_at: '2026-01-01T00:00:00.000Z',
+    granted_at: 1767225600000,
   });
   mocks.wake.mockClear();
   mocks.kill.mockClear();
@@ -82,7 +82,7 @@ function input(id: string, route = origin, sourceSessionId?: string) {
   writeSessionMessage(session.agent_group_id, session.id, {
     id,
     kind: 'chat',
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
     ...route,
     sourceSessionId,
     content: JSON.stringify({ text: id }),
@@ -116,7 +116,7 @@ async function respond(
     id: 'approval',
     session_id: session.id,
     request_id: 'approval',
-    created_at: '2026-01-01T00:00:00.000Z',
+    created_at: 1767225600000,
     origin_message_id: originMessageId,
     input: {
       action: action,
@@ -303,7 +303,7 @@ describe('approval conversation identity', () => {
       id: 'workflow',
       session_id: session.id,
       request_id: 'workflow',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
       origin_message_id: 'original',
       input: {
         action: 'request_access',

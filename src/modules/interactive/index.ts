@@ -36,7 +36,7 @@ export async function handleInteractiveResponse(payload: ResponsePayload): Promi
     }
     answerQuestion(payload.questionId, {
       ...payload,
-      answeredAt: new Date().toISOString(),
+      answeredAt: Date.now(),
     });
   }
 

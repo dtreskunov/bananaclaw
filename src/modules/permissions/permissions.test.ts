@@ -20,8 +20,8 @@ import { getUserDm } from './db/user-dms.js';
 import { seedUserWithIdentity } from '../../test-utils/seed-identity.js';
 import { ensureUserDm } from './user-dm.js';
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 beforeEach(() => {

@@ -203,7 +203,7 @@ export function provisionEmailBot(input: ProvisionInput): ProvisionResult {
   }
 
   // Slow path — create whatever is missing.
-  const now = new Date().toISOString();
+  const now = Date.now();
 
   // 1. Messaging group (might exist from a prior unwired auto-create).
   let mg = existing?.mg ?? getMessagingGroupByPlatform(channelType, platformId) ?? null;

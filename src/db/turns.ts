@@ -1,9 +1,9 @@
 import type Database from 'better-sqlite3';
 import { transaction } from './transaction.js';
-import { toEpoch, decodeTimes } from './time.js';
+import { assertTimestampFields } from './validate-timestamps.js';
 import { epochSchema } from './storage-lifecycle.js';
 
-// Mirrored in the Bun runner's db/turns.ts; neither runtime imports the other.
+// SQL is mirrored in the Bun runner; its external journal still uses ISO strings.
 export type TurnPhase = 'running' | 'stopping' | 'settling' | 'settled';
 export type TurnOutcome =
   | 'pending'
@@ -20,8 +20,8 @@ export interface TurnRow {
   origin_platform_id: string | null;
   origin_thread_id: string | null;
   origin_source_session_id: string | null;
-  started_at: string | null;
-  ended_at: string | null;
+  started_at: number | null;
+  ended_at: number | null;
   phase: TurnPhase;
   outcome: TurnOutcome;
   provenance: 'native' | 'backfill' | 'fork';
@@ -91,11 +91,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_activity_unanchored
 `;
 
 export function getTurn(db: Database.Database, id: string): TurnRow | undefined {
-  return decodeTimes<TurnRow | undefined>(db.prepare('SELECT * FROM turns WHERE id = ?').get(id), ['started_at', 'ended_at']);
+  return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as TurnRow | undefined;
 }
 
 /** Storage upsert; callers own lifecycle validation and runner journal triggers. */
 export function putTurn(db: Database.Database, turn: TurnRow): void {
+  assertTimestampFields(turn, ['started_at', 'ended_at']);
   db.prepare(
     `
     INSERT INTO turns (id, origin_channel_type, origin_platform_id, origin_thread_id,
@@ -116,8 +117,8 @@ export function putTurn(db: Database.Database, turn: TurnRow): void {
     turn.origin_platform_id,
     turn.origin_thread_id,
     turn.origin_source_session_id,
-    toEpoch(turn.started_at),
-    toEpoch(turn.ended_at),
+    turn.started_at,
+    turn.ended_at,
     turn.phase,
     turn.outcome,
     turn.provenance,

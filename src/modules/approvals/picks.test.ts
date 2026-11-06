@@ -17,8 +17,8 @@ import { grantRole } from '../permissions/db/user-roles.js';
 import { seedUserWithIdentity } from '../../test-utils/seed-identity.js';
 import { pickApprovalDelivery, pickApprover } from './primitive.js';
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 beforeEach(() => {

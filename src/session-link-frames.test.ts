@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -103,7 +104,7 @@ function queueHostMessage(): void {
     insertMessage(db, {
       id: 'in-1',
       kind: 'chat',
-      timestamp: '2026-09-01 00:00:00',
+      timestamp: parseTimestamp('2026-09-01 00:00:00'),
       channelType: 'web',
       platformId: 'chat-1',
       threadId: null,
@@ -469,7 +470,7 @@ describe('session link live state', () => {
       expect(lines).toHaveLength(128);
       expect(lines.filter((entry) => entry.turnId === 'turn-1' && entry.ordinal === 50)).toEqual([
         {
-          ts: TS,
+          ts: Number(TS),
           text: '{"kind":"internal","id":"r","text":"new"}',
           turnId: 'turn-1',
           ordinal: 50,

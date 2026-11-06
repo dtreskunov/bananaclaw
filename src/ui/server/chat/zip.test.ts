@@ -1,11 +1,10 @@
-import { toEpoch } from '../../../db/time.js';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import { Writable } from 'stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-ui-zip';
+const TEST_ROOT = `${process.cwd()}/.test-state/nanoclaw-test-ui-zip`;
 const TEST_GROUPS_DIR = path.join(TEST_ROOT, 'groups');
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
@@ -13,8 +12,8 @@ vi.mock('../../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../../config.js')>('../../../config.js');
   return {
     ...actual,
-    GROUPS_DIR: '/tmp/nanoclaw-test-ui-zip/groups',
-    DATA_DIR: '/tmp/nanoclaw-test-ui-zip/data',
+    GROUPS_DIR: `${process.cwd()}/.test-state/nanoclaw-test-ui-zip/groups`,
+    DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-ui-zip/data`,
   };
 });
 
@@ -77,19 +76,15 @@ beforeEach(() => {
 
   const db = initTestDb();
   runMigrations(db);
-  const now = new Date().toISOString();
-  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`).run(
-    ADMIN,
-    ADMIN,
-    toEpoch(now),
-  );
+  const now = Date.now();
+  db.prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`).run(ADMIN, ADMIN, now);
   db.prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`).run(
     GID,
     FOLDER,
     FOLDER,
-    toEpoch(now),
+    now,
   );
-  db.prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(GID, toEpoch(now));
+  db.prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(GID, now);
   grantRole({ user_id: ADMIN, role: 'admin', agent_group_id: GID, granted_by: ADMIN, granted_at: now });
 });
 

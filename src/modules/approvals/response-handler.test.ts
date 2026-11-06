@@ -27,7 +27,7 @@ vi.mock('../../config.js', async () => {
 const TEST_DIR = process.cwd() + '/.test-tmp/nanoclaw-test-approval-response-authz';
 
 function now() {
-  return new Date().toISOString();
+  return Date.now();
 }
 
 beforeEach(() => {

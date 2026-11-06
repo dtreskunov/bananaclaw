@@ -1,9 +1,10 @@
+import { parseTimestamp, formatTimestamp } from '../time.js';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { assertStorageVersion, convertStoreTimes, epochSchema, STORAGE_VERSION } from './storage-lifecycle.js';
-import { toEpoch, fromEpoch } from './time.js';
+
 import { cutoverStores } from './offline-cutover.js';
 import { migrations, runMigrations } from './migrations/index.js';
 import { initTestDb, closeDb } from './connection.js';
@@ -13,7 +14,7 @@ const directory = path.resolve('.test-epoch-cutover');
 afterEach(() => fs.rmSync(directory, { recursive: true, force: true }));
 
 describe('epoch storage lifecycle', () => {
-  it('stores dropped-message audit instants as integers while returning ISO strings', () => {
+  it('stores and returns dropped-message audit instants as numeric host records', () => {
     const db = initTestDb();
     try {
       runMigrations(db);
@@ -30,17 +31,17 @@ describe('epoch storage lifecycle', () => {
         db.prepare('SELECT typeof(first_seen) first_type,typeof(last_seen) last_type FROM unregistered_senders').get(),
       ).toEqual({ first_type: 'integer', last_type: 'integer' });
       const [row] = getUnregisteredSenders();
-      expect(new Date(row.first_seen).toISOString()).toBe(row.first_seen);
+      expect(Number.isSafeInteger(row.first_seen)).toBe(true);
       expect(row.last_seen).toBe(row.first_seen);
     } finally {
       closeDb();
     }
   });
   it('strictly validates dates and preserves offsets/millisecond precision', () => {
-    expect(fromEpoch(toEpoch('2026-09-01T04:30:00.123+04:30'))).toBe('2026-09-01T00:00:00.123Z');
-    expect(fromEpoch(toEpoch('2026-09-01 00:00:00'))).toBe('2026-09-01T00:00:00.000Z');
+    expect(formatTimestamp(parseTimestamp('2026-09-01T04:30:00.123+04:30'))).toBe('2026-09-01T00:00:00.123Z');
+    expect(formatTimestamp(parseTimestamp('2026-09-01 00:00:00'))).toBe('2026-09-01T00:00:00.000Z');
     for (const invalid of ['2026-02-30T00:00:00Z', '2026-09-01', '2026:09:01T00:00:00Z', '2026-09-01T00:00:00']) {
-      expect(() => toEpoch(invalid)).toThrow('Invalid timestamp');
+      expect(() => parseTimestamp(invalid)).toThrow('Invalid timestamp');
     }
   });
 
@@ -63,7 +64,7 @@ describe('epoch storage lifecycle', () => {
         timestamp: 1787342173990,
         type: 'integer',
       });
-      expect(() => toEpoch('1787342173990.0')).toThrow('Invalid timestamp');
+      expect(() => parseTimestamp('1787342173990.0')).toThrow('Invalid timestamp');
     } finally {
       db.close();
     }

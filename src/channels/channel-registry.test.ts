@@ -1,3 +1,4 @@
+import { parseTimestamp } from '../time.js';
 /**
  * Tests for the v2 channel adapter registry and integration with host.
  */
@@ -248,7 +249,7 @@ describe('channel + router integration', () => {
       name: 'Test Agent',
       folder: 'test-agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-1',
@@ -257,7 +258,7 @@ describe('channel + router integration', () => {
       name: 'Test Channel',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroupAgent({
       id: 'mga-1',
@@ -269,7 +270,7 @@ describe('channel + router integration', () => {
       ignored_message_policy: 'drop',
       session_mode: 'shared',
       priority: 0,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
   });
 

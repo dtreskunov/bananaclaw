@@ -16,6 +16,7 @@ import { startConversationStream } from './conversation-stream.js';
 import { reconcileThreadSummaries } from '../../../thread-summaries.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import type { WebSocket } from 'ws';
+import { isEpochMs } from '../../../time.js';
 
 export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: string): void {
   let selection: SyncSubscription | null = null;
@@ -41,8 +42,7 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
   };
   const authorize = () => {
     const session = lookupSessionByHash(sessionHash, { touch: false });
-    const deadline = Date.parse(session?.expiresAt ?? '');
-    if (!session || session.userId !== userId || !Number.isFinite(deadline)) {
+    if (!session || session.userId !== userId || !isEpochMs(session.expiresAt)) {
       ws.close(4401, 'Authentication expired');
       stop();
       throw new Error('Synchronization authentication expired');
@@ -56,7 +56,7 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
           fail(error);
         }
       },
-      Math.min(2_147_483_647, Math.max(1, deadline - Date.now())),
+      Math.min(2_147_483_647, Math.max(1, session.expiresAt - Date.now())),
     );
     authTimer.unref();
   };

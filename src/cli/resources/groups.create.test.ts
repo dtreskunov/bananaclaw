@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-cli-groups-create';
+const TEST_ROOT = `${process.cwd()}/.test-state/nanoclaw-test-cli-groups-create`;
 const TEST_GROUPS_DIR = path.join(TEST_ROOT, 'groups');
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
@@ -27,8 +27,8 @@ vi.mock('../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../config.js')>('../../config.js');
   return {
     ...actual,
-    GROUPS_DIR: '/tmp/nanoclaw-test-cli-groups-create/groups',
-    DATA_DIR: '/tmp/nanoclaw-test-cli-groups-create/data',
+    GROUPS_DIR: `${process.cwd()}/.test-state/nanoclaw-test-cli-groups-create/groups`,
+    DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-cli-groups-create/data`,
   };
 });
 

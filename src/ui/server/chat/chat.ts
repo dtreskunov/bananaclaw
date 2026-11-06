@@ -20,7 +20,7 @@ import {
 import { parseInputHandling } from './history.js';
 import crypto from 'crypto';
 import http from 'http';
-import { isEpochMs, parseTimestamp } from '../../shared/time.js';
+import { isEpochMs } from '../../shared/time.js';
 import type internal from 'stream';
 import path from 'path';
 
@@ -119,7 +119,7 @@ function ensureWebMessagingGroup(agentGroupId: string): string {
       is_group: 1,
       unknown_sender_policy: 'strict',
       denied_at: null,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
     mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformId)!;
   }
@@ -135,7 +135,7 @@ function ensureWebMessagingGroup(agentGroupId: string): string {
       ignored_message_policy: 'drop',
       session_mode: 'per-thread',
       priority: 0,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
   }
   return mg.id;
@@ -759,7 +759,7 @@ export async function handleChatRequest(
       writeJson(res, 200, {
         results: results.map((result) => ({
           ...result,
-          timestamp: parseTimestamp(result.timestamp),
+          timestamp: result.timestamp,
         })),
       });
     } catch (err) {
@@ -892,7 +892,7 @@ export async function handleChatRequest(
         else if (m.action === 'resume') resumeTask(inDb, m.seriesId);
         else if (m.action === 'cancel') cancelTask(inDb, m.seriesId);
         else {
-          occurrenceId = runTaskNow(inDb, m.seriesId, new Date().toISOString());
+          occurrenceId = runTaskNow(inDb, m.seriesId, Date.now());
           if (!occurrenceId) {
             writeJson(res, 409, { error: 'task_not_runnable' });
             return true;
@@ -954,7 +954,7 @@ export async function handleChatRequest(
         writeJson(res, 400, { error: 'invalid_process_after' });
         return true;
       }
-      update.processAfter = new Date(b.processAfter).toISOString();
+      update.processAfter = b.processAfter;
     }
     if (b.recurrence === null || typeof b.recurrence === 'string') {
       const cron = b.recurrence as string | null;
@@ -1144,7 +1144,7 @@ async function sendViaChannelAdapter(args: {
   writeSessionMessage(args.agentGroupId, session.id, {
     id,
     kind: 'chat',
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
     platformId: dmPlatformId || mg.platform_id,
     channelType: args.channelType,
     threadId: realThreadId,

@@ -5,7 +5,7 @@ import { Writable } from 'stream';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-private-web-issuance';
+const TEST_ROOT = `${process.cwd()}/.test-state/nanoclaw-test-private-web-issuance`;
 const TEST_GROUPS_DIR = path.join(TEST_ROOT, 'groups');
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
@@ -15,8 +15,8 @@ vi.mock('../../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../../config.js')>('../../../config.js');
   return {
     ...actual,
-    GROUPS_DIR: '/tmp/nanoclaw-test-private-web-issuance/groups',
-    DATA_DIR: '/tmp/nanoclaw-test-private-web-issuance/data',
+    GROUPS_DIR: `${process.cwd()}/.test-state/nanoclaw-test-private-web-issuance/groups`,
+    DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-private-web-issuance/data`,
     PAGES_BASE_DOMAIN: 'pages.test',
   };
 });
@@ -127,16 +127,16 @@ beforeEach(() => {
     name: 'Private',
     folder: FOLDER,
     agent_provider: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   createAgentGroup({
     id: OTHER_GROUP_ID,
     name: 'Other',
     folder: 'other',
     agent_provider: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
-  addMember({ user_id: USER_ID, agent_group_id: GROUP_ID, added_by: null, added_at: new Date().toISOString() });
+  addMember({ user_id: USER_ID, agent_group_id: GROUP_ID, added_by: null, added_at: Date.now() });
   const uiSession = createSession(USER_ID, 60_000);
   mockUserId = USER_ID;
   mockSessionHash = hashToken(uiSession.token);

@@ -47,7 +47,7 @@ beforeEach(() => {
   writeSessionMessage('g', 's', {
     id: 'source',
     kind: 'chat',
-    timestamp: new Date(Date.now() - 1000).toISOString(),
+    timestamp: Date.now() - 1000,
     channelType: 'web',
     platformId: 'group:g',
     threadId: 'source-thread',
@@ -67,7 +67,7 @@ function request(action = 'history-test', payload: Record<string, unknown> = {})
     session_id: 's',
     origin_message_id: 'source',
     request_id: 'request',
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
     input: {
       action: action,
       payload: payload,

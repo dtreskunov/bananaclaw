@@ -1,4 +1,3 @@
-import { toEpoch } from '../../db/time.js';
 /**
  * Integration tests for the unknown-channel registration flow (ACTION-ITEMS
  * item 22).
@@ -19,7 +18,11 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
 import { createAgentGroup } from '../../db/agent-groups.js';
-import { createMessagingGroup, getMessagingGroupByPlatform } from '../../db/messaging-groups.js';
+import {
+  createMessagingGroup,
+  getMessagingGroupByPlatform,
+  setMessagingGroupDeniedAt,
+} from '../../db/messaging-groups.js';
 import { seedUserWithIdentity } from '../../test-utils/seed-identity.js';
 import { getIdentity } from './db/identities.js';
 import { grantRole } from './db/user-roles.js';
@@ -67,8 +70,10 @@ vi.mock('../../config.js', async () => {
 
 const TEST_DIR = `${process.cwd()}/.test-channel-approval`;
 
+import { formatTimestamp } from '../../time.js';
+
 function now() {
-  return new Date().toISOString();
+  return Date.now();
 }
 
 beforeEach(async () => {
@@ -107,7 +112,7 @@ beforeEach(async () => {
       `INSERT INTO user_dms (user_id, channel_type, messaging_group_id, resolved_at)
        VALUES (?, ?, ?, ?)`,
     )
-    .run(ownerId, 'telegram', 'mg-dm-owner', toEpoch(now()));
+    .run(ownerId, 'telegram', 'mg-dm-owner', now());
 
   deliverMock.mockClear();
 });
@@ -126,7 +131,7 @@ function groupMention(platformId: string, text = '@bot hello') {
       id: `msg-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'chat' as const,
       content: JSON.stringify({ senderId: 'caller', senderName: 'Caller', text }),
-      timestamp: now(),
+      timestamp: formatTimestamp(now()),
       isMention: true,
     },
   };
@@ -141,7 +146,7 @@ function dmEvent(platformId: string, text = 'hello') {
       id: `msg-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'chat' as const,
       content: JSON.stringify({ senderId: 'stranger', senderName: 'Stranger', text }),
-      timestamp: now(),
+      timestamp: formatTimestamp(now()),
       isMention: true, // DM bridge sets isMention=true
     },
   };
@@ -351,6 +356,30 @@ describe('unknown-channel registration flow', () => {
     expect(stillPending).toBe(1);
   });
 
+  it('treats an epoch-zero denial as denied without sending another card or waking an agent', async () => {
+    const { routeInbound } = await import('../../router.js');
+    const { getDb } = await import('../../db/connection.js');
+    const { wakeContainer } = await import('../../container-runner.js');
+    createMessagingGroup({
+      id: 'mg-denied-zero',
+      channel_type: 'telegram',
+      platform_id: 'chat-denied-zero',
+      name: 'Denied',
+      is_group: 1,
+      unknown_sender_policy: 'strict',
+      created_at: now(),
+    });
+    setMessagingGroupDeniedAt('mg-denied-zero', 0);
+    deliverMock.mockClear();
+    vi.mocked(wakeContainer).mockClear();
+    await routeInbound(groupMention('chat-denied-zero'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(getMessagingGroupByPlatform('telegram', 'chat-denied-zero')?.denied_at).toBe(0);
+    expect(deliverMock).not.toHaveBeenCalled();
+    expect(wakeContainer).not.toHaveBeenCalled();
+    expect(getDb().prepare('SELECT count(*) AS count FROM pending_channel_approvals').get()).toEqual({ count: 0 });
+  });
+
   it('does not let a scoped admin connect an unknown channel to another agent group', async () => {
     const { routeInbound } = await import('../../router.js');
     const { getDb } = await import('../../db/connection.js');
@@ -378,7 +407,7 @@ describe('unknown-channel registration flow', () => {
         `INSERT INTO user_dms (user_id, channel_type, messaging_group_id, resolved_at)
        VALUES (?, ?, ?, ?)`,
       )
-      .run(scopedAdminId, 'telegram', 'mg-dm-scoped-admin', toEpoch(now()));
+      .run(scopedAdminId, 'telegram', 'mg-dm-scoped-admin', now());
 
     await routeInbound(groupMention('chat-scoped-cross-group'));
     await new Promise((r) => setTimeout(r, 10));

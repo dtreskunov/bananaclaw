@@ -10,27 +10,27 @@
 import { randomUUID } from 'node:crypto';
 
 import { getDb } from '../../../db/connection.js';
-import { decodeTimes, decodeTimeRows } from '../../../db/time.js';
-
 import { recordHostChange, transaction } from '../../../db/transaction.js';
 
 export interface Identity {
   user_id: string;
   channel: string;
   handle: string;
-  verified_at: string;
+  verified_at: number;
   primary_for_channel: number;
   metadata_json: string | null;
 }
 
 export function getIdentity(channel: string, handle: string): Identity | undefined {
-  return decodeTimes<Identity | undefined>(getDb().prepare('SELECT * FROM identities WHERE channel = ? AND handle = ?').get(channel, handle), ['verified_at']);
+  return getDb().prepare('SELECT * FROM identities WHERE channel = ? AND handle = ?').get(channel, handle) as
+    | Identity
+    | undefined;
 }
 
 export function getIdentitiesForUser(userId: string): Identity[] {
-  return decodeTimeRows<Identity>(getDb()
+  return getDb()
     .prepare('SELECT * FROM identities WHERE user_id = ? ORDER BY channel, handle')
-    .all(userId), ['verified_at']);
+    .all(userId) as Identity[];
 }
 
 /**
@@ -39,14 +39,14 @@ export function getIdentitiesForUser(userId: string): Identity[] {
  * earliest-verified.
  */
 export function getPrimaryIdentityForChannel(userId: string, channel: string): Identity | undefined {
-  return decodeTimes<Identity | undefined>(getDb()
+  return getDb()
     .prepare(
       `SELECT * FROM identities
        WHERE user_id = ? AND channel = ?
        ORDER BY primary_for_channel DESC, verified_at ASC
        LIMIT 1`,
     )
-    .get(userId, channel), ['verified_at']);
+    .get(userId, channel) as Identity | undefined;
 }
 
 export function insertIdentity(args: {

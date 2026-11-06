@@ -1,4 +1,3 @@
-import { toEpoch } from '../../../db/time.js';
 /**
  * Optimistic-concurrency tests for the file API's `write` op.
  *
@@ -13,7 +12,7 @@ import path from 'path';
 import { Writable } from 'stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-ui-write-concurrency';
+const TEST_ROOT = `${process.cwd()}/.test-state/nanoclaw-test-ui-write-concurrency`;
 const TEST_GROUPS_DIR = path.join(TEST_ROOT, 'groups');
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
@@ -21,8 +20,8 @@ vi.mock('../../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../../config.js')>('../../../config.js');
   return {
     ...actual,
-    GROUPS_DIR: '/tmp/nanoclaw-test-ui-write-concurrency/groups',
-    DATA_DIR: '/tmp/nanoclaw-test-ui-write-concurrency/data',
+    GROUPS_DIR: `${process.cwd()}/.test-state/nanoclaw-test-ui-write-concurrency/groups`,
+    DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-ui-write-concurrency/data`,
     PAGES_BASE_DOMAIN: 'pages.test',
   };
 });
@@ -37,7 +36,7 @@ import { initTestDb, closeDb, runMigrations, getDb } from '../../../db/index.js'
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { handle } from './routes.js';
 
-const NOW = () => new Date().toISOString();
+const NOW = () => Date.now();
 
 interface CapturedRes {
   done: Promise<void>;
@@ -138,16 +137,14 @@ const FOLDER = 'write-group';
 const ADMIN = 'web:admin';
 
 function seedUser(id: string): void {
-  getDb()
-    .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`)
-    .run(id, id, toEpoch(NOW()));
+  getDb().prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`).run(id, id, NOW());
 }
 
 function seedGroup(): void {
   getDb()
     .prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`)
-    .run(GID, FOLDER, FOLDER, toEpoch(NOW()));
-  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(GID, toEpoch(NOW()));
+    .run(GID, FOLDER, FOLDER, NOW());
+  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(GID, NOW());
   fs.mkdirSync(path.join(TEST_GROUPS_DIR, FOLDER), { recursive: true });
 }
 

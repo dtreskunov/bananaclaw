@@ -20,7 +20,7 @@ export const COOKIE_NAME = 'ui_session';
 export const MAGIC_LINK_TTL_MS = 10 * 60 * 1000; // 10 min
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-export function issueMagicLink(userId: string): { token: string; expiresAt: string } {
+export function issueMagicLink(userId: string): { token: string; expiresAt: number } {
   const out = createMagicLink(userId, MAGIC_LINK_TTL_MS);
   log.info('UI magic link issued', { userId, expiresAt: out.expiresAt });
   return out;
@@ -34,7 +34,7 @@ export function issueMagicLink(userId: string): { token: string; expiresAt: stri
  * missing — every entry point that mints a UI session must guarantee it,
  * otherwise the inbound web message handler later mints a phantom user
  * via `getOrCreateUserByIdentity`. Idempotent. */
-export function createUiSessionForUser(userId: string): { token: string; expiresAt: string } {
+export function createUiSessionForUser(userId: string): { token: string; expiresAt: number } {
   if (!getIdentity('web', userId)) {
     insertIdentity({ userId, channel: 'web', handle: userId, primary: true });
   }
@@ -44,7 +44,7 @@ export function createUiSessionForUser(userId: string): { token: string; expires
 }
 
 /** Returns user_id on success; null on invalid/expired/already-redeemed. */
-export function redeemAndCreateSession(token: string): { token: string; userId: string; expiresAt: string } | null {
+export function redeemAndCreateSession(token: string): { token: string; userId: string; expiresAt: number } | null {
   const userId = redeemMagicLink(token);
   if (!userId) return null;
   return { ...createUiSessionForUser(userId), userId };

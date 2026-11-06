@@ -1,4 +1,3 @@
-import { toEpoch } from '../../../db/time.js';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OUTBOUND_SCHEMA } from '../../../db/schema.js';
@@ -23,7 +22,7 @@ const turn: TurnRow = {
   origin_platform_id: 'group:g',
   origin_thread_id: 't',
   origin_source_session_id: null,
-  started_at: '2026-09-29T00:00:00Z',
+  started_at: 1790640000000,
   ended_at: null,
   imported_from_session_id: null,
   imported_from_turn_id: null,
@@ -50,7 +49,7 @@ const signals = {
       supportsInputCancellation: true,
     },
   },
-  activity: [{ turnId: 'turn', ordinal: 1, ts: '1', text: 'work', timelinePosition: 100 }],
+  activity: [{ turnId: 'turn', ordinal: 1, ts: 1, text: 'work', timelinePosition: 100 }],
   usage: null,
 };
 const read = (history: ConversationMessage[] = []) => projectConversation(db, context, 't', 'g', history, [], signals);
@@ -89,7 +88,7 @@ describe('authoritative conversation projection', () => {
         active: { ...capable.active, turn: { ...capable.active.turn, threadId: 'other-thread' } },
       }).capabilities.stopTool,
     ).toBe(false);
-    putTurn(db, { ...turn, phase: 'settled', outcome: 'silent', ended_at: '2026-09-29T00:00:01Z' });
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'silent', ended_at: 1790640001000 });
     expect(readSignals(capable).capabilities.stopTool).toBe(false);
   });
 
@@ -139,7 +138,7 @@ describe('authoritative conversation projection', () => {
           turnId: 'turn',
           ordinal: 0,
           timelinePosition: 100,
-          ts: '1000',
+          ts: 1000,
           text: JSON.stringify({
             kind: 'tool',
             id: 'tool',
@@ -148,12 +147,12 @@ describe('authoritative conversation projection', () => {
             detail: 'file.txt',
           }),
         },
-        { turnId: 'turn', ordinal: 1, ts: '1001', text: 'Imported activity', timelinePosition: 200 },
+        { turnId: 'turn', ordinal: 1, ts: 1001, text: 'Imported activity', timelinePosition: 200 },
         {
           turnId: 'turn',
           ordinal: 2,
           timelinePosition: 300,
-          ts: '2000',
+          ts: 2000,
           text: JSON.stringify({
             kind: 'tool',
             id: 'tool',
@@ -197,12 +196,12 @@ describe('authoritative conversation projection', () => {
       origin_message_id: null,
       dedupe_key: null,
       outcome_message: null,
-      updated_at: '2026-09-29T00:00:01Z',
+      updated_at: 1790640001000,
       expires_at: null,
       responded_by: null,
       responded_at: null,
       resolved_at: null,
-      created_at: '2026-09-29T00:00:01Z',
+      created_at: 1790640001000,
     };
     const questionInput = {
       question: question.input.question,
@@ -217,14 +216,14 @@ describe('authoritative conversation projection', () => {
             ...question,
             status,
             response: { responseType: 'text', value: 'Yes' },
-            responded_at: '2026-09-29T00:00:03Z',
+            responded_at: 1790640003000,
           }
         : { ...question, status };
     beforeEach(() => {
       db.prepare('INSERT INTO messages_out (id, kind, timestamp, content, turn_id) VALUES (?, ?, ?, ?, ?)').run(
         question.message_out_id,
         'system_action',
-        toEpoch(question.created_at),
+        question.created_at,
         JSON.stringify(questionInput),
         turn.id,
       );
@@ -294,7 +293,7 @@ describe('authoritative conversation projection', () => {
         const reply = { ...output, timelinePosition: base + 2_000_000 };
         const readQuestion = (current: Question, inputs: ConversationMessage[] = []) =>
           projectConversation(db, context, 't', 'g', [reply, ...inputs], [current], signals);
-        const pending = readQuestion({ ...question, created_at: '2026-09-29T00:00:10Z' });
+        const pending = readQuestion({ ...question, created_at: 1790640010000 });
         expect(pending.interactions[0]).toMatchObject({ timelinePosition: base + 1_000_000 });
         expect(pending.timeline.map((row) => row.kind)).toEqual(['interaction', 'message']);
 
@@ -302,7 +301,7 @@ describe('authoritative conversation projection', () => {
           ...question,
           status: 'answered',
           response: responseType === 'skipped' ? { responseType } : { responseType, value: 'Yes' },
-          responded_at: '2026-09-29T00:00:03Z',
+          responded_at: 1790640003000,
         };
         const queued = readQuestion(answered);
         expect(queued.interactions[0]).toMatchObject({ timelinePosition: base + 1_000_000 });
@@ -386,7 +385,7 @@ describe('authoritative conversation projection', () => {
             ...question,
             status: 'answered',
             response: { responseType: 'text', value: 'Yes' },
-            responded_at: '2026-09-29T00:00:03Z',
+            responded_at: 1790640003000,
           },
         ],
         signals,
@@ -467,7 +466,7 @@ describe('authoritative conversation projection', () => {
     db.prepare(
       'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
     ).run('out', 1, Number('1'), 'durable', 'turn');
-    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: 1790640002000 });
     const after = read([output]);
     expect(after.messages).toEqual([output]);
     expect(after.turns[0].activity[0].text).toBe('durable');
@@ -482,8 +481,8 @@ describe('authoritative conversation projection', () => {
       timestamp: Date.parse(timestamp),
       text: id,
     });
-    putTurn(db, { ...turn, id: 'earlier', started_at: '2026-09-28T23:59:50Z', ended_at: '2026-09-28T23:59:58Z' });
-    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
+    putTurn(db, { ...turn, id: 'earlier', started_at: 1790639990000, ended_at: 1790639998000 });
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: 1790640002000 });
     linkTurnInput(db, { turn_id: 'turn', message_in_id: 'late', association: 'consumed' });
     linkTurnInput(db, { turn_id: 'turn', message_in_id: 'first', association: 'consumed' });
     const requested = (history: ConversationMessage[]) => read(history).turns.find((t) => t.id === 'turn')?.requestedAt;
@@ -518,7 +517,7 @@ describe('authoritative conversation projection', () => {
       1767225600000,
     );
     expect(read().turns[0].metadata).toEqual({ status: 'provisional', model: 'm', durationMs: null });
-    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: '2026-09-29T00:00:02Z' });
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'replied', ended_at: 1790640002000 });
     expect(read().turns[0].metadata).toEqual({ status: 'unavailable', model: 'm', durationMs: null });
     expect(read().turns[0].endedAt).toBe(Date.parse('2026-09-29T00:00:02.000Z'));
   });

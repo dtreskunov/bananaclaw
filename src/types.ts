@@ -1,3 +1,5 @@
+import type { EpochMs } from './time.js';
+
 // ── Central DB entities ──
 
 export interface AgentGroup {
@@ -19,7 +21,7 @@ export interface AgentGroup {
   email_slug?: string | null;
   /** 1 = inbound/outbound agent email enabled, 0/absent = disabled. */
   email_enabled?: number;
-  created_at: string;
+  created_at: EpochMs;
 }
 
 /** Per-agent-group container runtime config. Source of truth in the DB;
@@ -60,7 +62,7 @@ export interface ContainerConfigRow {
    * one-shot warning at startup. Flat namespace; not provider-scoped.
    */
   model_params: string; // JSON: Record<string, unknown>
-  updated_at: string;
+  updated_at: EpochMs;
 }
 
 export type UnknownSenderPolicy = 'strict' | 'request_approval' | 'public';
@@ -89,8 +91,8 @@ export interface MessagingGroup {
    * MessagingGroup objects in code (fixtures, etc.) don't need to update;
    * the column itself defaults to NULL in SQLite.
    */
-  denied_at?: string | null;
-  created_at: string;
+  denied_at?: EpochMs | null;
+  created_at: EpochMs;
 }
 
 // ── Identity & privilege ──
@@ -107,9 +109,9 @@ export interface User {
   id: string;
   kind: string; // primary channel type, informational: 'phone' | 'email' | 'discord' | ...
   display_name: string | null;
-  created_at: string;
+  created_at: EpochMs;
   /** Timestamp when the user completed first-login onboarding (NULL = pending). */
-  onboarded_at?: string | null;
+  onboarded_at?: EpochMs | null;
 }
 
 export type UserRoleKind = 'owner' | 'admin';
@@ -125,7 +127,7 @@ export interface UserRole {
   role: UserRoleKind;
   agent_group_id: string | null;
   granted_by: string | null;
-  granted_at: string;
+  granted_at: EpochMs;
 }
 
 /** "Known" membership in an agent group — required for unprivileged users. */
@@ -133,7 +135,7 @@ export interface AgentGroupMember {
   user_id: string;
   agent_group_id: string;
   added_by: string | null;
-  added_at: string;
+  added_at: EpochMs;
 }
 
 /** Cached DM channel for a user on a specific channel_type. */
@@ -141,7 +143,7 @@ export interface UserDm {
   user_id: string;
   channel_type: string;
   messaging_group_id: string;
-  resolved_at: string;
+  resolved_at: EpochMs;
 }
 
 export type EngageMode = 'pattern' | 'mention' | 'mention-sticky';
@@ -163,7 +165,7 @@ export interface MessagingGroupAgent {
   ignored_message_policy: IgnoredMessagePolicy;
   session_mode: 'shared' | 'per-thread' | 'agent-shared';
   priority: number;
-  created_at: string;
+  created_at: EpochMs;
 }
 
 export interface Session {
@@ -174,8 +176,8 @@ export interface Session {
   agent_provider: string | null;
   status: 'active' | 'closed';
   container_status: 'running' | 'idle' | 'stopped';
-  last_active: string | null;
-  created_at: string;
+  last_active: EpochMs | null;
+  created_at: EpochMs;
 }
 
 // ── Session DB entities ──
@@ -186,10 +188,10 @@ export type MessageInStatus = 'pending' | 'processing' | 'completed' | 'failed';
 export interface MessageIn {
   id: string;
   kind: MessageInKind;
-  timestamp: string;
+  timestamp: EpochMs;
   status: MessageInStatus;
-  status_changed: string | null;
-  process_after: string | null;
+  status_changed: EpochMs | null;
+  process_after: EpochMs | null;
   recurrence: string | null;
   tries: number;
   platform_id: string | null;
@@ -201,9 +203,9 @@ export interface MessageIn {
 export interface MessageOut {
   id: string;
   in_reply_to: string | null;
-  timestamp: string;
+  timestamp: EpochMs;
   delivered: number; // 0 | 1
-  deliver_after: string | null;
+  deliver_after: EpochMs | null;
   recurrence: string | null;
   kind: string;
   platform_id: string | null;
@@ -219,14 +221,14 @@ interface InteractionRecord {
   session_id: string | null;
   agent_group_id: string | null;
   origin_message_id: string | null;
-  created_at: string;
-  updated_at: string;
-  expires_at: string | null;
+  created_at: EpochMs;
+  updated_at: EpochMs;
+  expires_at: EpochMs | null;
   revision: number;
   dedupe_key: string | null;
   responded_by: string | null;
-  responded_at: string | null;
-  resolved_at: string | null;
+  responded_at: EpochMs | null;
+  resolved_at: EpochMs | null;
   outcome_message: string | null;
 }
 
@@ -243,7 +245,7 @@ interface QuestionRecord extends InteractionRecord {
 
 export type Question = QuestionRecord &
   (
-    | { status: 'answered'; response: import('./ui/shared/question.js').QuestionResponse; responded_at: string }
+    | { status: 'answered'; response: import('./ui/shared/question.js').QuestionResponse; responded_at: EpochMs }
     | { status: 'pending' | 'cancelled'; response: null }
   );
 
@@ -284,7 +286,7 @@ export interface AgentDestination {
   local_name: string;
   target_type: 'channel' | 'agent';
   target_id: string;
-  created_at: string;
+  created_at: EpochMs;
   /** User who created this row. Null for legacy rows (channel backfill, pre-audit). */
   created_by: string | null;
 }

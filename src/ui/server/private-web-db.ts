@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 
 import { getDb } from '../../db/connection.js';
-import { toEpoch, fromEpoch } from '../../db/time.js';
 import { hashToken, lookupSessionByHash } from './db.js';
 
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
@@ -25,8 +24,8 @@ export interface PrivateWebSession {
   parentSessionHash: string;
   userId: string;
   agentGroupId: string;
-  expiresAt: string;
-  lastUsed: string | null;
+  expiresAt: number;
+  lastUsed: number | null;
 }
 
 function toSession(row: PrivateWebRow): PrivateWebSession {
@@ -35,8 +34,8 @@ function toSession(row: PrivateWebRow): PrivateWebSession {
     parentSessionHash: row.parent_ui_session_hash,
     userId: row.user_id,
     agentGroupId: row.agent_group_id,
-    expiresAt: fromEpoch(row.expires_at),
-    lastUsed: fromEpoch(row.last_used),
+    expiresAt: row.expires_at,
+    lastUsed: row.last_used,
   };
 }
 
@@ -49,27 +48,19 @@ function isLive(row: PrivateWebRow, now: number): boolean {
 export function createPrivateWebSession(args: { parentSessionHash: string; userId: string; agentGroupId: string }): {
   id: string;
   handoffToken: string;
-  expiresAt: string;
+  expiresAt: number;
 } {
   const id = crypto.randomBytes(24).toString('hex');
   const handoffToken = crypto.randomBytes(32).toString('base64url');
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
+  const now = Date.now();
+  const expiresAt = now + SESSION_TTL_MS;
   getDb()
     .prepare(
       `INSERT INTO ui_private_web_sessions
          (id, handoff_token_hash, parent_ui_session_hash, user_id, agent_group_id, created_at, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(
-      id,
-      hashToken(handoffToken),
-      args.parentSessionHash,
-      args.userId,
-      args.agentGroupId,
-      now.getTime(),
-      toEpoch(expiresAt),
-    );
+    .run(id, hashToken(handoffToken), args.parentSessionHash, args.userId, args.agentGroupId, now, expiresAt);
   return { id, handoffToken, expiresAt };
 }
 
@@ -77,7 +68,7 @@ export function inspectPrivateWebHandoff(id: string, handoffToken: string): Priv
   const row = getDb()
     .prepare('SELECT * FROM ui_private_web_sessions WHERE id = ? AND handoff_token_hash = ?')
     .get(id, hashToken(handoffToken)) as PrivateWebRow | undefined;
-  if (!row || row.redeemed_at || !isLive(row, Date.now())) return null;
+  if (!row || row.redeemed_at !== null || !isLive(row, Date.now())) return null;
   if (!lookupSessionByHash(row.parent_ui_session_hash)) return null;
   return toSession(row);
 }
@@ -89,14 +80,14 @@ export function redeemPrivateWebHandoff(
   const inspected = inspectPrivateWebHandoff(id, handoffToken);
   if (!inspected) return null;
   const secureToken = crypto.randomBytes(32).toString('base64url');
-  const now = new Date().toISOString();
+  const now = Date.now();
   const result = getDb()
     .prepare(
       `UPDATE ui_private_web_sessions
           SET secure_token_hash = ?, redeemed_at = ?, last_used = ?
         WHERE id = ? AND handoff_token_hash = ? AND redeemed_at IS NULL`,
     )
-    .run(hashToken(secureToken), toEpoch(now), toEpoch(now), id, hashToken(handoffToken));
+    .run(hashToken(secureToken), now, now, id, hashToken(handoffToken));
   if (result.changes !== 1) return null;
   return { session: { ...inspected, lastUsed: now }, secureToken };
 }
@@ -105,11 +96,11 @@ export function lookupPrivateWebSession(id: string, secureToken: string): Privat
   const row = getDb()
     .prepare('SELECT * FROM ui_private_web_sessions WHERE id = ? AND secure_token_hash = ?')
     .get(id, hashToken(secureToken)) as PrivateWebRow | undefined;
-  if (!row || !row.redeemed_at || !isLive(row, Date.now())) return null;
+  if (!row || row.redeemed_at === null || !isLive(row, Date.now())) return null;
   const parent = lookupSessionByHash(row.parent_ui_session_hash);
   if (!parent || parent.userId !== row.user_id) return null;
-  const now = new Date().toISOString();
-  getDb().prepare('UPDATE ui_private_web_sessions SET last_used = ? WHERE id = ?').run(toEpoch(now), id);
+  const now = Date.now();
+  getDb().prepare('UPDATE ui_private_web_sessions SET last_used = ? WHERE id = ?').run(now, id);
   return { ...toSession(row), lastUsed: now };
 }
 

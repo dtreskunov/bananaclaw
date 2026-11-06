@@ -11,7 +11,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import { getDb } from '../../../db/connection.js';
-import { decodeTimes, decodeTimeRows } from '../../../db/time.js';
 import { log } from '../../../log.js';
 import { addMember } from './agent-group-members.js';
 import { insertIdentity } from './identities.js';
@@ -34,8 +33,8 @@ export interface PendingUserApproval {
   approver_platform_id: string | null;
   approver_message_token: string | null;
   status: ApprovalStatus;
-  created_at: string;
-  resolved_at: string | null;
+  created_at: number;
+  resolved_at: number | null;
   resolved_by_user_id: string | null;
   resolution_note: string | null;
   granted_agent_group_id: string | null;
@@ -53,19 +52,21 @@ function sha256Hex(s: string): string {
  * in-flight pending row per subject.
  */
 export function findPendingByOidcSub(provider: string, sub: string): PendingUserApproval | undefined {
-  return decodeTimes<PendingUserApproval | undefined>(getDb()
+  return getDb()
     .prepare(`SELECT * FROM pending_user_approvals WHERE provider = ? AND sub = ? AND status = 'pending'`)
-    .get(provider, sub), ['created_at', 'resolved_at']);
+    .get(provider, sub) as PendingUserApproval | undefined;
 }
 
 export function getPendingApproval(id: string): PendingUserApproval | undefined {
-  return decodeTimes<PendingUserApproval | undefined>(getDb().prepare('SELECT * FROM pending_user_approvals WHERE id = ?').get(id), ['created_at', 'resolved_at']);
+  return getDb().prepare('SELECT * FROM pending_user_approvals WHERE id = ?').get(id) as
+    | PendingUserApproval
+    | undefined;
 }
 
 export function listPendingApprovals(): PendingUserApproval[] {
-  return decodeTimeRows<PendingUserApproval>(getDb()
+  return getDb()
     .prepare(`SELECT * FROM pending_user_approvals WHERE status = 'pending' ORDER BY created_at`)
-    .all(), ['created_at', 'resolved_at']);
+    .all() as PendingUserApproval[];
 }
 
 /**
@@ -188,7 +189,7 @@ export function approvePendingUser(args: ApprovePendingUserArgs): ApprovePending
 
   const displayName = args.displayName ?? row.display_name ?? row.email ?? `User ${row.sub.slice(0, 8)}`;
   const userId = randomUUID();
-  const now = new Date().toISOString();
+  const now = Date.now();
   let resolvedAgentGroupId: string | null = args.agentGroupId ?? null;
 
   const txn = transaction(getDb(), () => {

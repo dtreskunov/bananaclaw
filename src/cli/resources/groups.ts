@@ -176,7 +176,7 @@ registerResource({
             writeSessionMessage(id, ctx.sessionId, {
               id: `restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               kind: 'chat',
-              timestamp: new Date().toISOString(),
+              timestamp: Date.now(),
               platformId: mg?.platform_id ?? id,
               channelType: mg?.channel_type ?? 'agent',
               threadId: mg ? (s?.thread_id ?? null) : null,

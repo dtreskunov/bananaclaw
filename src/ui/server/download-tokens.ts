@@ -8,7 +8,7 @@
 import crypto from 'crypto';
 
 import { getDb } from '../../db/connection.js';
-import { toEpoch, decodeTimes } from '../../db/time.js';
+import { epochMs } from '../../time.js';
 import { hashToken } from './db.js';
 
 export interface DownloadTokenRow {
@@ -17,10 +17,10 @@ export interface DownloadTokenRow {
   recipient_user_id: string | null;
   group_id: string;
   rel_path: string;
-  created_at: string;
-  expires_at: string;
+  created_at: number;
+  expires_at: number;
   uses_left: number;
-  first_redeemed_at: string | null;
+  first_redeemed_at: number | null;
   first_redeemed_ip: string | null;
   first_redeemed_ua: string | null;
 }
@@ -32,10 +32,10 @@ export function createDownloadToken(args: {
   relPath: string;
   ttlMs: number;
   uses: number;
-}): { token: string; expiresAt: string } {
+}): { token: string; expiresAt: number } {
   const token = crypto.randomBytes(32).toString('base64url');
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + args.ttlMs).toISOString();
+  const now = Date.now();
+  const expiresAt = epochMs(now + args.ttlMs);
   getDb()
     .prepare(
       `INSERT INTO ui_download_tokens
@@ -48,8 +48,8 @@ export function createDownloadToken(args: {
       args.recipientUserId ?? null,
       args.groupId,
       args.relPath,
-      now.getTime(),
-      toEpoch(expiresAt),
+      now,
+      expiresAt,
       args.uses,
     );
   return { token, expiresAt };
@@ -62,11 +62,14 @@ export function createDownloadToken(args: {
 export function redeemDownloadToken(token: string, ip: string | null, ua: string | null): DownloadTokenRow | null {
   const db = getDb();
   const hash = hashToken(token);
-  const row = decodeTimes<DownloadTokenRow | undefined>(db.prepare('SELECT * FROM ui_download_tokens WHERE token_hash = ?').get(hash), ['created_at', 'expires_at', 'first_redeemed_at']);
+  const row = db.prepare('SELECT * FROM ui_download_tokens WHERE token_hash = ?').get(hash) as
+    | DownloadTokenRow
+    | undefined;
   if (!row) return null;
   if (row.uses_left <= 0) return null;
-  if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  if (row.expires_at < Date.now()) return null;
 
+  const now = Date.now();
   const res = db
     .prepare(
       `UPDATE ui_download_tokens
@@ -76,11 +79,11 @@ export function redeemDownloadToken(token: string, ip: string | null, ua: string
              first_redeemed_ua = COALESCE(first_redeemed_ua, ?)
        WHERE token_hash = ? AND uses_left > 0`,
     )
-    .run(Date.now(), ip, ua, hash);
+    .run(now, ip, ua, hash);
   if (res.changes !== 1) return null;
-  return { ...row, uses_left: row.uses_left - 1, first_redeemed_at: row.first_redeemed_at ?? new Date().toISOString() };
+  return { ...row, uses_left: row.uses_left - 1, first_redeemed_at: row.first_redeemed_at ?? now };
 }
 
 export function purgeExpiredDownloadTokens(): void {
-  getDb().prepare("DELETE FROM ui_download_tokens WHERE expires_at < ? OR uses_left <= 0").run(Date.now());
+  getDb().prepare('DELETE FROM ui_download_tokens WHERE expires_at < ? OR uses_left <= 0').run(Date.now());
 }

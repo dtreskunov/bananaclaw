@@ -20,10 +20,10 @@ vi.mock('../../container-runner.js', () => ({
 
 vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-cli-destinations' };
+  return { ...actual, DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-cli-destinations` };
 });
 
-const TEST_DIR = '/tmp/nanoclaw-test-cli-destinations';
+const TEST_DIR = `${process.cwd()}/.test-state/nanoclaw-test-cli-destinations`;
 
 import { initTestDb, closeDb, runMigrations, createAgentGroup } from '../../db/index.js';
 import { createSession } from '../../db/sessions.js';
@@ -32,8 +32,8 @@ import { dispatch } from '../dispatch.js';
 // Side-effect import: registers the `destinations-add` / `destinations-remove` commands.
 import './destinations.js';
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 function readSessionDestinations(agentGroupId: string, sessionId: string) {

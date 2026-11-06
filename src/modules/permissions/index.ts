@@ -261,7 +261,7 @@ async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<b
       user_id: row.sender_identity,
       agent_group_id: row.agent_group_id,
       added_by: approverId,
-      added_at: new Date().toISOString(),
+      added_at: Date.now(),
     });
     log.info('Unknown sender approved — member added', {
       approvalId: row.id,
@@ -335,7 +335,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
 
   // ── Reject / Cancel ──
   if (payload.value === REJECT_VALUE) {
-    setMessagingGroupDeniedAt(row.messaging_group_id, new Date().toISOString());
+    setMessagingGroupDeniedAt(row.messaging_group_id, Date.now());
     deletePendingChannelApproval(row.messaging_group_id);
     log.info('Channel registration denied', {
       messagingGroupId: row.messaging_group_id,
@@ -488,7 +488,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
     ignored_message_policy: 'accumulate',
     session_mode: 'shared',
     priority: 0,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   log.info('Channel registration approved — wiring created', {
     messagingGroupId: row.messaging_group_id,
@@ -504,7 +504,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
       user_id: senderUserId,
       agent_group_id: targetAgentGroupId,
       added_by: approverId,
-      added_at: new Date().toISOString(),
+      added_at: Date.now(),
     });
   }
 
@@ -588,7 +588,7 @@ setMessageInterceptor(async (event: InboundEvent): Promise<boolean> => {
     ignored_message_policy: 'accumulate',
     session_mode: 'shared',
     priority: 0,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   log.info('Channel registration approved — wiring created', {
     messagingGroupId: row.messaging_group_id,
@@ -604,7 +604,7 @@ setMessageInterceptor(async (event: InboundEvent): Promise<boolean> => {
       user_id: senderUserId,
       agent_group_id: ag.id,
       added_by: userId,
-      added_at: new Date().toISOString(),
+      added_at: Date.now(),
     });
   }
 

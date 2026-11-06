@@ -11,7 +11,6 @@
  * audit seam for a real DB table without touching handlers.
  */
 import http from 'http';
-import { parseTimestamp } from '../../shared/time.js';
 import zlib from 'zlib';
 import { URL } from 'url';
 
@@ -330,7 +329,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     if (match) {
       selectedImageDetail = {
         label: match.label,
-        createdAt: parseTimestamp(match.createdAt),
+        createdAt: match.createdAt,
         size: match.size,
       };
     }
@@ -352,8 +351,8 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     id: group.id,
     name: group.name,
     folder: group.folder,
-    createdAt: parseTimestamp(group.created_at),
-    updatedAt: parseTimestamp(cfg.updated_at),
+    createdAt: group.created_at,
+    updatedAt: cfg.updated_at,
     config: {
       provider: cfg.provider,
       upstream_provider: cfg.upstream_provider,
@@ -1298,7 +1297,7 @@ async function handleAddMember(
   if (isAdminOfAgentGroup(userId, gid)) {
     throw new BadRequest('user is an admin of this group — already an implicit member');
   }
-  addMember({ user_id: userId, agent_group_id: gid, added_by: actorUserId, added_at: new Date().toISOString() });
+  addMember({ user_id: userId, agent_group_id: gid, added_by: actorUserId, added_at: Date.now() });
   recordAdminAction({
     actorUserId,
     action: 'group_member_add',
@@ -1345,7 +1344,7 @@ function handleGetRoles(res: http.ServerResponse, gid: string): void {
   const out: RoleDto[] = rows.map((r) => ({
     userId: r.user_id,
     ...userDtoBase(r.user_id),
-    grantedAt: parseTimestamp(r.granted_at),
+    grantedAt: r.granted_at,
     grantedBy: r.granted_by,
   }));
   writeJson(res, 200, { admins: out });
@@ -1370,7 +1369,7 @@ async function handleGrantRole(
     role: 'admin',
     agent_group_id: gid,
     granted_by: actorUserId,
-    granted_at: new Date().toISOString(),
+    granted_at: Date.now(),
   });
   recordAdminAction({
     actorUserId,
@@ -1461,7 +1460,7 @@ function handleListImages(res: http.ServerResponse): void {
   writeJson(res, 200, {
     images: listImages().map((image) => ({
       ...image,
-      createdAt: parseTimestamp(image.createdAt),
+      createdAt: image.createdAt,
     })),
   });
 }
@@ -1519,7 +1518,7 @@ function handleListDestinations(res: http.ServerResponse, actorUserId: string, g
       channelType,
       platformId,
       reverseLink,
-      createdAt: parseTimestamp(r.created_at),
+      createdAt: r.created_at,
       createdBy: r.created_by,
     };
   });

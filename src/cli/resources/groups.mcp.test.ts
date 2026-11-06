@@ -42,7 +42,7 @@ describe('groups config add-mcp-server transports', () => {
       name: 'MCP test',
       folder: GROUP,
       agent_provider: null,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
     ensureContainerConfig(GROUP);
     updateContainerConfigJson(GROUP, 'mcp_servers', { other: { command: 'existing', args: ['keep'] } });
@@ -188,7 +188,7 @@ describe('groups config add-mcp-server transports', () => {
         status: 'active',
         container_status: 'stopped',
         last_active: null,
-        created_at: new Date().toISOString(),
+        created_at: Date.now(),
       });
       const frame = {
         id: 'agent-request',

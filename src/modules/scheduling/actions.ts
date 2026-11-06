@@ -25,7 +25,7 @@ export async function handleScheduleTask(
   const prompt = content.prompt as string;
   const script = content.script as string | null;
   const scriptTimeoutMs = typeof content.scriptTimeoutMs === 'number' ? content.scriptTimeoutMs : undefined;
-  const processAfter = content.processAfter as string;
+  const processAfter = parseTimestamp(content.processAfter as string);
   const recurrence = (content.recurrence as string) || null;
 
   insertTask(inDb, {
@@ -78,7 +78,7 @@ export async function handleUpdateTask(
   const taskId = content.taskId as string;
   const update: TaskUpdate = {};
   if (typeof content.prompt === 'string') update.prompt = content.prompt;
-  if (typeof content.processAfter === 'string') update.processAfter = content.processAfter;
+  if (typeof content.processAfter === 'string') update.processAfter = parseTimestamp(content.processAfter);
   if (content.recurrence === null || typeof content.recurrence === 'string') {
     update.recurrence = content.recurrence as string | null;
   }
@@ -97,7 +97,7 @@ export async function handleUpdateTask(
     writeSessionMessage(session.agent_group_id, session.id, {
       id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'chat',
-      timestamp: new Date().toISOString(),
+      timestamp: Date.now(),
       platformId: session.agent_group_id,
       channelType: 'agent',
       threadId: null,
@@ -115,3 +115,4 @@ export async function handleUpdateTask(
     }
   }
 }
+import { parseTimestamp } from '../../time.js';

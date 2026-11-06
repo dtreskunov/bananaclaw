@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   const db = initDb(path.join(DATA_DIR, 'v2.db'));
   runMigrations(db);
 
-  const now = new Date().toISOString();
+  const now = Date.now();
 
   // 1. Synthetic CLI user + owner grant if none exists.
   upsertUser({
@@ -167,9 +167,7 @@ async function main(): Promise<void> {
 
   console.log('');
   console.log('Init complete.');
-  console.log(
-    `  owner:   ${CLI_SYNTHETIC_USER_ID}${promotedToOwner ? ' (promoted on first owner)' : ''}`,
-  );
+  console.log(`  owner:   ${CLI_SYNTHETIC_USER_ID}${promotedToOwner ? ' (promoted on first owner)' : ''}`);
   console.log(`  agent:   ${ag.name} [${ag.id}] @ groups/${folder}`);
   console.log(`  channel: cli/${CLI_PLATFORM_ID}`);
   console.log('');

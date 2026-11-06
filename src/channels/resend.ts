@@ -1,3 +1,4 @@
+import { parseTimestamp } from '../time.js';
 /**
  * Resend (email) channel adapter (v2) — uses Chat SDK bridge.
  * Self-registers on import.
@@ -158,7 +159,7 @@ export async function routeResendDeliveryFailure(event: ResendDeliveryFailureEve
   writeSessionMessage(originSession.agent_group_id, originSession.id, {
     id: `resend-delivery-failure:${event.data.email_id}`,
     kind: 'chat',
-    timestamp: event.created_at || event.data.created_at,
+    timestamp: parseTimestamp(event.created_at || event.data.created_at),
     platformId: originSession.agent_group_id,
     channelType: 'agent',
     threadId: null,
@@ -774,7 +775,7 @@ registerChannelAdapter('resend', {
             correlation_token: correlationToken,
             origin_session_id: context.sessionId,
             email_thread_id: newTid,
-            created_at: new Date().toISOString(),
+            created_at: Date.now(),
           });
           pendingCorrelation = {
             token: correlationToken,

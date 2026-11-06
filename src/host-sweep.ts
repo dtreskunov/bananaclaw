@@ -53,17 +53,6 @@ import { isContainerRunning, killContainer, recoverStoppedSession, wakeContainer
 import { needsStoppedRunnerRecovery } from './session-recovery.js';
 import type { Session } from './types.js';
 
-/**
- * SQLite TIMESTAMP columns store UTC without a timezone marker. Date.parse
- * treats timezoneless ISO strings as local time, so on non-UTC hosts every
- * timestamp looks (TZ offset) hours stale — leading to spurious kill-claim
- * decisions on freshly-claimed messages. Append "Z" when no zone marker is
- * present so Date.parse interprets the string as UTC.
- */
-export function parseSqliteUtc(s: string): number {
-  return Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z');
-}
-
 const SWEEP_INTERVAL_MS = 60_000;
 // Absolute idle ceiling for a running container. If the session link hasn't
 // reported activity in this long, the container is either stuck or doing genuinely
@@ -91,7 +80,7 @@ export function decideStuckAction(args: {
   lastSignalAtMs: number; // 0 until the runner sends its first signal
   sessionLinkStartedAtMs?: number;
   containerState: ContainerState | null;
-  claims: Array<{ message_id: string; status_changed: string }>;
+  claims: Array<{ message_id: string; status_changed: number }>;
 }): StuckDecision {
   const { now, lastSignalAtMs, sessionLinkStartedAtMs = 0, containerState, claims } = args;
   const declaredBashMs = bashTimeoutMs(containerState);
@@ -117,7 +106,7 @@ export function decideStuckAction(args: {
 
   const tolerance = Math.max(CLAIM_STUCK_MS, declaredBashMs ?? 0);
   for (const claim of claims) {
-    const claimedAt = parseSqliteUtc(claim.status_changed);
+    const claimedAt = claim.status_changed;
     if (Number.isNaN(claimedAt)) continue;
     const claimAge = now - claimedAt;
     if (claimAge <= tolerance) continue;
@@ -338,7 +327,7 @@ function resetStuckProcessingRows(
     // Already rescheduled for a future retry — don't bump tries again. The
     // wake path (sweep step 2) will fire when process_after elapses and a
     // fresh container will clean the orphan claim on startup.
-    if (msg.processAfter && parseSqliteUtc(msg.processAfter) > now) continue;
+    if (msg.processAfter !== null && msg.processAfter > now) continue;
 
     if (msg.tries >= MAX_TRIES) {
       markMessageFailed(inDb, msg.id);

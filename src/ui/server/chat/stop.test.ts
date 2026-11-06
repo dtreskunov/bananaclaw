@@ -1,4 +1,3 @@
-import { toEpoch } from '../../../db/time.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -74,6 +73,7 @@ import {
 } from '../../../session-manager.js';
 import { createQuestion, answerQuestion } from '../../../db/sessions.js';
 import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
+import { formatTimestamp } from '../../../time.js';
 import { createWebAdapter } from '../../../channels/web.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
 import { COOKIE_NAME } from '../auth.js';
@@ -156,51 +156,46 @@ const TURN = {
   threadId: 'thread-1',
 };
 const OVERRIDE = { channelType: 'web', messagingGroupId: 'web-mg' };
-const NOW = '2026-09-25T00:00:00.000Z';
+const NOW = 1790294400000;
 
 beforeEach(() => {
   runMigrations(initTestDb());
   const db = getDb();
   for (const id of ['web:member', 'web:other', 'web:owner']) {
-    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(id, toEpoch(NOW));
+    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(id, NOW);
   }
   db.prepare(
     `INSERT INTO ui_sessions (token_hash, user_id, created_at, expires_at, last_used)
     VALUES ('test', 'web:member', ?, ?, ?)`,
-  ).run(toEpoch(NOW), toEpoch(new Date(Date.now() + 60_000).toISOString()), toEpoch(NOW));
+  ).run(NOW, Date.now() + 60_000, NOW);
   for (const id of ['agent', 'other']) {
-    db.prepare('INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)').run(
-      id,
-      id,
-      id,
-      toEpoch(NOW),
-    );
+    db.prepare('INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)').run(id, id, id, NOW);
   }
   for (const id of ['web:member', 'web:other']) {
     db.prepare('INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)').run(
       id,
       'agent',
       id,
-      toEpoch(NOW),
+      NOW,
     );
   }
   db.prepare(
     "INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES ('web:owner', 'owner', NULL, 'web:owner', ?)",
-  ).run(toEpoch(NOW));
+  ).run(NOW);
   for (const [id, channel, platform] of [
     ['web-mg', 'web', 'group:agent'],
     ['mail-mg', 'resend', 'bot@example.com'],
   ]) {
     db.prepare(
       "INSERT INTO messaging_groups (id, channel_type, platform_id, instance, is_group, unknown_sender_policy, created_at) VALUES (?, ?, ?, ?, 1, 'strict', ?)",
-    ).run(id, channel, platform, channel, toEpoch(NOW));
+    ).run(id, channel, platform, channel, NOW);
     db.prepare(
       "INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, session_mode, created_at) VALUES (?, ?, 'agent', 'agent-shared', ?)",
-    ).run(`wire-${id}`, id, toEpoch(NOW));
+    ).run(`wire-${id}`, id, NOW);
   }
   db.prepare(
     "INSERT INTO sessions (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at) VALUES ('session-1', 'agent', NULL, NULL, 'active', 'stopped', ?)",
-  ).run(toEpoch(NOW));
+  ).run(NOW);
   initSessionFolder('agent', 'session-1');
   const out = openOutboundDbRw('agent', 'session-1');
   putTurn(out, {
@@ -371,7 +366,7 @@ describe('native steering submissions', () => {
           turnId: 'turn-1',
           timelinePosition: 300,
         }),
-        toEpoch(NOW),
+        NOW,
       );
       db.close();
       expect(readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE)).toEqual([
@@ -381,7 +376,7 @@ describe('native steering submissions', () => {
           questionId: 'q',
           text: responseType === 'skipped' ? 'Question skipped' : 'Yes',
           ...(responseType === 'skipped' ? { questionResponseType: 'skipped' } : {}),
-          timestamp: toEpoch(NOW),
+          timestamp: NOW,
           timelinePosition: 300,
         }),
       ]);
@@ -491,7 +486,7 @@ function inputRow(
       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 2 FROM messages_in), 'chat', ?, ?, 1, ?, ?, ?, ?)`,
     ).run(
       `${id}:agent`,
-      toEpoch(NOW),
+      NOW,
       options.status ?? 'pending',
       options.platform ?? 'group:agent',
       options.channel ?? 'web',
@@ -515,7 +510,7 @@ function receipt(
     db.prepare('INSERT OR REPLACE INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
       `input:${createHash('sha256').update(messageId).digest('hex')}`,
       JSON.stringify({ messageId, status, turnId: TURN.id, ...(reason ? { reason } : {}), ...placement }),
-      toEpoch(NOW),
+      NOW,
     );
   } finally {
     db.close();
@@ -526,13 +521,13 @@ describe('durable input state history', () => {
   const history = () => readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE);
 
   it('uses the same outbound placement in a live frame and reloaded history despite delivery latency', async () => {
-    const timelinePosition = Date.parse(NOW) * 1000 + 1;
+    const timelinePosition = NOW * 1000 + 1;
     const content = { text: 'Progress', timelinePosition };
     const db = openOutboundDbRw('agent', 'session-1');
     db.prepare(
       `INSERT INTO messages_out (id, seq, kind, timestamp, channel_type, platform_id, thread_id, content)
        VALUES ('out-test', 1, 'chat', ?, 'web', 'group:agent', 'thread-1', ?)`,
-    ).run(toEpoch(NOW), JSON.stringify(content));
+    ).run(NOW, JSON.stringify(content));
     db.close();
     const frames: Record<string, unknown>[] = [];
     const ws = connectConversation(frames);
@@ -543,7 +538,7 @@ describe('durable input state history', () => {
       expect(socketView(frames).messages[0]).toMatchObject({
         id: 'out-test',
         timelinePosition,
-        timestamp: toEpoch(NOW),
+        timestamp: NOW,
       });
       expect(history()[0].timelinePosition).toBe(timelinePosition);
     } finally {
@@ -552,7 +547,7 @@ describe('durable input state history', () => {
   });
 
   it('keeps consumed follow-ups after the prior response on reload without altering sent timestamps', () => {
-    const base = Date.parse(NOW) * 1000;
+    const base = NOW * 1000;
     inputRow('a', { status: 'completed' });
     inputRow('b', { status: 'completed', handling: { mode: 'queue' } });
     receipt('a', 'processing', undefined, { timelinePosition: base + 1 });
@@ -562,14 +557,14 @@ describe('durable input state history', () => {
       `INSERT INTO messages_out (id, seq, kind, timestamp, platform_id, channel_type, thread_id, content)
        VALUES (?, ?, 'chat', ?, 'group:agent', 'web', 'thread-1', ?)`,
     );
-    insert.run('out-a', 1, toEpoch(NOW), JSON.stringify({ text: 'answer A', timelinePosition: base + 2 }));
-    insert.run('out-b', 3, toEpoch(NOW), JSON.stringify({ text: 'answer B', timelinePosition: base + 4 }));
+    insert.run('out-a', 1, NOW, JSON.stringify({ text: 'answer A', timelinePosition: base + 2 }));
+    insert.run('out-b', 3, NOW, JSON.stringify({ text: 'answer B', timelinePosition: base + 4 }));
     outDb.close();
     for (let reload = 0; reload < 2; reload++) {
       const messages = history();
       expect(messages.map((message) => message.id)).toEqual(['a', 'out-a', 'b', 'out-b']);
       expect(messages.find((message) => message.id === 'b')).toMatchObject({
-        timestamp: toEpoch(NOW),
+        timestamp: NOW,
         timelinePosition: base + 3,
         canEditPending: false,
       });
@@ -591,7 +586,7 @@ describe('durable input state history', () => {
   });
 
   it('preserves applied steering placement and ignores another conversation placement', () => {
-    const base = Date.parse(NOW) * 1000;
+    const base = NOW * 1000;
     inputRow('steer', { status: 'completed' });
     inputRow('hidden', { thread: 'thread-2' });
     receipt('steer', 'applied', undefined, { timelinePosition: base + 3 });
@@ -609,14 +604,14 @@ describe('durable input state history', () => {
     inputRow('waiting', { handling: { mode: 'queue' } });
     receipt('waiting', 'queued', undefined, { queuedForNextTurn: true });
     const db = openOutboundDbRw('agent', 'session-1');
-    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('waiting:agent', toEpoch(NOW));
+    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('waiting:agent', NOW);
     db.close();
     expect(history()[0]).toMatchObject({
       canEditPending: false,
       inputState: { status: 'processing', queuedForNextTurn: true },
     });
     expect(history()[0].timelinePosition).toBeUndefined();
-    const timelinePosition = Date.parse(NOW) * 1000 + 1;
+    const timelinePosition = NOW * 1000 + 1;
     receipt('waiting', 'processing', undefined, { queuedForNextTurn: true, timelinePosition });
     expect(history()[0].timelinePosition).toBe(timelinePosition);
   });
@@ -644,7 +639,7 @@ describe('durable input state history', () => {
     const db = openOutboundDbRw('agent', 'session-1');
     db.prepare(
       "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('pending:agent', 'processing', ?)",
-    ).run(toEpoch(NOW));
+    ).run(NOW);
     db.close();
     expect(history()[0].inputState?.status).toBe('processing');
     receipt('pending', 'applied');
@@ -681,13 +676,9 @@ describe('durable input state history', () => {
     db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
       'input:forged',
       JSON.stringify({ messageId: 'visible:agent', status: 'applied' }),
-      toEpoch(NOW),
+      NOW,
     );
-    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
-      'input:broken',
-      '{',
-      toEpoch(NOW),
-    );
+    db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run('input:broken', '{', NOW);
     db.close();
     expect(history()[0].inputState?.status).toBe('queued');
   });
@@ -706,7 +697,7 @@ describe('durable input state history', () => {
     const db = openOutboundDbRw('agent', 'session-1');
     db.prepare(
       "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('visible:agent', 'processing', ?)",
-    ).run(toEpoch(NOW));
+    ).run(NOW);
     db.close();
     await flushConversation();
     expect(socketView(frames).messages).toMatchObject([
@@ -717,7 +708,7 @@ describe('durable input state history', () => {
     expect(socketView(frames).messages).toMatchObject([
       { id: 'visible', inputState: { messageId: 'visible', status: 'applied', turnId: TURN.id } },
     ]);
-    const position = Date.parse(NOW) * 1000 + 1;
+    const position = NOW * 1000 + 1;
     receipt('visible', 'processing', undefined, { timelinePosition: position });
     await flushConversation();
     expect(socketView(frames).messages).toMatchObject([{ id: 'visible', timelinePosition: position }]);
@@ -841,7 +832,7 @@ describe('pending web input editing', () => {
         payload: {
           key: `input-edit:${requestId}`,
           value: JSON.stringify({ requestId, messageId: 'pending:agent', status, ...(reason ? { reason } : {}) }),
-          updated_at: NOW,
+          updated_at: formatTimestamp(NOW),
         },
       },
     });
@@ -849,12 +840,12 @@ describe('pending web input editing', () => {
   };
   beforeEach(() => {
     const db = getDb();
-    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(userId, toEpoch(NOW));
+    db.prepare("INSERT INTO users (id, kind, created_at) VALUES (?, 'web', ?)").run(userId, NOW);
     db.prepare('INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)').run(
       userId,
       'agent',
       userId,
-      toEpoch(NOW),
+      NOW,
     );
     signal.turn = { ...TURN, supportsSteering: true, supportsInputEditing: true, supportsInputCancellation: true };
     writeSessionMessage('agent', 'session-1', {
@@ -909,7 +900,7 @@ describe('pending web input editing', () => {
         payload: {
           key: `input-cancel:${requestId}`,
           value: JSON.stringify({ requestId, messageId: 'pending:agent', status, ...(reason ? { reason } : {}) }),
-          updated_at: NOW,
+          updated_at: formatTimestamp(NOW),
         },
       },
     });
@@ -1032,7 +1023,7 @@ describe('pending web input editing', () => {
     expect((await edit()).status).toBe(409);
     signal.turn = { ...TURN, supportsInputEditing: true };
     const db = openOutboundDbRw('agent', 'session-1');
-    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('pending:agent', toEpoch(NOW));
+    db.prepare("INSERT INTO processing_ack VALUES (?, 'processing', ?)").run('pending:agent', NOW);
     db.close();
     expect((await edit()).body.error).toBe('input_not_pending');
     const message = readChatHistory(userId, 'agent', 'thread-1', OVERRIDE)[0];
@@ -1192,7 +1183,7 @@ describe('chat turn snapshots and events', () => {
         .run(
           'question-output',
           'chat-sdk',
-          toEpoch(NOW),
+          NOW,
           '{"type":"ask_question","questionId":"q","question":"Continue?","responseMode":"text","options":[]}',
           'turn-1',
           'group:agent',
@@ -1229,7 +1220,7 @@ describe('chat turn snapshots and events', () => {
         expect(socketView(frames).messages.find((message) => message.questionId === 'q')).toMatchObject({
           id: 'question-response:q',
           direction: 'in',
-          timestamp: toEpoch(NOW),
+          timestamp: NOW,
           text: 'yes',
         }),
       );

@@ -12,14 +12,15 @@ import { execFileSync } from 'child_process';
 import { CONTAINER_IMAGE, CONTAINER_IMAGE_BASE } from '../../../config.js';
 import { CONTAINER_RUNTIME_BIN } from '../../../container-runtime.js';
 import { log } from '../../../log.js';
+import { epochMs } from '../../../time.js';
 
 export interface ImageSuggestion {
   /** Full image reference (`<base>:<tag>`) — stored verbatim in container_configs.image_tag. */
   value: string;
   /** Display label (just the tag portion). */
   label: string;
-  /** Created-at as ISO string (used for "age"). */
-  createdAt: string | null;
+  /** Epoch milliseconds (used for "age"). */
+  createdAt: number | null;
   /** Image size in bytes (or null if unavailable). */
   size: number | null;
   /** True if this matches the install's default image (CONTAINER_IMAGE). */
@@ -44,7 +45,7 @@ interface DockerImageRow {
   Size?: string | number;
   repository?: string;
   tag?: string;
-  Created?: number;
+  Created?: string | number;
 }
 
 function parseSizeBytes(size: string | number | undefined): number | null {
@@ -58,17 +59,17 @@ function parseSizeBytes(size: string | number | undefined): number | null {
   return Math.round(n * (mult[unit] ?? 1));
 }
 
-function parseCreatedAt(row: DockerImageRow): string | null {
+function parseCreatedAt(row: DockerImageRow): number | null {
   if (typeof row.Created === 'number') {
-    return new Date(row.Created * 1000).toISOString();
+    return epochMs(row.Created * 1000);
   }
-  const raw = row.CreatedAt;
+  const raw = row.CreatedAt ?? (typeof row.Created === 'string' ? row.Created : undefined);
   if (!raw) return null;
   // Docker / podman emit "2026-06-04 02:10:12 +0000 UTC".
   const cleaned = raw.replace(/\s+UTC$/, '');
   const ms = Date.parse(cleaned);
   if (Number.isNaN(ms)) return null;
-  return new Date(ms).toISOString();
+  return epochMs(ms);
 }
 
 export function listImages(): ImageSuggestion[] {
@@ -113,8 +114,8 @@ export function listImages(): ImageSuggestion[] {
       })
       // Newest first; falls back to label for items without timestamps.
       .sort((a, b) => {
-        const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
-        const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+        const ta = a.createdAt ?? 0;
+        const tb = b.createdAt ?? 0;
         if (tb !== ta) return tb - ta;
         return a.label.localeCompare(b.label);
       });

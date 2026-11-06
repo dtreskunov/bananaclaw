@@ -23,11 +23,11 @@ const SRC = 'ag-src';
 const TGT = 'ag-tgt';
 
 function group(id: string, name: string): AgentGroup {
-  return { id, name, folder: name, agent_provider: null, created_at: new Date().toISOString() };
+  return { id, name, folder: name, agent_provider: null, created_at: Date.now() };
 }
 
 function user(id: string): User {
-  return { id, kind: 'web', display_name: id, created_at: new Date().toISOString() };
+  return { id, kind: 'web', display_name: id, created_at: Date.now() };
 }
 
 describe('validateLocalName', () => {
@@ -112,7 +112,7 @@ describe('applyAgentLink', () => {
       local_name: 'shared',
       target_type: 'channel',
       target_id: 'mg-x',
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
       created_by: null,
     });
     await expect(
@@ -127,7 +127,7 @@ describe('applyAgentLink', () => {
       local_name: 'src',
       target_type: 'channel',
       target_id: 'mg-x',
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
       created_by: null,
     });
     await expect(

@@ -44,7 +44,6 @@ import {
 } from './session-manager.js';
 import type { Session } from './types.js';
 import { transaction } from './db/transaction.js';
-import { toEpoch, fromEpoch } from './db/time.js';
 
 /** Message kinds that must never be inherited — a copied task would double-fire. */
 const EXCLUDED_INBOUND_KINDS = new Set(['task']);
@@ -94,7 +93,7 @@ function findAnchor(
   channelType: string,
   threadId: string,
   anchorMessageId: string,
-): { timestamp: string; direction: 'in' | 'out'; timelinePosition?: number } {
+): { timestamp: number; direction: 'in' | 'out'; timelinePosition?: number } {
   // The router namespaces inbound ids as `<rawId>:<agentGroupId>`; the UI
   // renders the raw form. Accept either.
   const namespaced = `${anchorMessageId}:${agentGroupId}`;
@@ -110,7 +109,7 @@ function findAnchor(
     if (state?.status === 'cancelled' || isCancelledInputContent(inRow.content))
       throw new ForkError('anchor_not_found');
     if (state?.queuedForNextTurn && state.status === 'queued') throw new ForkError('anchor_pending');
-    return { timestamp: fromEpoch(inRow.timestamp), direction: 'in', timelinePosition: state?.timelinePosition };
+    return { timestamp: inRow.timestamp, direction: 'in', timelinePosition: state?.timelinePosition };
   }
 
   const outRow = outDb
@@ -118,7 +117,7 @@ function findAnchor(
     .get(anchorMessageId, channelType, threadId) as { timestamp: number; content: string } | undefined;
   if (outRow)
     return {
-      timestamp: fromEpoch(outRow.timestamp),
+      timestamp: outRow.timestamp,
       direction: 'out',
       timelinePosition: outboundTimelinePosition(outRow.content),
     };
@@ -213,7 +212,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
   let titleRow: Row | undefined;
   let parentContinuation: string | null = null;
   let anchorRef: string | null = null;
-  let cutTs = '';
+  let cutTs: number;
   const transcript: (Pick<IndexableMessage, 'id' | 'direction' | 'timestamp' | 'text' | 'senderUserId'> & {
     timelinePosition?: number;
     searchable: boolean;
@@ -224,7 +223,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
   try {
     const anchor = findAnchor(srcIn, srcOut, agentGroupId, channelType, parentThreadId, anchorMessageId);
     cutTs = anchor.timestamp;
-    const cutMs = toEpoch(cutTs);
+    const cutMs = cutTs;
     const cutPosition = timelineSortKey(cutMs, anchor.timelinePosition);
     // Historical outbound timestamps can have whole-second resolution, so a reply written in
     // the same second as the inbound message it answers looks simultaneous.
@@ -271,7 +270,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
       transcript.push({
         id: String(r.id),
         direction: 'in',
-        timestamp: fromEpoch(r.timestamp as number),
+        timestamp: r.timestamp as number,
         text: extractInboundText(String(r.content)),
         senderUserId: typeof r.sender_user_id === 'string' ? r.sender_user_id : null,
         timelinePosition: readInputTimeline(srcOut, String(r.id))?.timelinePosition,
@@ -283,7 +282,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
       transcript.push({
         id: String(r.id),
         direction: 'out',
-        timestamp: fromEpoch(r.timestamp as number),
+        timestamp: r.timestamp as number,
         text: extractOutboundText(String(r.content)),
         timelinePosition: outboundTimelinePosition(String(r.content)),
         searchable: true,
@@ -291,8 +290,8 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
     }
     transcript.sort(
       (a, b) =>
-        timelineSortKey(toEpoch(a.timestamp), a.timelinePosition) -
-        timelineSortKey(toEpoch(b.timestamp), b.timelinePosition),
+        timelineSortKey(a.timestamp, a.timelinePosition) -
+        timelineSortKey(b.timestamp, b.timelinePosition),
     );
 
     // A fork inherits the parent's title. The container only requests a title
@@ -351,7 +350,7 @@ export function forkThread(input: ForkThreadInput): ForkThreadResult {
 
   const fidelity: 'native' | 'transcript' = parentContinuation && anchorRef ? 'native' : 'transcript';
   const digest = buildDigest(transcript, parentTitle);
-  const now = new Date().toISOString();
+  const now = Date.now();
 
   try {
     populateForkSession({
@@ -444,7 +443,7 @@ function populateForkSession(args: {
   provider: string;
   parentContinuation: string | null;
   anchorRef: string | null;
-  createdAt: string;
+  createdAt: number;
 }): void {
   const { agentGroupId, sessionId, parentSessionId, newThreadId, inRows, outRows, digest } = args;
 
@@ -472,13 +471,13 @@ function populateForkSession(args: {
         message_out_id: String(r.id),
         platform_message_id: null,
         status: 'inherited',
-        delivered_at: toEpoch(args.createdAt),
+        delivered_at: args.createdAt,
       })),
     );
 
     if (args.titleRow) {
       insertRows(dstIn, 'thread_titles', [
-        { ...args.titleRow, thread_id: newThreadId, source: 'fork', published: 1, updated_at: toEpoch(args.createdAt) },
+        { ...args.titleRow, thread_id: newThreadId, source: 'fork', published: 1, updated_at: args.createdAt },
       ]);
     }
 
@@ -494,7 +493,7 @@ function populateForkSession(args: {
         provider: args.provider,
         anchor_ref: args.anchorRef,
         digest,
-        created_at: toEpoch(args.createdAt),
+        created_at: args.createdAt,
       });
 
     const inheritedEvenMax = [...inRows, ...outRows].reduce((maximum, row) => {
@@ -532,7 +531,7 @@ function populateForkSession(args: {
         {
           key: inputStateKey(String(row.id)),
           value: JSON.stringify(state),
-          updated_at: toEpoch(args.createdAt),
+          updated_at: args.createdAt,
         },
       ]);
     }
@@ -542,7 +541,7 @@ function populateForkSession(args: {
     insertRows(
       dstOut,
       'processing_ack',
-      inRows.map((r) => ({ message_id: String(r.id), status: 'completed', status_changed: toEpoch(args.createdAt) })),
+      inRows.map((r) => ({ message_id: String(r.id), status: 'completed', status_changed: args.createdAt })),
     );
   } finally {
     srcOut.close();

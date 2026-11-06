@@ -5,11 +5,11 @@ import path from 'node:path';
 import { DATA_DIR } from './config.js';
 import { getDb, hasTable } from './db/connection.js';
 import { ensureSchema } from './db/session-db.js';
-import { fromEpoch, decodeTimes } from './db/time.js';
+import { isEpochMs } from './time.js';
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from './channels/homeassistant-text.js';
 import { onHostChange, publishHostChange } from './host-changes.js';
 import type { LiveTaskDto } from './ui/shared/thread.js';
-export type SummaryTask = Omit<LiveTaskDto, 'nextRunAt'> & { nextRunAt: string | null };
+export type SummaryTask = LiveTaskDto;
 import {
   projectMessagePublications,
   projectInteractionPublications,
@@ -43,7 +43,7 @@ interface SummaryRow extends Route {
 interface InboundSummary {
   count: number;
   pendingAt: number | null;
-  last: string | null;
+  last: number | null;
   first: { seq: number; title: string } | null;
   owners: { seq: number; handles: string[] }[];
   title: string | null;
@@ -51,12 +51,12 @@ interface InboundSummary {
 }
 interface OutboundSummary {
   count: number;
-  last: string | null;
+  last: number | null;
 }
 export interface SummaryTurn {
   id: string;
   phase: string;
-  started_at: string | null;
+  started_at: number | null;
 }
 export interface ThreadSummarySpec {
   agentGroupId: string;
@@ -69,14 +69,14 @@ export interface SummarizedThread {
   threadId: string;
   title: string;
   messageCount: number;
-  lastActivityAt: string;
+  lastActivityAt: number | null;
   liveTasks?: SummaryTask[];
 }
 export interface SessionThreadSummary {
   threads: SummarizedThread[];
   owners: string[];
-  dms: { channelType: string; platformId: string; messageCount: number; lastActivityAt: string }[];
-  dmReplies: { channelType: string; messageCount: number; lastActivityAt: string }[];
+  dms: { channelType: string; platformId: string; messageCount: number; lastActivityAt: number | null }[];
+  dmReplies: { channelType: string; messageCount: number; lastActivityAt: number | null }[];
   totalCost: number;
   totalTokens: number;
   turnCount: number;
@@ -140,18 +140,15 @@ function title(text: string): string {
       .slice(0, 60) || '(new thread)'
   );
 }
-function latest(values: (string | null)[]): string {
-  return (
-    values
-      .filter((value): value is string => !!value)
-      .sort((a, b) => Date.parse(b.includes('T') ? b : b + 'Z') - Date.parse(a.includes('T') ? a : a + 'Z'))[0] ?? ''
-  );
+function latest(values: (number | null)[]): number | null {
+  return values.reduce<number | null>((last, value) =>
+    value === null ? last : last === null ? value : Math.max(last, value), null);
 }
 
 function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
   const params = [route.channel_type, route.platform_id, route.thread_id];
   const where = `channel_type = ? AND COALESCE(platform_id, '') = ? AND COALESCE(thread_id, '') = ?`;
-  const count = decodeTimes<Pick<InboundSummary, 'count' | 'last' | 'pendingAt'>>(
+  const count =
     db
       .prepare(
         `SELECT COUNT(*) AS count, MAX(timestamp) AS last,
@@ -160,9 +157,7 @@ function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
           ELSE process_after END END) AS pendingAt
       FROM messages_in WHERE ${where}`,
       )
-      .get(...params),
-    ['last'],
-  );
+      .get(...params) as Pick<InboundSummary, 'count' | 'last' | 'pendingAt'>;
   const first = db
     .prepare(`SELECT seq, content, platform_id FROM messages_in WHERE ${where} ORDER BY seq LIMIT 5`)
     .all(...params) as { seq: number; content: string; platform_id: string }[];
@@ -197,7 +192,7 @@ function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
     title: explicit?.title ?? null,
     tasks: tasks.map((task) => ({
       seriesId: task.series_id,
-      nextRunAt: fromEpoch(task.process_after),
+      nextRunAt: task.process_after,
       recurrence: task.recurrence,
       summary: summarizeTaskPrompt(task.content),
       paused: task.status === 'paused',
@@ -217,7 +212,7 @@ function summarizeSource(db: Database.Database, source: SummaryRow['source'], ro
       )
       .get();
   if (route.kind === 'turn')
-    return decodeTimes<SummaryTurn | null>(
+    return (
       db
         .prepare(
           `
@@ -226,11 +221,10 @@ function summarizeSource(db: Database.Database, source: SummaryRow['source'], ro
     ORDER BY started_at DESC, id DESC LIMIT 1
   `,
         )
-        .get(route.channel_type, route.platform_id, route.thread_id) ?? null,
-      ['started_at'],
-    );
+        .get(route.channel_type, route.platform_id, route.thread_id) ?? null
+    ) as SummaryTurn | null;
   if (source === 'inbound') return summarizeInbound(db, route);
-  return decodeTimes<OutboundSummary>(
+  return (
     db
       .prepare(
         `
@@ -239,9 +233,8 @@ function summarizeSource(db: Database.Database, source: SummaryRow['source'], ro
       AND kind IN ('chat','text')
   `,
       )
-      .get(route.channel_type, route.platform_id, route.thread_id),
-    ['last'],
-  );
+      .get(route.channel_type, route.platform_id, route.thread_id)
+  ) as OutboundSummary;
 }
 
 export function assertThreadSummariesReady(): void {
@@ -316,6 +309,9 @@ export function refreshThreadSummaries(sessionId: string, dataDir = DATA_DIR): v
 
 export function reconcileThreadSummaries(groupId?: string, dataDir = DATA_DIR): void {
   assertThreadSummariesReady();
+  if (getDb().prepare(`SELECT 1 FROM thread_summaries s,json_tree(s.value) field
+    WHERE field.key IN ('last','nextRunAt','started_at') AND field.type NOT IN ('integer','null') LIMIT 1`).get())
+    throw new Error('Numeric thread summaries require offline backfill: pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped');
   const sessions = getDb()
     .prepare(`SELECT id FROM sessions${groupId ? ' WHERE agent_group_id=?' : ''}`)
     .all(...(groupId ? [groupId] : [])) as { id: string }[];
@@ -400,8 +396,14 @@ function sourceRows(sessionId: string, turnsOnly = false): SummaryRow[] {
 export function readSummaryTurns(sessionId: string): (Route & SummaryTurn)[] {
   return sourceRows(sessionId, true).flatMap((row) => {
     const turn = JSON.parse(row.value) as SummaryTurn | null;
+    if (turn) assertNumericSummaryTime(turn.started_at);
     return turn ? [{ ...row, ...turn }] : [];
   });
+}
+
+function assertNumericSummaryTime(value: unknown): void {
+  if (value !== null && !isEpochMs(value))
+    throw new Error('Numeric thread summaries require offline backfill: pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped');
 }
 
 function readInboundSummary(row: SummaryRow): InboundSummary {
@@ -410,6 +412,8 @@ function readInboundSummary(row: SummaryRow): InboundSummary {
     throw new Error(
       'Thread queue summaries require offline backfill: pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped',
     );
+  assertNumericSummaryTime(value.last);
+  for (const task of value.tasks) assertNumericSummaryTime(task.nextRunAt);
   return value;
 }
 
@@ -429,7 +433,11 @@ export function readSessionThreadSummary(spec: ThreadSummarySpec): SessionThread
     .map((row) => ({ ...row, data: readInboundSummary(row) }));
   const outbound = rows
     .filter((row) => row.kind === 'route' && row.source === 'outbound')
-    .map((row) => ({ ...row, data: JSON.parse(row.value) as OutboundSummary }))
+    .map((row) => {
+      const data = JSON.parse(row.value) as OutboundSummary;
+      assertNumericSummaryTime(data.last);
+      return { ...row, data };
+    })
     .filter((row) => row.data.count > 0);
   const usage = rows.find((row) => row.kind === 'usage');
   const result: SessionThreadSummary = {
@@ -463,7 +471,7 @@ export function readSessionThreadSummary(spec: ThreadSummarySpec): SessionThread
       ...(spec.thread && tasks.length
         ? {
             liveTasks: tasks.sort((a, b) =>
-              a.nextRunAt === null ? 1 : b.nextRunAt === null ? -1 : a.nextRunAt.localeCompare(b.nextRunAt),
+              a.nextRunAt === null ? 1 : b.nextRunAt === null ? -1 : a.nextRunAt - b.nextRunAt,
             ),
           }
         : {}),
@@ -488,7 +496,7 @@ export function readSessionThreadSummary(spec: ThreadSummarySpec): SessionThread
           channelType: row.channel_type,
           platformId: row.platform_id,
           messageCount: row.data.count,
-          lastActivityAt: row.data.last ?? '',
+          lastActivityAt: row.data.last,
         });
       else addThread({ channelType: row.channel_type, platformId: row.platform_id, threadId: row.thread_id }, [row]);
     }

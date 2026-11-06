@@ -19,6 +19,7 @@ import path from 'path';
 
 import { DATA_DIR } from '../config.js';
 import { log } from '../log.js';
+import { epochMs, importTimestamp } from '../time.js';
 
 export type PairingIntent = 'main' | { kind: 'wire-to'; folder: string } | { kind: 'new-agent'; folder: string };
 export type PairingStatus = 'pending' | 'consumed' | 'invalidated' | 'unknown';
@@ -28,20 +29,20 @@ export interface ConsumedDetails {
   isGroup: boolean;
   name: string | null;
   adminUserId: string | null;
-  consumedAt: string;
+  consumedAt: number;
 }
 
 export interface PairingAttempt {
   candidate: string;
   platformId: string;
-  at: string;
+  at: number;
   matched: boolean;
 }
 
 export interface PairingRecord {
   code: string;
   intent: PairingIntent;
-  createdAt: string;
+  createdAt: number;
   status: Exclude<PairingStatus, 'unknown'>;
   consumed?: ConsumedDetails;
   /** Recent pairing attempts observed while this record was pending. Capped. */
@@ -79,14 +80,41 @@ function withLock<T>(fn: () => Promise<T> | T): Promise<T> {
 }
 
 function readStore(): Store {
+  type ImportedRecord = Omit<PairingRecord, 'createdAt' | 'consumed' | 'attempts'> & {
+    createdAt: unknown;
+    consumed?: Omit<ConsumedDetails, 'consumedAt'> & { consumedAt: unknown };
+    attempts?: (Omit<PairingAttempt, 'at'> & { at: unknown })[];
+  };
+  let parsed: { pairings: ImportedRecord[] };
   try {
     const raw = fs.readFileSync(storePath(), 'utf8');
-    const parsed = JSON.parse(raw) as Store;
-    if (!Array.isArray(parsed.pairings)) return { pairings: [] };
-    return parsed;
+    parsed = JSON.parse(raw) as typeof parsed;
   } catch {
     return { pairings: [] };
   }
+  if (!Array.isArray(parsed.pairings)) return { pairings: [] };
+  return {
+    pairings: parsed.pairings.map(({ createdAt, consumed, attempts, ...record }) => ({
+      ...record,
+      createdAt: epochMs(importTimestamp(createdAt)),
+      ...(consumed
+        ? {
+            consumed: {
+              ...consumed,
+              consumedAt: epochMs(importTimestamp(consumed.consumedAt)),
+            },
+          }
+        : {}),
+      ...(attempts
+        ? {
+            attempts: attempts.map((attempt) => ({
+              ...attempt,
+              at: epochMs(importTimestamp(attempt.at)),
+            })),
+          }
+        : {}),
+    })),
+  };
 }
 
 function writeStore(store: Store): void {
@@ -132,7 +160,7 @@ export async function createPairing(intent: PairingIntent): Promise<PairingRecor
     const record: PairingRecord = {
       code: generateCode(active),
       intent,
-      createdAt: new Date().toISOString(),
+      createdAt: Date.now(),
       status: 'pending',
     };
     store.pairings.push(record);
@@ -191,7 +219,7 @@ export async function tryConsume(input: ConsumeInput): Promise<PairingRecord | n
       const attempt: PairingAttempt = {
         candidate: code,
         platformId: input.platformId,
-        at: new Date(now).toISOString(),
+        at: now,
         matched: false,
       };
       let recorded = false;
@@ -216,11 +244,11 @@ export async function tryConsume(input: ConsumeInput): Promise<PairingRecord | n
       isGroup: input.isGroup,
       name: input.name ?? null,
       adminUserId: input.adminUserId ?? null,
-      consumedAt: new Date(now).toISOString(),
+      consumedAt: now,
     };
     record.attempts = [
       ...(record.attempts ?? []),
-      { candidate: code, platformId: input.platformId, at: new Date(now).toISOString(), matched: true },
+      { candidate: code, platformId: input.platformId, at: now, matched: true },
     ].slice(-MAX_ATTEMPTS_PER_RECORD);
     writeStore(store);
     log.info('Pairing consumed', { code, platformId: input.platformId, intent: record.intent });

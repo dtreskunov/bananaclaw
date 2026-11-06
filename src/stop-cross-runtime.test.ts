@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -65,7 +66,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
   async () => {
     runMigrations(initTestDb());
     const now = new Date().toISOString();
-    createAgentGroup({ id: 'agent', name: 'Agent', folder: 'agent', agent_provider: null, created_at: now });
+    createAgentGroup({ id: 'agent', name: 'Agent', folder: 'agent', agent_provider: null, created_at: parseTimestamp(now) });
     createMessagingGroup({
       id: 'web-mg',
       channel_type: 'web',
@@ -73,7 +74,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
       name: 'Web',
       is_group: 1,
       unknown_sender_policy: 'strict',
-      created_at: now,
+      created_at: parseTimestamp(now),
     });
     session = resolveSession('agent', 'web-mg', 'thread-1', 'per-thread').session;
     const inbound = openInboundDb('agent', session.id);
@@ -83,7 +84,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
       writeSessionMessage('agent', session!.id, {
         id,
         kind: 'chat',
-        timestamp: now,
+        timestamp: parseTimestamp(now),
         channelType: 'web',
         platformId: 'group:agent',
         threadId: 'thread-1',

@@ -21,11 +21,11 @@ const TGT = 'ag-tgt';
 const USR = 'u-1';
 
 function group(id: string, name: string): AgentGroup {
-  return { id, name, folder: name, agent_provider: null, created_at: new Date().toISOString() };
+  return { id, name, folder: name, agent_provider: null, created_at: Date.now() };
 }
 
 function user(id: string): User {
-  return { id, kind: 'web', display_name: id, created_at: new Date().toISOString() };
+  return { id, kind: 'web', display_name: id, created_at: Date.now() };
 }
 
 describe('authorizeAgentLink', () => {
@@ -83,7 +83,7 @@ describe('authorizeAgentLink', () => {
       role: 'admin',
       agent_group_id: TGT,
       granted_by: null,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
     const d = authorizeAgentLink(USR, SRC, TGT);
     expect(d.mode).toBe('denied');
@@ -96,7 +96,7 @@ describe('authorizeAgentLink', () => {
       role: 'admin',
       agent_group_id: SRC,
       granted_by: null,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
     const d = authorizeAgentLink(USR, SRC, TGT);
     expect(d.mode).toBe('needs-approval');
@@ -112,14 +112,14 @@ describe('authorizeAgentLink', () => {
       role: 'admin',
       agent_group_id: SRC,
       granted_by: null,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
     grantRole({
       user_id: USR,
       role: 'admin',
       agent_group_id: TGT,
       granted_by: null,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
     const d = authorizeAgentLink(USR, SRC, TGT);
     expect(d.mode).toBe('auto');
@@ -132,7 +132,7 @@ describe('authorizeAgentLink', () => {
       role: 'admin',
       agent_group_id: null,
       granted_by: null,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
     const d = authorizeAgentLink(USR, SRC, TGT);
     expect(d.mode).toBe('auto');
@@ -144,7 +144,7 @@ describe('authorizeAgentLink', () => {
       role: 'owner',
       agent_group_id: null,
       granted_by: null,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
     const d = authorizeAgentLink(USR, SRC, TGT);
     expect(d.mode).toBe('auto');
@@ -181,7 +181,7 @@ describe('authorizeAgentLinkRemoval', () => {
       role: 'admin',
       agent_group_id: SRC,
       granted_by: null,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
     const r = authorizeAgentLinkRemoval(USR, SRC);
     expect(r.allowed).toBe(true);
@@ -193,7 +193,7 @@ describe('authorizeAgentLinkRemoval', () => {
       role: 'owner',
       agent_group_id: null,
       granted_by: null,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
     const r = authorizeAgentLinkRemoval(USR, SRC);
     expect(r.allowed).toBe(true);

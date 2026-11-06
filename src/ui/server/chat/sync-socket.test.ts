@@ -50,7 +50,8 @@ let globalState: GlobalProjection | null = null;
 const globalView = () => globalState?.data;
 const globalCursor = () => (globalState ? { streamId: globalState.streamId, revision: globalState.revision } : null);
 const listThreads = vi.mocked(listThreadsForViewer);
-const now = () => new Date().toISOString();
+const now = () => Date.now();
+import { formatTimestamp } from '../../../time.js';
 const conversation = { threadId: 'thread', channelType: 'web', messagingGroupId: 'mg' };
 function startTurn() {
   applyDurableRunnerEvent('g', 'session', {
@@ -64,7 +65,7 @@ function startTurn() {
         origin_platform_id: 'group:g',
         origin_thread_id: 'thread',
         origin_source_session_id: null,
-        started_at: now(),
+        started_at: formatTimestamp(now()),
         ended_at: null,
         phase: 'running',
         outcome: 'pending',
@@ -617,7 +618,7 @@ describe('unified sync WebSocket integration', () => {
   });
 
   it('enforces legacy deadlines on refresh without scheduling a workflow transition', async () => {
-    const expiresAt = new Date(Date.now() + 2000).toISOString();
+    const expiresAt = Date.now() + 2000;
     createInteraction({
       id: 'q',
       kind: 'question',
@@ -633,7 +634,7 @@ describe('unified sync WebSocket integration', () => {
     });
     const client = await connect();
     expect(globalView()!.attention.map((row) => row.id)).toEqual(['q']);
-    await new Promise((resolve) => setTimeout(resolve, Math.max(1, Date.parse(expiresAt) - Date.now() + 50)));
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, expiresAt - Date.now() + 50)));
     expect(frames).toHaveLength(1);
     client.send(
       JSON.stringify({

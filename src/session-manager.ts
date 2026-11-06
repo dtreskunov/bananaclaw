@@ -125,7 +125,7 @@ export function resolveSession(
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   };
 
   createSession(session);
@@ -202,12 +202,12 @@ export function writeSessionMessage(
   message: {
     id: string;
     kind: string;
-    timestamp: string;
+    timestamp: number;
     platformId?: string | null;
     channelType?: string | null;
     threadId?: string | null;
     content: string;
-    processAfter?: string | null;
+    processAfter?: number | null;
     recurrence?: string | null;
     /**
      * 1 = this message should wake the agent (the default); 0 = accumulate
@@ -300,7 +300,7 @@ export function writeSessionMessage(
     }
   }
 
-  updateSession(sessionId, { last_active: new Date().toISOString() });
+  updateSession(sessionId, { last_active: Date.now() });
   notifySessionHostState(sessionId);
 }
 
@@ -523,7 +523,7 @@ export function writeSystemResponse(
   writeSessionMessage(agentGroupId, sessionId, {
     id: `sys-resp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     kind: 'system',
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
     content: JSON.stringify({
       type: 'question_response',
       questionId: requestId,
@@ -632,7 +632,7 @@ export function clearOutbox(agentGroupId: string, sessionId: string, messageId: 
 
 /** Mark a container as running for a session. */
 export function markContainerRunning(sessionId: string): void {
-  updateSession(sessionId, { container_status: 'running', last_active: new Date().toISOString() });
+  updateSession(sessionId, { container_status: 'running', last_active: Date.now() });
 }
 
 /** Mark a container as idle for a session. */

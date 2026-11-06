@@ -4,7 +4,8 @@ import net from 'node:net';
 import path from 'node:path';
 
 import { reduceActivityLines } from './activity.js';
-import type { ActivityLine } from './channels/adapter.js';
+import { activityEpoch } from './db/time.js';
+export interface HostActivityLine { ts: number; text: string }
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
 import { publishHostChange } from './host-changes.js';
@@ -80,7 +81,7 @@ interface SessionSignalState {
   frameBytesThisWindow: number;
   connectionWindowStartedAt: number;
   connectionsThisWindow: number;
-  activity: Array<ActivityLine & { turnId: string | null; ordinal: number; timelinePosition: number }>;
+  activity: Array<HostActivityLine & { turnId: string | null; ordinal: number; timelinePosition: number }>;
   turnEndedAt: number;
   activeTurn: SessionActiveTurn | null;
   turnStateReady: boolean;
@@ -461,7 +462,7 @@ function applyActivity(frame: Record<string, unknown>, { state }: FrameContext):
   const ordinal = frame.ordinal as number;
   state.activity = state.activity.filter((line) => line.turnId !== turnId || line.ordinal !== ordinal);
   state.activity.push({
-    ts: frame.ts as string,
+    ts: activityEpoch(frame.ts as string),
     text: JSON.stringify(step),
     turnId,
     ordinal,
@@ -807,15 +808,15 @@ export function getSessionSignalLastSeenAt(sessionId: string): number {
   return states.get(sessionId)?.lastSeenAt ?? 0;
 }
 
-export function getSessionSignalActivity(sessionId: string, sinceMs?: number): ActivityLine[] {
+export function getSessionSignalActivity(sessionId: string, sinceMs?: number): HostActivityLine[] {
   const lines = states.get(sessionId)?.activity ?? [];
-  return reduceActivityLines(sinceMs === undefined ? lines : lines.filter((line) => Number(line.ts) >= sinceMs));
+  return reduceActivityLines(sinceMs === undefined ? lines : lines.filter((line) => line.ts >= sinceMs));
 }
 
 /** Identity-preserving live input for the later authoritative conversation projector. */
 export function getSessionTurnSignals(sessionId: string): {
   active: ReturnType<typeof getSessionActiveTurn>;
-  activity: Array<ActivityLine & { turnId: string | null; ordinal: number; timelinePosition: number }>;
+  activity: Array<HostActivityLine & { turnId: string | null; ordinal: number; timelinePosition: number }>;
 } {
   const state = states.get(sessionId);
   return {

@@ -313,7 +313,7 @@ function bounceBackDeliveryFailure(
   writeSessionMessage(session.agent_group_id, session.id, {
     id: `delivery-fail-${msg.id}`,
     kind: 'system',
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
     content: JSON.stringify({
       action: 'delivery_failed',
       status: 'error',
@@ -432,7 +432,7 @@ async function deliverMessage(
       platform_id: msg.platform_id,
       channel_type: msg.channel_type,
       thread_id: msg.thread_id,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
       input: {
         question: content.question,
         responseMode: content.responseMode,

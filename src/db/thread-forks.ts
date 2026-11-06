@@ -1,6 +1,5 @@
 import { getDb } from './connection.js';
-import { encodeTimes, decodeTimes, decodeTimeRows } from './time.js';
-
+import { assertTimestampFields } from './validate-timestamps.js';
 import { recordHostChange } from './transaction.js';
 
 export interface ThreadFork {
@@ -14,13 +13,14 @@ export interface ThreadFork {
    * copy of every parent message at or before this instant, which is what lets
    * a delete work out how much of the parent survives elsewhere.
    */
-  parent_message_ts: string;
+  parent_message_ts: number;
   parent_title: string | null;
   fidelity: 'native' | 'transcript';
-  created_at: string;
+  created_at: number;
 }
 
 export function createThreadFork(row: ThreadFork): void {
+  assertTimestampFields(row, ['parent_message_ts', 'created_at']);
   getDb()
     .prepare(
       `INSERT INTO thread_forks
@@ -30,7 +30,7 @@ export function createThreadFork(row: ThreadFork): void {
          (@agent_group_id, @messaging_group_id, @thread_id, @parent_thread_id, @parent_message_id,
           @parent_message_ts, @parent_title, @fidelity, @created_at)`,
     )
-    .run(encodeTimes(row, ['parent_message_ts', 'created_at']));
+    .run(row);
   recordHostChange({ kind: 'sessions', groupId: row.agent_group_id });
 }
 
@@ -39,9 +39,9 @@ export function getThreadFork(
   messagingGroupId: string,
   threadId: string,
 ): ThreadFork | undefined {
-  return decodeTimes<ThreadFork | undefined>(getDb()
+  return getDb()
     .prepare('SELECT * FROM thread_forks WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id = ?')
-    .get(agentGroupId, messagingGroupId, threadId), ['parent_message_ts', 'created_at']);
+    .get(agentGroupId, messagingGroupId, threadId) as ThreadFork | undefined;
 }
 
 /** Every fork whose parent is `threadId`, oldest first. */
@@ -50,25 +50,25 @@ export function getThreadForkChildren(
   messagingGroupId: string,
   parentThreadId: string,
 ): ThreadFork[] {
-  return decodeTimeRows<ThreadFork>(getDb()
+  return getDb()
     .prepare(
       `SELECT * FROM thread_forks
         WHERE agent_group_id = ? AND messaging_group_id = ? AND parent_thread_id = ?
         ORDER BY created_at`,
     )
-    .all(agentGroupId, messagingGroupId, parentThreadId), ['parent_message_ts', 'created_at']);
+    .all(agentGroupId, messagingGroupId, parentThreadId) as ThreadFork[];
 }
 
 /** All lineage rows for an agent group's messaging group. Used to build the rail tree. */
 export function getThreadForks(agentGroupId: string, messagingGroupId: string): ThreadFork[] {
-  return decodeTimeRows<ThreadFork>(getDb()
+  return getDb()
     .prepare('SELECT * FROM thread_forks WHERE agent_group_id = ? AND messaging_group_id = ?')
-    .all(agentGroupId, messagingGroupId), ['parent_message_ts', 'created_at']);
+    .all(agentGroupId, messagingGroupId) as ThreadFork[];
 }
 
 /** All lineage rows for an agent group, across every messaging group. */
 export function getThreadForksForAgentGroup(agentGroupId: string): ThreadFork[] {
-  return decodeTimeRows<ThreadFork>(getDb().prepare('SELECT * FROM thread_forks WHERE agent_group_id = ?').all(agentGroupId), ['parent_message_ts', 'created_at']);
+  return getDb().prepare('SELECT * FROM thread_forks WHERE agent_group_id = ?').all(agentGroupId) as ThreadFork[];
 }
 
 /**

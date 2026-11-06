@@ -9,11 +9,7 @@ import { DATA_DIR } from '../src/config.js';
 import { initDb } from '../src/db/connection.js';
 import { runMigrations } from '../src/db/migrations/index.js';
 import { createAgentGroup, getAgentGroup } from '../src/db/agent-groups.js';
-import {
-  createMessagingGroup,
-  createMessagingGroupAgent,
-  getMessagingGroup,
-} from '../src/db/messaging-groups.js';
+import { createMessagingGroup, createMessagingGroupAgent, getMessagingGroup } from '../src/db/messaging-groups.js';
 
 const db = initDb(path.join(DATA_DIR, 'v2.db'));
 runMigrations(db);
@@ -29,7 +25,7 @@ if (!getAgentGroup(AGENT_GROUP_ID)) {
     name: 'Main',
     folder: 'main',
     agent_provider: 'claude',
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   console.log('Created agent group:', AGENT_GROUP_ID);
 } else {
@@ -45,7 +41,7 @@ if (!getMessagingGroup(MESSAGING_GROUP_ID)) {
     name: 'Discord Test',
     is_group: 1,
     unknown_sender_policy: 'strict',
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   console.log('Created messaging group:', MESSAGING_GROUP_ID);
 } else {
@@ -66,7 +62,7 @@ try {
     ignored_message_policy: 'drop',
     session_mode: 'shared',
     priority: 0,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   console.log('Created messaging_group_agent link');
 } catch (err: any) {

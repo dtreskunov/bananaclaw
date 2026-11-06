@@ -9,7 +9,7 @@ export function readInteractionSync(userId: string): Pick<SyncResponse, 'approva
     "SELECT * FROM interactions WHERE status IN ('pending','applying') ORDER BY created_at DESC,id DESC",
   );
   const result: Pick<SyncResponse, 'approvals' | 'attention'> = { approvals: [], attention: [] };
-  const now = new Date().toISOString();
+  const now = Date.now();
   for (const row of rows) {
     if (row.kind === 'question') {
       if (row.status !== 'pending' || legacyInteractionExpired(row, now)) continue;

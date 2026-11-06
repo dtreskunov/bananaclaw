@@ -60,7 +60,7 @@ import { pushAvailable, sendToUser as sendPushToUser } from '../../modules/push/
 
 import { authenticate } from './auth.js';
 import { getBranding } from './branding.js';
-import { parseTimestamp, UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../shared/time.js';
+import { UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../shared/time.js';
 
 const SETTINGS_PREFIX = '/ui/settings';
 const PROFILE_NAME_MAX = 80;
@@ -145,7 +145,7 @@ async function handleApi(
         channel: r.channel,
         handle: r.handle,
         primary: r.primary_for_channel === 1,
-        verified_at: parseTimestamp(r.verified_at),
+        verified_at: r.verified_at,
       })),
       availableChannels,
       deepLinkChannels: availableChannels.filter((c) => hasDeepLinkBuilder(c)),
@@ -173,7 +173,7 @@ async function handleApi(
       return json(res, 502, { error: 'deeplink_failed', message: `Could not build deep link for ${channel}.` });
     }
     log.info('identity deep-link challenge created', { userId, channel, challengeId: row.id });
-    return json(res, 200, { challengeId: row.id, channel, deepLink, expiresAt: parseTimestamp(row.expires_at) });
+    return json(res, 200, { challengeId: row.id, channel, deepLink, expiresAt: row.expires_at });
   }
 
   if (req.method === 'GET' && pathname === '/identities/link/status') {
@@ -182,14 +182,14 @@ async function handleApi(
     if (!challengeId) return json(res, 400, { error: 'challengeId is required' });
     const ch = getChallenge(challengeId);
     if (!ch || ch.user_id !== userId) return json(res, 404, { error: 'not_found' });
-    const consumed = !!ch.consumed_at;
-    const expired = !consumed && new Date(ch.expires_at).getTime() < Date.now();
+    const consumed = ch.consumed_at !== null;
+    const expired = !consumed && ch.expires_at < Date.now();
     return json(res, 200, {
       consumed,
       expired,
       channel: ch.channel_type,
       handle: ch.handle || null,
-      expiresAt: parseTimestamp(ch.expires_at),
+      expiresAt: ch.expires_at,
     });
   }
 
@@ -228,7 +228,7 @@ async function handleApi(
     log.info('identity link challenge created', { userId, channel, handle, challengeId: row.id });
     return json(res, 200, {
       challengeId: row.id,
-      expiresAt: parseTimestamp(row.expires_at),
+      expiresAt: row.expires_at,
       channel,
       handle,
     });
@@ -241,8 +241,8 @@ async function handleApi(
     if (!challengeId || !code) return json(res, 400, { error: 'challengeId and code are required' });
     const ch = getChallenge(challengeId);
     if (!ch || ch.user_id !== userId) return json(res, 404, { error: 'not_found' });
-    if (ch.consumed_at) return json(res, 410, { error: 'already_used' });
-    if (new Date(ch.expires_at).getTime() < Date.now()) return json(res, 410, { error: 'expired' });
+    if (ch.consumed_at !== null) return json(res, 410, { error: 'already_used' });
+    if (ch.expires_at < Date.now()) return json(res, 410, { error: 'expired' });
     const newAttempts = incrementAttempts(challengeId);
     if (newAttempts > MAX_ATTEMPTS) return json(res, 429, { error: 'too_many_attempts' });
     if (!verifyCode(challengeId, code))

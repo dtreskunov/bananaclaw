@@ -1,4 +1,3 @@
-import { toEpoch } from '../../db/time.js';
 /**
  * Load-bearing round-trip test for `ncl groups archive` + `ncl groups restore`.
  *
@@ -59,7 +58,7 @@ import {
   getAccountRequest,
 } from '../../modules/approvals/workflows.js';
 
-const NOW = () => new Date().toISOString();
+const NOW = () => Date.now();
 
 interface SeedRefs {
   id: string;
@@ -92,7 +91,7 @@ function seedGroup(id: string, folder: string): SeedRefs {
   const sessionId = `sess-${id}`;
 
   createAgentGroup({ id, name: folder, folder, agent_provider: null, created_at: NOW() });
-  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, toEpoch(NOW()));
+  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, NOW());
   createMessagingGroup({
     id: messagingGroupId,
     channel_type: 'web',
@@ -116,15 +115,15 @@ function seedGroup(id: string, folder: string): SeedRefs {
   });
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'human', ?, ?)`)
-    .run(userId, `User ${id}`, toEpoch(NOW()));
+    .run(userId, `User ${id}`, NOW());
   getDb()
     .prepare(`INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, ?)`)
-    .run(userId, id, toEpoch(NOW()));
+    .run(userId, id, NOW());
   getDb()
     .prepare(
       `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'admin', ?, NULL, ?)`,
     )
-    .run(userId, id, toEpoch(NOW()));
+    .run(userId, id, NOW());
   createSession({
     id: sessionId,
     agent_group_id: id,
@@ -311,7 +310,7 @@ describe('ncl groups archive ↔ restore round trip', () => {
       VALUES('retained-approval','confirmation','retained-approval',?,
       '{"action":"install_packages","payload":{},"title":"Install package","options":[]}',?,1767225600000,'approved',?,
       '{"decision":"approve","message":"Keep existing work."}')`,
-    ).run(refs.sessionId, toEpoch(NOW()), refs.userId);
+    ).run(refs.sessionId, NOW(), refs.userId);
     const approval = db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get();
 
     await archive(refs.id);
@@ -320,6 +319,48 @@ describe('ncl groups archive ↔ restore round trip', () => {
 
     expect(db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id)).toEqual(seededSession);
     expect(db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get()).toEqual(approval);
+  });
+
+  it('restores legacy v3 ISO dates through the import codec without losing epoch zero', async () => {
+    const refs = seedGroup('ag-legacy-iso', 'legacy-iso');
+    const db = getDb();
+    db.prepare('UPDATE agent_groups SET created_at=0 WHERE id=?').run(refs.id);
+    db.prepare('UPDATE container_configs SET updated_at=0 WHERE agent_group_id=?').run(refs.id);
+    db.prepare('UPDATE sessions SET created_at=0,last_active=NULL WHERE id=?').run(refs.sessionId);
+    expect((await archive(refs.id)).ok).toBe(true);
+    const archivePath = path.join(TEST_GROUPS_DIR, 'legacy-iso~', 'archive.json');
+    const dump = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+    expect(dump.agent_group.created_at).toBe(0);
+    expect(dump.container_config.updated_at).toBe(0);
+    expect(dump.sessions[0].last_active).toBeNull();
+    dump.agent_group.created_at = '1970-01-01T00:00:00.000Z';
+    dump.container_config.updated_at = '1970-01-01T00:00:00.000Z';
+    dump.sessions[0].created_at = '1970-01-01T00:00:00.000Z';
+    fs.writeFileSync(archivePath, JSON.stringify(dump));
+    expect((await restore('legacy-iso', true)).ok).toBe(true);
+    expect(db.prepare('SELECT created_at FROM agent_groups WHERE id=?').get(refs.id)).toEqual({ created_at: 0 });
+    expect(db.prepare('SELECT updated_at FROM container_configs WHERE agent_group_id=?').get(refs.id)).toEqual({
+      updated_at: 0,
+    });
+    expect(db.prepare('SELECT created_at,last_active FROM sessions WHERE id=?').get(refs.sessionId)).toEqual({
+      created_at: 0,
+      last_active: null,
+    });
+  });
+
+  it('rejects corrupt archived timestamps without partially restoring records', async () => {
+    const refs = seedGroup('ag-invalid-date', 'invalid-date');
+    await archive(refs.id);
+    const archivePath = path.join(TEST_GROUPS_DIR, 'invalid-date~', 'archive.json');
+    const dump = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+    dump.agent_group.created_at = 'not-a-timestamp';
+    fs.writeFileSync(archivePath, JSON.stringify(dump));
+    const result = await restore('invalid-date');
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected invalid timestamp rejection');
+    expect(result.error.message).toMatch(/Invalid timestamp/);
+    expect(getDb().prepare('SELECT id FROM agent_groups WHERE id=?').get(refs.id)).toBeUndefined();
+    expect(fs.existsSync(archivePath)).toBe(true);
   });
 
   it('refuses to restore over a live group with the same folder', async () => {

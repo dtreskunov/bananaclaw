@@ -112,7 +112,7 @@ export function scaffoldPerUserAgentGroupDb(input: ScaffoldPerUserAgentGroupInpu
     name: AUTO_PROVISIONED_GROUP_NAME,
     folder,
     agent_provider: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   log.info('Per-user agent group created', {
     id,
@@ -138,7 +138,7 @@ export function initPerUserAgentGroupFs(agentGroupId: string, folder: string): v
     name: AUTO_PROVISIONED_GROUP_NAME,
     folder,
     agent_provider: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   });
   // initGroupFilesystem -> ensureContainerConfig already inserted the row.
   const assistantName = getBranding().shortName;
@@ -184,7 +184,7 @@ export function ensurePerUserAgentGroup(userId: string): string | null {
   if (links.length === 0) return null;
   const link = links[0];
   const folder = userAgentGroupFolder(link.provider, link.sub);
-  const now = new Date().toISOString();
+  const now = Date.now();
 
   let agentGroupId = '';
   transaction(getDb(), () => {

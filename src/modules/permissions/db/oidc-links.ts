@@ -5,7 +5,6 @@
  * lookup but is NOT the matching key.
  */
 import { getDb } from '../../../db/connection.js';
-import { decodeTimes, decodeTimeRows } from '../../../db/time.js';
 
 export interface OidcLink {
   provider: string;
@@ -13,16 +12,18 @@ export interface OidcLink {
   user_id: string;
   email: string | null;
   claims_json: string | null;
-  linked_at: string;
-  last_seen_at: string | null;
+  linked_at: number;
+  last_seen_at: number | null;
 }
 
 export function getOidcLink(provider: string, sub: string): OidcLink | undefined {
-  return decodeTimes<OidcLink | undefined>(getDb().prepare('SELECT * FROM oidc_links WHERE provider = ? AND sub = ?').get(provider, sub), ['linked_at', 'last_seen_at']);
+  return getDb().prepare('SELECT * FROM oidc_links WHERE provider = ? AND sub = ?').get(provider, sub) as
+    | OidcLink
+    | undefined;
 }
 
 export function getOidcLinksForUser(userId: string): OidcLink[] {
-  return decodeTimeRows<OidcLink>(getDb().prepare('SELECT * FROM oidc_links WHERE user_id = ? ORDER BY linked_at').all(userId), ['linked_at', 'last_seen_at']);
+  return getDb().prepare('SELECT * FROM oidc_links WHERE user_id = ? ORDER BY linked_at').all(userId) as OidcLink[];
 }
 
 export function insertOidcLink(args: {
@@ -37,7 +38,14 @@ export function insertOidcLink(args: {
       `INSERT INTO oidc_links (provider, sub, user_id, email, claims_json, last_seen_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(args.provider, args.sub, args.user_id, args.email, args.claims ? JSON.stringify(args.claims) : null, Date.now());
+    .run(
+      args.provider,
+      args.sub,
+      args.user_id,
+      args.email,
+      args.claims ? JSON.stringify(args.claims) : null,
+      Date.now(),
+    );
 }
 
 export function touchOidcLink(provider: string, sub: string, claims: Record<string, unknown> | null): void {

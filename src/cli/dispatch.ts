@@ -13,6 +13,7 @@ import { registerApprovalHandler, requestApproval } from '../modules/approvals/i
 import type { CallerContext, ErrorCode, RequestFrame, ResponseFrame } from './frame.js';
 import { getResource } from './crud.js';
 import { lookup } from './registry.js';
+import { serializeCliTimestamps } from './timestamps.js';
 
 export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<ResponseFrame> {
   let cmd = lookup(req.command);
@@ -212,7 +213,7 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
       }
     }
 
-    return { id: req.id, ok: true, data };
+    return { id: req.id, ok: true, data: cmd.resource === 'credentials' ? data : serializeCliTimestamps(data) };
   } catch (e) {
     return err(req.id, 'handler-error', errMsg(e));
   }

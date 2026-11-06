@@ -46,8 +46,7 @@ export type AccountRequestStatus =
   | 'expired'
   | 'failed';
 
-export interface AccountRequestData extends Omit<InteractionIdentity, 'createdAt'> {
-  createdAt: string;
+export interface AccountRequestData extends InteractionIdentity {
   kind: 'account_setup' | 'access_grant';
   requirements: AccountRequirements;
   status: AccountRequestStatus;
@@ -55,16 +54,11 @@ export interface AccountRequestData extends Omit<InteractionIdentity, 'createdAt
   retryable: boolean;
   agentGroupId: string;
   agentGroupName: string;
-  expiresAt: string | null;
+  expiresAt: EpochMs | null;
   outcomeMessage: string | null;
-  resolvedAt: string | null;
+  resolvedAt: EpochMs | null;
 }
 
-export type AccountInteraction = Omit<AccountRequestData, 'createdAt' | 'expiresAt' | 'resolvedAt'> &
-  InteractionContext & {
-    createdAt: EpochMs;
-    expiresAt: EpochMs | null;
-    resolvedAt: EpochMs | null;
-  };
+export type AccountInteraction = AccountRequestData & InteractionContext;
 export type ConversationApproval = ConfirmationInteraction | AccountInteraction;
 import type { AccessRequirements } from './access-authentication.js';

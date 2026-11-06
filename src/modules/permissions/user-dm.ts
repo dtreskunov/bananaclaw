@@ -109,7 +109,7 @@ export async function ensureUserDm(userId: string): Promise<MessagingGroup | nul
 
   // Find-or-create the underlying messaging_group. A DM we received
   // earlier may already have a row matching (channel_type, platform_id).
-  const now = new Date().toISOString();
+  const now = Date.now();
   let mg = getMessagingGroupByPlatform(channelType, dmPlatformId);
   if (!mg) {
     const mgId = `mg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

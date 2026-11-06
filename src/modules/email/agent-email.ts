@@ -89,7 +89,7 @@ export function getEnabledAgentGroupForEmailAlias(alias: string): AgentGroup | u
 }
 
 function createMailbox(group: AgentGroup, address: string): MessagingGroup {
-  const createdAt = new Date().toISOString();
+  const createdAt = Date.now();
   const mailbox: MessagingGroup = {
     id: `mg-${Date.now()}-${randomUUID().slice(0, 6)}`,
     channel_type: 'resend',
@@ -140,7 +140,7 @@ export function reconcileAgentEmail(group: AgentGroup, baseDomain: string): void
       ignored_message_policy: 'drop',
       session_mode: 'shared',
       priority: 0,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
   }
 
@@ -154,7 +154,7 @@ export function reconcileAgentEmail(group: AgentGroup, baseDomain: string): void
       local_name: 'email',
       target_type: 'channel',
       target_id: mailbox.id,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
       created_by: null,
     });
   }

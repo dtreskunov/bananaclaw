@@ -11,8 +11,8 @@ type DbMod = typeof import('../../../db/index.js');
 let site: SiteMod;
 let db: DbMod;
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 beforeAll(async () => {

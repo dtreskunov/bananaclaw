@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -43,7 +44,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
       origin_platform_id: 'chat',
       origin_thread_id: null,
       origin_source_session_id: null,
-      started_at: '2026-10-04T20:22:46.226Z',
+      started_at: parseTimestamp('2026-10-04T20:22:46.226Z'),
       ended_at: null,
       phase: 'running',
       outcome: 'pending',

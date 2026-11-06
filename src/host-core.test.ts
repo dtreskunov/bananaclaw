@@ -1,4 +1,5 @@
-import { toEpoch } from './db/time.js';
+import { parseTimestamp } from './time.js';
+
 /**
  * Integration tests for the v2 host core.
  * Tests routing, session creation, message writing, and delivery
@@ -78,7 +79,7 @@ describe('session manager', () => {
       name: 'Test Agent',
       folder: 'test-agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-1',
@@ -87,7 +88,7 @@ describe('session manager', () => {
       name: 'General',
       is_group: 1,
       unknown_sender_policy: 'strict',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
   });
 
@@ -202,7 +203,7 @@ describe('session manager', () => {
     writeSessionMessage('ag-1', session.id, {
       id: 'msg-evil',
       kind: 'chat',
-      timestamp: now(),
+      timestamp: parseTimestamp(now()),
       content: JSON.stringify({
         text: 'evil',
         attachments: [{ name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 }],
@@ -227,7 +228,7 @@ describe('session manager', () => {
     writeSessionMessage('ag-1', session.id, {
       id: 'msg-sym',
       kind: 'chat',
-      timestamp: now(),
+      timestamp: parseTimestamp(now()),
       content: JSON.stringify({
         text: 'sym',
         attachments: [{ name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 }],
@@ -244,7 +245,7 @@ describe('session manager', () => {
     writeSessionMessage('ag-1', session.id, {
       id: '../../escape',
       kind: 'chat',
-      timestamp: now(),
+      timestamp: parseTimestamp(now()),
       content: JSON.stringify({
         text: 'msgid',
         attachments: [{ name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 }],
@@ -264,7 +265,7 @@ describe('session manager', () => {
     writeSessionMessage('ag-1', session.id, {
       id: 'msg-ok',
       kind: 'chat',
-      timestamp: now(),
+      timestamp: parseTimestamp(now()),
       content: JSON.stringify({
         text: 'ok',
         attachments: [{ name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 }],
@@ -281,7 +282,7 @@ describe('session manager', () => {
     const message = {
       id: 'msg-replay',
       kind: 'chat',
-      timestamp: now(),
+      timestamp: parseTimestamp(now()),
       idempotent: true,
     };
 
@@ -338,7 +339,7 @@ describe('session manager', () => {
     writeSessionMessage('ag-1', session.id, {
       id: 'msg-1',
       kind: 'chat',
-      timestamp: now(),
+      timestamp: parseTimestamp(now()),
       platformId: 'chan-123',
       channelType: 'discord',
       threadId: null,
@@ -369,7 +370,7 @@ describe('session manager', () => {
     writeSessionMessage('ag-1', session.id, {
       id: 'msg-1',
       kind: 'chat',
-      timestamp: now(),
+      timestamp: parseTimestamp(now()),
       content: JSON.stringify({ text: 'hi' }),
     });
 
@@ -389,7 +390,7 @@ describe('session manager', () => {
     writeSessionMessage('ag-1', session.id, {
       id: 'msg-attack',
       kind: 'chat',
-      timestamp: now(),
+      timestamp: parseTimestamp(now()),
       content: JSON.stringify({
         text: 'pwn',
         attachments: [
@@ -421,7 +422,7 @@ describe('router', () => {
       name: 'Test Agent',
       folder: 'test-agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     // Use 'public' policy so the router tests exercise routing, not the
     // access gate. Dedicated access-gate tests live with the access module.
@@ -432,7 +433,7 @@ describe('router', () => {
       name: 'General',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroupAgent({
       id: 'mga-1',
@@ -444,7 +445,7 @@ describe('router', () => {
       ignored_message_policy: 'drop',
       session_mode: 'shared',
       priority: 0,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
   });
 
@@ -598,7 +599,7 @@ describe('router', () => {
       name: 'Secondary Agent',
       folder: 'secondary-agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroupAgent({
       id: 'mga-2',
@@ -610,7 +611,7 @@ describe('router', () => {
       ignored_message_policy: 'drop',
       session_mode: 'shared',
       priority: 0,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     await routeInbound({
@@ -695,14 +696,14 @@ describe('router — channel instances', () => {
       name: 'Default Bot',
       folder: 'default-bot',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createAgentGroup({
       id: 'ag-2',
       name: 'Tester Bot',
       folder: 'tester-bot',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     // Two messaging groups on the SAME (channel_type, platform_id), owned
     // by different adapter instances and wired to different agents.
@@ -713,7 +714,7 @@ describe('router — channel instances', () => {
       name: 'Default chat',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-tester',
@@ -723,7 +724,7 @@ describe('router — channel instances', () => {
       name: 'Tester chat',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     for (const [mgaId, mgId, agId] of [
       ['mga-default', 'mg-default', 'ag-1'],
@@ -739,7 +740,7 @@ describe('router — channel instances', () => {
         ignored_message_policy: 'drop',
         session_mode: 'shared',
         priority: 0,
-        created_at: now(),
+        created_at: parseTimestamp(now()),
       });
     }
   });
@@ -845,7 +846,7 @@ describe('router — channel instances', () => {
       name: null,
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     await routeInbound({
@@ -878,7 +879,7 @@ describe('routing metadata preservation', () => {
       name: 'Test Agent',
       folder: 'test-agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-1',
@@ -887,7 +888,7 @@ describe('routing metadata preservation', () => {
       name: 'General',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroupAgent({
       id: 'mga-1',
@@ -899,7 +900,7 @@ describe('routing metadata preservation', () => {
       ignored_message_policy: 'drop',
       session_mode: 'shared',
       priority: 0,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
   });
 
@@ -937,7 +938,7 @@ describe('routing metadata preservation', () => {
       name: 'Agent Two',
       folder: 'agent-two',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroupAgent({
       id: 'mga-2',
@@ -949,7 +950,7 @@ describe('routing metadata preservation', () => {
       ignored_message_policy: 'drop',
       session_mode: 'shared',
       priority: 0,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     await routeInbound({
@@ -985,7 +986,7 @@ describe('writeSessionRouting', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-1',
@@ -994,7 +995,7 @@ describe('writeSessionRouting', () => {
       name: 'Chat',
       is_group: 0,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
@@ -1022,7 +1023,7 @@ describe('writeSessionRouting', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     const { session } = resolveSession('ag-1', null, null, 'agent-shared');
@@ -1050,7 +1051,7 @@ describe('writeSessionRouting', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-1',
@@ -1059,7 +1060,7 @@ describe('writeSessionRouting', () => {
       name: 'General',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     const { session } = resolveSession('ag-1', 'mg-1', 'thread-77', 'per-thread');
@@ -1089,7 +1090,7 @@ describe('agent-shared session resolution', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     const { session: s1, created: c1 } = resolveSession('ag-1', null, null, 'agent-shared');
@@ -1106,7 +1107,7 @@ describe('agent-shared session resolution', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     const { session } = resolveSession('ag-1', null, null, 'agent-shared');
@@ -1121,7 +1122,7 @@ describe('agent-to-agent routing', () => {
       name: 'PA',
       folder: 'pa-agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-slack',
@@ -1130,14 +1131,14 @@ describe('agent-to-agent routing', () => {
       name: 'Slack General',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createAgentGroup({
       id: 'ag-researcher',
       name: 'Researcher',
       folder: 'researcher-agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     // Wire bidirectional A2A destinations (table created by runMigrations)
@@ -1145,11 +1146,11 @@ describe('agent-to-agent routing', () => {
     db.prepare(
       `INSERT OR IGNORE INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
        VALUES ('ag-pa', 'researcher', 'agent', 'ag-researcher', ?)`,
-    ).run(toEpoch(now()));
+    ).run(parseTimestamp(now()));
     db.prepare(
       `INSERT OR IGNORE INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
        VALUES ('ag-researcher', 'pa', 'agent', 'ag-pa', ?)`,
-    ).run(toEpoch(now()));
+    ).run(parseTimestamp(now()));
   });
 
   it('A2A outbound lands in a session for the target agent', async () => {
@@ -1200,7 +1201,7 @@ describe('agent-to-agent routing', () => {
       name: 'Discord',
       is_group: 0,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     const { session: paDiscordSession } = resolveSession('ag-pa', 'mg-discord', null, 'shared');
 
@@ -1282,7 +1283,7 @@ describe('delivery', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-test',
@@ -1291,7 +1292,7 @@ describe('delivery', () => {
       name: 'Test',
       is_group: 0,
       unknown_sender_policy: 'strict',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     const { session } = resolveSession('ag-1', 'mg-test', null, 'shared');

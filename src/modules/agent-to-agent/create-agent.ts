@@ -141,7 +141,7 @@ async function performCreateAgent(
   }
 
   const agentGroupId = `ag-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const now = new Date().toISOString();
+  const now = Date.now();
 
   const newGroup: AgentGroup = {
     id: agentGroupId,

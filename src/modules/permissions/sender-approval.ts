@@ -102,7 +102,7 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
     sender_name: senderName,
     original_message: JSON.stringify(event),
     approver_user_id: target.userId,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
     title,
     options_json: JSON.stringify(options),
   });

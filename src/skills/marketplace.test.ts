@@ -505,7 +505,7 @@ describe('refreshing catalog snapshots', () => {
     const repo = makeMarketplaceRepo();
     const record = {
       ...addMarketplace({ repo, id: 'refresh-catalog' }),
-      refreshedAt: '2020-01-01T00:00:00.000Z',
+      refreshedAt: Date.parse('2020-01-01T00:00:00.000Z'),
     };
     putMarketplaceRecord(record);
     return { store, repo, record, cache: marketplaceCacheDir(record.id) };
@@ -524,7 +524,7 @@ describe('refreshing catalog snapshots', () => {
     const refreshed = await refreshMarketplace(record.id);
     expect(refreshed.commit).not.toBe(record.commit);
     expect(refreshed.label).toBe('refreshed-name');
-    expect(Date.parse(refreshed.refreshedAt!)).toBeGreaterThan(Date.parse(record.refreshedAt));
+    expect(refreshed.refreshedAt!).toBeGreaterThan(record.refreshedAt);
     expect(refreshed.lastRefreshAttemptAt).toBeTruthy();
     expect(refreshed.lastRefreshError).toBeNull();
     expect(readCatalog(refreshed)).toMatchObject({ commit: refreshed.commit, error: null });

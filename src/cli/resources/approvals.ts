@@ -2,7 +2,7 @@ import { getApproval } from '../../db/approvals.js';
 import { queryInteractions } from '../../db/interactions.js';
 import type { Approval } from '../../types.js';
 import { registerResource } from '../crud.js';
-import { toEpoch } from '../../db/time.js';
+import { parseTimestamp } from '../../time.js';
 
 const filters = ['id', 'session_id', 'request_id', 'agent_group_id', 'kind', 'status', 'created_at', 'expires_at'];
 registerResource({
@@ -22,7 +22,12 @@ registerResource({
         return queryInteractions<Approval>(
           `SELECT * FROM interactions WHERE kind!='question'
           ${selected.map(([key]) => `AND ${key}=?`).join(' ')} LIMIT ?`,
-          ...selected.map(([key, value]) => key === 'created_at' || key === 'expires_at' ? toEpoch(value as string) : value),
+          ...selected.map(([key, value]) => {
+            if (key !== 'created_at' && key !== 'expires_at') return value;
+            if (value === null) return null;
+            if (typeof value !== 'string') throw new Error(`${key} must be a timestamp string`);
+            return parseTimestamp(value);
+          }),
           Math.max(1, Number(args.limit ?? 200)),
         );
       },

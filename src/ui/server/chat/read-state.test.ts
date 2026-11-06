@@ -200,7 +200,7 @@ describe('durable viewer unread state', () => {
       channel_type: 'web',
       platform_id: 'group:g',
       thread_id: 'a',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     expect(unread()).toBe(true);
@@ -213,7 +213,7 @@ describe('durable viewer unread state', () => {
       user_id: 'admin',
       role: 'admin',
       agent_group_id: 'g',
-      granted_at: '2026-01-01T00:00:00.000Z',
+      granted_at: 1767225600000,
       granted_by: null,
     });
     createApproval({
@@ -221,7 +221,7 @@ describe('durable viewer unread state', () => {
       request_id: 'approval',
       session_id: 's',
       origin_message_id: 'input-a',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
       input: { action: 'test', title: 'Approve?', payload: {}, options: [] },
     });
     expect(unread()).toBe(false);
@@ -249,7 +249,7 @@ describe('durable viewer unread state', () => {
     expect(unread()).toBe(true);
     rebuildThreadSummaries(root);
     expect(unread()).toBe(true);
-    createUser({ id: 'fresh', kind: 'web', display_name: 'Fresh', created_at: '2026-01-01T00:00:00.000Z' });
+    createUser({ id: 'fresh', kind: 'web', display_name: 'Fresh', created_at: 1767225600000 });
     getDb().exec("INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('fresh','g',1767225600000)");
     expect(unread('fresh')).toBe(false);
     expect(getUser('fresh')).not.toHaveProperty('unread_baseline');

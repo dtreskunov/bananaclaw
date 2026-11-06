@@ -162,7 +162,7 @@ function createPairingInterceptor(
           name: consumed.consumed!.name,
           is_group: consumed.consumed!.isGroup ? 1 : 0,
           unknown_sender_policy: 'strict',
-          created_at: new Date().toISOString(),
+          created_at: Date.now(),
         });
       }
 
@@ -178,7 +178,7 @@ function createPairingInterceptor(
           role: 'owner',
           agent_group_id: null,
           granted_by: null,
-          granted_at: new Date().toISOString(),
+          granted_at: Date.now(),
         });
         promotedToOwner = true;
       }

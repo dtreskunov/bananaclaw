@@ -12,6 +12,8 @@ import {
   TURN_SCHEMA,
   TURN_ACTIVITY_SCHEMA,
   TURN_INDEX_SCHEMA,
+  putTurn,
+  getTurn,
 } from './turns.js';
 
 const opened: Database.Database[] = [];
@@ -20,6 +22,31 @@ afterEach(() => {
 });
 
 describe('durable turn schema', () => {
+  it('keeps numeric epoch-zero records and rejects invalid nullable instants before writes', () => {
+    const db = new Database(':memory:');
+    opened.push(db);
+    db.exec(OUTBOUND_SCHEMA);
+    const turn = {
+      id: 'clock',
+      origin_channel_type: null,
+      origin_platform_id: null,
+      origin_thread_id: null,
+      origin_source_session_id: null,
+      started_at: 0,
+      ended_at: null,
+      phase: 'running' as const,
+      outcome: 'pending' as const,
+      provenance: 'native' as const,
+      imported_from_session_id: null,
+      imported_from_turn_id: null,
+    };
+    putTurn(db, turn);
+    for (const started_at of [NaN, Infinity, 0.5, 8640000000000001]) {
+      expect(() => putTurn(db, { ...turn, started_at })).toThrow('Invalid epoch-millisecond timestamp');
+      expect(getTurn(db, 'clock')).toEqual(turn);
+    }
+  });
+
   it('rejects unmigrated activity storage rather than upgrading it at runtime', () => {
     const db = new Database(':memory:');
     opened.push(db);
@@ -31,7 +58,9 @@ describe('durable turn schema', () => {
   it('keeps host and runner SQL contracts identical without cross-runtime imports', () => {
     const runner = fs.readFileSync(path.join(process.cwd(), 'container/agent-runner/src/db/turns.ts'), 'utf8');
     for (const [name, sql] of Object.entries({ TURN_SCHEMA, TURN_ACTIVITY_SCHEMA, TURN_INDEX_SCHEMA })) {
-      const template = runner.match(new RegExp('export const ' + name + ' = (?:epochSchema\\()?`([\\s\\S]*?)`\\)?;'))?.[1];
+      const template = runner.match(
+        new RegExp('export const ' + name + ' = (?:epochSchema\\()?`([\\s\\S]*?)`\\)?;'),
+      )?.[1];
       expect(template === undefined ? undefined : epochSchema(template)).toBe(sql);
     }
   });
@@ -49,9 +78,13 @@ describe('durable turn schema', () => {
         "INSERT INTO turn_activity (turn_id, ordinal, ts, text, timeline_position) VALUES ('silent', 0, 1767225600000, 'duplicate', 2)",
       ),
     ).toThrow();
-    expect(() => db.exec("INSERT INTO turn_activity (ordinal, ts, text) VALUES (1, 1767225600000, 'unassociated')")).toThrow();
     expect(() =>
-      db.exec("INSERT INTO turn_activity (turn_id, ordinal, ts, text) VALUES ('silent', 2, 1767225600000, 'missing order')"),
+      db.exec("INSERT INTO turn_activity (ordinal, ts, text) VALUES (1, 1767225600000, 'unassociated')"),
+    ).toThrow();
+    expect(() =>
+      db.exec(
+        "INSERT INTO turn_activity (turn_id, ordinal, ts, text) VALUES ('silent', 2, 1767225600000, 'missing order')",
+      ),
     ).toThrow();
     assertActivityOrderSchema(db);
     expect(db.pragma('foreign_key_check')).toEqual([]);

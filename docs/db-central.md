@@ -5,8 +5,17 @@ Complete reference for `data/v2.db`, the host-owned admin-plane database. Start 
 Access layer: `src/db/`. Authoritative schema: migrations in
 `src/db/migrations/`, followed by the checked epoch storage definitions in
 `src/db/storage-lifecycle.ts`. The unused duplicate central DDL was removed.
-Maintained time instants below are INTEGER UTC epoch milliseconds, exposed as
-ISO strings by the DB access layer. `PRAGMA user_version=1` is required; existing
+Maintained time instants below are INTEGER UTC epoch milliseconds, retained as
+numbers by the DB access layer, host domain records and UI protocol 16.
+Nullable instants remain `null`; epoch zero is a valid recorded instant.
+Exported mutation APIs validate supplied instants as safe integer milliseconds
+within the JavaScript Date range before binding SQLite, so invalid numbers
+cannot be silently coerced to `NULL`.
+The admin CLI formats public record dates as ISO strings at its response boundary
+and parses user-supplied date arguments once. Archive rows contain numeric dates;
+the explicit archive import codec still accepts ISO dates from older v3 archives.
+`archived_at` remains ISO archive metadata. No additional central schema migration
+is required for numeric host records. `PRAGMA user_version=1` is required; existing
 stores use the [offline cutover](db-storage-cutover.md), not startup conversion.
 
 ### Integrity upgrades

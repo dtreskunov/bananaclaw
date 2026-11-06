@@ -18,6 +18,7 @@ import { getAgentGroup } from '../../db/agent-groups.js';
 import { assertGroupApprovalsIdle, getSessionsByAgentGroup } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import { transaction } from '../../db/transaction.js';
+import { formatTimestamp } from '../../time.js';
 
 export interface ArchiveResult {
   id: string;
@@ -184,7 +185,7 @@ export function archiveAgentGroup(
   }
 
   // 1. Snapshot all DB state before any deletes.
-  const archivedAt = new Date().toISOString();
+  const archivedAt = Date.now();
   const archiveJsonPath = path.join(groupDir, 'archive.json');
   transaction(getDb(), () => {
     assertGroupApprovalsIdle(groupId);
@@ -195,12 +196,17 @@ export function archiveAgentGroup(
          WHERE status='pending' AND
        (agent_group_id=? OR session_id IN (SELECT id FROM sessions WHERE agent_group_id=?))`,
       )
-      .run(Date.parse(archivedAt), Date.parse(archivedAt), groupId, groupId);
-    const dump: ArchiveDump = { version: 3, archived_at: archivedAt, archived_by: actor, ...dumpRows(groupId) };
+      .run(archivedAt, archivedAt, groupId, groupId);
+    const dump: ArchiveDump = {
+      version: 3,
+      archived_at: formatTimestamp(archivedAt),
+      archived_by: actor,
+      ...dumpRows(groupId),
+    };
     fs.writeFileSync(archiveJsonPath, JSON.stringify(dump, null, 2), 'utf-8');
     fs.writeFileSync(
       path.join(groupDir, 'ARCHIVE_RESTORE.md'),
-      renderRestoreReadme(group.folder, groupId, archivedAt, actor),
+      renderRestoreReadme(group.folder, groupId, formatTimestamp(archivedAt), actor),
       'utf-8',
     );
   })();

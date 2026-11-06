@@ -21,7 +21,7 @@ it('bootstraps canonical questions with typed responses, idempotence and retaine
     platform_id: null,
     channel_type: null,
     thread_id: null,
-    created_at: '2026-01-01T00:00:00.000Z',
+    created_at: 1767225600000,
     input: { question: 'Choose?', responseMode: 'choice' as const, options: [] },
   };
   expect(createQuestion(question)).toBe(true);
@@ -30,7 +30,7 @@ it('bootstraps canonical questions with typed responses, idempotence and retaine
     createApproval({
       id: 'q',
       request_id: 'q',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
       input: {
         action: 'install_packages',
         payload: {},
@@ -43,19 +43,19 @@ it('bootstraps canonical questions with typed responses, idempotence and retaine
   expect(createQuestion(queued)).toBe(true);
   expect(createQuestion(queued)).toBe(false);
   expect(getQuestion('other')).toMatchObject({ status: 'pending', input: question.input });
-  expect(answerQuestion('q', { responseType: 'skipped', userId: 'actor', answeredAt: '2026-01-01T00:00:01.000Z' })).toBe(true);
+  expect(answerQuestion('q', { responseType: 'skipped', userId: 'actor', answeredAt: 1767225601000 })).toBe(true);
   expect(getQuestion('q')).toMatchObject({
     status: 'answered',
     response: { responseType: 'skipped' },
     responded_by: 'actor',
-    responded_at: '2026-01-01T00:00:01.000Z',
+    responded_at: 1767225601000,
   });
   expect(createQuestion({ ...question, id: 'literal' })).toBe(true);
   const answer = {
     responseType: 'text' as const,
     value: 'yes',
     userId: 'actor',
-    answeredAt: '2026-01-01T00:00:02.000Z',
+    answeredAt: 1767225602000,
     questionId: 'route-only',
     message: 'not response data',
   };

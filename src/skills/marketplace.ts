@@ -62,8 +62,8 @@ export interface MarketplaceCatalog {
   label: string | null;
   description: string | null;
   commit: string | null;
-  refreshedAt: string | null;
-  lastRefreshAttemptAt: string | null;
+  refreshedAt: number | null;
+  lastRefreshAttemptAt: number | null;
   lastRefreshError: string | null;
   /** Manifest-driven, a scanned layout, or one of the read-only local sets. */
   kind: 'plugin-marketplace' | 'skill-repo' | 'built-in' | 'workspace';
@@ -404,7 +404,7 @@ export function previewCatalog(input: { repo: string; ref?: string }): Marketpla
     label: null,
     description: null,
     commit: null,
-    addedAt: new Date().toISOString(),
+    addedAt: Date.now(),
     refreshedAt: null,
   };
   const synced = syncWithDefaultBranchFallback(draft);
@@ -459,7 +459,7 @@ export function addMarketplace(input: {
     label: null,
     description: null,
     commit: null,
-    addedAt: new Date().toISOString(),
+    addedAt: Date.now(),
     refreshedAt: null,
   };
 
@@ -485,7 +485,7 @@ export function addMarketplace(input: {
     ...readManifestIdentity(id),
     // Preview-only clones do not yet persist a fetch timestamp. Registration
     // must not claim that reusing one contacted the upstream just now.
-    refreshedAt: input.expectedCommit === undefined ? new Date().toISOString() : null,
+    refreshedAt: input.expectedCommit === undefined ? Date.now() : null,
   };
   putMarketplaceRecord(record);
   return record;
@@ -505,7 +505,7 @@ export function refreshMarketplace(id: string): Promise<MarketplaceRecord> {
 }
 
 async function refreshSnapshot(record: MarketplaceRecord): Promise<MarketplaceRecord> {
-  const attemptedAt = new Date().toISOString();
+  const attemptedAt = Date.now();
   const cacheDir = marketplaceCacheDir(record.id);
   let workDir: string | null = null;
   let preserveWorkDir = false;
@@ -528,7 +528,7 @@ async function refreshSnapshot(record: MarketplaceRecord): Promise<MarketplaceRe
       ...record,
       ...readManifestIdentity(record.id, candidateDir),
       commit,
-      refreshedAt: new Date().toISOString(),
+      refreshedAt: Date.now(),
       lastRefreshAttemptAt: attemptedAt,
       lastRefreshError: null,
     };

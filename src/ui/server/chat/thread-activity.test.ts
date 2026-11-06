@@ -47,8 +47,8 @@ function turn(id: string, thread: string, phase: 'running' | 'stopping' | 'settl
     origin_platform_id: 'group:g',
     origin_thread_id: thread,
     origin_source_session_id: null,
-    started_at: '2026-11-05T00:00:00Z',
-    ended_at: phase === 'settled' ? '2026-11-05T00:01:00Z' : null,
+    started_at: 1793836800000,
+    ended_at: phase === 'settled' ? 1793836860000 : null,
     phase,
     outcome: phase === 'settled' ? 'replied' : 'pending',
     provenance: 'native',
@@ -143,7 +143,7 @@ describe('thread activity projection', () => {
       channel_type: 'web',
       platform_id: 'group:g',
       thread_id: 'a',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
@@ -173,7 +173,7 @@ describe('thread activity projection', () => {
         origin_platform_id: 'person@example.com',
         origin_thread_id: null,
         origin_source_session_id: null,
-        started_at: '2026-11-05T00:00:00Z',
+        started_at: 1793836800000,
         ended_at: null,
         phase: 'running' as const,
         outcome: 'pending' as const,
@@ -192,7 +192,7 @@ describe('thread activity projection', () => {
       };
       signal.connected = true;
       expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'running', stale: false });
-      putTurn(outputs, { ...active, phase: 'settled', outcome: 'replied', ended_at: '2026-11-05T00:01:00Z' });
+      putTurn(outputs, { ...active, phase: 'settled', outcome: 'replied', ended_at: 1793836860000 });
       putTurn(outputs, { ...active, id: 'private-turn', origin_platform_id: 'other@example.com' });
       refreshThreadSummaries('dm-session');
       signal.turn = { ...signal.turn, id: 'private-turn', platformId: 'other@example.com' };
@@ -211,7 +211,7 @@ describe('thread activity projection', () => {
         channel_type: 'resend',
         platform_id: 'person@example.com',
         thread_id: null,
-        created_at: '2026-01-01T00:00:00.000Z',
+        created_at: 1767225600000,
         input: { question: 'Choose?', responseMode: 'text', options: [] },
       });
       expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'idle', waiting: true, stale: false });
@@ -256,7 +256,7 @@ describe('thread activity projection', () => {
       channel_type: 'web',
       platform_id: 'group:g',
       thread_id: 'a',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
@@ -272,7 +272,7 @@ describe('thread activity projection', () => {
     ]);
     turn('turn-a', 'a', 'settled');
     expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
-    answerQuestion('q', { responseType: 'text', value: 'Done', userId: 'viewer', answeredAt: '2026-11-05T00:02:00Z' });
+    answerQuestion('q', { responseType: 'text', value: 'Done', userId: 'viewer', answeredAt: 1793836920000 });
     expect((await activities()).a.activity).toBe('idle');
   });
   it('counts idle agents from the maintained projection and omits inaccessible groups', () => {
@@ -292,7 +292,7 @@ describe('thread activity projection', () => {
       channel_type: 'web',
       platform_id: 'group:g',
       thread_id: 'a',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
       input: { question: 'Choose?', responseMode: 'text', options: [] },
     });
     turn('turn-b', 'b', 'running');
@@ -333,7 +333,7 @@ describe('thread activity projection', () => {
         VALUES('other-turn','running','pending','native','web','group:other','other-thread',1767225600000);`);
       refreshThreadSummaries('other-session');
       expect(readAgentActivity('viewer', [], null, []).map((group) => group.id)).toEqual(['g']);
-      addMember({ user_id: 'viewer', agent_group_id: 'other', added_by: null, added_at: '2026-01-01T00:00:00.000Z' });
+      addMember({ user_id: 'viewer', agent_group_id: 'other', added_by: null, added_at: 1767225600000 });
       expect(readAgentActivity('viewer', [], null, [])).toEqual([
         { id: 'g', activity: 'running', threadCount: 2 },
         { id: 'other', activity: 'running', activityStale: true, threadCount: 1 },
@@ -395,7 +395,7 @@ describe('thread activity projection', () => {
         role: 'admin',
         agent_group_id: null,
         granted_by: null,
-        granted_at: '2026-01-01T00:00:00.000Z',
+        granted_at: 1767225600000,
       });
       expect(readAgentActivity('admin', [], null, [])).toEqual([{ id: 'g', activity: 'running', threadCount: 3 }]);
     } finally {
@@ -409,7 +409,7 @@ describe('thread activity projection', () => {
       role: 'admin',
       agent_group_id: 'g',
       granted_by: null,
-      granted_at: '2026-01-01T00:00:00.000Z',
+      granted_at: 1767225600000,
     });
     createApproval({
       id: 'approval',
@@ -417,7 +417,7 @@ describe('thread activity projection', () => {
       session_id: 's',
       agent_group_id: 'g',
       origin_message_id: 'input-a',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
       input: {
         action: 'test',
         title: 'Approve?',

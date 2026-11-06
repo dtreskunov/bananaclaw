@@ -4,7 +4,6 @@ import path from 'node:path';
 import { extractDisplayQuery, HA_CHANNEL_TYPE } from './channels/homeassistant-text.js';
 import { readThreadTitle } from './modules/thread-titles/db.js';
 import type { SummaryTask } from './thread-summaries.js';
-import { fromEpoch, decodeTimeRows } from './db/time.js';
 
 export interface ThreadScanSpec {
   agentGroupId: string;
@@ -18,15 +17,15 @@ export interface ScannedThread {
   threadId: string;
   title: string;
   messageCount: number;
-  lastActivityAt: string;
+  lastActivityAt: number | null;
   liveTasks?: SummaryTask[];
 }
 
 export interface SessionThreadScan {
   threads: ScannedThread[];
   owners: string[];
-  dms: { channelType: string; platformId: string; messageCount: number; lastActivityAt: string }[];
-  dmReplies: { channelType: string; messageCount: number; lastActivityAt: string }[];
+  dms: { channelType: string; platformId: string; messageCount: number; lastActivityAt: number | null }[];
+  dmReplies: { channelType: string; messageCount: number; lastActivityAt: number | null }[];
   totalCost: number;
   totalTokens: number;
   turnCount: number;
@@ -90,12 +89,9 @@ function finalizeTitle(title: string): string {
   );
 }
 
-function latest(...timestamps: (string | null)[]): string {
-  return (
-    timestamps
-      .filter((s): s is string => !!s)
-      .sort((a, b) => Date.parse(b.includes('T') ? b : b + 'Z') - Date.parse(a.includes('T') ? a : a + 'Z'))[0] || ''
-  );
+function latest(...timestamps: (number | null)[]): number | null {
+  return timestamps.reduce<number | null>((last, value) =>
+    value === null ? last : last === null ? value : Math.max(last, value), null);
 }
 
 interface CountRow {
@@ -103,7 +99,7 @@ interface CountRow {
   platform_id: string;
   thread_id: string | null;
   n: number;
-  max_ts: string | null;
+  max_ts: number | null;
 }
 
 /** Worker-only reads: no host services, schema writes, or runner-private databases. */
@@ -121,17 +117,16 @@ export function scanThreadSession(dataDir: string, spec: ThreadScanSpec): Sessio
         )
         .get() as Pick<SessionThreadScan, 'totalCost' | 'totalTokens' | 'turnCount'>;
       const result: SessionThreadScan = { threads: [], owners: [], dms: [], dmReplies: [], ...usage };
-      const replies = decodeTimeRows<CountRow>(
+      const replies = (
         outbound
           .prepare(
             `SELECT channel_type, thread_id, COUNT(*) AS n, MAX(timestamp) AS max_ts
          FROM messages_out WHERE kind IN ('chat', 'text') GROUP BY channel_type, thread_id`,
           )
-          .all(),
-        ['max_ts'],
-      );
+          .all()
+      ) as CountRow[];
 
-      const groups = decodeTimeRows<CountRow>(
+      const groups = (
         spec.thread
           ? (inbound
               .prepare(
@@ -144,8 +139,7 @@ export function scanThreadSession(dataDir: string, spec: ThreadScanSpec): Sessio
                 `SELECT channel_type, platform_id, thread_id, COUNT(*) AS n, MAX(timestamp) AS max_ts
            FROM messages_in GROUP BY channel_type, platform_id, thread_id`,
               )
-              .all() as CountRow[]),
-        ['max_ts'],
+              .all() as CountRow[])
       );
 
       for (const group of groups) {
@@ -154,7 +148,7 @@ export function scanThreadSession(dataDir: string, spec: ThreadScanSpec): Sessio
             channelType: group.channel_type,
             platformId: group.platform_id,
             messageCount: group.n,
-            lastActivityAt: group.max_ts || '',
+            lastActivityAt: group.max_ts,
           });
           continue;
         }
@@ -186,7 +180,7 @@ export function scanThreadSession(dataDir: string, spec: ThreadScanSpec): Sessio
         result.dmReplies.push({
           channelType: reply.channel_type,
           messageCount: reply.n,
-          lastActivityAt: reply.max_ts || '',
+          lastActivityAt: reply.max_ts,
         });
       }
       if (spec.thread) {
@@ -220,7 +214,7 @@ export function scanThreadSession(dataDir: string, spec: ThreadScanSpec): Sessio
         if (tasks.length)
           result.threads[0].liveTasks = tasks.map((task) => ({
             seriesId: task.series_id,
-            nextRunAt: fromEpoch(task.process_after),
+            nextRunAt: task.process_after,
             recurrence: task.recurrence,
             summary: summarizeTaskPrompt(task.content),
             paused: task.status === 'paused',

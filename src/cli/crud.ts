@@ -10,7 +10,7 @@ import { randomUUID } from 'crypto';
 
 import { getDb } from '../db/connection.js';
 import { INSTANT_COLUMNS } from '../db/storage-lifecycle.js';
-import { toEpoch, encodeTimes, decodeTimes, decodeTimeRows } from '../db/time.js';
+import { parseTimestamp } from '../time.js';
 
 import { register } from './registry.js';
 import type { CallerContext } from './frame.js';
@@ -105,8 +105,10 @@ function visibleColumns(def: ResourceDef): string[] {
   return def.columns.map((c) => c.name);
 }
 
-function instantColumns(def: ResourceDef): string[] {
-  return visibleColumns(def).filter(column => INSTANT_COLUMNS.has(column));
+function columnValue(column: string, value: unknown): unknown {
+  if (!INSTANT_COLUMNS.has(column) || value === null) return value;
+  if (typeof value !== 'string') throw new Error(`${column} must be a timestamp string`);
+  return parseTimestamp(value);
 }
 
 function genericList(def: ResourceDef) {
@@ -120,14 +122,14 @@ function genericList(def: ResourceDef) {
       if (k === 'id' || k === 'limit') continue;
       if (filterableNames.has(k)) {
         filters.push(`${k} = ?`);
-        params.push(INSTANT_COLUMNS.has(k) ? toEpoch(v as string | null) : v);
+        params.push(columnValue(k, v));
       }
     }
     const where = filters.length > 0 ? ` WHERE ${filters.join(' AND ')}` : '';
     params.push(limit);
-    return decodeTimeRows<Record<string, unknown>>(getDb()
+    return getDb()
       .prepare(`SELECT ${cols} FROM ${def.table}${where} LIMIT ?`)
-      .all(...params), instantColumns(def));
+      .all(...params) as Record<string, unknown>[];
   };
 }
 
@@ -138,7 +140,7 @@ function genericGet(def: ResourceDef) {
     if (!id) throw new Error(`${def.name} id is required`);
     const row = getDb().prepare(`SELECT ${cols} FROM ${def.table} WHERE ${def.idColumn} = ?`).get(id);
     if (!row) throw new Error(`${def.name} not found: ${id}`);
-    return decodeTimes<Record<string, unknown>>(row, instantColumns(def));
+    return row;
   };
 }
 
@@ -151,7 +153,7 @@ function genericCreate(def: ResourceDef) {
         if (col.name === def.idColumn) {
           values[col.name] = randomUUID();
         } else if (col.name.endsWith('_at')) {
-          values[col.name] = new Date().toISOString();
+          values[col.name] = Date.now();
         }
         continue;
       }
@@ -161,7 +163,7 @@ function genericCreate(def: ResourceDef) {
         if (col.enum && !col.enum.includes(String(v))) {
           throw new Error(`${col.name} must be one of: ${col.enum.join(', ')}`);
         }
-        values[col.name] = col.type === 'number' ? Number(v) : v;
+        values[col.name] = columnValue(col.name, col.type === 'number' ? Number(v) : v);
       } else if (col.required) {
         throw new Error(`--${col.name.replace(/_/g, '-')} is required`);
       } else if (col.default !== undefined) {
@@ -175,7 +177,7 @@ function genericCreate(def: ResourceDef) {
     const placeholders = colNames.map((c) => `@${c}`);
     getDb()
       .prepare(`INSERT INTO ${def.table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')})`)
-      .run(encodeTimes(values, instantColumns(def)));
+      .run(values);
     recordHostChange({ kind: 'access' });
     return values;
   };
@@ -194,7 +196,7 @@ function genericUpdate(def: ResourceDef) {
         if (col.enum && !col.enum.includes(String(v))) {
           throw new Error(`${col.name} must be one of: ${col.enum.join(', ')}`);
         }
-        updates[col.name] = col.type === 'number' ? Number(v) : v;
+        updates[col.name] = columnValue(col.name, col.type === 'number' ? Number(v) : v);
       }
     }
     if (Object.keys(updates).length === 0) {
@@ -208,12 +210,12 @@ function genericUpdate(def: ResourceDef) {
       .join(', ');
     const result = getDb()
       .prepare(`UPDATE ${def.table} SET ${setClause} WHERE ${def.idColumn} = @_id`)
-      .run(encodeTimes<Record<string, unknown>>({ ...updates, _id: id }, instantColumns(def)));
+      .run({ ...updates, _id: id });
     if (result.changes === 0) throw new Error(`${def.name} not found: ${id}`);
     recordHostChange({ kind: 'access' });
 
     const cols = visibleColumns(def).join(', ');
-    return decodeTimes<Record<string, unknown>>(getDb().prepare(`SELECT ${cols} FROM ${def.table} WHERE ${def.idColumn} = ?`).get(id), instantColumns(def));
+    return getDb().prepare(`SELECT ${cols} FROM ${def.table} WHERE ${def.idColumn} = ?`).get(id);
   };
 }
 

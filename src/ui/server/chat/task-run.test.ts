@@ -1,4 +1,3 @@
-import { toEpoch } from '../../../db/time.js';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import http from 'http';
@@ -6,12 +5,12 @@ import path from 'path';
 import { Readable, Writable } from 'stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-ui-task-run';
+const TEST_ROOT = `${process.cwd()}/.test-state/nanoclaw-test-ui-task-run`;
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
 vi.mock('../../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../../config.js')>('../../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-ui-task-run/data' };
+  return { ...actual, DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-ui-task-run/data` };
 });
 
 vi.mock('../../../container-runner.js', () => ({
@@ -23,7 +22,7 @@ import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js'
 import { inboundDbPath, initSessionFolder } from '../../../session-manager.js';
 import { handleChatRequest } from './chat.js';
 
-const NOW = '2026-08-16T12:00:00.000Z';
+const NOW = 1786881600000;
 const USER_ID = 'web:member';
 const GROUP_ID = 'agent';
 const MESSAGING_GROUP_ID = 'web-mg';
@@ -62,36 +61,36 @@ beforeEach(() => {
   runMigrations(db);
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', 'Member', ?)`)
-    .run(USER_ID, toEpoch(NOW));
+    .run(USER_ID, NOW);
   getDb()
     .prepare(
       `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, 'Agent', 'agent', NULL, ?)`,
     )
-    .run(GROUP_ID, toEpoch(NOW));
+    .run(GROUP_ID, NOW);
   getDb()
     .prepare(`INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, ?, ?)`)
-    .run(USER_ID, GROUP_ID, USER_ID, toEpoch(NOW));
+    .run(USER_ID, GROUP_ID, USER_ID, NOW);
   getDb()
     .prepare(
       `INSERT INTO messaging_groups
          (id, channel_type, platform_id, instance, name, is_group, unknown_sender_policy, created_at)
        VALUES (?, 'web', ?, 'web', 'Web', 0, 'strict', ?)`,
     )
-    .run(MESSAGING_GROUP_ID, PLATFORM_ID, toEpoch(NOW));
+    .run(MESSAGING_GROUP_ID, PLATFORM_ID, NOW);
   getDb()
     .prepare(
       `INSERT INTO messaging_group_agents
          (id, messaging_group_id, agent_group_id, session_mode, created_at)
        VALUES ('wire-1', ?, ?, 'per-thread', ?)`,
     )
-    .run(MESSAGING_GROUP_ID, GROUP_ID, toEpoch(NOW));
+    .run(MESSAGING_GROUP_ID, GROUP_ID, NOW);
   getDb()
     .prepare(
       `INSERT INTO sessions
          (id, agent_group_id, messaging_group_id, thread_id, status, container_status, created_at)
        VALUES (?, ?, ?, ?, 'active', 'stopped', ?)`,
     )
-    .run(SESSION_ID, GROUP_ID, MESSAGING_GROUP_ID, THREAD_ID, toEpoch(NOW));
+    .run(SESSION_ID, GROUP_ID, MESSAGING_GROUP_ID, THREAD_ID, NOW);
   initSessionFolder(GROUP_ID, SESSION_ID);
 
   const inDb = new Database(inboundDbPath(GROUP_ID, SESSION_ID));
@@ -103,7 +102,7 @@ beforeEach(() => {
        VALUES (?, 2, 'task', ?, 'pending', 1786968000000,
                '0 9 * * *', ?, 1, ?, 'web', ?, ?)`,
     )
-    .run(SERIES_ID, toEpoch(NOW), SERIES_ID, PLATFORM_ID, THREAD_ID, JSON.stringify({ prompt: 'Find deals' }));
+    .run(SERIES_ID, NOW, SERIES_ID, PLATFORM_ID, THREAD_ID, JSON.stringify({ prompt: 'Find deals' }));
   inDb.prepare('UPDATE host_sequence SET last_even = 2 WHERE id = 1').run();
   inDb.close();
 });
@@ -149,7 +148,7 @@ describe('POST chat task run', () => {
       const db = new Database(inboundDbPath(GROUP_ID, SESSION_ID), { readonly: true });
       try {
         expect(db.prepare('SELECT process_after FROM messages_in WHERE id=?').get(SERIES_ID)).toEqual({
-          process_after: toEpoch('2026-08-17T12:00:00.000Z'),
+          process_after: 1786968000000,
         });
       } finally {
         db.close();
@@ -186,7 +185,7 @@ describe('POST chat task run', () => {
     };
     inDb.close();
 
-    expect(scheduled.process_after).toBe(toEpoch('2026-08-17T12:00:00.000Z'));
+    expect(scheduled.process_after).toBe(1786968000000);
     expect(scheduled.recurrence).toBe('0 9 * * *');
     expect(JSON.parse(scheduled.content).triggerSource).toBeUndefined();
     expect(manual.series_id).toBe(SERIES_ID);

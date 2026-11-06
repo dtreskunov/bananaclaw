@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -1084,7 +1085,7 @@ describe('session signal link', () => {
       insertMessage(inDb, {
         id: 'in-1',
         kind: 'chat',
-        timestamp: '2026-09-01 00:00:00',
+        timestamp: parseTimestamp('2026-09-01 00:00:00'),
         channelType: 'web',
         platformId: 'chat-1',
         threadId: null,

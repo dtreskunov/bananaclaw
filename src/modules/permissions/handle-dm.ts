@@ -34,7 +34,7 @@ export async function sendHandleDm(channelType: string, handle: string, text: st
       name: null,
       is_group: 0,
       unknown_sender_policy: 'strict',
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     };
     createMessagingGroup(mg);
     log.info('sendHandleDm: created messaging_group for verification DM', {

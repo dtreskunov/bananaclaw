@@ -1,5 +1,4 @@
 import type Database from 'better-sqlite3';
-import { epochMs, parseTimestamp } from '../../shared/time.js';
 import { reduceActivityLines } from '../../../activity.js';
 import type { Question } from '../../../types.js';
 import type { ConversationApproval } from '../../shared/approval.js';
@@ -178,7 +177,7 @@ export function projectConversation(
         if (line.turnId === turn.id && !trace.has(line.ordinal))
           trace.set(line.ordinal, {
             ordinal: line.ordinal,
-            ts: epochMs(Number(line.ts)),
+            ts: line.ts,
             text: line.text,
             timelinePosition: line.timelinePosition,
           });
@@ -240,7 +239,7 @@ export function projectConversation(
       ...q.input,
       status: legacyInteractionExpired(q) ? 'cancelled' : q.status,
       response: q.response,
-      answeredAt: parseTimestamp(q.responded_at),
+      answeredAt: q.responded_at,
       threadId: q.thread_id,
       agentGroupId: groupId,
       createdAt: anchor.timestamp,

@@ -139,7 +139,7 @@ export async function run(args: string[]): Promise<void> {
       name: parsed.assistantName,
       folder: parsed.folder,
       agent_provider: null,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
     agentGroup = getAgentGroupByFolder(parsed.folder)!;
     log.info('Created agent group', { id: agId, folder: parsed.folder });
@@ -157,7 +157,7 @@ export async function run(args: string[]): Promise<void> {
       name: parsed.name,
       is_group: 1,
       unknown_sender_policy: 'strict',
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
     messagingGroup = getMessagingGroupByPlatform(parsed.channel, parsed.platformId)!;
     log.info('Created messaging group', { id: mgId, channel: parsed.channel, platformId: parsed.platformId });
@@ -187,7 +187,7 @@ export async function run(args: string[]): Promise<void> {
       ignored_message_policy: 'drop',
       session_mode: parsed.sessionMode as 'shared' | 'per-thread' | 'agent-shared',
       priority: 0,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     });
     log.info('Wired agent to messaging group', {
       mgaId,
@@ -207,7 +207,7 @@ export async function run(args: string[]): Promise<void> {
     writeSessionMessage(agentGroup.id, session.id, {
       id: generateId('onboard'),
       kind: 'task',
-      timestamp: new Date().toISOString(),
+      timestamp: Date.now(),
       platformId: parsed.platformId,
       channelType: parsed.channel,
       content: JSON.stringify({

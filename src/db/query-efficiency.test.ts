@@ -1,3 +1,4 @@
+import { parseTimestamp } from '../time.js';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,7 +8,6 @@ import { closeDb, initTestDb } from './connection.js';
 import { runMigrations } from './migrations/index.js';
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
 import { getDueOutboundMessages, markDelivered, markDeliveryFailed } from './session-db.js';
-import { toEpoch } from './time.js';
 
 afterEach(closeDb);
 
@@ -60,16 +60,18 @@ it('returns only due unreceipted messages over a read-only outbound connection',
     writer.exec(OUTBOUND_SCHEMA);
     const insert = writer.prepare(`INSERT INTO messages_out(id,timestamp,deliver_after,kind,content)
       VALUES(?,?,?,'chat','{}')`);
-    writer.transaction(() => inbound.transaction(() => {
-      for (let i = 0; i < 1000; i++) {
-        insert.run(`old-${i}`, toEpoch('2020-01-01T00:00:00Z'), null);
-        markDelivered(inbound, `old-${i}`, null);
-      }
-    })())();
-    insert.run('due', toEpoch('2020-01-01T00:00:00Z'), Date.now() - 60_000);
-    insert.run('failed', toEpoch('2020-01-01T00:00:00Z'), null);
+    writer.transaction(() =>
+      inbound.transaction(() => {
+        for (let i = 0; i < 1000; i++) {
+          insert.run(`old-${i}`, parseTimestamp('2020-01-01T00:00:00Z'), null);
+          markDelivered(inbound, `old-${i}`, null);
+        }
+      })(),
+    )();
+    insert.run('due', parseTimestamp('2020-01-01T00:00:00Z'), Date.now() - 60_000);
+    insert.run('failed', parseTimestamp('2020-01-01T00:00:00Z'), null);
     markDeliveryFailed(inbound, 'failed');
-    insert.run('future', toEpoch('2020-01-01T00:00:00Z'), toEpoch('2999-01-01T00:00:00.000Z'));
+    insert.run('future', parseTimestamp('2020-01-01T00:00:00Z'), parseTimestamp('2999-01-01T00:00:00.000Z'));
     reader = new Database(outboundPath, { readonly: true });
     expect(getDueOutboundMessages(reader, inbound.name).map((row) => row.id)).toEqual(['due']);
     expect(getDueOutboundMessages(reader, inbound.name).map((row) => row.id)).toEqual(['due']);

@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,7 +21,7 @@ const session: Session = {
   status: 'active',
   container_status: 'stopped',
   last_active: null,
-  created_at: '2026-10-04T20:22:46.000Z',
+  created_at: parseTimestamp('2026-10-04T20:22:46.000Z'),
 };
 
 beforeEach(() => initSessionFolder(session.agent_group_id, session.id));

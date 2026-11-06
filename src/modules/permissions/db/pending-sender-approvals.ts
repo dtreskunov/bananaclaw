@@ -9,7 +9,7 @@
  * still pending is silently dropped instead of spamming the admin.
  */
 import { getDb } from '../../../db/connection.js';
-import { encodeTimes, decodeTimes } from '../../../db/time.js';
+import { assertTimestampFields } from '../../../db/validate-timestamps.js';
 
 export interface PendingSenderApproval {
   id: string;
@@ -19,7 +19,7 @@ export interface PendingSenderApproval {
   sender_name: string | null;
   original_message: string;
   approver_user_id: string;
-  created_at: string;
+  created_at: number;
   /** Card title shown at creation and re-used by getAskQuestionRender on click. */
   title: string;
   /** Normalized options (JSON-encoded NormalizedOption[]) — same shape persisted on approvals. */
@@ -27,6 +27,7 @@ export interface PendingSenderApproval {
 }
 
 export function createPendingSenderApproval(row: PendingSenderApproval): void {
+  assertTimestampFields(row, ['created_at']);
   getDb()
     .prepare(
       `INSERT INTO pending_sender_approvals (
@@ -40,11 +41,13 @@ export function createPendingSenderApproval(row: PendingSenderApproval): void {
          @title, @options_json
        )`,
     )
-    .run(encodeTimes(row, ['created_at']));
+    .run(row);
 }
 
 export function getPendingSenderApproval(id: string): PendingSenderApproval | undefined {
-  return decodeTimes<PendingSenderApproval | undefined>(getDb().prepare('SELECT * FROM pending_sender_approvals WHERE id = ?').get(id), ['created_at']);
+  return getDb().prepare('SELECT * FROM pending_sender_approvals WHERE id = ?').get(id) as
+    | PendingSenderApproval
+    | undefined;
 }
 
 export function hasInFlightSenderApproval(messagingGroupId: string, senderIdentity: string): boolean {

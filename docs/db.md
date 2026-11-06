@@ -7,15 +7,29 @@ Orientation for the data model: the three databases, how they fit together, and 
 
 Related: [architecture.md](architecture.md) for the high-level design; [api-details.md](api-details.md) for inbound/outbound message content shapes; [isolation-model.md](isolation-model.md) for channel-to-agent wiring modes.
 
-Maintained SQL instants and UI-owned API/state timestamps use INTEGER UTC epoch
-milliseconds. Provider, channel and session-link records retain their existing
-string boundaries. All stores are version-gated, including optional native
+In-process host records, maintained SQL instants and UI-owned API/state
+timestamps use numeric UTC epoch milliseconds from `src/time.ts`. Ordinary DB
+reads/writes and projections do not convert them to strings. Provider, channel
+and session-link transports retain their existing string boundaries, parsed
+once at ingress; CLI/document exports format dates at egress. All stores are
+version-gated, including optional native
 provider state and the search index. Existing stores require the
 [explicit offline cutover](db-storage-cutover.md), never startup conversion.
 UI protocol 16 carries numeric timestamps (including `lastActivityAt`) and null
 for missing values. UI HTTP requests and responses exchange the
 `X-NanoClaw-UI-Protocol` version header before startup data is consumed; the
 sync socket also requires protocol 16.
+
+Existing maintained thread-summary JSON with ISO-valued dates requires the
+explicit stopped-host rebuild before deploying numeric-host code:
+`pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped`.
+This reconstructs only derived projections from the already-integer session
+stores; durable messages, journals and timestamp columns do not need another
+cutover. Startup/readers refuse the older projection shape rather than silently
+coercing it. Legacy catalog/pairing/breaker JSON and archives are decoded only
+at their file/import boundaries; current in-memory records and new writes are
+numeric. Keep central and metadata backups for rollback, and rebuild summaries
+with the matching previous code if rolling back the host.
 
 ---
 

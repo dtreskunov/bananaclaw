@@ -209,7 +209,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
       id: approvalId,
       session_id: session.id,
       request_id: approvalId,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
       origin_message_id: opts.originMessageId ?? null,
       ...(opts.workflowKey ? { agent_group_id: session.agent_group_id } : {}),
       input: { action: action, payload: payload, title: title, options: normalizedOptions },

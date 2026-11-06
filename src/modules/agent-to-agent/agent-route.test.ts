@@ -1,4 +1,3 @@
-import { toEpoch } from '../../db/time.js';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -20,13 +19,13 @@ vi.mock('../../container-runner.js', () => ({
 
 vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-a2a-route' };
+  return { ...actual, DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-a2a-route` };
 });
 
-const TEST_DIR = '/tmp/nanoclaw-test-a2a-route';
+const TEST_DIR = `${process.cwd()}/.test-state/nanoclaw-test-a2a-route`;
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 function readInbound(agentGroupId: string, sessionId: string) {
@@ -114,7 +113,7 @@ describe('routeAgentMessage return-path', () => {
       status: 'active',
       container_status: 'stopped',
       last_active: null,
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
     };
     S2 = {
       id: 'sess-A-new',
@@ -125,7 +124,7 @@ describe('routeAgentMessage return-path', () => {
       status: 'active',
       container_status: 'stopped',
       last_active: null,
-      created_at: '2026-02-01T00:00:00.000Z',
+      created_at: 1769904000000,
     };
     SB = {
       id: 'sess-B',
@@ -136,7 +135,7 @@ describe('routeAgentMessage return-path', () => {
       status: 'active',
       container_status: 'stopped',
       last_active: null,
-      created_at: '2026-01-15T00:00:00.000Z',
+      created_at: 1768435200000,
     };
     createSession(S1);
     createSession(S2);
@@ -356,7 +355,7 @@ describe('routeAgentMessage return-path', () => {
       status: 'active',
       container_status: 'stopped',
       last_active: null,
-      created_at: '2026-03-01T00:00:00.000Z',
+      created_at: 1772323200000,
     };
     createSession(SC);
     initSessionFolder(C, SC.id);
@@ -449,7 +448,7 @@ describe('routeAgentMessage return-path', () => {
         `INSERT INTO messages_out (id, seq, kind, timestamp, platform_id, channel_type, thread_id, content)
          VALUES ('prior-ack', 1, 'chat', ?, ?, 'agent', NULL, ?)`,
       )
-      .run(toEpoch(now()), B, sameContent);
+      .run(now(), B, sameContent);
     outDb.close();
 
     await routeAgentMessage({ id: 'duplicate-ack', platform_id: B, content: sameContent, in_reply_to: null }, S1);
@@ -465,7 +464,7 @@ describe('routeAgentMessage return-path', () => {
         `INSERT INTO messages_out (id, seq, kind, timestamp, platform_id, channel_type, thread_id, content)
          VALUES ('prior', 1, 'chat', ?, ?, 'agent', NULL, ?)`,
       )
-      .run(toEpoch(now()), B, JSON.stringify({ text: 'first thought' }));
+      .run(now(), B, JSON.stringify({ text: 'first thought' }));
     outDb.close();
 
     await routeAgentMessage(

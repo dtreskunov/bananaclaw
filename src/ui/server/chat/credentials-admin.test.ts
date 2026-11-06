@@ -1,4 +1,3 @@
-import { toEpoch } from '../../../db/time.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -6,7 +5,10 @@ import { Writable } from 'node:stream';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectAccountInteraction } from './approval-transcript.js';
 
-const ROOT = vi.hoisted(() => `/tmp/nanoclaw-shared-credentials-${process.pid}-${Math.random().toString(36).slice(2)}`);
+const ROOT = vi.hoisted(
+  () =>
+    `${process.cwd()}/.test-state/nanoclaw-shared-credentials-${process.pid}-${Math.random().toString(36).slice(2)}`,
+);
 vi.mock('../../../config.js', async () => ({
   ...(await vi.importActual<typeof import('../../../config.js')>('../../../config.js')),
   DATA_DIR: `${ROOT}/data`,
@@ -141,21 +143,21 @@ beforeEach(() => {
   closeDb();
   runMigrations(initTestDb());
   const db = getDb(),
-    now = new Date().toISOString();
+    now = Date.now();
   for (const id of ['alice', 'bob', 'member'])
-    db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(id, 'test', id, toEpoch(now));
+    db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(id, 'test', id, now);
   db.prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(
     GROUP,
     'Shared test',
     'shared-test',
-    toEpoch(now),
+    now,
   );
   grantRole({ user_id: 'alice', role: 'owner', agent_group_id: null, granted_by: null, granted_at: now });
   grantRole({ user_id: 'bob', role: 'admin', agent_group_id: GROUP, granted_by: 'alice', granted_at: now });
   db.prepare('INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES(?,?,?)').run(
     'member',
     GROUP,
-    toEpoch(now),
+    now,
   );
   user = 'alice';
   requests.length = 0;
@@ -222,8 +224,8 @@ describe('user-owned Credentials API', () => {
       agent_provider: null,
       status: 'active' as const,
       container_status: 'stopped' as const,
-      created_at: '2026-01-01T00:00:00.000Z',
-      last_active: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
+      last_active: 1767225600000,
     };
     createSession(session);
     initSessionFolder(GROUP, session.id);
@@ -267,8 +269,8 @@ describe('user-owned Credentials API', () => {
       agent_provider: null,
       status: 'active' as const,
       container_status: 'stopped' as const,
-      created_at: '2026-01-01T00:00:00.000Z',
-      last_active: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
+      last_active: 1767225600000,
     };
     createSession(session);
     initSessionFolder(GROUP, session.id);
@@ -313,8 +315,8 @@ describe('user-owned Credentials API', () => {
       agent_provider: null,
       status: 'active' as const,
       container_status: 'stopped' as const,
-      created_at: '2026-01-01T00:00:00.000Z',
-      last_active: '2026-01-01T00:00:00.000Z',
+      created_at: 1767225600000,
+      last_active: 1767225600000,
     };
     createSession(session);
     initSessionFolder(GROUP, session.id);
@@ -708,13 +710,13 @@ describe('managed identity reconciliation', () => {
 
   it('drains more than one batch before startup reconciliation completes', async () => {
     const db = getDb(),
-      now = new Date().toISOString();
+      now = Date.now();
     for (let index = 0; index < 40; index++)
       db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(
         `bulk-${index}`,
         'test',
         'Bulk user',
-        toEpoch(now),
+        now,
       );
     await flushManagedUsers();
     expect(db.prepare('SELECT count(*) AS n FROM credential_gateway_sync').get()).toEqual({ n: 0 });

@@ -35,7 +35,7 @@ import type { AgentGroup, Session } from './types.js';
 registerProviderContainerConfig('surfaces-test-provider', () => ({}), { providesAgentSurfaces: true });
 
 function group(id: string, folder: string): AgentGroup {
-  return { id, name: folder, folder, agent_provider: null, created_at: new Date().toISOString() } as AgentGroup;
+  return { id, name: folder, folder, agent_provider: null, created_at: Date.now() } as AgentGroup;
 }
 
 function session(id: string, agentGroupId: string): Session {

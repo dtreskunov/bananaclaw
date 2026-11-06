@@ -1,4 +1,3 @@
-import { toEpoch } from '../../../db/time.js';
 /**
  * Tests for `POST /api/groups` — the UI surface that lets an owner or
  * global admin create a new agent group end-to-end.
@@ -16,7 +15,7 @@ import path from 'path';
 import { Writable } from 'stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-ui-create-group';
+const TEST_ROOT = `${process.cwd()}/.test-state/nanoclaw-test-ui-create-group`;
 const TEST_GROUPS_DIR = path.join(TEST_ROOT, 'groups');
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
@@ -24,8 +23,8 @@ vi.mock('../../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../../config.js')>('../../../config.js');
   return {
     ...actual,
-    GROUPS_DIR: '/tmp/nanoclaw-test-ui-create-group/groups',
-    DATA_DIR: '/tmp/nanoclaw-test-ui-create-group/data',
+    GROUPS_DIR: `${process.cwd()}/.test-state/nanoclaw-test-ui-create-group/groups`,
+    DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-ui-create-group/data`,
     PAGES_BASE_DOMAIN: 'pages.test',
   };
 });
@@ -53,8 +52,8 @@ import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { handle } from './routes.js';
 import { UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../shared/time.js';
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 interface CapturedRes {
@@ -137,7 +136,7 @@ async function call(method: string, url: string, body?: unknown): Promise<Captur
 function seedUser(id: string, name = 'Test User'): void {
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'web', ?, ?)`)
-    .run(id, name, toEpoch(now()));
+    .run(id, name, now());
 }
 
 beforeEach(() => {
@@ -168,7 +167,7 @@ describe('GET /api/groups', () => {
     });
     getDb()
       .prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)')
-      .run('files', 'Files', 'files', toEpoch(now()));
+      .run('files', 'Files', 'files', now());
     fs.mkdirSync(path.join(TEST_GROUPS_DIR, 'files'));
     fs.writeFileSync(path.join(TEST_GROUPS_DIR, 'files', 'note.txt'), 'read me');
     mockUserId = 'web:owner';
@@ -220,20 +219,20 @@ describe('GET /api/groups', () => {
     });
     const db = getDb();
     for (const id of ['active', 'never-active']) {
-      db.prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, id, id, toEpoch(now()));
+      db.prepare('INSERT INTO agent_groups(id,name,folder,created_at) VALUES(?,?,?,?)').run(id, id, id, now());
     }
-    const latest = '2026-11-06T03:00:00.123Z';
+    const latest = 1793934000123;
     db.prepare(
       `INSERT INTO sessions(id,agent_group_id,created_at,last_active)
       VALUES('older','active',?,?),('newer','active',?,?)`,
-    ).run(toEpoch(now()), toEpoch('2026-11-05T12:00:00.000Z'), toEpoch(now()), toEpoch(latest));
+    ).run(now(), 1793880000000, now(), latest);
     mockUserId = 'web:owner';
 
     const res = await call('GET', '/ui/chat/api/groups');
     expect(res.status()).toBe(200);
     const body = res.body() as { groups: Array<{ id: string; lastActivityAt: number | null }> };
     expect(Object.fromEntries(body.groups.map((group) => [group.id, group.lastActivityAt]))).toEqual({
-      active: toEpoch(latest),
+      active: latest,
       'never-active': null,
     });
     for (const group of body.groups) {
@@ -250,7 +249,7 @@ describe('GET /api/groups', () => {
     ]) {
       getDb()
         .prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`)
-        .run(id, name, id, toEpoch(now()));
+        .run(id, name, id, now());
     }
     grantRole({
       user_id: 'web:admin',
@@ -308,7 +307,7 @@ describe('POST /api/groups', () => {
     // Seed an unrelated group + scoped admin role.
     getDb()
       .prepare(`INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES (?, ?, ?, NULL, ?)`)
-      .run('ag-existing', 'Existing', 'existing', toEpoch(now()));
+      .run('ag-existing', 'Existing', 'existing', now());
     grantRole({
       user_id: 'web:scoped',
       role: 'admin',

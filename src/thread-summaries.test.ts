@@ -22,6 +22,7 @@ import {
   assertThreadSummariesReady,
   readSessionThreadSummary,
   readSummaryQueuedRoutes,
+  readSummaryTurns,
   reconcileThreadSummaries,
   rebuildThreadSummaries,
   refreshThreadSummaries,
@@ -63,6 +64,24 @@ afterEach(async () => {
 });
 
 describe('maintained thread summaries', () => {
+  it('keeps epoch-zero cache facts numeric and requires explicit rebuild for older string projections', () => {
+    message('one');
+    inbound.exec("UPDATE messages_in SET timestamp=0 WHERE id='one'");
+    outbound.exec(`INSERT INTO turns(id,phase,outcome,provenance,started_at,
+      origin_channel_type,origin_platform_id,origin_thread_id)
+      VALUES('zero','running','pending','native',0,'web','group:g','t')`);
+    refreshThreadSummaries('s');
+    expect(readSessionThreadSummary(spec).threads[0].lastActivityAt).toBe(0);
+    expect(readSummaryTurns('s')[0].started_at).toBe(0);
+    getDb().exec(`UPDATE thread_summaries SET value=json_set(value,'$.last','1970-01-01T00:00:00Z')
+      WHERE source='inbound' AND kind='route'`);
+    expect(() => reconcileThreadSummaries()).toThrow('Numeric thread summaries require offline backfill');
+    expect(() => readSessionThreadSummary(spec)).toThrow('Numeric thread summaries require offline backfill');
+    rebuildThreadSummaries(ROOT);
+    expect(readSessionThreadSummary(spec).threads[0].lastActivityAt).toBe(0);
+    expect(inbound.prepare("SELECT timestamp FROM messages_in WHERE id='one'").get()).toEqual({ timestamp: 0 });
+  });
+
   it('requires explicit backfill for old queue facts and refreshes the trigger gate capture', () => {
     message('one');
     refreshThreadSummaries('s');

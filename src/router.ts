@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 /**
  * Inbound message routing.
  *
@@ -208,7 +209,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       is_group: event.message.isGroup ? 1 : 0,
       unknown_sender_policy: 'request_approval',
       denied_at: null,
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
     };
     createMessagingGroup(mg);
     log.info('Auto-created messaging group', {
@@ -226,7 +227,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   //     escalate to owner for channel-registration approval.
   if (agentCount === 0) {
     if (!isMention) return;
-    if (mg.denied_at) {
+    if (mg.denied_at != null) {
       log.debug('Message dropped — channel was denied by owner', {
         messagingGroupId: mg.id,
         deniedAt: mg.denied_at,
@@ -501,7 +502,7 @@ async function deliverToAgent(
   writeSessionMessage(session.agent_group_id, session.id, {
     id: messageIdForAgent(event.message.id, agent.agent_group_id),
     kind: event.message.kind,
-    timestamp: event.message.timestamp,
+    timestamp: parseTimestamp(event.message.timestamp),
     platformId: deliveryAddr.platformId,
     channelType: deliveryAddr.channelType,
     threadId: deliveryAddr.threadId,

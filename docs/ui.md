@@ -285,6 +285,12 @@ distinct concepts and keep their existing units/order. Display uses local
 locale/timezone formatting; datetime-local edits convert local wall time to
 epoch milliseconds at submission.
 
+Host records now use that same numeric representation, so projections copy
+group/turn/request dates without decode-to-ISO/reparse round trips. Older
+maintained summary JSON must first complete the
+[stopped-host projection rebuild](db.md); external runner/provider journals
+and CLI/archive date representations remain unchanged at their boundaries.
+
 - **Detect:** protocol 16 is required by HTTP header `X-NanoClaw-UI-Protocol`
   and the synchronization socket. Mismatched startup responses are rejected
   before consumption; missing/older request versions receive HTTP 409 before

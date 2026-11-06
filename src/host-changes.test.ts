@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initTestDb, runMigrations, closeDb, getDb } from './db/index.js';
 import { createApproval, updateApprovalStatus } from './db/approvals.js';
@@ -26,7 +27,7 @@ describe('committed host changes', () => {
     createApproval({
       id: 'a',
       request_id: 'a',
-      created_at: new Date().toISOString(),
+      created_at: Date.now(),
       input: { action: 'test', payload: {}, title: 'Review', options: [] },
     });
     expect(listener).not.toHaveBeenCalled();
@@ -43,7 +44,7 @@ describe('committed host changes', () => {
     off = onHostChange((_change: HostChange) => {
       counts.push((getDb().prepare('SELECT COUNT(*) AS n FROM agent_group_members').get() as { n: number }).n);
     });
-    const member = { user_id: 'u', agent_group_id: 'g', added_by: null, added_at: '2026-01-01T00:00:00.000Z' };
+    const member = { user_id: 'u', agent_group_id: 'g', added_by: null, added_at: parseTimestamp('2026-01-01T00:00:00.000Z') };
     expect(() =>
       transaction(getDb(), () => {
         addMember(member);
@@ -103,7 +104,7 @@ describe('committed host changes', () => {
       id: 'a',
       request_id: 'a',
       session_id: 'session',
-      created_at: '2026-01-01T00:00:00.000Z',
+      created_at: parseTimestamp('2026-01-01T00:00:00.000Z'),
       input: { action: 'test', payload: {}, title: 'Review', options: [] },
     });
     await Promise.resolve();

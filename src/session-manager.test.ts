@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 /**
  * Tests for session-manager's direct outbound write path.
  *
@@ -68,8 +69,8 @@ describe('writeOutboundDirect', () => {
       origin_platform_id: 'chat',
       origin_thread_id: null,
       origin_source_session_id: null,
-      started_at: '2026-01-01T00:00:00.000Z',
-      ended_at: '2026-01-01T00:01:00.000Z',
+      started_at: parseTimestamp('2026-01-01T00:00:00.000Z'),
+      ended_at: parseTimestamp('2026-01-01T00:01:00.000Z'),
       imported_from_session_id: null,
       imported_from_turn_id: null,
     });

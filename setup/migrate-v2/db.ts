@@ -29,13 +29,7 @@ import {
 import { runMigrations } from '../../src/db/migrations/index.js';
 import { readEnvFile } from '../../src/env.js';
 import { buildDiscordResolver, type DiscordResolver } from './discord-resolver.js';
-import {
-  generateId,
-  inferIsGroup,
-  parseJid,
-  triggerToEngage,
-  v2PlatformId,
-} from './shared.js';
+import { generateId, inferIsGroup, parseJid, triggerToEngage, v2PlatformId } from './shared.js';
 
 interface V1Group {
   jid: string;
@@ -133,7 +127,7 @@ async function main(): Promise<void> {
     } else {
       platformId = v2PlatformId(channelType, parsed.raw);
     }
-    const createdAt = new Date().toISOString();
+    const createdAt = Date.now();
 
     try {
       // agent_group — one per folder
@@ -170,10 +164,7 @@ async function main(): Promise<void> {
           created_at: createdAt,
         });
         mg = getMessagingGroupByPlatform(channelType, platformId)!;
-      } else if (
-        mg.unknown_sender_policy !== 'public' &&
-        getMessagingGroupAgents(mg.id).length === 0
-      ) {
+      } else if (mg.unknown_sender_policy !== 'public' && getMessagingGroupAgents(mg.id).length === 0) {
         updateMessagingGroup(mg.id, { unknown_sender_policy: 'public' });
         mg = getMessagingGroupByPlatform(channelType, platformId)!;
       }

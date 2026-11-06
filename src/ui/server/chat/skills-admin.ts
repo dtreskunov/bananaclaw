@@ -42,26 +42,14 @@ import { getMarketplaceRecord, readMarketplaceRecords, type MarketplaceRecord } 
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { recordAdminAction } from './audit.js';
 import { listAvailableSkills } from './skill-catalog.js';
-import { parseTimestamp } from '../../shared/time.js';
 
 export interface SkillsAdminResult {
   status: number;
   body: unknown;
 }
 
-function catalogForUi<
-  T extends {
-    refreshedAt: string | null;
-    lastRefreshAttemptAt?: string | null;
-    addedAt?: string;
-  },
->(catalog: T) {
-  return {
-    ...catalog,
-    refreshedAt: parseTimestamp(catalog.refreshedAt),
-    lastRefreshAttemptAt: parseTimestamp(catalog.lastRefreshAttemptAt),
-    ...(catalog.addedAt === undefined ? {} : { addedAt: parseTimestamp(catalog.addedAt) }),
-  };
+function catalogForUi<T extends { lastRefreshAttemptAt?: number | null }>(catalog: T) {
+  return { ...catalog, lastRefreshAttemptAt: catalog.lastRefreshAttemptAt ?? null };
 }
 
 function fail(err: unknown): SkillsAdminResult {
@@ -358,8 +346,8 @@ export async function discoverSkills(query: string): Promise<SkillsAdminResult> 
           source: skill.source,
           catalogId: catalog?.id ?? null,
           snapshot: catalog?.commit ? { commit: catalog.commit, ref: catalog.ref } : null,
-          refreshedAt: parseTimestamp(catalog?.refreshedAt),
-          lastRefreshAttemptAt: parseTimestamp(catalog?.lastRefreshAttemptAt),
+          refreshedAt: catalog?.refreshedAt ?? null,
+          lastRefreshAttemptAt: catalog?.lastRefreshAttemptAt ?? null,
           lastRefreshError: catalog?.lastRefreshError ?? null,
           skills: [],
         };

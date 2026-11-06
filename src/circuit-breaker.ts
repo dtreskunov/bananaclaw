@@ -3,6 +3,7 @@ import path from 'path';
 
 import { DATA_DIR } from './config.js';
 import { log } from './log.js';
+import { epochMs, formatTimestamp, importTimestamp } from './time.js';
 
 const CB_PATH = path.join(DATA_DIR, 'circuit-breaker.json');
 const RESET_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -12,16 +13,18 @@ const BACKOFF_SCHEDULE_S = [0, 0, 10, 30, 120, 300, 900];
 
 interface CircuitBreakerState {
   attempt: number;
-  timestamp: string;
+  timestamp: number;
 }
 
 function read(): CircuitBreakerState | null {
+  let state: Omit<CircuitBreakerState, 'timestamp'> & { timestamp: unknown };
   try {
     const raw = fs.readFileSync(CB_PATH, 'utf-8');
-    return JSON.parse(raw) as CircuitBreakerState;
+    state = JSON.parse(raw) as typeof state;
   } catch {
     return null;
   }
+  return { ...state, timestamp: epochMs(importTimestamp(state.timestamp)) };
 }
 
 function write(state: CircuitBreakerState): void {
@@ -44,35 +47,35 @@ export function resetCircuitBreaker(): void {
 }
 
 export async function enforceStartupBackoff(): Promise<void> {
-  const now = new Date();
+  const now = Date.now();
   const prev = read();
 
   let attempt: number;
   if (!prev) {
     attempt = 1;
   } else {
-    const elapsedMs = now.getTime() - new Date(prev.timestamp).getTime();
+    const elapsedMs = now - prev.timestamp;
     if (elapsedMs < RESET_WINDOW_MS) {
       attempt = prev.attempt + 1;
       log.warn('Previous startup was not a clean shutdown', {
         previousAttempt: prev.attempt,
-        previousTimestamp: prev.timestamp,
+        previousTimestamp: formatTimestamp(prev.timestamp),
         elapsedSec: Math.round(elapsedMs / 1000),
       });
     } else {
       attempt = 1;
       log.info('Circuit breaker reset — last startup was over 1h ago', {
         previousAttempt: prev.attempt,
-        previousTimestamp: prev.timestamp,
+        previousTimestamp: formatTimestamp(prev.timestamp),
       });
     }
   }
 
-  write({ attempt, timestamp: now.toISOString() });
+  write({ attempt, timestamp: now });
 
   const delaySec = getDelay(attempt);
   if (delaySec > 0) {
-    const resumeAt = new Date(now.getTime() + delaySec * 1000).toISOString();
+    const resumeAt = formatTimestamp(now + delaySec * 1000);
     log.warn('Circuit breaker: delaying startup due to repeated crashes', {
       attempt,
       delaySec,

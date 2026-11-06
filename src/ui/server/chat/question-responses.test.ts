@@ -1,4 +1,3 @@
-import { toEpoch } from '../../../db/time.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import { Readable } from 'node:stream';
@@ -38,20 +37,20 @@ import { registerResponseHandler } from '../../../response-registry.js';
 import { handle } from './routes.js';
 import { readChatHistory } from './history.js';
 
-const NOW = '2026-10-05T18:00:00Z';
+const NOW = 1791223200000;
 registerResponseHandler(handleApprovalsResponse);
 beforeEach(() => {
   runMigrations(initTestDb());
   const db = getDb();
   db.exec(`
-    INSERT INTO users (id, kind, created_at) VALUES ('web:member', 'web', ${toEpoch(NOW)}), ('web:other', 'web', ${toEpoch(NOW)});
-    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('agent', 'Agent', 'agent', ${toEpoch(NOW)});
-    INSERT INTO agent_group_members (user_id, agent_group_id, added_at) VALUES ('web:member', 'agent', ${toEpoch(NOW)});
+    INSERT INTO users (id, kind, created_at) VALUES ('web:member', 'web', ${NOW}), ('web:other', 'web', ${NOW});
+    INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('agent', 'Agent', 'agent', ${NOW});
+    INSERT INTO agent_group_members (user_id, agent_group_id, added_at) VALUES ('web:member', 'agent', ${NOW});
     INSERT INTO messaging_groups (id, channel_type, platform_id, instance, is_group, created_at)
-      VALUES ('mg', 'web', 'group:agent', 'web', 1, ${toEpoch(NOW)});
+      VALUES ('mg', 'web', 'group:agent', 'web', 1, ${NOW});
     INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, session_mode, created_at)
-      VALUES ('wiring', 'mg', 'agent', 'agent-shared', ${toEpoch(NOW)});
-    INSERT INTO sessions (id, agent_group_id, created_at) VALUES ('session', 'agent', ${toEpoch(NOW)});
+      VALUES ('wiring', 'mg', 'agent', 'agent-shared', ${NOW});
+    INSERT INTO sessions (id, agent_group_id, created_at) VALUES ('session', 'agent', ${NOW});
   `);
   initSessionFolder('agent', 'session');
   createQuestion({
@@ -139,7 +138,7 @@ describe('approval response messages', () => {
   beforeEach(() => {
     applied.mockReset();
     getDb().exec(`
-      INSERT INTO user_roles(user_id,role,granted_at) VALUES('web:member','owner',${toEpoch(NOW)});
+      INSERT INTO user_roles(user_id,role,granted_at) VALUES('web:member','owner',${NOW});
       UPDATE sessions SET messaging_group_id='mg',thread_id='thread' WHERE id='session';
     `);
     createApproval({
@@ -259,7 +258,7 @@ describe('typed responses through the existing endpoint', () => {
         questionId: 'q',
         questionResponseType: 'skipped',
         text: 'Question skipped',
-        timestamp: saved?.responded_at ? toEpoch(saved.responded_at) : null,
+        timestamp: saved?.responded_at ?? null,
       }),
     ]);
     expect(runtime.wake).toHaveBeenCalled();
@@ -309,7 +308,7 @@ describe('typed responses through the existing endpoint', () => {
     expect((await respond({ responseType: 'skipped' }, 'missing')).status).toBe(404);
     getDb().exec("UPDATE interactions SET status = 'cancelled' WHERE id = 'q'");
     expect((await respond({ responseType: 'skipped' })).status).toBe(409);
-    getDb().exec(`INSERT INTO user_roles (user_id, role, granted_at) VALUES ('web:member', 'owner', ${toEpoch(NOW)})`);
+    getDb().exec(`INSERT INTO user_roles (user_id, role, granted_at) VALUES ('web:member', 'owner', ${NOW})`);
     createApproval({
       id: 'approval',
       session_id: 'session',

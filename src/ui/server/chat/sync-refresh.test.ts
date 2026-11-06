@@ -7,7 +7,7 @@ import { publishHostChange } from '../../../host-changes.js';
 
 const state = vi.hoisted(() => ({ view: null as Conversation | null }));
 vi.mock('../db.js', () => ({
-  lookupSessionByHash: () => ({ userId: 'viewer', expiresAt: new Date(Date.now() + 60_000).toISOString() }),
+  lookupSessionByHash: () => ({ userId: 'viewer', expiresAt: Date.now() + 60_000 }),
 }));
 vi.mock('../../../db/sessions.js', () => ({ getSession: () => ({ agent_group_id: 'g' }) }));
 vi.mock('./sync-state.js', () => ({

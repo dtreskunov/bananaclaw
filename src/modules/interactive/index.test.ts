@@ -42,7 +42,7 @@ beforeEach(() => {
     name: 'Group',
     folder: 'group',
     agent_provider: null,
-    created_at: '2026-01-01T00:00:00Z',
+    created_at: 1767225600000,
   });
   createMessagingGroup({
     id: 'messaging-1',
@@ -51,7 +51,7 @@ beforeEach(() => {
     name: 'Web',
     is_group: 0,
     unknown_sender_policy: 'strict',
-    created_at: '2026-01-01T00:00:00Z',
+    created_at: 1767225600000,
   });
   createSession({
     id: 'session-1',
@@ -62,7 +62,7 @@ beforeEach(() => {
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: '2026-01-01T00:00:00Z',
+    created_at: 1767225600000,
   });
   mockWriteSessionMessage.mockClear();
   mockWakeContainer.mockReset().mockResolvedValue(true);
@@ -81,7 +81,7 @@ function seedQuestion(responseMode: 'choice' | 'text' | 'choice_or_text'): void 
     platform_id: 'user-1',
     channel_type: 'web',
     thread_id: 'thread-1',
-    created_at: '2026-01-01T00:00:00Z',
+    created_at: 1767225600000,
     input: {
       question: 'Which environment?',
       responseMode: responseMode,

@@ -1,4 +1,3 @@
-import { toEpoch } from '../../db/time.js';
 import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
@@ -86,8 +85,8 @@ const session: Session = {
   status: 'active',
   container_status: 'stopped',
   agent_provider: null,
-  created_at: '2026-01-01T00:00:00.000Z',
-  last_active: '2026-01-01T00:00:00.000Z',
+  created_at: 1767225600000,
+  last_active: 1767225600000,
 };
 const input = { resource_url: 'https://api.example.com/v1/items', reason: 'Finish the requested report.' };
 let connection: SharedConnection;
@@ -96,12 +95,7 @@ beforeEach(() => {
   runMigrations(initTestDb());
   const db = getDb();
   for (const id of ['alice', 'bob', 'member'])
-    db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(
-      id,
-      'test',
-      id,
-      toEpoch('2026-01-01T00:00:00.000Z'),
-    );
+    db.prepare('INSERT INTO users(id,kind,display_name,created_at) VALUES(?,?,?,?)').run(id, 'test', id, 1767225600000);
   db.prepare(
     "INSERT INTO agent_groups(id,name,folder,created_at) VALUES('ag-access','My Agent','agent',1767225600000)",
   ).run();
@@ -113,7 +107,7 @@ beforeEach(() => {
       role: 'admin',
       agent_group_id: session.agent_group_id,
       granted_by: null,
-      granted_at: '2026-01-01T00:00:00.000Z',
+      granted_at: 1767225600000,
     });
   connection = {
     id: 'private-connection',
@@ -658,7 +652,7 @@ describe('assisted access approvals', () => {
       role: 'admin',
       agent_group_id: session.agent_group_id,
       granted_by: null,
-      granted_at: '2026-01-01T00:00:00.000Z',
+      granted_at: 1767225600000,
     });
     connection.grants = [{ vault: session.agent_group_id, status: 'suspended', services: ['api'] }];
     expect((await applyAccessRequest('alice', request.id, selection())).status).toBe('completed');

@@ -13,7 +13,7 @@ import Router from 'find-my-way';
 import { GROUPS_DIR, PAGES_BASE_DOMAIN } from '../../../config.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getDb } from '../../../db/connection.js';
-import { parseTimestamp, UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../shared/time.js';
+import { UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../shared/time.js';
 import { getInteraction, legacyInteractionExpired } from '../../../db/interactions.js';
 import { log } from '../../../log.js';
 import {
@@ -521,7 +521,7 @@ async function handleCreatePrivateWebSession(
   redeemUrl.searchParams.set('next', `/${relPath}`);
   redeemUrl.searchParams.set('preview', '1');
   ctx.res.writeHead(201, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' });
-  ctx.res.end(JSON.stringify({ url: redeemUrl.toString(), expiresAt: parseTimestamp(issued.expiresAt) }));
+  ctx.res.end(JSON.stringify({ url: redeemUrl.toString(), expiresAt: issued.expiresAt }));
 }
 
 function handleGroups(ctx: Ctx, userId: string): void {
@@ -594,7 +594,7 @@ async function handleCreateGroup(ctx: Ctx, userId: string): Promise<void> {
       role: 'admin',
       agent_group_id: group.id,
       granted_by: userId,
-      granted_at: new Date().toISOString(),
+      granted_at: Date.now(),
     });
   } catch (err) {
     log.warn('Failed to auto-grant scoped admin on new group', { userId, groupId: group.id, err });
@@ -611,7 +611,7 @@ async function handleCreateGroup(ctx: Ctx, userId: string): Promise<void> {
     id: group.id,
     name: group.name,
     folder: group.folder,
-    createdAt: parseTimestamp(group.created_at),
+    createdAt: group.created_at,
   });
 }
 

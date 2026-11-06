@@ -25,8 +25,8 @@ const SLUG = 'svsite';
 let siteRoot: string;
 let groupRoot: string;
 
-function now(): string {
-  return new Date().toISOString();
+function now(): number {
+  return Date.now();
 }
 
 interface CapturedRes {

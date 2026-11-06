@@ -1,7 +1,6 @@
 import type { ContainerConfigRow } from '../types.js';
 import { getDb } from './connection.js';
-import { toEpoch, decodeTimes, decodeTimeRows } from './time.js';
-
+import { assertTimestampFields } from './validate-timestamps.js';
 import { recordHostChange } from './transaction.js';
 
 const SCALAR_COLUMNS = new Set([
@@ -29,15 +28,18 @@ const JSON_COLUMNS = new Set([
 ]);
 
 export function getContainerConfig(agentGroupId: string): ContainerConfigRow | undefined {
-  return decodeTimes<ContainerConfigRow | undefined>(getDb().prepare('SELECT * FROM container_configs WHERE agent_group_id = ?').get(agentGroupId), ['updated_at']);
+  return getDb().prepare('SELECT * FROM container_configs WHERE agent_group_id = ?').get(agentGroupId) as
+    | ContainerConfigRow
+    | undefined;
 }
 
 export function getAllContainerConfigs(): ContainerConfigRow[] {
-  return decodeTimeRows<ContainerConfigRow>(getDb().prepare('SELECT * FROM container_configs').all(), ['updated_at']);
+  return getDb().prepare('SELECT * FROM container_configs').all() as ContainerConfigRow[];
 }
 
 /** Insert a new config row. Caller must supply all JSON fields (use defaults for empty). */
 export function createContainerConfig(config: ContainerConfigRow): void {
+  assertTimestampFields(config, ['updated_at']);
   if (config.credential_backend != null && config.credential_backend !== 'agent-vault')
     throw new Error('Unsupported credential backend; review the archived group before restoring its access');
   getDb()
@@ -54,7 +56,6 @@ export function createContainerConfig(config: ContainerConfigRow): void {
     )
     .run({
       ...config,
-      updated_at: toEpoch(config.updated_at),
       voice_input_backend: config.voice_input_backend ?? null,
       voice_input_enabled: config.voice_input_enabled ?? 1,
       credential_backend: config.credential_backend ?? 'agent-vault',

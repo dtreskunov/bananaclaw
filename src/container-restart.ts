@@ -43,7 +43,7 @@ export function restartAgentGroupContainers(
         writeSessionMessage(agentGroupId, session.id, {
           id: `restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           kind: 'system',
-          timestamp: new Date().toISOString(),
+          timestamp: Date.now(),
           content: JSON.stringify({ action: 'restart', reason }),
           onWake: 1,
         });
@@ -59,7 +59,7 @@ export function restartAgentGroupContainers(
       writeSessionMessage(agentGroupId, session.id, {
         id: `restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         kind: 'chat',
-        timestamp: new Date().toISOString(),
+        timestamp: Date.now(),
         platformId: mg?.platform_id ?? agentGroupId,
         channelType: mg?.channel_type ?? 'agent',
         threadId: mg ? session.thread_id : null,

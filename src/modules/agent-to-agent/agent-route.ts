@@ -264,7 +264,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
   writeSessionMessage(targetAgentGroupId, targetSession.id, {
     id: a2aMsgId,
     kind: 'chat',
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
     platformId: session.agent_group_id,
     channelType: 'agent',
     threadId: null,

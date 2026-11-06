@@ -8,7 +8,6 @@
  * Existing rows are cleared first so migrated session metadata is refreshed.
  */
 import Database from 'better-sqlite3';
-import { fromEpoch } from '../src/db/time.js';
 import { assertStorageVersion } from '../src/db/storage-lifecycle.js';
 import fs from 'fs';
 import path from 'path';
@@ -97,7 +96,7 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
             channelType: row.channel_type,
             threadId: row.thread_id ?? session?.thread_id ?? null,
             direction: 'in',
-            timestamp: fromEpoch(row.timestamp),
+            timestamp: row.timestamp,
             text,
             senderUserId: row.sender_user_id ?? null,
           });
@@ -141,7 +140,7 @@ for (const agentGroupId of fs.readdirSync(sessionsDir)) {
             channelType: row.channel_type,
             threadId: row.thread_id ?? session?.thread_id ?? null,
             direction: 'out',
-            timestamp: fromEpoch(row.timestamp),
+            timestamp: row.timestamp,
             text,
           });
           sessionMsgCount++;

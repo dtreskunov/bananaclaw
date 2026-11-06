@@ -13,7 +13,7 @@ import { assertUserUuid } from './uuid.js';
 import { assertActivityOrderSchema } from './turns.js';
 import { recordSessionDatabaseChange, transaction } from './transaction.js';
 import { assertStorageVersion, STORAGE_VERSION, EPOCH_NOW_SQL } from './storage-lifecycle.js';
-import { toEpoch, decodeTimes, decodeTimeRows } from './time.js';
+import { epochMs } from '../time.js';
 
 function openStore(
   dbPath: string,
@@ -205,12 +205,12 @@ export function insertMessage(
   message: {
     id: string;
     kind: string;
-    timestamp: string;
+    timestamp: number;
     platformId: string | null;
     channelType: string | null;
     threadId: string | null;
     content: string;
-    processAfter: string | null;
+    processAfter: number | null;
     recurrence: string | null;
     /**
      * 1 = wake the agent (default); 0 = accumulate as context only.
@@ -248,11 +248,11 @@ export function insertMessage(
   };
   bounded(message.id, 256, 'id', true);
   bounded(message.kind, 64, 'kind', true);
-  bounded(message.timestamp, 128, 'timestamp', true);
+  epochMs(message.timestamp);
   bounded(message.platformId, 1024, 'platformId');
   bounded(message.channelType, 64, 'channelType');
   bounded(message.threadId, 1024, 'threadId');
-  bounded(message.processAfter, 128, 'processAfter');
+  if (message.processAfter !== null) epochMs(message.processAfter);
   bounded(message.recurrence, 1024, 'recurrence');
   bounded(message.sourceSessionId, 256, 'sourceSessionId');
   bounded(message.senderIdentity, 1024, 'senderIdentity');
@@ -261,8 +261,6 @@ export function insertMessage(
      VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake, @senderUserId, @senderIdentity)`,
   ).run({
     ...message,
-    timestamp: toEpoch(message.timestamp),
-    processAfter: toEpoch(message.processAfter),
     trigger: message.trigger ?? 1,
     onWake: message.onWake ?? 0,
     sourceSessionId: message.sourceSessionId ?? null,
@@ -299,19 +297,20 @@ export function markMessageFailed(db: Database.Database, messageId: string): voi
 }
 
 export function retryWithBackoff(db: Database.Database, messageId: string, backoffSec: number): void {
-  db.prepare(
-    'UPDATE messages_in SET tries = tries + 1, process_after = ? WHERE id = ?',
-  ).run(Date.now() + backoffSec * 1000, messageId);
+  db.prepare('UPDATE messages_in SET tries = tries + 1, process_after = ? WHERE id = ?').run(
+    Date.now() + backoffSec * 1000,
+    messageId,
+  );
 }
 
 export function getMessageForRetry(
   db: Database.Database,
   messageId: string,
   status: string,
-): { id: string; tries: number; processAfter: string | null } | undefined {
-  return decodeTimes<{ id: string; tries: number; processAfter: string | null } | undefined>(db
+): { id: string; tries: number; processAfter: number | null } | undefined {
+  return db
     .prepare('SELECT id, tries, process_after as processAfter FROM messages_in WHERE id = ? AND status = ?')
-    .get(messageId, status), ['processAfter']);
+    .get(messageId, status) as { id: string; tries: number; processAfter: number | null } | undefined;
 }
 
 /** Routing fields for a message, used when the host must bounce a notice back. */
@@ -395,14 +394,14 @@ export function getStuckProcessingIds(outDb: Database.Database): string[] {
 
 export interface ProcessingClaim {
   message_id: string;
-  status_changed: string;
+  status_changed: number;
 }
 
 /** Return processing_ack rows still in 'processing' with their claim timestamps. */
 export function getProcessingClaims(outDb: Database.Database): ProcessingClaim[] {
-  return decodeTimeRows<ProcessingClaim>(outDb
+  return outDb
     .prepare("SELECT message_id, status_changed FROM processing_ack WHERE status = 'processing'")
-    .all(), ['status_changed']);
+    .all() as ProcessingClaim[];
 }
 
 /**
@@ -421,7 +420,7 @@ export function deleteOrphanProcessingClaims(outDb: Database.Database): number {
 export interface ContainerState {
   current_tool: string | null;
   tool_declared_timeout_ms: number | null;
-  tool_started_at: string | null;
+  tool_started_at: number | null;
 }
 
 /**
@@ -430,12 +429,12 @@ export interface ContainerState {
  * declared timeout.
  */
 export function getContainerState(outDb: Database.Database): ContainerState | null {
-  const row = decodeTimes<ContainerState | undefined>(outDb
+  const row = outDb
     .prepare(
       `SELECT current_tool, tool_declared_timeout_ms, tool_started_at
            FROM container_state WHERE id = 1`,
     )
-    .get(), ['tool_started_at']);
+    .get() as ContainerState | undefined;
   return row ?? null;
 }
 
@@ -445,7 +444,7 @@ export function getContainerState(outDb: Database.Database): ContainerState | nu
 
 export interface OutboundMessage {
   id: string;
-  timestamp: string;
+  timestamp: number;
   kind: string;
   platform_id: string | null;
   channel_type: string | null;
@@ -457,7 +456,7 @@ export interface OutboundMessage {
 export function getDueOutboundMessages(db: Database.Database, receiptsPath: string): OutboundMessage[] {
   db.prepare('ATTACH DATABASE ? AS delivery_receipts').run(receiptsPath);
   try {
-    return decodeTimeRows<OutboundMessage>(db
+    return db
       .prepare(
         `SELECT m.* FROM messages_out m
          WHERE (deliver_after IS NULL OR deliver_after <= ?)
@@ -466,7 +465,7 @@ export function getDueOutboundMessages(db: Database.Database, receiptsPath: stri
            )
          ORDER BY timestamp ASC, id ASC`,
       )
-      .all(Date.now()), ['timestamp']);
+      .all(Date.now()) as OutboundMessage[];
   } finally {
     db.exec('DETACH DATABASE delivery_receipts');
   }

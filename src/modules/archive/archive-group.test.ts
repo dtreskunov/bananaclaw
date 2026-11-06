@@ -1,4 +1,3 @@
-import { toEpoch } from '../../db/time.js';
 /**
  * Tests for `archiveAgentGroup`:
  *   - dumps every restorable row into `archive.json`
@@ -15,7 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_ROOT = '/tmp/nanoclaw-test-archive-group';
+const TEST_ROOT = `${process.cwd()}/.test-state/nanoclaw-test-archive-group`;
 const TEST_GROUPS_DIR = path.join(TEST_ROOT, 'groups');
 const TEST_DATA_DIR = path.join(TEST_ROOT, 'data');
 
@@ -30,8 +29,8 @@ vi.mock('../../config.js', async () => {
   const actual = await vi.importActual<typeof import('../../config.js')>('../../config.js');
   return {
     ...actual,
-    GROUPS_DIR: '/tmp/nanoclaw-test-archive-group/groups',
-    DATA_DIR: '/tmp/nanoclaw-test-archive-group/data',
+    GROUPS_DIR: `${process.cwd()}/.test-state/nanoclaw-test-archive-group/groups`,
+    DATA_DIR: `${process.cwd()}/.test-state/nanoclaw-test-archive-group/data`,
   };
 });
 
@@ -48,7 +47,7 @@ import {
 } from '../../db/index.js';
 import { archiveAgentGroup, nextArchiveSuffix } from './archive-group.js';
 
-const NOW = () => new Date().toISOString();
+const NOW = () => Date.now();
 
 function seedGroup(id: string, folder: string) {
   createAgentGroup({ id, name: folder, folder, agent_provider: null, created_at: NOW() });
@@ -59,7 +58,7 @@ function seedGroup(id: string, folder: string) {
 function seedFullGroup(id: string, folder: string) {
   seedGroup(id, folder);
   // container config
-  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, toEpoch(NOW()));
+  getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES (?, ?)`).run(id, NOW());
   // wiring
   createMessagingGroup({
     id: `mg-${id}`,
@@ -85,16 +84,16 @@ function seedFullGroup(id: string, folder: string) {
   // member
   getDb()
     .prepare(`INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'human', ?, ?)`)
-    .run(`u-${id}`, `User ${id}`, toEpoch(NOW()));
+    .run(`u-${id}`, `User ${id}`, NOW());
   getDb()
     .prepare(`INSERT INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, ?)`)
-    .run(`u-${id}`, id, toEpoch(NOW()));
+    .run(`u-${id}`, id, NOW());
   // scoped admin role
   getDb()
     .prepare(
       `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'admin', ?, NULL, ?)`,
     )
-    .run(`u-${id}`, id, toEpoch(NOW()));
+    .run(`u-${id}`, id, NOW());
   // session
   createSession({
     id: `sess-${id}`,

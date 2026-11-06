@@ -10,7 +10,7 @@ import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.j
 export interface ApprovalNotificationOptions {
   originMessageId?: string | null;
   id?: string;
-  timestamp?: string;
+  timestamp?: number;
   afterRestart?: boolean;
   idempotent?: boolean;
   responseMessage?: ApprovalResponseMessage;
@@ -68,7 +68,7 @@ export function writeApprovalNotification(
   writeSessionMessage(session.agent_group_id, session.id, {
     id: options.id ?? `appr-note-${randomUUID()}`,
     kind: 'chat',
-    timestamp: options.timestamp ?? new Date().toISOString(),
+    timestamp: options.timestamp ?? Date.now(),
     ...routing,
     content: JSON.stringify({
       text: contentText,

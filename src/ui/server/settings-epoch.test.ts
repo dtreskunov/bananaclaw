@@ -47,7 +47,7 @@ it('returns identity verification and challenge expiry as integer milliseconds',
   const { row } = createChallenge({ user_id: 'viewer', channel_type: 'telegram', handle: '123' });
   const challenge = await call(`/ui/settings/api/identities/link/status?challengeId=${row.id}`);
   expect(challenge.status).toBe(200);
-  expect(challenge.body.expiresAt).toBe(Date.parse(row.expires_at));
+  expect(challenge.body.expiresAt).toBe(row.expires_at);
 });
 
 it.each([null, '15'])('rejects settings requests from protocol %s before a mutation', async (version) => {

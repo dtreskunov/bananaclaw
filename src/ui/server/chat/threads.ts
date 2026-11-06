@@ -1,5 +1,4 @@
 import { getDb } from '../../../db/connection.js';
-import { decodeTimeRows } from '../../../db/time.js';
 import { getMessagingGroupByPlatform, getMessagingGroupAgentByPair } from '../../../db/messaging-groups.js';
 import { getSessionsByAgentGroup, findSessionByAgentGroup } from '../../../db/sessions.js';
 import { getThreadForksForAgentGroup } from '../../../db/thread-forks.js';
@@ -16,7 +15,6 @@ import {
 } from '../../../thread-summaries.js';
 import { getSessionActiveTurn } from '../../../session-link.js';
 import type { AttentionTarget } from '../../shared/attention.js';
-import { parseTimestamp } from '../../shared/time.js';
 import { readInteractionSync } from './attention.js';
 import {
   isElevated,
@@ -314,17 +312,15 @@ function collectThreadsForContexts(
   const plans: Plan[] = [];
   const sharedPlans: Plan[] = [];
   for (const ctx of ctxs) {
-    const perThread = decodeTimeRows<
-      Pick<(typeof sessions)[number], 'id' | 'thread_id' | 'last_active' | 'created_at'>
-    >(
-      getDb()
-        .prepare(
-          `SELECT id, thread_id, last_active, created_at FROM sessions
+    const perThread = getDb()
+      .prepare(
+        `SELECT id, thread_id, last_active, created_at FROM sessions
        WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NOT NULL`,
-        )
-        .all(agentGroupId, ctx.messagingGroupId),
-      ['last_active', 'created_at'],
-    );
+      )
+      .all(agentGroupId, ctx.messagingGroupId) as Pick<
+      (typeof sessions)[number],
+      'id' | 'thread_id' | 'last_active' | 'created_at'
+    >[];
     for (const session of perThread) {
       if (session.thread_id === null) continue;
       plans.push({
@@ -386,19 +382,13 @@ function collectThreadsForContexts(
       const target = plan.mode === 'agent-shared' ? agentSummaries : out;
       target.push({
         ...thread,
-        liveTasks: thread.liveTasks?.map((task) => ({
-          ...task,
-          nextRunAt: parseTimestamp(task.nextRunAt),
-        })),
         activity: 'idle',
         sessionId: plan.session.id,
         messagingGroupId: ctx.messagingGroupId,
         sessionMode: plan.mode,
-        lastActivityAt: thread.lastActivityAt
-          ? parseTimestamp(thread.lastActivityAt)
-          : plan.mode === 'per-thread'
-            ? parseTimestamp(plan.session.last_active ?? plan.session.created_at)
-            : null,
+        lastActivityAt:
+          thread.lastActivityAt ??
+          (plan.mode === 'per-thread' ? (plan.session.last_active ?? plan.session.created_at) : null),
         counterparty: ctx.channelType === WEB_CHANNEL_TYPE ? undefined : thread.platformId,
         ...usage,
       });
@@ -412,9 +402,8 @@ function collectThreadsForContexts(
     );
     if (!dms.length) continue;
     const reply = scan.dmReplies.find((r) => r.channelType === ctx.channelType);
-    const times = [...dms.map((dm) => dm.lastActivityAt), reply?.lastActivityAt || '']
-      .filter(Boolean)
-      .map((value) => parseTimestamp(value))
+    const times = [...dms.map((dm) => dm.lastActivityAt), reply?.lastActivityAt]
+      .filter((value): value is number => value != null)
       .sort((a, b) => b - a);
     const platformId = dms[dms.length - 1].platformId;
     dmSummaries.push({
@@ -487,7 +476,7 @@ function stampForkLineage(agentGroupId: string, threads: ThreadSummary[]): boole
   const byThread = new Map(forks.map((f) => [f.thread_id, f]));
   const titles = new Map(threads.map((t) => [t.threadId, t.title]));
   const childrenByParent = new Map<string, { threadId: string; messageId: string; title: string }[]>();
-  for (const f of [...forks].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+  for (const f of [...forks].sort((a, b) => a.created_at - b.created_at)) {
     // A branch the viewer can't see would render as a link that 404s.
     const title = titles.get(f.thread_id);
     if (title === undefined) continue;
@@ -522,8 +511,8 @@ function stampForkLineage(agentGroupId: string, threads: ThreadSummary[]): boole
         fidelity: fork.fidelity,
         deleted: !liveParents.has(fork.parent_thread_id),
       };
-      if (t.lastActivityAt === null || parseTimestamp(fork.created_at) > t.lastActivityAt) {
-        t.lastActivityAt = parseTimestamp(fork.created_at);
+      if (t.lastActivityAt === null || fork.created_at > t.lastActivityAt) {
+        t.lastActivityAt = fork.created_at;
         resorted = true;
       }
     }

@@ -1,7 +1,6 @@
 import type { UserRole, UserRoleKind } from '../../../types.js';
 import { getDb } from '../../../db/connection.js';
-import { encodeTimes, decodeTimeRows } from '../../../db/time.js';
-
+import { assertTimestampFields } from '../../../db/validate-timestamps.js';
 import { recordHostChange } from '../../../db/transaction.js';
 
 /**
@@ -9,6 +8,7 @@ import { recordHostChange } from '../../../db/transaction.js';
  * not by schema, so callers get a clean error path).
  */
 export function grantRole(row: UserRole): void {
+  assertTimestampFields(row, ['granted_at']);
   if (row.role === 'owner' && row.agent_group_id !== null) {
     throw new Error('owner role must be global (agent_group_id = null)');
   }
@@ -17,7 +17,7 @@ export function grantRole(row: UserRole): void {
       `INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at)
        VALUES (@user_id, @role, @agent_group_id, @granted_by, @granted_at)`,
     )
-    .run(encodeTimes(row, ['granted_at']));
+    .run(row);
   recordHostChange({ kind: 'access' });
 }
 
@@ -35,7 +35,7 @@ export function revokeRole(userId: string, role: UserRoleKind, agentGroupId: str
 }
 
 export function getUserRoles(userId: string): UserRole[] {
-  return decodeTimeRows<UserRole>(getDb().prepare('SELECT * FROM user_roles WHERE user_id = ?').all(userId), ['granted_at']);
+  return getDb().prepare('SELECT * FROM user_roles WHERE user_id = ?').all(userId) as UserRole[];
 }
 
 export function isOwner(userId: string): boolean {
@@ -65,9 +65,9 @@ export function hasAdminPrivilege(userId: string, agentGroupId: string): boolean
 }
 
 export function getOwners(): UserRole[] {
-  return decodeTimeRows<UserRole>(getDb()
+  return getDb()
     .prepare('SELECT * FROM user_roles WHERE role = ? AND agent_group_id IS NULL ORDER BY granted_at')
-    .all('owner'), ['granted_at']);
+    .all('owner') as UserRole[];
 }
 
 export function hasAnyOwner(): boolean {
@@ -78,13 +78,13 @@ export function hasAnyOwner(): boolean {
 }
 
 export function getGlobalAdmins(): UserRole[] {
-  return decodeTimeRows<UserRole>(getDb()
+  return getDb()
     .prepare('SELECT * FROM user_roles WHERE role = ? AND agent_group_id IS NULL ORDER BY granted_at')
-    .all('admin'), ['granted_at']);
+    .all('admin') as UserRole[];
 }
 
 export function getAdminsOfAgentGroup(agentGroupId: string): UserRole[] {
-  return decodeTimeRows<UserRole>(getDb()
+  return getDb()
     .prepare('SELECT * FROM user_roles WHERE role = ? AND agent_group_id = ? ORDER BY granted_at')
-    .all('admin', agentGroupId), ['granted_at']);
+    .all('admin', agentGroupId) as UserRole[];
 }

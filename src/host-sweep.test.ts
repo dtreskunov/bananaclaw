@@ -1,11 +1,12 @@
-import { toEpoch } from './db/time.js';
+import { parseTimestamp } from './time.js';
+
 /**
  * Unit tests for the stuck-container decision logic introduced by
  * ACTION-ITEMS item 9. Lives on the pure helper `decideStuckAction` so we
  * don't have to mock the filesystem or the container runner.
  */
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { deleteOrphanProcessingClaims, getProcessingClaims } from './db/session-db.js';
 import {
@@ -14,17 +15,30 @@ import {
   SESSION_LINK_START_GRACE_MS,
   _resetStuckProcessingRowsForTesting,
   decideStuckAction,
-  parseSqliteUtc,
 } from './host-sweep.js';
 import type { Session } from './types.js';
 
 const BASE = Date.parse('2026-04-20T12:00:00.000Z');
 
 function claim(id: string, offsetMs: number) {
-  return { message_id: id, status_changed: new Date(BASE - offsetMs).toISOString() };
+  return { message_id: id, status_changed: BASE - offsetMs };
 }
 
 describe('decideStuckAction', () => {
+  it.each(['UTC', 'America/New_York', 'Asia/Kolkata'])('uses exact epoch-zero claims regardless of host zone %s', (zone) => {
+    vi.stubEnv('TZ', zone);
+    try {
+      expect(decideStuckAction({
+        now: 60_123, lastSignalAtMs: 0, containerState: null,
+        claims: [{ message_id: 'epoch-zero', status_changed: 0 }],
+      })).toEqual({
+        action: 'kill-claim', messageId: 'epoch-zero', claimAgeMs: 60_123, toleranceMs: 60_000,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('returns ok when the latest signal is fresh and there are no claims', () => {
     expect(
       decideStuckAction({
@@ -109,7 +123,7 @@ describe('decideStuckAction', () => {
       containerState: {
         current_tool: 'Bash',
         tool_declared_timeout_ms: twoHrMs,
-        tool_started_at: new Date(BASE - 45 * 60 * 1000).toISOString(),
+        tool_started_at: BASE - 45 * 60 * 1000,
       },
       claims: [],
     });
@@ -136,7 +150,7 @@ describe('decideStuckAction', () => {
       containerState: {
         current_tool: 'Bash',
         tool_declared_timeout_ms: Number.MAX_SAFE_INTEGER,
-        tool_started_at: new Date(BASE - 7 * 60 * 60 * 1000).toISOString(),
+        tool_started_at: BASE - 7 * 60 * 60 * 1000,
       },
       claims: [claim('msg-1', 7 * 60 * 60 * 1000)],
     });
@@ -187,7 +201,7 @@ describe('decideStuckAction', () => {
         containerState: {
           current_tool,
           tool_declared_timeout_ms: tenMinMs,
-          tool_started_at: new Date(BASE - claimAgeMs).toISOString(),
+          tool_started_at: BASE - claimAgeMs,
         },
         claims: [claim('msg-1', claimAgeMs)],
       });
@@ -200,7 +214,7 @@ describe('decideStuckAction', () => {
       now: BASE,
       lastSignalAtMs: BASE - 5_000,
       containerState: null,
-      claims: [{ message_id: 'x', status_changed: 'not-a-date' }],
+      claims: [{ message_id: 'x', status_changed: Number.NaN }],
     });
     expect(res.action).toBe('ok');
   });
@@ -280,7 +294,7 @@ function fakeSession(): Session {
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: new Date().toISOString(),
+    created_at: Date.now(),
   };
 }
 
@@ -320,8 +334,8 @@ describe('resetStuckProcessingRows — orphan claim cleanup', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, content) VALUES ('m-1', 1, 'chat', ?, 'pending', '{}')",
       )
-      .run(toEpoch(claimedAt));
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-1', 'processing', ?)").run(toEpoch(claimedAt));
+      .run(parseTimestamp(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-1', 'processing', ?)").run(parseTimestamp(claimedAt));
 
     // Sanity: the orphan claim is what would trip claim-stuck.
     expect(getProcessingClaims(outDb)).toHaveLength(1);
@@ -355,8 +369,8 @@ describe('resetStuckProcessingRows — orphan claim cleanup', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, process_after, tries, content) VALUES ('m-2', 2, 'chat', ?, 'pending', ?, 1, '{}')",
       )
-      .run(toEpoch(claimedAt), toEpoch(future));
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-2', 'processing', ?)").run(toEpoch(claimedAt));
+      .run(parseTimestamp(claimedAt), parseTimestamp(future));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-2', 'processing', ?)").run(parseTimestamp(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -389,9 +403,9 @@ describe('resetStuckProcessingRows — failure bounce', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, thread_id, content) VALUES ('m-3', 2, 'chat', ?, 'pending', 5, 'chan-1', 'web', 'thread-1', '{\"text\":\"hi\"}')",
       )
-      .run(toEpoch(claimedAt));
+      .run(parseTimestamp(claimedAt));
     inDb.prepare('UPDATE host_sequence SET last_even = 2 WHERE id = 1').run();
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-3', 'processing', ?)").run(toEpoch(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-3', 'processing', ?)").run(parseTimestamp(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -421,8 +435,8 @@ describe('resetStuckProcessingRows — failure bounce', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, content) VALUES ('m-4', 2, 'system', ?, 'pending', 5, 'chan-1', 'web', '{}')",
       )
-      .run(toEpoch(claimedAt));
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-4', 'processing', ?)").run(toEpoch(claimedAt));
+      .run(parseTimestamp(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-4', 'processing', ?)").run(parseTimestamp(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -437,8 +451,8 @@ describe('resetStuckProcessingRows — failure bounce', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, content) VALUES ('m-5', 2, 'chat', ?, 'pending', 5, '{}')",
       )
-      .run(toEpoch(claimedAt));
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-5', 'processing', ?)").run(toEpoch(claimedAt));
+      .run(parseTimestamp(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-5', 'processing', ?)").run(parseTimestamp(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -453,8 +467,8 @@ describe('resetStuckProcessingRows — failure bounce', () => {
       .prepare(
         "INSERT INTO messages_in (id, seq, kind, timestamp, status, tries, platform_id, channel_type, content) VALUES ('m-6', 2, 'chat', ?, 'pending', 0, 'chan-1', 'web', '{}')",
       )
-      .run(toEpoch(claimedAt));
-    outDb.prepare("INSERT INTO processing_ack VALUES ('m-6', 'processing', ?)").run(toEpoch(claimedAt));
+      .run(parseTimestamp(claimedAt));
+    outDb.prepare("INSERT INTO processing_ack VALUES ('m-6', 'processing', ?)").run(parseTimestamp(claimedAt));
 
     _resetStuckProcessingRowsForTesting(inDb, outDb, fakeSession(), 'claim-stuck');
 
@@ -462,46 +476,5 @@ describe('resetStuckProcessingRows — failure bounce', () => {
     const status = (inDb.prepare('SELECT status FROM messages_in WHERE id = ?').get('m-6') as { status: string })
       .status;
     expect(status).toBe('pending');
-  });
-});
-
-describe('parseSqliteUtc', () => {
-  // Regression: SQLite TIMESTAMP strings have no zone marker, but Date.parse
-  // treats those as local time. On non-UTC hosts this made every claim look
-  // (TZ offset) hours stale and tripped kill-claim on freshly-claimed messages.
-  // The helper appends "Z" only when no marker is present, so parsing is
-  // always anchored to UTC regardless of host timezone.
-
-  const utcMs = Date.parse('2026-04-20T12:00:00.000Z');
-
-  it('treats a SQLite-style timestamp (no zone) as UTC', () => {
-    expect(parseSqliteUtc('2026-04-20 12:00:00')).toBe(utcMs);
-    expect(parseSqliteUtc('2026-04-20T12:00:00')).toBe(utcMs);
-    expect(parseSqliteUtc('2026-04-20T12:00:00.000')).toBe(utcMs);
-  });
-
-  it('preserves an explicit Z marker', () => {
-    expect(parseSqliteUtc('2026-04-20T12:00:00.000Z')).toBe(utcMs);
-    expect(parseSqliteUtc('2026-04-20T12:00:00z')).toBe(utcMs);
-  });
-
-  it('preserves an explicit numeric offset', () => {
-    // 14:00+02:00 == 12:00 UTC
-    expect(parseSqliteUtc('2026-04-20T14:00:00+02:00')).toBe(utcMs);
-    expect(parseSqliteUtc('2026-04-20T14:00:00+0200')).toBe(utcMs);
-    // 07:00-05:00 == 12:00 UTC
-    expect(parseSqliteUtc('2026-04-20T07:00:00-05:00')).toBe(utcMs);
-  });
-
-  it('returns NaN for unparseable input', () => {
-    expect(Number.isNaN(parseSqliteUtc('not a date'))).toBe(true);
-  });
-
-  it('does not drift across host timezones for SQLite-style input', () => {
-    // The helper itself is timezone-independent because it forces UTC parsing.
-    // (Verifying the regex branch — without the helper, `Date.parse` of the
-    // bare string returns different values depending on the host TZ.)
-    const bare = '2026-04-20T12:00:00';
-    expect(parseSqliteUtc(bare)).toBe(Date.parse(bare + 'Z'));
   });
 });

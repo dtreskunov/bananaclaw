@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
 import { publishHostChange } from './host-changes.js';
@@ -15,7 +16,7 @@ import { getTurn, putTurn, linkTurnInput, type TurnRow } from './db/turns.js';
 import { isModelDurationMs } from './session-link-validate.js';
 import { log } from './log.js';
 import { transaction } from './db/transaction.js';
-import { encodeTimes, toEpoch } from './db/time.js';
+import { encodeTimes } from './db/time.js';
 import { assertStorageVersion } from './db/storage-lifecycle.js';
 import { openOutboundDbRw } from './db/session-db.js';
 
@@ -412,7 +413,7 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
        context_tokens=excluded.context_tokens, timestamp=excluded.timestamp`,
   ).run({
     ...payload,
-    timestamp: toEpoch(payload.timestamp as string),
+    timestamp: parseTimestamp(payload.timestamp as string),
     duration_api_ms: payload.duration_api_ms === null ? null : Math.round(payload.duration_api_ms),
   });
 }
@@ -463,6 +464,15 @@ function applyTurn(db: Database.Database, payload: Record<string, unknown>): voi
     !['native', 'backfill', 'fork'].includes(String(payload.provenance))
   )
     throw new Error('invalid turn.upsert payload');
+  const wire = payload as Omit<TurnRow, 'started_at' | 'ended_at'> & {
+    started_at: string | null;
+    ended_at: string | null;
+  };
+  const turn: TurnRow = {
+    ...wire,
+    started_at: parseTimestamp(wire.started_at),
+    ended_at: parseTimestamp(wire.ended_at),
+  };
   const prior = getTurn(db, payload.id);
   if (
     prior &&
@@ -475,12 +485,12 @@ function applyTurn(db: Database.Database, payload: Record<string, unknown>): voi
       'provenance',
       'imported_from_session_id',
       'imported_from_turn_id',
-    ].some((key) => prior[key as keyof TurnRow] !== payload[key])
+    ].some((key) => prior[key as keyof TurnRow] !== turn[key as keyof TurnRow])
   )
     throw new Error('immutable turn identity');
   if (
     prior?.phase === 'settled' &&
-    (payload.phase !== 'settled' || payload.outcome !== prior.outcome || payload.ended_at !== prior.ended_at)
+    (turn.phase !== 'settled' || turn.outcome !== prior.outcome || turn.ended_at !== prior.ended_at)
   )
     throw new Error('turn already settled');
   const phases = ['running', 'stopping', 'settling', 'settled'];
@@ -490,7 +500,7 @@ function applyTurn(db: Database.Database, payload: Record<string, unknown>): voi
     if (payload.outcome === 'pending' || !text(payload.ended_at)) throw new Error('invalid turn settlement');
     if (payload.provenance === 'native' && !prior) throw new Error('turn identity must precede settlement');
   } else if (payload.outcome !== 'pending' || payload.ended_at !== null) throw new Error('premature turn outcome');
-  putTurn(db, payload as unknown as TurnRow);
+  putTurn(db, turn);
 }
 
 function applyTaskAttempt(db: Database.Database, payload: Record<string, unknown>): void {

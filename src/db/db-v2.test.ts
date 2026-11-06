@@ -38,7 +38,7 @@ import {
 import { getAskQuestionRender } from './sessions.js';
 
 function now() {
-  return new Date().toISOString();
+  return Date.now();
 }
 
 beforeEach(() => {

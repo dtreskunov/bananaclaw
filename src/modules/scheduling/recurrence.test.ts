@@ -1,4 +1,5 @@
-import { toEpoch } from '../../db/time.js';
+import { parseTimestamp } from '../../time.js';
+
 /**
  * Tests for `handleRecurrence` — specifically the timezone-aware cron
  * interpretation ported from v1 (src/v1/task-scheduler.ts).
@@ -39,8 +40,8 @@ function fakeSession(): Session {
     messaging_group_id: 'mg-test',
     thread_id: null,
     status: 'active',
-    created_at: new Date().toISOString(),
-    last_active: new Date().toISOString(),
+    created_at: Date.now(),
+    last_active: Date.now(),
     container_status: 'stopped',
   } as Session;
 }
@@ -54,7 +55,7 @@ describe('handleRecurrence', () => {
     const db = freshDb();
     insertTask(db, {
       id: 'task-1',
-      processAfter: '2020-01-01T00:00:00.000Z',
+      processAfter: parseTimestamp('2020-01-01T00:00:00.000Z'),
       recurrence: '0 9 * * *', // every day at 09:00 (user TZ)
       platformId: null,
       channelType: null,
@@ -88,7 +89,7 @@ describe('handleRecurrence', () => {
     const db = freshDb();
     insertTask(db, {
       id: 'task-1',
-      processAfter: '2020-01-01T00:00:00.000Z',
+      processAfter: parseTimestamp('2020-01-01T00:00:00.000Z'),
       recurrence: null,
       platformId: null,
       channelType: null,
@@ -108,7 +109,7 @@ describe('handleRecurrence', () => {
     const outDb = freshOutboundDb();
     insertTask(db, {
       id: 'task-1',
-      processAfter: '2020-01-01T00:00:00.000Z',
+      processAfter: parseTimestamp('2020-01-01T00:00:00.000Z'),
       recurrence: '0 9 * * *',
       platformId: null,
       channelType: null,
@@ -121,9 +122,9 @@ describe('handleRecurrence', () => {
         (task_message_id, series_id, trigger_source, status, started_at)
        VALUES (?, 'task-1', 'scheduled', 'failed', ?)`,
     );
-    insertAttempt.run('attempt-1', toEpoch('2026-08-16T10:00:00Z'));
-    insertAttempt.run('attempt-2', toEpoch('2026-08-16T11:00:00Z'));
-    insertAttempt.run('attempt-3', toEpoch('2026-08-16T12:00:00Z'));
+    insertAttempt.run('attempt-1', parseTimestamp('2026-08-16T10:00:00Z'));
+    insertAttempt.run('attempt-2', parseTimestamp('2026-08-16T11:00:00Z'));
+    insertAttempt.run('attempt-3', parseTimestamp('2026-08-16T12:00:00Z'));
 
     await handleRecurrence(db, fakeSession(), outDb);
 
@@ -144,7 +145,7 @@ describe('handleRecurrence', () => {
     const outDb = freshOutboundDb();
     insertTask(db, {
       id: 'task-1',
-      processAfter: '2020-01-01T00:00:00.000Z',
+      processAfter: parseTimestamp('2020-01-01T00:00:00.000Z'),
       recurrence: '0 9 * * *',
       platformId: null,
       channelType: null,

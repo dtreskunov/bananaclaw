@@ -1,3 +1,4 @@
+import { parseTimestamp } from './time.js';
 /**
  * Delivery race tests.
  *
@@ -50,7 +51,7 @@ function seedAgentAndChannel(): void {
     name: 'Test Agent',
     folder: 'test-agent',
     agent_provider: null,
-    created_at: now(),
+    created_at: parseTimestamp(now()),
   });
   createMessagingGroup({
     id: 'mg-1',
@@ -59,7 +60,7 @@ function seedAgentAndChannel(): void {
     name: 'Test Chat',
     is_group: 0,
     unknown_sender_policy: 'public',
-    created_at: now(),
+    created_at: parseTimestamp(now()),
   });
 }
 
@@ -381,7 +382,7 @@ describe('deliverSessionMessages — instance resolution', () => {
       name: 'Test Agent',
       folder: 'test-agent',
       agent_provider: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     // Two instances own the same chat address. The named row sorts before
     // 'slack', so a plain by-platform lookup (default-instance-first) would
@@ -393,7 +394,7 @@ describe('deliverSessionMessages — instance resolution', () => {
       name: 'Default',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroup({
       id: 'mg-tester',
@@ -403,7 +404,7 @@ describe('deliverSessionMessages — instance resolution', () => {
       name: 'Tester',
       is_group: 1,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     const { session } = resolveSession('ag-1', 'mg-tester', null, 'shared');
@@ -456,7 +457,7 @@ describe('deliverSessionMessages — permission check', () => {
       name: 'Unauthorized Chat',
       is_group: 0,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     // Session is on mg-1 (telegram)
@@ -509,7 +510,7 @@ describe('deliverSessionMessages — delivery-failure bounce-back', () => {
       name: 'Bob (Bot)',
       is_group: 0,
       unknown_sender_policy: 'public',
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
     createMessagingGroupAgent({
       id: 'mga-2',
@@ -521,7 +522,7 @@ describe('deliverSessionMessages — delivery-failure bounce-back', () => {
       ignored_message_policy: 'drop',
       session_mode: 'shared',
       priority: 0,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     });
 
     const { session } = resolveSession('ag-1', 'mg-1', null, 'shared'); // origin = mg-1

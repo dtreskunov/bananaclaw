@@ -1,4 +1,5 @@
-import { toEpoch } from './db/time.js';
+import { parseTimestamp } from './time.js';
+
 import fs from 'fs';
 import http from 'http';
 import os from 'os';
@@ -122,8 +123,8 @@ describe('agent vault egress', () => {
       .prepare(
         `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at) VALUES ('ag-db', 'db', 'db', NULL, ?)`,
       )
-      .run(toEpoch(now));
-    getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES ('ag-db', ?)`).run(toEpoch(now));
+      .run(parseTimestamp(now));
+    getDb().prepare(`INSERT INTO container_configs (agent_group_id, updated_at) VALUES ('ag-db', ?)`).run(parseTimestamp(now));
     expect(usesAgentVault('ag-db')).toBe(true);
     expect(() => getDb().prepare("UPDATE container_configs SET credential_backend='unsupported'").run()).toThrow();
     expect(usesAgentVault('ag-db')).toBe(true);

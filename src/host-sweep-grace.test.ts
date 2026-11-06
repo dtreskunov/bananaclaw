@@ -1,4 +1,5 @@
-import { toEpoch } from './db/time.js';
+import { parseTimestamp } from './time.js';
+
 /**
  * Regression test for the wake-tick SLA race in the host sweep.
  *
@@ -53,7 +54,7 @@ function seedStaleClaim(messageId: string, ageMs: number): void {
     db.prepare('INSERT INTO processing_ack (message_id, status, status_changed) VALUES (?, ?, ?)').run(
       messageId,
       'processing',
-      toEpoch(new Date(Date.now() - ageMs).toISOString()),
+      parseTimestamp(new Date(Date.now() - ageMs).toISOString()),
     );
   } finally {
     db.close();
@@ -110,7 +111,7 @@ beforeEach(() => {
 
   const db = initTestDb();
   runMigrations(db);
-  createAgentGroup({ id: AG, name: 'Test Agent', folder: 'test-agent', agent_provider: null, created_at: now() });
+  createAgentGroup({ id: AG, name: 'Test Agent', folder: 'test-agent', agent_provider: null, created_at: parseTimestamp(now()) });
   createSession({
     id: SESS,
     agent_group_id: AG,
@@ -120,13 +121,13 @@ beforeEach(() => {
     status: 'active',
     container_status: 'stopped',
     last_active: null,
-    created_at: now(),
+    created_at: parseTimestamp(now()),
   });
   initSessionFolder(AG, SESS);
 
   // A due message (wakes the container) + a stale claim from a previous crash
   // (would trip claim-stuck if the SLA check ran on the wake tick).
-  writeSessionMessage(AG, SESS, { id: 'm-1', kind: 'chat', timestamp: now(), content: '{"text":"hi"}' });
+  writeSessionMessage(AG, SESS, { id: 'm-1', kind: 'chat', timestamp: parseTimestamp(now()), content: '{"text":"hi"}' });
   seedStaleClaim('m-1', 2 * 60 * 60 * 1000); // claimed 2h ago
 });
 
@@ -218,7 +219,7 @@ describe('host sweep justWoke grace period', () => {
       status: 'active',
       container_status: 'stopped',
       last_active: null,
-      created_at: now(),
+      created_at: parseTimestamp(now()),
     } satisfies Session;
     const first = _requestSessionSweepForTesting(session);
     await vi.waitFor(() => expect(wakeContainer).toHaveBeenCalledTimes(1));
