@@ -67,6 +67,11 @@ context at their existing validation stage, preserving body-error precedence.
 Task session lookup uses the same authorized conversation resolver, including
 synthetic-DM/messaging-group binding.
 
+Account review indexes compatible account IDs and chooses the selected account
+only from that compatible set. Setup, creation, apply and retry share credential
+operation busy/error handling; stale preview/request revisions still disable
+approval. Decline keeps its separate interaction-response error behavior.
+
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 

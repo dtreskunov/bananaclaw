@@ -187,6 +187,84 @@ function render(node: { type: unknown; props: unknown }): TestNode {
 }
 
 describe('assisted credential approval UI', () => {
+  it.each(['setup', 'create', 'apply', 'retry'] as const)(
+    'clears busy state and surfaces expected %s failures without submitting an outcome',
+    async (operation) => {
+      const request = testAccountInteraction({
+        ...(operation === 'create' ? { kind: 'account_setup' } : {}),
+        ...(operation === 'retry' ? { status: 'failed', retryable: true } : {}),
+      });
+      const onSaved = vi.fn();
+      const onCreate = vi.fn().mockRejectedValue(new TypeError('Creation failed'));
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ error: 'Unavailable' }, { status: 503 })));
+      const draw = (): TestNode => {
+        hooks.cursor = 0;
+        hooks.effects = [];
+        return AccessRequestReview({
+          request,
+          connections: operation === 'setup' || operation === 'create' ? [] : [original],
+          onCreate,
+          onManage: vi.fn(),
+          onSaved,
+        }) as TestNode;
+      };
+      draw();
+      if (operation === 'apply') {
+        hooks.slots[0] = original.id;
+        hooks.slots[1] = {
+          requestRevision: request.revision,
+          connection: original,
+          matches: true,
+          grantBreadth: 'Full access',
+          verification: 'Not verified',
+        };
+      }
+      const node = draw();
+      const label = operation === 'retry' ? 'Review and retry' : operation === 'apply' ? 'Allow access' : 'Add account';
+      const button = descendants(node).find((child) => child.type === 'button' && child.props.children === label)!;
+      expect(button).toBeDefined();
+      await button.props.onClick();
+      await vi.waitFor(() =>
+        expect(hooks.slots[4]).toContain(operation === 'create' ? 'Creation failed' : 'Unavailable'),
+      );
+      expect(hooks.slots[2]).toBe(false);
+      expect(hooks.slots[3]).toBeUndefined();
+      expect(onSaved).toHaveBeenCalledTimes(operation === 'apply' ? 1 : 0);
+      if (operation === 'apply') expect(hooks.slots[1]).toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(operation === 'create' ? 0 : 1);
+    },
+  );
+
+  it('disables a previously reviewed account when compatibility changes without an id or revision change', async () => {
+    const request = testAccountInteraction({});
+    const alternate = { ...original, id: 'alternate' };
+    let connections = [original, alternate];
+    const draw = (): TestNode => {
+      hooks.cursor = 0;
+      hooks.effects = [];
+      return AccessRequestReview({
+        request,
+        connections,
+        onCreate: vi.fn(),
+        onManage: vi.fn(),
+        onSaved: vi.fn(),
+      }) as TestNode;
+    };
+    draw();
+    hooks.slots[0] = original.id;
+    hooks.slots[1] = { requestRevision: request.revision, connection: original, matches: true };
+    const allow = (node: TestNode) =>
+      descendants(node).find(
+        (child) => child.type === 'button' && child.props.class === 'approval-btn approval-approve primary',
+      )!;
+    expect(allow(draw()).props.disabled).toBe(false);
+    connections = [{ ...original, services: [{ ...original.services[0], host: 'different.example.com' }] }, alternate];
+    const node = draw();
+    expect(allow(node).props.disabled).toBe(true);
+    await allow(node).props.onClick();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('surfaces a newly created credential that did not receive requested scopes without choosing a fallback', () => {
     hooks.request = testAccountInteraction({
       requirements: {

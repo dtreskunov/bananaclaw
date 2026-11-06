@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/path-to-regexp/dist/index.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "node_modules/path-to-regexp/dist/index.js"(exports) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/core.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "node_modules/highlight.js/lib/core.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/xml.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/bash.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/c.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/cpp.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/csharp.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/css.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/markdown.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/diff.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/ruby.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/go.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/graphql.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/ini.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/java.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/javascript.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/json.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/kotlin.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/less.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/lua.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/makefile.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/perl.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/objectivec.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/php.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/php-template.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/plaintext.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/python.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/python-repl.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/r.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/rust.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/scss.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/shell.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/sql.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/swift.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/yaml.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/typescript.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/vbnet.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/wasm.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/common.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "node_modules/highlight.js/lib/common.js"(exports, module) {
+  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// node_modules/preact/dist/preact.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// node_modules/preact/hooks/dist/hooks.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// node_modules/@preact/signals-core/dist/signals-core.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// node_modules/@preact/signals/dist/signals.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -16651,7 +16651,7 @@ function clearApprovalMessage(approvalId) {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// node_modules/marked/lib/marked.esm.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -20424,7 +20424,7 @@ function openChat() {
   if (location.hash === "#credentials") location.hash = "";
 }
 
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -23262,7 +23262,7 @@ function ThreadsRail() {
   );
 }
 
-// node_modules/preact/compat/dist/compat.module.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -25308,15 +25308,16 @@ function AccessRequestReview({
     ...defaults?.scopes.length ? { scopes: defaults.scopes } : {}
   };
   const compatible = connections.filter((connection2) => connectionMatchesAccess(connection2, effectiveRequest));
+  const compatibleSet = new Set(compatible.map((connection2) => connection2.id));
   const created = connections.find((connection2) => connection2.id === preferredConnectionId);
-  const createdMismatch = created?.status === "ready" && !compatible.some((connection2) => connection2.id === created.id);
-  const reconnect = connections.filter((connection2) => connection2.kind !== "static" && !compatible.some((candidate) => candidate.id === connection2.id) && !(createdMismatch && connection2.id === created.id) && connectionMatchesAccess(connection2, { ...effectiveRequest, scopes: void 0 }));
-  const compatibleIds = JSON.stringify(compatible.map((connection2) => connection2.id));
+  const createdMismatch = created?.status === "ready" && !compatibleSet.has(created.id);
+  const reconnect = connections.filter((connection2) => connection2.kind !== "static" && !compatibleSet.has(connection2.id) && !(createdMismatch && connection2.id === created.id) && connectionMatchesAccess(connection2, { ...effectiveRequest, scopes: void 0 }));
+  const compatibleIds = JSON.stringify([...compatibleSet]);
   y2(() => {
-    if (preferredConnectionId && preferred.current !== preferredConnectionId && compatible.some((connection2) => connection2.id === preferredConnectionId)) {
+    if (preferredConnectionId && preferred.current !== preferredConnectionId && compatibleSet.has(preferredConnectionId)) {
       preferred.current = preferredConnectionId;
       setSelected(preferredConnectionId);
-    } else if (selected && !compatible.some((connection2) => connection2.id === selected)) {
+    } else if (selected && !compatibleSet.has(selected)) {
       setSelected("");
     }
   }, [preferredConnectionId, compatibleIds, selected, request]);
@@ -25328,7 +25329,7 @@ function AccessRequestReview({
     connection2.granted_scopes,
     connection2.scope_source
   ]));
-  const chosen = connections.find((connection2) => connection2.id === selected);
+  const chosen = compatible.find((connection2) => connection2.id === selected);
   const here = isApprovalThread(request.origin);
   const awaiting = submitted === `${id2}:${request.revision}`;
   const blocked = busy || awaiting || !!signingIn || !!disabled || !!loadingAccounts || !!accountsError;
@@ -25336,7 +25337,7 @@ function AccessRequestReview({
   const oauth = defaults?.kind !== void 0 && defaults.kind !== "static";
   const authorizationUrl = URL.parse(apps.find((app) => app.id === defaults?.appId)?.authorization_endpoint ?? "");
   const signInDestination = authorizationUrl?.protocol === "https:" && !authorizationUrl.username && !authorizationUrl.password ? authorizationUrl.origin + authorizationUrl.pathname : void 0;
-  const canApply = here && !blocked && compatible.some((connection2) => connection2.id === selected) && chosen?.status === "ready" && preview?.matches && preview.connection.status === "ready" && preview.connection.id === selected && chosen?.revision === preview.connection.revision && request.status === "pending" && preview.requestRevision === request.revision && (setup ? request.kind === "account_setup" : !configureMcp || !!mcpServer && !!accountAlias.trim());
+  const canApply = here && !blocked && chosen?.status === "ready" && preview?.matches && preview.connection.status === "ready" && preview.connection.id === selected && chosen.revision === preview.connection.revision && request.status === "pending" && preview.requestRevision === request.revision && (setup ? request.kind === "account_setup" : !configureMcp || !!mcpServer && !!accountAlias.trim());
   const failed = request.status === "failed";
   y2(() => {
     setPreview(null);
@@ -25358,25 +25359,30 @@ function AccessRequestReview({
     });
     return () => controller.abort();
   }, [path, selected, connectionVersion, request.revision, request.status]);
-  async function prepareSetup() {
-    if (blocked || !here || request.status !== "pending") return false;
-    if (request.kind === "account_setup") return true;
+  async function runCredentialAction(action, onFailure = (error2) => setError(errorMessage(error2))) {
     setBusy(true);
     setError("");
-    setPreview(null);
-    setConfigureMcp(false);
     try {
-      await credentialRequest(path + "/setup", "POST", { request_revision: request.revision });
-      setSubmitted(`${id2}:${request.revision}`);
-      onSaved();
+      await action();
       return true;
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
-      setError(error2 instanceof CredentialsError && error2.status === 404 && error2.message === "not_found" ? "Account setup unavailable. Reload and retry." : errorMessage(error2));
+      onFailure(error2);
       return false;
     } finally {
       setBusy(false);
     }
+  }
+  async function prepareSetup() {
+    if (blocked || !here || request.status !== "pending") return false;
+    if (request.kind === "account_setup") return true;
+    setPreview(null);
+    setConfigureMcp(false);
+    return runCredentialAction(async () => {
+      await credentialRequest(path + "/setup", "POST", { request_revision: request.revision });
+      setSubmitted(`${id2}:${request.revision}`);
+      onSaved();
+    }, (error2) => setError(error2 instanceof CredentialsError && error2.status === 404 && error2.message === "not_found" ? "Account setup unavailable. Reload and retry." : errorMessage(error2)));
   }
   y2(() => {
     if (!setup || request.kind === "account_setup" || request.status !== "pending" || blocked || !here || setupAttempt.current === request.revision) return;
@@ -25385,25 +25391,14 @@ function AccessRequestReview({
   }, [setup, request.kind, request.revision, request.status, blocked, here]);
   async function addAccount() {
     if (!await prepareSetup()) return;
-    setBusy(true);
-    setError("");
-    try {
-      await onCreate(effectiveRequest);
-    } catch (error2) {
-      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
-      setError(errorMessage(error2));
-    } finally {
-      setBusy(false);
-    }
+    await runCredentialAction(() => onCreate(effectiveRequest));
   }
   async function manageAccount(account2) {
     if (await prepareSetup()) onManage(account2, effectiveRequest);
   }
   async function apply() {
-    if (!preview || !canApply || !isApprovalThread(request.origin)) return;
-    setBusy(true);
-    setError("");
-    try {
+    if (!preview || !canApply) return;
+    await runCredentialAction(async () => {
       const message2 = approvalMessageDrafts.value[id2]?.trim();
       await credentialRequest(path + (setup ? "/account" : "/apply"), "POST", {
         connection_id: preview.connection.id,
@@ -25420,14 +25415,11 @@ function AccessRequestReview({
       setSubmitted(`${id2}:${request.revision}`);
       setPreview(null);
       onSaved();
-    } catch (error2) {
-      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
+    }, (error2) => {
       setError(errorMessage(error2));
       setPreview(null);
       onSaved();
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   y2(() => {
     if (setup && created?.status === "ready" && selected === created.id && canApply) void apply();
@@ -25447,21 +25439,14 @@ function AccessRequestReview({
   }
   async function retry() {
     if (blocked || !isApprovalThread(request.origin)) return;
-    setBusy(true);
-    setError("");
     setPreview(null);
     setConfigureMcp(false);
-    try {
+    await runCredentialAction(async () => {
       await credentialRequest(path + "/retry", "POST", { request_revision: request.revision });
       setSubmitted(`${id2}:${request.revision}`);
       setSelected("");
       onSaved();
-    } catch (error2) {
-      if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
-      setError(errorMessage(error2));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   const agentName = request.agentGroupName;
   const accountStatus = {
@@ -30321,7 +30306,7 @@ function FilePreviewDialog({ expanded, title, onClose, children }) {
   );
 }
 
-// node_modules/highlight.js/es/common.js
+// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 

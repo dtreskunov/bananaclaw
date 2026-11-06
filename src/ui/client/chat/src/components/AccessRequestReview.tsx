@@ -60,25 +60,26 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
     ...requirements, ...(defaults?.scopes.length ? { scopes: defaults.scopes } : {}),
   };
   const compatible = connections.filter(connection => connectionMatchesAccess(connection, effectiveRequest));
+  const compatibleSet = new Set(compatible.map(connection => connection.id));
   const created = connections.find(connection => connection.id === preferredConnectionId);
-  const createdMismatch = created?.status === 'ready' && !compatible.some(connection => connection.id === created.id);
+  const createdMismatch = created?.status === 'ready' && !compatibleSet.has(created.id);
   const reconnect = connections.filter(connection =>
-    connection.kind !== 'static' && !compatible.some(candidate => candidate.id === connection.id) &&
+    connection.kind !== 'static' && !compatibleSet.has(connection.id) &&
     !(createdMismatch && connection.id === created.id) &&
     connectionMatchesAccess(connection, { ...effectiveRequest, scopes: undefined }));
-  const compatibleIds = JSON.stringify(compatible.map(connection => connection.id));
+  const compatibleIds = JSON.stringify([...compatibleSet]);
   useEffect(() => {
     if (preferredConnectionId && preferred.current !== preferredConnectionId &&
-      compatible.some(connection => connection.id === preferredConnectionId)) {
+      compatibleSet.has(preferredConnectionId)) {
       preferred.current = preferredConnectionId;
       setSelected(preferredConnectionId);
-    } else if (selected && !compatible.some(connection => connection.id === selected)) {
+    } else if (selected && !compatibleSet.has(selected)) {
       setSelected('');
     }
   }, [preferredConnectionId, compatibleIds, selected, request]);
   const connectionVersion = JSON.stringify(connections.map(connection => [connection.id, connection.revision, connection.status,
     connection.requested_scopes, connection.granted_scopes, connection.scope_source]));
-  const chosen = connections.find(connection => connection.id === selected);
+  const chosen = compatible.find(connection => connection.id === selected);
   const here = isApprovalThread(request.origin);
   const awaiting = submitted === `${id}:${request.revision}`;
   const blocked = busy || awaiting || !!signingIn || !!disabled || !!loadingAccounts || !!accountsError;
@@ -88,9 +89,9 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
   const authorizationUrl = URL.parse(apps.find(app => app.id === defaults?.appId)?.authorization_endpoint ?? '');
   const signInDestination = authorizationUrl?.protocol === 'https:' && !authorizationUrl.username && !authorizationUrl.password
     ? authorizationUrl.origin + authorizationUrl.pathname : undefined;
-  const canApply = here && !blocked && compatible.some(connection => connection.id === selected) &&
+  const canApply = here && !blocked &&
     chosen?.status === 'ready' && preview?.matches && preview.connection.status === 'ready' &&
-    preview.connection.id === selected && chosen?.revision === preview.connection.revision &&
+    preview.connection.id === selected && chosen.revision === preview.connection.revision &&
     request.status === 'pending' &&
     preview.requestRevision === request.revision &&
     (setup ? request.kind === 'account_setup' : !configureMcp || (!!mcpServer && !!accountAlias.trim()));
@@ -118,24 +119,33 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
     return () => controller.abort();
   }, [path, selected, connectionVersion, request.revision, request.status]);
 
-  async function prepareSetup(): Promise<boolean> {
-    if (blocked || !here || request.status !== 'pending') return false;
-    if (request.kind === 'account_setup') return true;
+  async function runCredentialAction(
+    action: () => void | Promise<void>,
+    onFailure: (error: CredentialsError | TypeError) => void = error => setError(errorMessage(error)),
+  ): Promise<boolean> {
     setBusy(true);
     setError('');
-    setPreview(null);
-    setConfigureMcp(false);
     try {
-      await credentialRequest(path + '/setup', 'POST', { request_revision: request.revision });
-      setSubmitted(`${id}:${request.revision}`);
-      onSaved();
+      await action();
       return true;
     } catch (error) {
       if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
-      setError(error instanceof CredentialsError && error.status === 404 && error.message === 'not_found'
-        ? 'Account setup unavailable. Reload and retry.' : errorMessage(error));
+      onFailure(error);
       return false;
     } finally { setBusy(false); }
+  }
+
+  async function prepareSetup(): Promise<boolean> {
+    if (blocked || !here || request.status !== 'pending') return false;
+    if (request.kind === 'account_setup') return true;
+    setPreview(null);
+    setConfigureMcp(false);
+    return runCredentialAction(async () => {
+      await credentialRequest(path + '/setup', 'POST', { request_revision: request.revision });
+      setSubmitted(`${id}:${request.revision}`);
+      onSaved();
+    }, error => setError(error instanceof CredentialsError && error.status === 404 && error.message === 'not_found'
+      ? 'Account setup unavailable. Reload and retry.' : errorMessage(error)));
   }
 
   useEffect(() => {
@@ -147,14 +157,7 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
 
   async function addAccount(): Promise<void> {
     if (!(await prepareSetup())) return;
-    setBusy(true);
-    setError('');
-    try {
-      await onCreate(effectiveRequest);
-    } catch (error) {
-      if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
-      setError(errorMessage(error));
-    } finally { setBusy(false); }
+    await runCredentialAction(() => onCreate(effectiveRequest));
   }
 
   async function manageAccount(account: Connection): Promise<void> {
@@ -162,10 +165,8 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
   }
 
   async function apply(): Promise<void> {
-    if (!preview || !canApply || !isApprovalThread(request.origin)) return;
-    setBusy(true);
-    setError('');
-    try {
+    if (!preview || !canApply) return;
+    await runCredentialAction(async () => {
       const message = approvalMessageDrafts.value[id]?.trim();
       await credentialRequest(path + (setup ? '/account' : '/apply'), 'POST', {
         connection_id: preview.connection.id, connection_revision: preview.connection.revision,
@@ -180,12 +181,11 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
       setSubmitted(`${id}:${request.revision}`);
       setPreview(null);
       onSaved();
-    } catch (error) {
-      if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
+    }, error => {
       setError(errorMessage(error));
       setPreview(null);
       onSaved();
-    } finally { setBusy(false); }
+    });
   }
 
   useEffect(() => {
@@ -206,19 +206,14 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
 
   async function retry(): Promise<void> {
     if (blocked || !isApprovalThread(request.origin)) return;
-    setBusy(true);
-    setError('');
     setPreview(null);
     setConfigureMcp(false);
-    try {
+    await runCredentialAction(async () => {
       await credentialRequest(path + '/retry', 'POST', { request_revision: request.revision });
       setSubmitted(`${id}:${request.revision}`);
       setSelected('');
       onSaved();
-    } catch (error) {
-      if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
-      setError(errorMessage(error));
-    } finally { setBusy(false); }
+    });
   }
 
   const agentName = request.agentGroupName;
