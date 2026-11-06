@@ -81,6 +81,12 @@ dropped, date defaulted, or malformed fixture spelling silently normalized.
 Pending durable JSON payloads stay wire-compatible strings; journal sequence
 high-water marks and acknowledgements survive.
 
+Historical TEXT columns may also hold integral epoch-millisecond values with
+13-16 digits, including SQLite's trailing `.0` representation. The offline
+parser preserves those exact integers; it does not guess seconds, accept
+scientific notation or round fractional milliseconds. Public timestamp inputs
+remain ISO strings.
+
 ## Verify
 
 While still stopped:

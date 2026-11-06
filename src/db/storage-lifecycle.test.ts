@@ -53,6 +53,33 @@ describe('epoch storage lifecycle', () => {
     db.close();
   });
 
+  it('preserves integral legacy epoch-millisecond text without accepting fractional or ambiguous values', () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec('CREATE TABLE events(timestamp TEXT)');
+      db.prepare('INSERT INTO events VALUES (?)').run('1787342173990.0');
+      convertStoreTimes(db);
+      expect(db.prepare('SELECT timestamp,typeof(timestamp) type FROM events').get()).toEqual({
+        timestamp: 1787342173990,
+        type: 'integer',
+      });
+      expect(() => toEpoch('1787342173990.0')).toThrow('Invalid timestamp');
+    } finally {
+      db.close();
+    }
+    for (const value of ['1787342173990.1', '1787342173', '1.787342173990e12']) {
+      const source = new Database(':memory:');
+      try {
+        source.exec('CREATE TABLE events(timestamp TEXT)');
+        source.prepare('INSERT INTO events VALUES (?)').run(value);
+        expect(() => convertStoreTimes(source)).toThrow('events.timestamp');
+        expect(source.prepare('SELECT timestamp FROM events').get()).toEqual({ timestamp: value });
+      } finally {
+        source.close();
+      }
+    }
+  });
+
   it('applies pending integrity migrations only to the offline central candidate', async () => {
     fs.mkdirSync(directory);
     const filename = path.join(directory, 'central.db');

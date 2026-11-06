@@ -44,6 +44,7 @@ export const INSTANT_COLUMNS = new Set([
 /** Offline storage may already contain integers; the wire parser remains string-only. */
 export function legacyEpoch(value: unknown): number | null {
   if (value === null) return null;
+  if (typeof value === 'string' && /^-?\d{13,16}(?:\.0+)?$/.test(value)) value = Number(value);
   if (typeof value === 'number' && Number.isSafeInteger(value)) {
     new Date(value).toISOString();
     return value;
