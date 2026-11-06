@@ -459,7 +459,10 @@ function largeHistory(characters: number) {
   return { ...compactionOptions(conversation, protectedRef), contextWindow: 1_000_000 };
 }
 
-it('retries the reported oversized reasoning-model leaf without relaxing limits or losing source context', async () => {
+it.each([
+  ['original response', 8740, 2521, 39],
+  ['shorter retry response', 7625, 2067, 13],
+] as const)('enforces the leaf token limit after the %s without losing source context', async (_name, bytes, outputTokens, reasoningTokens) => {
   const options = largeHistory(240_000);
   const original = store.messages(options.conversation);
   let firstPrompt = '';
@@ -475,11 +478,11 @@ it('retries the reported oversized reasoning-model leaf without relaxing limits 
         firstPrompt = prompt;
         expect(request.maxOutputTokens).toBe(10_048);
         expect(prompt).toContain('2048 tokens and 8192 UTF-8 bytes');
-        return { text: 'x'.repeat(6403), finishReason: 'stop', outputTokens: 2183, reasoningTokens: 22 };
+        return { text: 'x'.repeat(bytes), finishReason: 'stop', outputTokens, reasoningTokens };
       }
       if (prompt.includes('The previous summary exceeded')) {
         retryPrompt = prompt;
-        expect(request.maxOutputTokens).toBe(10_048);
+        expect(request.maxOutputTokens).toBe(2048);
         expect(prompt).toContain('at most 1024 tokens and 4096 UTF-8 bytes');
       }
       return { text: 'Earlier work completed; continue pending requests.', finishReason: 'stop',
@@ -553,6 +556,26 @@ it('does not retry oversized output after cancellation', async () => {
     },
   })).rejects.toThrow('Compaction stopped');
   expect(calls).toBe(1);
+});
+
+it.each([false, true])('rejects a nonempty length-limited summary with oversized retry=%s', async retry => {
+  const options = largeHistory(60_000);
+  const before = store.contextMessages(options.conversation);
+  let calls = 0;
+  await expect(compactNativeContext({
+    ...options, reasoning: true, maxOutputTokens: 512_000,
+    summarize: async (_prompt, request) => {
+      if (++calls === 1 && retry) {
+        return { text: 'x'.repeat(32_001), finishReason: 'stop', outputTokens: 8100, reasoningTokens: 22 };
+      }
+      expect(request.maxOutputTokens).toBe(retry ? 8000 : 16_000);
+      return { text: 'Earlier actions completed, but the remaining constraints are',
+        finishReason: 'length', outputTokens: request.maxOutputTokens, reasoningTokens: retry ? 22 : 8022 };
+    },
+  })).rejects.toThrow('truncated summary');
+  expect(calls).toBe(retry ? 2 : 1);
+  expect(store.contextMessages(options.conversation)).toEqual(before);
+  expect(store.messages(options.conversation)).toEqual(before);
 });
 
 it('reserves reasoning and retry output without enlarging the visible summary target', async () => {

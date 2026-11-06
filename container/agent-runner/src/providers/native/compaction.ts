@@ -362,11 +362,14 @@ export async function compactNativeContext(options: {
       if (summary && oversized && !retried) {
         retried = true;
         instructions = budget.retryInstructions;
-        console.error('[native-compaction] Retrying oversized summary with a shorter visible-text target');
+        generationTokens = budget.outputTokens;
+        console.error(`[native-compaction] Retrying oversized summary with a shorter target and ${generationTokens} generated tokens`);
         continue;
       }
-      if (!summary || oversized) {
-        throw new CompactionSummaryError(`Compaction returned an ${summary ? 'oversized' : 'empty'} summary (${detail}); full transcript was preserved`);
+      const truncated = result.finishReason === 'length';
+      if (!summary || oversized || truncated) {
+        const reason = !summary ? 'an empty' : oversized ? 'an oversized' : 'a truncated';
+        throw new CompactionSummaryError(`Compaction returned ${reason} summary (${detail}); full transcript was preserved`);
       }
       return summary;
     }

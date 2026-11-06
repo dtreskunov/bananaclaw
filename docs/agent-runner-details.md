@@ -557,11 +557,14 @@ byte caps do not grow. Reported visible tokens are checked separately when
 reasoning usage is available.
 
 An oversized summary gets one retry against the same original source, with
-instructions targeting half the original token and byte limits. This shares
-the single output-validation retry with reasoning-only recovery, counts toward
-the request limit, and keeps the original hard size limits. Source packing
-reserves room for the longer retry instructions; no summary is truncated or
-activated unless it passes validation.
+instructions targeting half the original token and byte limits. The retry's
+total generation allowance, including reasoning, is capped at the original
+visible token limit rather than retaining the extra reasoning reserve. This
+shares the single output-validation retry with reasoning-only recovery, counts
+toward the request limit, and keeps the original hard size limits. Source
+packing reserves room for the longer retry instructions. Nonempty responses
+that reach their generation limit are rejected as truncated, not activated;
+the full transcript remains unchanged.
 
 MiniMax-M3.1-Flash-Preview summaries use low effort (`output_config.effort` for
 Anthropic, `reasoning_effort` for Chat Completions), without changing normal
@@ -569,14 +572,14 @@ generation settings. This model cannot disable thinking, and thinking consumes
 the generation allowance; see the [MiniMax compatibility documentation](https://platform.minimax.io/docs/api-reference/text-anthropic-api).
 Summary diagnostics record request number, finish reason, output/reasoning
 tokens, visible bytes and limits, never transcript or reasoning content.
-Empty and oversized failures have distinct messages with these measurements.
+Empty, oversized and truncated failures have distinct messages with these measurements.
 
 Each compaction has a five-minute deadline, 60-second request timeouts, at most
 32 leaf chunks, and at most 64 model requests, counting rejections and reduction.
 There are no hidden SDK retries. A context-specific summarizer rejection splits
 the offending request and summarizes its ordered fragments within the same
 limits; other provider errors are surfaced without splitting. Work exceeding
-the leaf limit is rejected before model calls. Empty, oversized, non-reducing,
+the leaf limit is rejected before model calls. Empty, oversized, truncated, non-reducing,
 failed, or cancelled summaries are not saved. Exhausted emergency recovery
 surfaces an explicit provider failure rather than silently dropping history.
 
