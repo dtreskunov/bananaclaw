@@ -19,7 +19,8 @@ import path from 'path';
 
 import { DATA_DIR } from '../config.js';
 import { log } from '../log.js';
-import { epochMs, importTimestamp } from '../time.js';
+import { epochMs } from '../time.js';
+import { readJsonFile } from '../json-file.js';
 
 export type PairingIntent = 'main' | { kind: 'wire-to'; folder: string } | { kind: 'new-agent'; folder: string };
 export type PairingStatus = 'pending' | 'consumed' | 'invalidated' | 'unknown';
@@ -80,41 +81,14 @@ function withLock<T>(fn: () => Promise<T> | T): Promise<T> {
 }
 
 function readStore(): Store {
-  type ImportedRecord = Omit<PairingRecord, 'createdAt' | 'consumed' | 'attempts'> & {
-    createdAt: unknown;
-    consumed?: Omit<ConsumedDetails, 'consumedAt'> & { consumedAt: unknown };
-    attempts?: (Omit<PairingAttempt, 'at'> & { at: unknown })[];
-  };
-  let parsed: { pairings: ImportedRecord[] };
-  try {
-    const raw = fs.readFileSync(storePath(), 'utf8');
-    parsed = JSON.parse(raw) as typeof parsed;
-  } catch {
-    return { pairings: [] };
+  const store = readJsonFile<Store>(storePath(), { pairings: [] });
+  if (!Array.isArray(store.pairings)) throw new Error('Invalid Telegram pairing metadata');
+  for (const record of store.pairings) {
+    epochMs(record.createdAt);
+    if (record.consumed) epochMs(record.consumed.consumedAt);
+    for (const attempt of record.attempts ?? []) epochMs(attempt.at);
   }
-  if (!Array.isArray(parsed.pairings)) return { pairings: [] };
-  return {
-    pairings: parsed.pairings.map(({ createdAt, consumed, attempts, ...record }) => ({
-      ...record,
-      createdAt: epochMs(importTimestamp(createdAt)),
-      ...(consumed
-        ? {
-            consumed: {
-              ...consumed,
-              consumedAt: epochMs(importTimestamp(consumed.consumedAt)),
-            },
-          }
-        : {}),
-      ...(attempts
-        ? {
-            attempts: attempts.map((attempt) => ({
-              ...attempt,
-              at: epochMs(importTimestamp(attempt.at)),
-            })),
-          }
-        : {}),
-    })),
-  };
+  return store;
 }
 
 function writeStore(store: Store): void {

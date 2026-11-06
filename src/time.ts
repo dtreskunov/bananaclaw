@@ -15,13 +15,6 @@ export function formatTimestamp(value: EpochMs | null): string | null {
   return value === null ? null : new Date(epochMs(value)).toISOString();
 }
 
-/** Import older JSON/archive dates once; internal record types remain strictly numeric. */
-export function importTimestamp(value: unknown): EpochMs | null {
-  if (value === null) return null;
-  if (typeof value === 'string') return parseTimestamp(value);
-  return epochMs(value);
-}
-
 /** Only external ISO/SQLite UTC boundaries parse strings; UI state never does. */
 export function parseTimestamp(value: string): EpochMs;
 export function parseTimestamp(value: string | null | undefined): EpochMs | null;

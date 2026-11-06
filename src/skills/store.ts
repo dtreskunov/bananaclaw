@@ -16,7 +16,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR } from '../config.js';
-import { epochMs, importTimestamp } from '../time.js';
+import { epochMs } from '../time.js';
+import { readJsonFile } from '../json-file.js';
 
 export interface MarketplaceRecord {
   id: string;
@@ -49,14 +50,6 @@ export function marketplaceCacheDir(id: string): string {
   return path.join(skillsStoreRoot(), 'cache', id);
 }
 
-function readJsonFile<T>(file: string, fallback: T): T {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 /** Write via a temp file + rename so a crash can't leave a truncated manifest. */
 function writeJsonFile(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -68,24 +61,17 @@ function writeJsonFile(file: string, value: unknown): void {
 // ── marketplace sources ───────────────────────────────────────────────────
 
 export function readMarketplaceRecords(): MarketplaceRecord[] {
-  type ImportedRecord = Omit<MarketplaceRecord, 'addedAt' | 'refreshedAt' | 'lastRefreshAttemptAt'> & {
-    addedAt: unknown;
-    refreshedAt: unknown;
-    lastRefreshAttemptAt?: unknown;
-  };
-  const raw = readJsonFile<{ sources?: ImportedRecord[] }>(path.join(skillsStoreRoot(), 'marketplaces.json'), {});
-  return Array.isArray(raw.sources)
-    ? raw.sources.map(({ addedAt, refreshedAt, lastRefreshAttemptAt, ...source }) => ({
-        ...source,
-        addedAt: epochMs(importTimestamp(addedAt)),
-        refreshedAt: importTimestamp(refreshedAt),
-        ...(lastRefreshAttemptAt === undefined
-          ? {}
-          : {
-              lastRefreshAttemptAt: importTimestamp(lastRefreshAttemptAt),
-            }),
-      }))
-    : [];
+  const { sources } = readJsonFile<{ sources: MarketplaceRecord[] }>(
+    path.join(skillsStoreRoot(), 'marketplaces.json'),
+    { sources: [] },
+  );
+  if (!Array.isArray(sources)) throw new Error('Invalid skill catalog metadata');
+  for (const source of sources) {
+    epochMs(source.addedAt);
+    if (source.refreshedAt !== null) epochMs(source.refreshedAt);
+    if (source.lastRefreshAttemptAt != null) epochMs(source.lastRefreshAttemptAt);
+  }
+  return sources;
 }
 
 export function getMarketplaceRecord(id: string): MarketplaceRecord | null {

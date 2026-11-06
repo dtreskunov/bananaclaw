@@ -38,11 +38,11 @@ vi.mock('./log.js', () => ({
 
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
 
-function readState(): { attempt: number; timestamp: string } {
+function readState(): { attempt: number; timestamp: number } {
   return JSON.parse(fs.readFileSync(CB_PATH, 'utf-8'));
 }
 
-function seedState(attempt: number, timestamp = new Date().toISOString()): void {
+function seedState(attempt: number, timestamp = Date.now()): void {
   fs.writeFileSync(CB_PATH, JSON.stringify({ attempt, timestamp }));
 }
 
@@ -90,7 +90,7 @@ describe('enforceStartupBackoff — state transitions', () => {
   });
 
   it('outside reset window (>1h), attempt resets to 1', async () => {
-    const longAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const longAgo = Date.now() - 2 * 60 * 60 * 1000;
     seedState(5, longAgo);
     await enforceStartupBackoff();
     expect(readState().attempt).toBe(1);
@@ -99,7 +99,7 @@ describe('enforceStartupBackoff — state transitions', () => {
   it('exactly at the reset window boundary still counts as "within"', async () => {
     // RESET_WINDOW_MS = 60min. Use 59min59s to stay inside even if the test
     // takes a few ms to execute.
-    const justInside = new Date(Date.now() - (60 * 60 * 1000 - 1000)).toISOString();
+    const justInside = Date.now() - (60 * 60 * 1000 - 1000);
     seedState(2, justInside);
     vi.useFakeTimers();
     const promise = enforceStartupBackoff();
@@ -108,10 +108,15 @@ describe('enforceStartupBackoff — state transitions', () => {
     expect(readState().attempt).toBe(3);
   });
 
-  it('treats a malformed state file as no prior state', async () => {
+  it('surfaces malformed metadata instead of resetting crash history', async () => {
     fs.writeFileSync(CB_PATH, '{ this is not json');
-    await enforceStartupBackoff();
-    expect(readState().attempt).toBe(1);
+    await expect(enforceStartupBackoff()).rejects.toThrow('Unable to read JSON metadata');
+    expect(fs.readFileSync(CB_PATH, 'utf8')).toBe('{ this is not json');
+  });
+
+  it('requires explicit normalization of legacy date strings', async () => {
+    fs.writeFileSync(CB_PATH, JSON.stringify({ attempt: 2, timestamp: '2026-01-01T00:00:00Z' }));
+    await expect(enforceStartupBackoff()).rejects.toThrow('Invalid epoch-millisecond timestamp');
   });
 
   it('resetCircuitBreaker after a startup actually clears the counter for the next startup', async () => {

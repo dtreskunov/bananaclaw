@@ -3,7 +3,8 @@ import path from 'path';
 
 import { DATA_DIR } from './config.js';
 import { log } from './log.js';
-import { epochMs, formatTimestamp, importTimestamp } from './time.js';
+import { epochMs, formatTimestamp } from './time.js';
+import { readJsonFile } from './json-file.js';
 
 const CB_PATH = path.join(DATA_DIR, 'circuit-breaker.json');
 const RESET_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -17,14 +18,9 @@ interface CircuitBreakerState {
 }
 
 function read(): CircuitBreakerState | null {
-  let state: Omit<CircuitBreakerState, 'timestamp'> & { timestamp: unknown };
-  try {
-    const raw = fs.readFileSync(CB_PATH, 'utf-8');
-    state = JSON.parse(raw) as typeof state;
-  } catch {
-    return null;
-  }
-  return { ...state, timestamp: epochMs(importTimestamp(state.timestamp)) };
+  const state = readJsonFile<CircuitBreakerState | undefined>(CB_PATH, undefined);
+  if (state !== undefined) epochMs(state.timestamp);
+  return state ?? null;
 }
 
 function write(state: CircuitBreakerState): void {
@@ -40,10 +36,8 @@ function getDelay(attempt: number): number {
 }
 
 export function resetCircuitBreaker(): void {
-  try {
-    fs.unlinkSync(CB_PATH);
-    log.info('Circuit breaker reset on clean shutdown');
-  } catch {}
+  fs.rmSync(CB_PATH, { force: true });
+  log.info('Circuit breaker reset on clean shutdown');
 }
 
 export async function enforceStartupBackoff(): Promise<void> {

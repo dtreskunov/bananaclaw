@@ -4,6 +4,12 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Numeric-only host metadata.** Pairing, skill-catalog and startup
+  breaker files no longer import ISO dates during normal reads. Run the
+  [stopped-host normalization](docs/db.md) before deploying; the explicit tool
+  backs up originals. Invalid JSON now fails explicitly instead of becoming an
+  empty catalog, pairing store or crash history.
+
 - **[BREAKING] Retire interaction expiry.** Requests resolve explicitly; legacy
   expiring requests and their old column must be discarded during the
   [stopped-host cleanup](docs/db.md#retiring-interaction-expiry). Startup refuses

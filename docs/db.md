@@ -45,8 +45,18 @@ explicit stopped-host rebuild before deploying numeric-host code:
 This reconstructs only derived projections from the already-integer session
 stores; durable messages, journals and timestamp columns do not need another
 cutover. Startup/readers refuse the older projection shape rather than silently
-coercing it. Legacy catalog/pairing/breaker JSON is decoded only at file-read
-boundaries; current in-memory records and new writes are numeric. Group archives
+coercing it. Catalog/pairing/breaker JSON requires numeric dates; legacy files
+must be normalized explicitly while the host is stopped:
+
+```sh
+pnpm exec tsx scripts/normalize-host-metadata.ts --host-stopped /absolute/path/to/new-metadata-backup
+```
+
+The tool checks the host socket, validates all known dates before writing, keeps
+exact private backups, and does not traverse opaque payloads. Runtime readers
+reject legacy strings and malformed files rather than returning empty stores.
+For rollback, stop the host and restore the saved files with the previous code.
+Group archives
 must already contain numeric dates; legacy string-date archives are rejected
 without conversion or filesystem changes. Keep central and metadata backups for rollback, and rebuild summaries
 with the matching previous code if rolling back the host.
