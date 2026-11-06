@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { reduceActivityLines } from '../../../activity.js';
+import { reduceConversationActivity } from '../../../activity.js';
 import type { Question } from '../../../types.js';
 import type { ConversationApproval } from '../../shared/approval.js';
 import { queryInteractions, legacyInteractionExpired } from '../../../db/interactions.js';
@@ -26,34 +26,6 @@ type StoredTurn = Omit<TurnRow, 'started_at' | 'ended_at'> & {
   started_at: number | null;
   ended_at: number | null;
 };
-
-function displayActivity(lines: ConversationTurn['activity']): ConversationTurn['activity'] {
-  const groups = new Map<string, ConversationTurn['activity']>();
-  for (const line of lines) {
-    let key = `ordinal:${line.ordinal}`;
-    try {
-      const step: unknown = JSON.parse(line.text);
-      if (
-        step &&
-        typeof step === 'object' &&
-        'kind' in step &&
-        'id' in step &&
-        typeof step.kind === 'string' &&
-        typeof step.id === 'string'
-      )
-        key = JSON.stringify([step.kind, step.id]);
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-    }
-    const group = groups.get(key) ?? [];
-    group.push(line);
-    groups.set(key, group);
-  }
-  return [...groups.values()].flatMap((group) => {
-    const reduced = reduceActivityLines(group);
-    return reduced.length ? reduced.map((line) => ({ ...group[0], ...line })) : group;
-  });
-}
 
 function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
   const value: Record<string, unknown> = {};
@@ -203,7 +175,7 @@ export function projectConversation(
       endedAt: turn.ended_at,
       inputIds,
       outputIds: outputs,
-      activity: displayActivity([...trace.values()].sort((a, b) => a.ordinal - b.ordinal)),
+      activity: reduceConversationActivity([...trace.values()].sort((a, b) => a.ordinal - b.ordinal)),
       usage,
       metadata: {
         status:

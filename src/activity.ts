@@ -34,54 +34,69 @@ export interface ReducedActivityLine extends ActivityLine {
   step: ActivityStep;
 }
 
-function parseStep(text: string): ActivityStep | null {
+function parseStep(text: string): { key: string; step: ActivityStep | null } | null {
   try {
     const value = JSON.parse(text) as Partial<ActivityStep>;
-    if (!value || typeof value.kind !== 'string' || typeof value.id !== 'string' || !value.id) return null;
-    if (
-      !['tool', 'internal', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification', 'model'].includes(
-        value.kind,
-      )
-    )
-      return null;
-    return value as ActivityStep;
-  } catch {
+    if (!value || typeof value.kind !== 'string' || typeof value.id !== 'string') return null;
+    return {
+      key: JSON.stringify([value.kind, value.id]),
+      step:
+        value.id &&
+        ['tool', 'internal', 'file', 'patch', 'retry', 'compaction', 'subtask', 'notification', 'model'].includes(
+          value.kind,
+        )
+          ? (value as ActivityStep)
+          : null,
+    };
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
     return null;
   }
 }
 
-/** Collapse lifecycle updates by kind + provider id while preserving first-seen order and timestamp. */
-export function reduceActivityLines<T extends { ts: string | number; text: string }>(
-  lines: T[],
-): { ts: T['ts']; text: string }[] {
-  const reduced: { ts: T['ts']; text: string; step: ActivityStep }[] = [];
-  const positions = new Map<string, number>();
-
-  for (const line of lines) {
-    const step = parseStep(line.text);
-    if (!step) continue;
-    const key = `${step.kind}\u0000${step.id}`;
-    const position = positions.get(key);
-    if (position === undefined) {
-      positions.set(key, reduced.length);
-      reduced.push({ ...line, step });
+function reducedActivity<T extends { ts: string | number; text: string }>(lines: T[]) {
+  const groups = new Map<string, { lines: T[]; step: ActivityStep | null }>();
+  for (const [index, line] of lines.entries()) {
+    const parsed = parseStep(line.text);
+    const key = parsed?.key ?? `line:${index}`;
+    const prior = groups.get(key);
+    if (!prior) {
+      groups.set(key, { lines: [line], step: parsed?.step ?? null });
       continue;
     }
-    const prior = reduced[position];
-    let merged = { ...prior.step, ...step } as ActivityStep;
+    if (!parsed?.step) {
+      prior.lines.push(line);
+      continue;
+    }
+    let merged = { ...prior.step, ...parsed.step } as ActivityStep;
     if (
       (merged.kind === 'tool' || merged.kind === 'compaction') &&
       merged.status !== undefined &&
       ['completed', 'error', 'interrupted', 'unknown'].includes(merged.status)
     ) {
-      const startedAt = Number(prior.ts);
+      const startedAt = Number(prior.lines[0].ts);
       const endedAt = Number(line.ts);
       if (Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt) {
         merged = { ...merged, durationMs: endedAt - startedAt };
       }
     }
-    reduced[position] = { ts: prior.ts, text: JSON.stringify(merged), step: merged };
+    prior.step = merged;
   }
+  return [...groups.values()];
+}
 
-  return reduced.map(({ ts, step }) => ({ ts, text: JSON.stringify(step) }));
+/** Channel labels omit unrecognized activity and retain first-seen timestamps. */
+export function reduceActivityLines<T extends { ts: string | number; text: string }>(
+  lines: T[],
+): { ts: T['ts']; text: string }[] {
+  return reducedActivity(lines).flatMap(({ lines: [first], step }) =>
+    step ? [{ ts: first.ts, text: JSON.stringify(step) }] : [],
+  );
+}
+
+/** Conversation traces retain first-seen positions and all unrecognized history. */
+export function reduceConversationActivity<T extends { ts: string | number; text: string }>(lines: T[]): T[] {
+  return reducedActivity(lines).flatMap(({ lines, step }) =>
+    step ? [{ ...lines[0], text: JSON.stringify(step) }] : lines,
+  );
 }

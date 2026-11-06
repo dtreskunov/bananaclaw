@@ -36,6 +36,11 @@ fabricates a final response, completion time, or billing record. Silent turns
 remain visible without synthetic output. At the same host revision, reducing
 incremental frames yields the same conversation as a fresh snapshot.
 
+Channel labels and conversation traces share one activity lifecycle reducer.
+Each emitted line is parsed once. Traces retain the first ordinal, timestamp
+and timeline position, plus unrecognized imported history; channel labels
+continue to omit unrecognized activity.
+
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 

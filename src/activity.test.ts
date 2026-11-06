@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { reduceActivityLines } from './activity.js';
+import { reduceActivityLines, reduceConversationActivity } from './activity.js';
 import { stepSummary } from './ui/shared/activity-presentation.js';
 
 const line = (ts: string, step: object) => ({ ts, text: JSON.stringify(step) });
@@ -10,16 +10,33 @@ const latestLabel = (lines: Array<{ ts: string; text: string }>) =>
 describe('reduceActivityLines', () => {
   it('merges compaction lifecycle updates and measures their duration', () => {
     const [result] = reduceActivityLines([
-      line('1000', { kind: 'compaction', id: 'compact-1', auto: true, status: 'running', detail: 'Context window exceeded' }),
+      line('1000', {
+        kind: 'compaction',
+        id: 'compact-1',
+        auto: true,
+        status: 'running',
+        detail: 'Context window exceeded',
+      }),
       line('1250', { kind: 'compaction', id: 'compact-1', auto: true, status: 'completed' }),
     ]);
-    expect(JSON.parse(result.text)).toMatchObject({ kind: 'compaction', status: 'completed', durationMs: 250, detail: 'Context window exceeded' });
+    expect(JSON.parse(result.text)).toMatchObject({
+      kind: 'compaction',
+      status: 'completed',
+      durationMs: 250,
+      detail: 'Context window exceeded',
+    });
     expect(latestLabel([result])).toBe('Compacted context automatically');
   });
 
   it('preserves builtin metadata through completion and reconnect lifecycle replay', () => {
-    const running = { kind: 'tool', id: 'email-1', tool: 'nanoclaw.send_email', status: 'running',
-      detail: 'alice@example.test', description: 'Subject: Exact\n<literal> subject' };
+    const running = {
+      kind: 'tool',
+      id: 'email-1',
+      tool: 'nanoclaw.send_email',
+      status: 'running',
+      detail: 'alice@example.test',
+      description: 'Subject: Exact\n<literal> subject',
+    };
     const result = reduceActivityLines([
       line('10', running),
       line('20', { kind: 'tool', id: 'email-1', tool: 'nanoclaw.send_email', status: 'completed' }),
@@ -60,10 +77,12 @@ describe('reduceActivityLines', () => {
       line('2000', tool('b', 'completed')),
       line('4000', tool('a', 'completed')),
     ]);
-    expect(result.map(({ ts, text }) => {
-      const step = JSON.parse(text);
-      return { id: step.id, start: Number(ts), end: Number(ts) + step.durationMs, status: step.status };
-    })).toEqual([
+    expect(
+      result.map(({ ts, text }) => {
+        const step = JSON.parse(text);
+        return { id: step.id, start: Number(ts), end: Number(ts) + step.durationMs, status: step.status };
+      }),
+    ).toEqual([
       { id: 'a', start: 1000, end: 4000, status: 'completed' },
       { id: 'b', start: 1500, end: 2000, status: 'completed' },
     ]);
@@ -75,72 +94,138 @@ describe('reduceActivityLines', () => {
       line('1050', { kind: 'tool', id: 'call-1', tool: 'write', status }),
     ]);
     expect(JSON.parse(result.text)).toMatchObject({ status, durationMs: 50 });
-    expect(latestLabel([result])).toBe(status === 'interrupted'
-      ? 'Interrupted (outcome unknown): write'
-      : 'Outcome unknown: write');
+    expect(latestLabel([result])).toBe(
+      status === 'interrupted' ? 'Interrupted (outcome unknown): write' : 'Outcome unknown: write',
+    );
   });
 
   it('keeps distinct ids and drops malformed or unidentified lines', () => {
-    expect(reduceActivityLines([
-      { ts: '1', text: 'Thinking…' },
-      line('2', { kind: 'tool', tool: 'bash', status: 'running' }),
-      line('3', { kind: 'tool', id: 'a', tool: 'read', status: 'running' }),
-      line('4', { kind: 'tool', id: 'b', tool: 'read', status: 'running' }),
-    ])).toHaveLength(2);
+    expect(
+      reduceActivityLines([
+        { ts: '1', text: 'Thinking…' },
+        line('2', { kind: 'tool', tool: 'bash', status: 'running' }),
+        line('3', { kind: 'tool', id: 'a', tool: 'read', status: 'running' }),
+        line('4', { kind: 'tool', id: 'b', tool: 'read', status: 'running' }),
+      ]),
+    ).toHaveLength(2);
   });
 
   it('drops legacy reasoning activity rows', () => {
-    expect(reduceActivityLines([
-      line('1', { kind: 'reasoning', id: 'r1', text: 'private detail' }),
-      line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
-    ])).toEqual([
-      line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
-    ]);
+    expect(
+      reduceActivityLines([
+        line('1', { kind: 'reasoning', id: 'r1', text: 'private detail' }),
+        line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
+      ]),
+    ).toEqual([line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' })]);
+  });
+});
+
+describe('conversation activity reduction', () => {
+  it('parses each emitted line only once and retains first-seen metadata', () => {
+    const lines = [
+      {
+        ...line('1000', { kind: 'tool', id: 'a', tool: 'read', status: 'running' }),
+        ordinal: 0,
+        timelinePosition: 100,
+      },
+      { ts: '1001', text: 'Imported history', ordinal: 1, timelinePosition: 200 },
+      {
+        ...line('1500', { kind: 'tool', id: 'a', tool: 'read', status: 'completed' }),
+        ordinal: 2,
+        timelinePosition: 300,
+      },
+    ];
+    const parse = vi.spyOn(JSON, 'parse');
+    let result: typeof lines;
+    try {
+      result = reduceConversationActivity(lines);
+      expect(parse).toHaveBeenCalledTimes(lines.length);
+    } finally {
+      parse.mockRestore();
+    }
+    expect(result[0]).toMatchObject({ ts: '1000', ordinal: 0, timelinePosition: 100 });
+    expect(JSON.parse(result[0].text)).toMatchObject({ status: 'completed', durationMs: 500 });
+    expect(result[1]).toBe(lines[1]);
+    expect(lines[0].text).toContain('running');
+  });
+
+  it('keeps unrecognized identity groups and malformed rows in their existing first-seen order', () => {
+    const lines = [
+      line('1', { kind: 'future-step', id: 'unknown', text: 'first' }),
+      line('2', { kind: 'tool', id: 'known', tool: 'read', status: 'running' }),
+      line('3', { kind: 'future-step', id: 'unknown', text: 'second' }),
+      { ts: '4', text: '{invalid' },
+      line('5', { kind: 'tool', id: '', tool: 'read' }),
+    ];
+    const result = reduceConversationActivity(lines);
+    expect(result).toEqual([lines[0], lines[2], lines[1], lines[3], lines[4]]);
+    expect(reduceActivityLines(lines)).toEqual([lines[1]]);
   });
 });
 
 describe('latest reduced label', () => {
   it('matches the primary label of the latest reduced activity', () => {
-    expect(latestLabel([
-      line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running' }),
-      line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
-    ])).toBe('Ran bash');
-    expect(latestLabel([
-      line('1', { kind: 'internal', id: 'i1', text: 'Checking constraints' }),
-    ])).toBe('Internal activity');
+    expect(
+      latestLabel([
+        line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running' }),
+        line('2', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed' }),
+      ]),
+    ).toBe('Ran bash');
+    expect(latestLabel([line('1', { kind: 'internal', id: 'i1', text: 'Checking constraints' })])).toBe(
+      'Internal activity',
+    );
   });
 
   it('uses the same success and error labels shown in trace rows', () => {
-    expect(latestLabel([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'running' })]))
-      .toBe('Running bash');
-    expect(latestLabel([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'error' })]))
-      .toBe('Ran bash');
+    expect(latestLabel([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'running' })])).toBe('Running bash');
+    expect(latestLabel([line('1', { kind: 'tool', id: 'a', tool: 'Bash', status: 'error' })])).toBe('Ran bash');
   });
 
   it('prefers a provider tool title over the bare tool name', () => {
-    expect(latestLabel([
-      line('1', { kind: 'tool', id: 'a', tool: 'skill', status: 'running' }),
-      line('2', { kind: 'tool', id: 'a', tool: 'skill', status: 'completed', title: 'Loaded skill: agent-browser' }),
-    ])).toBe('Loaded skill: agent-browser');
+    expect(
+      latestLabel([
+        line('1', { kind: 'tool', id: 'a', tool: 'skill', status: 'running' }),
+        line('2', { kind: 'tool', id: 'a', tool: 'skill', status: 'completed', title: 'Loaded skill: agent-browser' }),
+      ]),
+    ).toBe('Loaded skill: agent-browser');
   });
 
   it('shows the operation verb for file tools (read/write/edit)', () => {
     // OpenCode-style: title is the path; the verb comes from the tool name.
-    expect(latestLabel([
-      line('1', { kind: 'tool', id: 'a', tool: 'write', status: 'running', detail: '/workspace/agent/notes.md' }),
-      line('2', { kind: 'tool', id: 'a', tool: 'write', status: 'completed', detail: '/workspace/agent/notes.md', title: 'workspace/agent/notes.md' }),
-    ])).toBe('Wrote /workspace/agent/notes.md');
+    expect(
+      latestLabel([
+        line('1', { kind: 'tool', id: 'a', tool: 'write', status: 'running', detail: '/workspace/agent/notes.md' }),
+        line('2', {
+          kind: 'tool',
+          id: 'a',
+          tool: 'write',
+          status: 'completed',
+          detail: '/workspace/agent/notes.md',
+          title: 'workspace/agent/notes.md',
+        }),
+      ]),
+    ).toBe('Wrote /workspace/agent/notes.md');
     // Claude-style: no title, path comes from detail.
-    expect(latestLabel([line('1', { kind: 'tool', id: 'b', tool: 'Read', status: 'running', detail: '/workspace/agent/notes.md' })]))
-      .toBe('Reading /workspace/agent/notes.md');
-    expect(latestLabel([line('1', { kind: 'tool', id: 'c', tool: 'Edit', status: 'error', detail: '/workspace/agent/notes.md' })]))
-      .toBe('Edited /workspace/agent/notes.md');
+    expect(
+      latestLabel([
+        line('1', { kind: 'tool', id: 'b', tool: 'Read', status: 'running', detail: '/workspace/agent/notes.md' }),
+      ]),
+    ).toBe('Reading /workspace/agent/notes.md');
+    expect(
+      latestLabel([
+        line('1', { kind: 'tool', id: 'c', tool: 'Edit', status: 'error', detail: '/workspace/agent/notes.md' }),
+      ]),
+    ).toBe('Edited /workspace/agent/notes.md');
   });
 
   it('uses status-aware command labels and collapses command whitespace', () => {
-    expect(latestLabel([line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running', detail: 'pnpm test\n--runInBand' })]))
-      .toBe('Running pnpm test --runInBand');
-    expect(latestLabel([line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed', detail: 'pnpm test' })]))
-      .toBe('Ran pnpm test');
+    expect(
+      latestLabel([
+        line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'running', detail: 'pnpm test\n--runInBand' }),
+      ]),
+    ).toBe('Running pnpm test --runInBand');
+    expect(
+      latestLabel([line('1', { kind: 'tool', id: 'a', tool: 'bash', status: 'completed', detail: 'pnpm test' })]),
+    ).toBe('Ran pnpm test');
   });
 });
