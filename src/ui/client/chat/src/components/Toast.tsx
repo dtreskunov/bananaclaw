@@ -29,8 +29,10 @@ function enqueueToast(message: ToastMessage, ms = 1800): void {
   }
 }
 
-export function showToast(text: string, kind: 'ok' | 'err' = 'ok', ms = 1800): void {
-  enqueueToast({ id: nextId++, text, kind }, ms);
+export function showToast(text: string, kind: 'ok' | 'err' = 'ok', ms = 1800): number {
+  const id = nextId++;
+  enqueueToast({ id, text, kind }, ms);
+  return id;
 }
 
 // Sticky toast action — does not auto-hide. Caller's onClick is responsible
@@ -49,6 +51,12 @@ export function dismissToast(): void {
   const next = pending.shift();
   if (next) displayToast(next.message, next.ms);
   else toastMessage.value = null;
+}
+
+export function dismissToastById(id: number): void {
+  const index = pending.findIndex(item => item.message.id === id);
+  if (index !== -1) pending.splice(index, 1);
+  else if (toastMessage.value?.id === id) dismissToast();
 }
 
 export function Toast() {

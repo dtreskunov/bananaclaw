@@ -20423,7 +20423,9 @@ function enqueueToast(message2, ms = 1800) {
   }
 }
 function showToast(text2, kind = "ok", ms = 1800) {
-  enqueueToast({ id: nextId++, text: text2, kind }, ms);
+  const id2 = nextId++;
+  enqueueToast({ id: id2, text: text2, kind }, ms);
+  return id2;
 }
 function showStickyToast(text2, onClick, kind = "ok", actionLabel) {
   enqueueToast({ id: nextId++, text: text2, kind, action: onClick, actionLabel });
@@ -20436,6 +20438,11 @@ function dismissToast() {
   const next = pending3.shift();
   if (next) displayToast(next.message, next.ms);
   else toastMessage.value = null;
+}
+function dismissToastById(id2) {
+  const index = pending3.findIndex((item) => item.message.id === id2);
+  if (index !== -1) pending3.splice(index, 1);
+  else if (toastMessage.value?.id === id2) dismissToast();
 }
 function Toast() {
   const t4 = toastMessage.value;
@@ -27599,7 +27606,9 @@ function revealLatestActivity(viewport, details = false) {
 // src/read-state.ts
 var ReadAckError = class extends Error {
 };
+var readErrors = /* @__PURE__ */ new Map();
 function attachReadTracking(log, target) {
+  const errorKey = JSON.stringify([target.groupId, target.threadId, target.channelType, target.messagingGroupId]);
   let timer2;
   let complete = false;
   let request = null;
@@ -27620,13 +27629,21 @@ function attachReadTracking(log, target) {
         body: JSON.stringify(target.cursor),
         signal: active.signal
       });
+      if (request !== active) return;
       if (!response.ok) throw new ReadAckError(`Read acknowledgement failed: HTTP ${response.status}`);
       complete = true;
+      const errorId = readErrors.get(errorKey);
+      if (errorId !== void 0) {
+        dismissToastById(errorId);
+        readErrors.delete(errorKey);
+      }
     } catch (error) {
       if (request === null) return;
       if (!(error instanceof ReadAckError) && !(error instanceof TypeError) && !(error instanceof Error && error.name === "AbortError")) throw error;
       console.warn("Read acknowledgement failed", error);
-      showToast("Could not mark this conversation read. Refocus or scroll to retry.", "err");
+      const previousError = readErrors.get(errorKey);
+      if (previousError !== void 0) dismissToastById(previousError);
+      readErrors.set(errorKey, showToast("Could not mark this conversation read. Refocus or scroll to retry.", "err"));
     } finally {
       clearTimeout(timeout);
       if (request === active) request = null;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { dismissToast, showStickyToast, showToast, Toast } from './components/Toast';
+import { dismissToast, dismissToastById, showStickyToast, showToast, Toast } from './components/Toast';
 import { toastMessage } from './state';
 
 vi.hoisted(() => {
@@ -70,6 +70,27 @@ describe('shared toast policy', () => {
     expect(action).not.toHaveBeenCalled();
     toastMessage.value?.action?.();
     expect(action).toHaveBeenCalledOnce();
+  });
+
+  it('dismisses only the recovered error and preserves unrelated feedback', () => {
+    const readError = showToast('Read failed', 'err');
+    showToast('Upload failed', 'err');
+    dismissToastById(readError);
+    expect(toastMessage.value?.text).toBe('Upload failed');
+    dismissToastById(readError);
+    expect(toastMessage.value?.text).toBe('Upload failed');
+  });
+
+  it('removes a recovered error from the queue without dismissing the active error', () => {
+    showToast('Upload failed', 'err');
+    const readError = showToast('Read failed', 'err');
+    showToast('Copied');
+    dismissToastById(readError);
+    expect(toastMessage.value?.text).toBe('Upload failed');
+    dismissToast();
+    expect(toastMessage.value?.text).toBe('Copied');
+    vi.advanceTimersByTime(1800);
+    expect(toastMessage.value).toBeNull();
   });
 
   it('keeps replacing transient successes and clears timers on dismissal', () => {

@@ -118,6 +118,9 @@ the bottom, using `POST /api/groups/:group/chat/:thread/read` with
 The host validates current access and cursor scope and advances read watermarks
 monotonically. A concurrent newer publication remains unread. Failed
 acknowledgements retain unread state and report an error; refocus/scroll retries.
+A successful retry clears only that conversation's read warning, including
+queued warnings and warnings from an older rendered cursor. Repeated failures
+replace that warning rather than queuing duplicates; unrelated errors persist.
 
 Read notices invalidate only the same user's sockets, including other devices.
 The PWA worker is the single app-badge writer, serializing authenticated
