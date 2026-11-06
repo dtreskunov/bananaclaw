@@ -136,8 +136,7 @@ function title(text: string): string {
     text
       .replace(/^>\s*Context.*\n+/i, '')
       .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 60) || '(new thread)'
+      .trim() || '(new thread)'
   );
 }
 function latest(values: (number | null)[]): number | null {

@@ -17,10 +17,16 @@ describe('thread title metadata', () => {
 
   afterEach(() => db.close());
 
-  it('normalizes and bounds model titles', () => {
+  it('normalizes model titles without shortening them', () => {
     expect(normalizeThreadTitle('  OAuth\n token   refresh failure  ')).toBe('OAuth token refresh failure');
-    expect(normalizeThreadTitle('x'.repeat(80))).toBe('x'.repeat(60));
+    expect(normalizeThreadTitle('x'.repeat(80))).toBe('x'.repeat(80));
     expect(normalizeThreadTitle('(new thread)')).toBeNull();
+  });
+
+  it('persists complete titles longer than the old 60-character limit', () => {
+    const title = 'Detailed household expense categorization and reconciliation across multiple credit accounts';
+    expect(upsertThreadTitle(db, { ...key, title, requestMessageId: 'in-1' })).toBe(true);
+    expect(readThreadTitle(db, key)).toBe(title);
   });
 
   it('shows the first title immediately without any delivered reply', () => {

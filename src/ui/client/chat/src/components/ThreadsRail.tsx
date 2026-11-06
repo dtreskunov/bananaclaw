@@ -1,7 +1,7 @@
 // Threads rail.
 import './ThreadsRail.css';
 import type { JSX } from 'preact';
-import { useState, useRef } from 'preact/hooks';
+import { useState, useRef, useLayoutEffect } from 'preact/hooks';
 import {
   threads, threadId, groupId, paneOpen, drawerOpen, channelMeta,
   searchQuery, searchResults, searchLoading, searchError, highlightMessageId,
@@ -27,6 +27,25 @@ import { ActivityIndicator, activityDetails } from './ActivityIndicator';
 import { threadAttentionCount } from '../attention-state';
 import { withPendingActivity } from '../conversation-state';
 import { buildThreadTree } from '../thread-tree';
+import { attachScrollEdges } from '../scroll-edges';
+
+export function ThreadTitle({ title, unread }: { title: string; unread?: boolean }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    return attachScrollEdges(element, { vertical: false }, (edges) => {
+      element.tabIndex = edges.left || edges.right ? 0 : -1;
+    });
+  }, []);
+  return (
+    <span class="title-text scroll-edge-fade" ref={ref} title={title} tabIndex={-1}>
+      <span class="thread-title-content">
+        {unread ? <span class="unread-label">Unread. </span> : null}{title}
+      </span>
+    </span>
+  );
+}
 
 function ThreadAttention({ thread }: { thread: Thread }) {
   const location = {
@@ -129,7 +148,7 @@ export function ThreadRow({ t, guides = [] }: { t: Thread; guides?: boolean[] })
       ) : null}
       <div class="title">
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
-        <span class="title-text">{t.unread ? <span class="unread-label">Unread. </span> : null}{t.title}</span>
+        <ThreadTitle title={t.title} unread={t.unread} />
         {head ? (
           <button
             type="button"
@@ -168,7 +187,7 @@ export function DmRow({ t }: { t: Thread }) {
     <div class={'thread dm' + (active ? ' active' : '') + (t.unread ? ' is-unread' : '')} data-id={t.threadId} onClick={onOpen}>
       <div class="title">
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
-        <span class="title-text">{t.unread ? <span class="unread-label">Unread. </span> : null}{meta.label}</span>
+        <ThreadTitle title={meta.label} unread={t.unread} />
       </div>
       <div class="meta">
         <ThreadAttention thread={t} />

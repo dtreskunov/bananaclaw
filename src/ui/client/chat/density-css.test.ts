@@ -129,6 +129,29 @@ describe('text density CSS contract', () => {
     expect(source).toMatch(/<span class="file-meta">[\s\S]*result-path[\s\S]*class="meta"[\s\S]*class="size"/);
   });
 
+  it('lets full thread titles scroll without ellipses or changing the row hierarchy', () => {
+    const css = read('components/ThreadsRail.css');
+    const title = css.match(/\.thread \.title \.title-text \{([^}]+)\}/)![1];
+    expect(title).toContain('white-space: nowrap');
+    expect(title).toContain('overflow-x: auto');
+    expect(title).toContain('scrollbar-width: none');
+    expect(title).not.toContain('text-overflow');
+    expect(css).toContain('.thread-title-content { display: inline-block; }');
+    expect(css).toContain('.title-text:focus-visible');
+  });
+
+  it('uses the action column only while the delete icon is visible, including keyboard focus and touch', () => {
+    const css = read('components/ThreadsRail.css');
+    expect(css).toMatch(/\.thread \.title \{[^}]*grid-column: 1 \/ -1; grid-row: 1;/);
+    expect(css).toMatch(/\.thread \.meta \{[^}]*grid-column: 1 \/ -1; grid-row: 2;/);
+    expect(css).toContain('.thread:has(.del):is(:hover, :focus-within) > :is(.title, .meta) { grid-column: 1; }');
+    expect(css).toMatch(/\.thread \.del \{[^}]*opacity: 0; pointer-events: none;/);
+    expect(css).toMatch(/\.thread \.del:focus-visible \{ opacity: 1; pointer-events: auto; \}/);
+    expect(css).toMatch(
+      /@media \(hover: none\) \{\s*\.threads-rail \.thread \.del \{ opacity: 1; pointer-events: auto; \}\s*\.threads-rail \.thread:has\(\.del\) > :is\(\.title, \.meta\) \{ grid-column: 1; \}/,
+    );
+  });
+
   it('keeps density typography and spacing independent of theme, icons, widths, media and control sizes', () => {
     for (const name of Object.keys(comfortable)) {
       expect(name).not.toMatch(

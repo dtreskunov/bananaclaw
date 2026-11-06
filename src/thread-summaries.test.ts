@@ -128,6 +128,21 @@ describe('maintained thread summaries', () => {
     expect(inbound.prepare('SELECT COUNT(*) FROM thread_summary_dirty').pluck().get()).toBe(0);
     expect(outbound.prepare('SELECT COUNT(*) FROM thread_summary_dirty').pluck().get()).toBe(0);
   });
+  it.each(['fallback', 'explicit', 'email'])('preserves complete %s titles from existing projection facts', (source) => {
+    const title = 'Detailed household expense categorization and reconciliation across multiple credit accounts';
+    const channel = source === 'email' ? 'resend' : 'web';
+    const titledSpec = { ...spec, thread: { ...spec.thread!, channelType: channel } };
+    message('one', 'group:g', 't', channel, `> Context from earlier\n\n  ${title}  `);
+    if (source === 'explicit') {
+      upsertThreadTitle(inbound, { ...titledSpec.thread, title, requestMessageId: 'one' });
+    } else if (source === 'email') {
+      inbound.prepare('UPDATE messages_in SET content=? WHERE id=?')
+        .run(JSON.stringify({ subject: title, text: 'Different email body' }), 'one');
+    }
+    refreshThreadSummaries('s');
+    expect(readSessionThreadSummary(titledSpec).threads[0].title).toBe(title);
+    expect(readSessionThreadSummary(titledSpec)).toEqual(scanThreadSession(ROOT, titledSpec));
+  });
   it('preserves independent shared routing scopes and DM totals', () => {
     message('one', 'a@example.com', 'mail', 'resend', 'A');
     message('two', 'b@example.com', 'mail', 'resend', 'B');

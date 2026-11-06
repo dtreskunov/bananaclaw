@@ -22898,7 +22898,69 @@ function buildThreadTree(threads2) {
   return rows;
 }
 
+// src/scroll-edges.ts
+var EDGE_EPSILON = 1;
+function axisScrollEdges(offset, clientSize, scrollSize) {
+  const maxOffset = Math.max(0, scrollSize - clientSize);
+  return { start: offset > EDGE_EPSILON, end: offset < maxOffset - EDGE_EPSILON };
+}
+var NO_EDGES = { start: false, end: false };
+function scrollEdges(element, { horizontal = true, vertical = true } = {}) {
+  const x6 = horizontal ? axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth) : NO_EDGES;
+  const y5 = vertical ? axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight) : NO_EDGES;
+  return { left: x6.start, right: x6.end, top: y5.start, bottom: y5.end };
+}
+function attachScrollEdges(element, axes = {}, onUpdate) {
+  let previous = null;
+  const update = () => {
+    const edges = scrollEdges(element, axes);
+    let changed = false;
+    for (const edge of ["left", "right", "top", "bottom"]) {
+      if (previous?.[edge] !== edges[edge]) {
+        element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
+        changed = true;
+      }
+    }
+    previous = edges;
+    if (changed) onUpdate?.(edges);
+  };
+  element.addEventListener("scroll", update, { passive: true });
+  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+  const observeSize = () => {
+    resize?.disconnect();
+    resize?.observe(element);
+    for (const child of element.children) {
+      resize?.observe(child);
+      if (child.firstElementChild) resize?.observe(child.firstElementChild);
+    }
+    update();
+  };
+  const mutations = new MutationObserver(observeSize);
+  mutations.observe(element, { childList: true, subtree: true, characterData: true });
+  observeSize();
+  return () => {
+    element.removeEventListener("scroll", update);
+    resize?.disconnect();
+    mutations.disconnect();
+    for (const edge of ["left", "right", "top", "bottom"]) element.classList.remove(`scroll-fade-${edge}`);
+  };
+}
+
 // src/components/ThreadsRail.tsx
+function ThreadTitle({ title, unread }) {
+  const ref = A2(null);
+  _2(() => {
+    const element = ref.current;
+    if (!element) return;
+    return attachScrollEdges(element, { vertical: false }, (edges) => {
+      element.tabIndex = edges.left || edges.right ? 0 : -1;
+    });
+  }, []);
+  return /* @__PURE__ */ u4("span", { class: "title-text scroll-edge-fade", ref, title, tabIndex: -1, children: /* @__PURE__ */ u4("span", { class: "thread-title-content", children: [
+    unread ? /* @__PURE__ */ u4("span", { class: "unread-label", children: "Unread. " }) : null,
+    title
+  ] }) });
+}
 function ThreadAttention({ thread: thread2 }) {
   const location2 = {
     agentGroupId: groupId.value,
@@ -22998,10 +23060,7 @@ This also cancels its outstanding approval requests. Already applied changes are
         )) }) : null,
         /* @__PURE__ */ u4("div", { class: "title", children: [
           ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
-          /* @__PURE__ */ u4("span", { class: "title-text", children: [
-            t4.unread ? /* @__PURE__ */ u4("span", { class: "unread-label", children: "Unread. " }) : null,
-            t4.title
-          ] }),
+          /* @__PURE__ */ u4(ThreadTitle, { title: t4.title, unread: t4.unread }),
           head ? /* @__PURE__ */ u4(
             "button",
             {
@@ -23041,10 +23100,7 @@ function DmRow({ t: t4 }) {
   return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : "") + (t4.unread ? " is-unread" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
       /* @__PURE__ */ u4("span", { class: "ch-pill dm", title: meta.label, children: meta.icon }),
-      /* @__PURE__ */ u4("span", { class: "title-text", children: [
-        t4.unread ? /* @__PURE__ */ u4("span", { class: "unread-label", children: "Unread. " }) : null,
-        meta.label
-      ] })
+      /* @__PURE__ */ u4(ThreadTitle, { title: meta.label, unread: t4.unread })
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(ThreadAttention, { thread: t4 }),
@@ -24618,54 +24674,6 @@ function ApprovalCard({ approval: a4, busy, onRespond }) {
       option.value
     )) }) : null
   ] });
-}
-
-// src/scroll-edges.ts
-var EDGE_EPSILON = 1;
-function axisScrollEdges(offset, clientSize, scrollSize) {
-  const maxOffset = Math.max(0, scrollSize - clientSize);
-  return { start: offset > EDGE_EPSILON, end: offset < maxOffset - EDGE_EPSILON };
-}
-var NO_EDGES = { start: false, end: false };
-function scrollEdges(element, { horizontal = true, vertical = true } = {}) {
-  const x6 = horizontal ? axisScrollEdges(element.scrollLeft, element.clientWidth, element.scrollWidth) : NO_EDGES;
-  const y5 = vertical ? axisScrollEdges(element.scrollTop, element.clientHeight, element.scrollHeight) : NO_EDGES;
-  return { left: x6.start, right: x6.end, top: y5.start, bottom: y5.end };
-}
-function attachScrollEdges(element, axes = {}, onUpdate) {
-  let previous = null;
-  const update = () => {
-    const edges = scrollEdges(element, axes);
-    let changed = false;
-    for (const edge of ["left", "right", "top", "bottom"]) {
-      if (previous?.[edge] !== edges[edge]) {
-        element.classList.toggle(`scroll-fade-${edge}`, edges[edge]);
-        changed = true;
-      }
-    }
-    previous = edges;
-    if (changed) onUpdate?.(edges);
-  };
-  element.addEventListener("scroll", update, { passive: true });
-  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-  const observeSize = () => {
-    resize?.disconnect();
-    resize?.observe(element);
-    for (const child of element.children) {
-      resize?.observe(child);
-      if (child.firstElementChild) resize?.observe(child.firstElementChild);
-    }
-    update();
-  };
-  const mutations = new MutationObserver(observeSize);
-  mutations.observe(element, { childList: true, subtree: true, characterData: true });
-  observeSize();
-  return () => {
-    element.removeEventListener("scroll", update);
-    resize?.disconnect();
-    mutations.disconnect();
-    for (const edge of ["left", "right", "top", "bottom"]) element.classList.remove(`scroll-fade-${edge}`);
-  };
 }
 
 // src/components/MessageBubble.tsx

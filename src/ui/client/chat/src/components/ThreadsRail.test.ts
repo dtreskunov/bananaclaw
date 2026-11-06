@@ -4,7 +4,7 @@ import { epochMs } from '../../../../shared/time';
 import { testThread } from '../conversation-test-fixtures';
 import { groupId, threadId } from '../state';
 import { openChat } from '../actions';
-import { DmRow, ThreadList, ThreadRow } from './ThreadsRail';
+import { DmRow, ThreadList, ThreadRow, ThreadTitle } from './ThreadsRail';
 import { RelativeTime } from './RelativeTime';
 
 type ElementNode = VNode<JSX.HTMLAttributes<HTMLElement>>;
@@ -96,8 +96,9 @@ describe('thread family rendering', () => {
     const title = (toChildArray(row.props.children) as ElementNode[]).find((node) => node.props.class === 'title')!;
     const children = toChildArray(title.props.children) as ElementNode[];
     expect(children).toHaveLength(1);
-    expect(children[0].props).toMatchObject({
-      class: 'title-text',
+    expect(children[0]).toMatchObject({
+      type: ThreadTitle,
+      props: { title: t.title, unread: t.unread },
     });
   });
 });

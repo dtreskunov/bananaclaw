@@ -126,6 +126,21 @@ branch-count badges. Search results remain flat, and the existing
 channel-section toggles are unchanged.
 This is presentation-only; fork storage and deletion behavior do not change.
 
+Thread titles retain their complete normalized text instead of being clipped
+to 60 characters. Long rail titles stay on one line and scroll horizontally,
+using the same shared edge tracking and 12 px fade masks as transcript tables
+instead of ellipses. Only overflowing titles enter the keyboard tab order;
+hover tooltips also contain the full title. Tree guides and row actions do not
+scroll with the title.
+
+Desktop titles and metadata use the full row width until hover or keyboard focus
+reveals the delete icon. Touch devices reserve its space while it remains
+visible; rows without a delete action always use the full width.
+
+The runner and host preserve complete newly set titles. Existing message-derived
+titles use the full available source text immediately; previously truncated
+stored titles cannot be reconstructed automatically.
+
 ### Unread conversations
 
 Unread is per user and orthogonal to execution/waiting. Bold names and a small

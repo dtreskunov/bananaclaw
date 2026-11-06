@@ -25,7 +25,7 @@ export function normalizeThreadTitle(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const title = value.replace(/\s+/g, ' ').trim();
   if (!title || title === '(new thread)') return null;
-  return title.slice(0, 60);
+  return title;
 }
 
 export function upsertThreadTitle(db: Database.Database, input: ThreadTitleUpdate): boolean {

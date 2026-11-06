@@ -1968,7 +1968,8 @@ nav.tab-bar-strip.group-strip {
   background: var(--accent);
 }
 .threads-rail .thread .title {
-  grid-column: 1;
+  grid-column: 1 / -1;
+  grid-row: 1;
   font-size: var(--font-base);
   display: flex;
   align-items: center;
@@ -1978,11 +1979,21 @@ nav.tab-bar-strip.group-strip {
   min-width: 0;
   flex: 0 1 auto;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+}
+.threads-rail .thread .title .title-text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.thread-title-content {
+  display: inline-block;
 }
 .threads-rail .thread .meta {
-  grid-column: 1;
+  grid-column: 1 / -1;
+  grid-row: 2;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -2094,12 +2105,17 @@ nav.tab-bar-strip.group-strip {
 }
 .threads-rail .thread .del {
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 .threads-rail .thread:hover .del,
 .threads-rail .thread:focus-within .del,
 .threads-rail .thread .del:focus-visible {
   opacity: 1;
+  pointer-events: auto;
+}
+.threads-rail .thread:has(.del):is(:hover, :focus-within) > :is(.title, .meta) {
+  grid-column: 1;
 }
 .threads-rail .thread-section {
   display: flex;
@@ -2191,6 +2207,10 @@ nav.tab-bar-strip.group-strip {
 @media (hover: none) {
   .threads-rail .thread .del {
     opacity: 1;
+    pointer-events: auto;
+  }
+  .threads-rail .thread:has(.del) > :is(.title, .meta) {
+    grid-column: 1;
   }
 }
 .threads-rail .search-results {

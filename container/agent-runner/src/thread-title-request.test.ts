@@ -33,6 +33,7 @@ function insertChat(id: string, seq: number, text: string): void {
 describe('thread title request', () => {
   it('asks for a title while the thread has none', () => {
     expect(threadTitleInstruction()).toContain('<thread_title_request>');
+    expect(threadTitleInstruction()).not.toContain('60 characters');
   });
 
   it('stays silent when the session has no thread to title', () => {
@@ -73,5 +74,15 @@ describe('thread title request', () => {
       threadId: 'thread-1',
       timelinePosition: expect.any(Number),
     });
+  });
+
+  it('preserves the full title in its routed action and acknowledgement', async () => {
+    const title = 'Detailed household expense categorization and reconciliation across multiple credit accounts';
+    insertChat('in-1', 2, 'Categorize the household budget');
+    markProcessing(['in-1']);
+    const result = await setThreadTitle.handler({ title: `  ${title}\n` });
+    const row = getOutboundDb().prepare('SELECT content FROM messages_out').get() as { content: string };
+    expect(JSON.parse(row.content).title).toBe(title);
+    expect(result.content).toEqual([{ type: 'text', text: `Thread title set to: ${title}` }]);
   });
 });
