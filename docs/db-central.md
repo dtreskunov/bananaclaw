@@ -11,6 +11,18 @@ stores use the [offline cutover](db-storage-cutover.md), not startup conversion.
 
 ### Integrity upgrades
 
+Migration 054 validates configuration JSON shapes, CLI scope, routing enums,
+boolean flags, and nonnegative safe-integer counters/watermarks on both insert
+and update. Invalid existing rows abort the migration with their table/count;
+no values are silently replaced. Routing columns now have their documented
+defaults when omitted, while explicit null or incomplete pattern rules fail.
+The routing-table rebuild preserves rowids, indexes and triggers.
+
+Domain validation uses database triggers so it also protects installed module
+writers and ad-hoc SQL, without another rebuild of every configuration table.
+Gateway reconciliation tombstones and cross-database references remain
+deliberately unconstrained by user/session foreign keys.
+
 Migration 052 makes single-column text primary keys explicitly non-null,
 enforces role values/global owner scope, and adds null-aware uniqueness for
 global roles, primary identities and active routed sessions. It preserves rowids,

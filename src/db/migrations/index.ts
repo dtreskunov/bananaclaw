@@ -49,6 +49,7 @@ import { migration050 } from './050-thread-summaries.js';
 import { migration051 } from './051-conversation-reads.js';
 import { migration052 } from './052-integrity.js';
 import { migration053 } from './053-query-indexes.js';
+import { migration054 } from './054-domain-integrity.js';
 import { transaction } from '../transaction.js';
 import { assertStorageVersion, convertStoreTimes, STORAGE_VERSION } from '../storage-lifecycle.js';
 
@@ -116,6 +117,7 @@ export const migrations: Migration[] = [
   migration051,
   migration052,
   migration053,
+  migration054,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a
