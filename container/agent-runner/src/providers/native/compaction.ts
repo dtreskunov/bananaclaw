@@ -30,6 +30,7 @@ export interface NativeCompactionPlan {
 }
 
 export class NativeContextBudgetError extends Error {}
+export class NativeOutputBudgetError extends Error {}
 
 export function createCompactionPolicy(window: number | undefined) {
   let emergencyAttempts = 0;
@@ -55,18 +56,31 @@ export function createCompactionPolicy(window: number | undefined) {
           return budgetPart(part);
         }),
       });
-      requestBytes = Buffer.byteLength(JSON.stringify({
+      const request = {
         prompt, tools: params.tools, toolChoice: params.toolChoice, responseFormat: params.responseFormat,
-      }));
+      };
+      requestBytes = Buffer.byteLength(JSON.stringify(request));
       // Without a measurement for this model, one UTF-8 byte per token is conservative.
       const inputTokens = measured
         ? measured.inputTokens + Math.max(0, requestBytes - measured.bytes) : requestBytes;
       const outputTokens = params.maxOutputTokens ?? 0;
       const overhead = Math.min(1024, Math.floor(window / 8));
-      if (inputTokens + outputTokens + overhead > window) throw new NativeContextBudgetError(
-        `Native request exceeds context budget before generation: ${inputTokens} estimated input + ` +
-        `${outputTokens} reserved output + ${overhead} framing > ${window} tokens`,
-      );
+      if (inputTokens + outputTokens + overhead > window) {
+        const fixedInputTokens = Buffer.byteLength(JSON.stringify({
+          ...request, prompt: prompt.filter(message => message.role === 'system'),
+        }));
+        if (outputTokens + overhead >= window ||
+            (fixedInputTokens + overhead < window && fixedInputTokens + outputTokens + overhead > window)) {
+          throw new NativeOutputBudgetError(
+            `Native output allowance cannot fit before generation: ${outputTokens} reserved output + ` +
+            `${fixedInputTokens} estimated fixed input + ${overhead} framing > ${window} tokens; reduce max_tokens`,
+          );
+        }
+        throw new NativeContextBudgetError(
+          `Native request exceeds context budget before generation: ${inputTokens} estimated input + ` +
+          `${outputTokens} reserved output + ${overhead} framing > ${window} tokens`,
+        );
+      }
       return params;
     },
   };

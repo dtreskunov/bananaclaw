@@ -45,40 +45,48 @@
 ) { background: var(--table-row-alt-bg); }
 .threads-rail .thread:hover { background: var(--wash-soft); }
 .threads-rail .thread.active { background: var(--accent); }
-.threads-rail .thread .title { grid-column: 1; font-size: var(--font-base); display: flex; align-items: center; min-width: 0; }
-.threads-rail .thread .title .title-text { min-width: 0; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.threads-rail .thread .meta { grid-column: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: var(--font-xs); color: var(--muted); margin-top: 2px; }
+.threads-rail .thread .title { grid-column: 1 / -1; grid-row: 1; font-size: var(--font-base); display: flex; align-items: center; min-width: 0; }
+.threads-rail .thread .title .title-text {
+  min-width: 0; flex: 0 1 auto; white-space: nowrap;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+}
+.threads-rail .thread .title .title-text:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.thread-title-content { display: inline-block; }
+.threads-rail .thread .meta { grid-column: 1 / -1; grid-row: 2; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: var(--font-xs); color: var(--muted); margin-top: 2px; }
 .threads-rail .thread .meta > span:not(.activity-indicator) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .threads-rail .thread .title .ch-pill { font-size: var(--font-base); flex: none; margin-right: 5px; opacity: 0.85; display: inline-block; vertical-align: -1px; }
 .threads-rail .thread .title .task-badge { font-size: var(--font-xs); flex: none; margin-left: 5px; opacity: 0.75; display: inline-block; vertical-align: 0; cursor: pointer; padding: 0; border: none; background: none; line-height: 1; color: inherit; }
 .threads-rail .thread .title .task-badge:hover { opacity: 1; }
 .threads-rail .thread .title .task-badge.paused { opacity: 0.45; filter: grayscale(1); }
-/* Fork lineage: a leading glyph on a branch, a count on what it branched from. */
-.threads-rail .thread .title .fork-pill { font-size: var(--font-xs); flex: none; margin-right: 5px; opacity: 0.75; display: inline-block; vertical-align: 0; }
-.threads-rail .thread .title .fork-pill.orphan { opacity: 0.4; }
-.threads-rail .thread .title .fork-count { font-size: var(--font-xs); flex: none; margin-left: 5px; opacity: 0.65; white-space: nowrap; }
-/* Indent branches so lineage reads at a glance. One level only — deeper
-   nesting would run the title out of a rail this narrow. */
-.threads-rail .thread.branch { padding-left: 16px; }
-.threads-rail .thread.branch::before {
-  content: '';
-  position: absolute;
-  left: 7px;
-  top: 8px;
-  bottom: 8px;
-  width: 1px;
-  background: var(--border, var(--muted));
-  opacity: 0.5;
+.threads-rail .thread.branch {
+  padding-left: calc(var(--thread-padding-inline) + var(--thread-depth) * 12px);
+}
+.thread-tree-guides {
+  position: absolute; top: 0; bottom: 0; left: var(--thread-padding-inline);
+  display: flex; pointer-events: none; color: var(--muted); opacity: 0.4;
+}
+.thread-tree-guide { position: relative; width: 12px; }
+.thread-tree-guide.continues::before,
+.thread-tree-guide.elbow::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  border-left: 1px solid currentColor;
+}
+.thread-tree-guide.elbow:not(.continues)::before { bottom: 50%; }
+.thread-tree-guide.elbow::after {
+  content: ''; position: absolute; left: 0; right: 3px; top: 50%;
+  border-top: 1px solid currentColor;
 }
 .readonly-banner { padding: 10px 12px; border-top: 1px solid var(--border); background: var(--wash-soft); font-size: var(--font-sm); color: var(--muted); }
 .chat-subnotice { padding: 4px 12px; border-top: 1px solid var(--border); background: var(--wash-subtle); font-size: var(--font-xs); color: var(--muted); }
 .thread-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: 4px; }
 .thread-actions .msg-action-btn { width: 32px; height: 32px; }
 .thread-actions .msg-action-icon { width: 16px; height: 16px; }
-.threads-rail .thread .del { opacity: 0; transition: opacity 0.12s ease; }
+.threads-rail .thread .del { opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
 .threads-rail .thread:hover .del,
 .threads-rail .thread:focus-within .del,
-.threads-rail .thread .del:focus-visible { opacity: 1; }
+.threads-rail .thread .del:focus-visible { opacity: 1; pointer-events: auto; }
+.threads-rail .thread:has(.del):is(:hover, :focus-within) > :is(.title, .meta) { grid-column: 1; }
 
 /* Collapsible channel sections. Open sections grow to fill available
    height and scroll their thread list; collapsed sections are flex
@@ -133,7 +141,8 @@
 
 /* Show delete on touch devices (no hover). */
 @media (hover: none) {
-  .threads-rail .thread .del { opacity: 1; }
+  .threads-rail .thread .del { opacity: 1; pointer-events: auto; }
+  .threads-rail .thread:has(.del) > :is(.title, .meta) { grid-column: 1; }
 }
 
 /* ── Search results ────────────────────────────────────────────────── */

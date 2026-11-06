@@ -114,7 +114,7 @@ unchanged. Staleness mutes the indicator without freezing its running ring.
 Waiting remains a separate native clickable control, with a larger hit target
 and visible keyboard focus. Agent tabs, the selected mobile dropdown and picker
 rows, including thread and DM rows, place the icon in the secondary status line
-before the relative activity time and message/thread counts. Channel, branch
+before the relative activity time and message/thread counts. Channel
 and scheduled-task badges stay beside thread titles. There is
 no visible `N attn` badge, activity text label or link-styled waiting action.
 
@@ -130,6 +130,36 @@ same middle-dot separator as thread message counts. The count includes every
 viewer-visible conversation row, including channel DMs; zero and unavailable
 counts are omitted. Counts update through the existing keyed agent metadata
 patches and use the thread rail's authorization and deduplication rules.
+
+### Fork families in the thread rail
+
+Within each channel section, forked conversations form an always-expanded
+pseudo-tree: parents precede their children, with subtle connector lines.
+Families and sibling subtrees sort by their newest activity, including
+descendants; ties use thread IDs for stable ordering. Each row keeps its own
+timestamp, unread/activity state, tasks and actions.
+
+Indentation stops after three levels without hiding deeper conversations.
+Forks whose parent is deleted or absent from the authorized channel listing
+remain top-level rows. The rail uses tree connectors without fork glyphs or
+branch-count badges. Search results remain flat, and the existing
+channel-section toggles are unchanged.
+This is presentation-only; fork storage and deletion behavior do not change.
+
+Thread titles retain their complete normalized text instead of being clipped
+to 60 characters. Long rail titles stay on one line and scroll horizontally,
+using the same shared edge tracking and 12 px fade masks as transcript tables
+instead of ellipses. Only overflowing titles enter the keyboard tab order;
+hover tooltips also contain the full title. Tree guides and row actions do not
+scroll with the title.
+
+Desktop titles and metadata use the full row width until hover or keyboard focus
+reveals the delete icon. Touch devices reserve its space while it remains
+visible; rows without a delete action always use the full width.
+
+The runner and host preserve complete newly set titles. Existing message-derived
+titles use the full available source text immediately; previously truncated
+stored titles cannot be reconstructed automatically.
 
 ### Unread conversations
 

@@ -84,8 +84,7 @@ function finalizeTitle(title: string): string {
     title
       .replace(/^>\s*Context.*\n+/i, '')
       .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 60) || '(new thread)'
+      .trim() || '(new thread)'
   );
 }
 

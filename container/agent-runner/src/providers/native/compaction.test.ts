@@ -5,7 +5,7 @@ import { wrapLanguageModel } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import {
   compactNativeContext, COMPACTION_INSTRUCTIONS, createCompactionPolicy, isContextOverflow, planCompaction, shouldCompactContext,
-  MAX_COMPACTION_LEAVES, MAX_COMPACTION_REQUESTS, NativeContextBudgetError,
+  MAX_COMPACTION_LEAVES, MAX_COMPACTION_REQUESTS, NativeContextBudgetError, NativeOutputBudgetError,
 } from './compaction.js';
 import { NativeStore } from './store.js';
 
@@ -42,6 +42,7 @@ describe('context overflow detection', () => {
   ])('recognizes a context-specific API rejection', (error) => expect(isContextOverflow(error)).toBe(true));
 
   it.each([
+    new NativeOutputBudgetError('Native output allowance cannot fit; reduce max_tokens'),
     new Error('Unauthorized'),
     { status: 400, code: 2013 },
     new Error('429 rate limited'),
@@ -86,7 +87,6 @@ describe('request preflight', () => {
       type: 'function' as const, name: 'query', description: 'd'.repeat(20_000),
       inputSchema: { type: 'object', properties: {} },
     }] } },
-    { name: 'output', params: request('hello', 20_000) },
     { name: 'tool result', params: { ...baseRequest, prompt: [
       { role: 'tool' as const, content: [{
         type: 'tool-result' as const, toolName: 'query', toolCallId: 'call-1',
@@ -108,6 +108,32 @@ describe('request preflight', () => {
       expect(upstream.doStreamCalls).toHaveLength(0);
     },
   );
+
+  it.each([18_000, 20_000])('rejects an irreducible %s-token output allowance without classifying it as compactable', async outputTokens => {
+    const { model, upstream } = guarded(createCompactionPolicy(20_000));
+    const params = {
+      ...request('hello', outputTokens),
+      prompt: [
+        { role: 'system' as const, content: 's'.repeat(2000) },
+        ...request('hello').prompt,
+      ],
+    };
+    await expect(model.doStream(params)).rejects.toBeInstanceOf(NativeOutputBudgetError);
+    await expect(model.doStream(params)).rejects.toThrow('reduce max_tokens');
+    expect(upstream.doStreamCalls).toHaveLength(0);
+  });
+
+  it('distinguishes fixed tool schemas from history when the output allowance prevents them from fitting', async () => {
+    const { model, upstream } = guarded(createCompactionPolicy(20_000));
+    await expect(model.doStream({
+      ...request('hello', 18_000),
+      tools: [{
+        type: 'function', name: 'query', description: 'd'.repeat(2000),
+        inputSchema: { type: 'object', properties: {} },
+      }],
+    })).rejects.toBeInstanceOf(NativeOutputBudgetError);
+    expect(upstream.doStreamCalls).toHaveLength(0);
+  });
 
   it('uses only this model measurement plus request growth and clears it after compaction', async () => {
     const policy = createCompactionPolicy(20_000);

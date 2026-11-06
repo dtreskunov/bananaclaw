@@ -48,14 +48,14 @@ export const setThreadTitle: McpToolDefinition = {
       properties: {
         title: {
           type: 'string',
-          description: 'Concrete 3-7 word conversation title, at most 60 characters',
+          description: 'Concise, concrete 3-7 word conversation title',
         },
       },
       required: ['title'],
     },
   },
   async handler(args) {
-    const title = typeof args.title === 'string' ? args.title.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
+    const title = typeof args.title === 'string' ? args.title.replace(/\s+/g, ' ').trim() : '';
     const routing = getSessionRouting();
     const requestMessageId = getCurrentInReplyTo() ?? findActiveRequestMessageId(routing);
     if (!title) return result('Error: title is required', true);

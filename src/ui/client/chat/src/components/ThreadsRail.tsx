@@ -1,7 +1,7 @@
 // Threads rail.
 import './ThreadsRail.css';
 import type { JSX } from 'preact';
-import { useState, useRef } from 'preact/hooks';
+import { useState, useRef, useLayoutEffect } from 'preact/hooks';
 import {
   threads, threadId, groupId, paneOpen, drawerOpen, channelMeta,
   searchQuery, searchResults, searchLoading, searchError, highlightMessageId,
@@ -26,6 +26,26 @@ import type { Thread, SearchResult } from '../types';
 import { ActivityIndicator, activityDetails } from './ActivityIndicator';
 import { threadAttentionCount } from '../attention-state';
 import { withPendingActivity } from '../conversation-state';
+import { buildThreadTree } from '../thread-tree';
+import { attachScrollEdges } from '../scroll-edges';
+
+export function ThreadTitle({ title, unread }: { title: string; unread?: boolean }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    return attachScrollEdges(element, { vertical: false }, (edges) => {
+      element.tabIndex = edges.left || edges.right ? 0 : -1;
+    });
+  }, []);
+  return (
+    <span class="title-text scroll-edge-fade" ref={ref} title={title} tabIndex={-1}>
+      <span class="thread-title-content">
+        {unread ? <span class="unread-label">Unread. </span> : null}{title}
+      </span>
+    </span>
+  );
+}
 
 function ThreadAttention({ thread }: { thread: Thread }) {
   const location = {
@@ -50,7 +70,7 @@ function ThreadAttention({ thread }: { thread: Thread }) {
   ) : indicator;
 }
 
-export function ThreadRow({ t }: { t: Thread }) {
+export function ThreadRow({ t, guides = [] }: { t: Thread; guides?: boolean[] }) {
   const ct = t.channelType || 'web';
   const meta = channelMeta(ct);
   const active = t.threadId === threadId.value;
@@ -69,8 +89,7 @@ export function ThreadRow({ t }: { t: Thread }) {
         head.summary,
       ].filter(Boolean).join(' · ')
     : undefined;
-  const onOpen = (ev: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
-    if ((ev.target as HTMLElement).classList.contains('del')) return;
+  const onOpen = (): void => {
     if (groupId.value) openChat(groupId.value, t.threadId, threadCtxOf(t)).catch(console.error);
     drawerOpen.threads.value = false;
   };
@@ -110,31 +129,26 @@ export function ThreadRow({ t }: { t: Thread }) {
     if (!ok) return;
     await deleteThread(t);
   };
-  const origin = t.forkedFrom;
-  const branchCount = t.forkChildren?.length ?? 0;
   return (
     <div
-      class={'thread' + (active ? ' active' : '') + (origin ? ' branch' : '') + (t.unread ? ' is-unread' : '')}
+      class={'thread' + (active ? ' active' : '') + (guides.length ? ' branch' : '') + (t.unread ? ' is-unread' : '')}
       data-id={t.threadId}
+      style={{ '--thread-depth': guides.length }}
       onClick={onOpen}
     >
+      {guides.length ? (
+        <span class="thread-tree-guides" aria-hidden="true">
+          {guides.map((continues, i) => (
+            <span
+              key={i}
+              class={'thread-tree-guide' + (continues ? ' continues' : '') + (i === guides.length - 1 ? ' elbow' : '')}
+            />
+          ))}
+        </span>
+      ) : null}
       <div class="title">
-        {origin
-          ? <span
-              class={'fork-pill' + (origin.deleted ? ' orphan' : '')}
-              title={origin.deleted
-                ? 'Branched from a thread that has since been deleted'
-                : `Branched from "${origin.title || 'another thread'}"`}
-            >{'\u2442'}</span>
-          : null}
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
-        <span class="title-text">{t.unread ? <span class="unread-label">Unread. </span> : null}{t.title}</span>
-        {branchCount > 0
-          ? <span
-              class="fork-count"
-              title={`${branchCount} ${branchCount === 1 ? 'branch was' : 'branches were'} started from this thread`}
-            >{'\u2442'}{' '}{branchCount}</span>
-          : null}
+        <ThreadTitle title={t.title} unread={t.unread} />
         {head ? (
           <button
             type="button"
@@ -173,7 +187,7 @@ export function DmRow({ t }: { t: Thread }) {
     <div class={'thread dm' + (active ? ' active' : '') + (t.unread ? ' is-unread' : '')} data-id={t.threadId} onClick={onOpen}>
       <div class="title">
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
-        <span class="title-text">{t.unread ? <span class="unread-label">Unread. </span> : null}{meta.label}</span>
+        <ThreadTitle title={meta.label} unread={t.unread} />
       </div>
       <div class="meta">
         <ThreadAttention thread={t} />
@@ -187,10 +201,12 @@ export function DmRow({ t }: { t: Thread }) {
   );
 }
 
-function renderRow(t: Thread) {
-  return t.kind === 'dm'
-    ? <DmRow key={t.threadId} t={t} />
-    : <ThreadRow key={t.threadId} t={t} />;
+export function ThreadList({ items }: { items: Thread[] }) {
+  return <>{buildThreadTree(items).map(({ thread, guides }) => (
+    thread.kind === 'dm'
+      ? <DmRow key={thread.threadId} t={thread} />
+      : <ThreadRow key={thread.threadId} t={thread} guides={guides} />
+  ))}</>;
 }
 
 function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[]; defaultOpen: boolean }) {
@@ -230,7 +246,7 @@ function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[
             ? <span class="handle" title={handles.join(', ')}>{handleStr}</span>
             : null}
         </button>}
-      {expanded ? <div class="thread-section-body">{items.map(renderRow)}</div> : null}
+      {expanded ? <div class="thread-section-body"><ThreadList items={items} /></div> : null}
     </div>
   );
 }
@@ -349,10 +365,6 @@ export function ThreadsRail() {
       if (b.ct === 'web' && a.ct !== 'web') return 1;
       return a.label.localeCompare(b.label);
     });
-  for (const s of sections) {
-    s.items.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
-  }
-
   const runSearch = (): void => {
     const q = searchQuery.peek().trim();
     if (!q) {
