@@ -856,7 +856,7 @@ export async function handleChatRequest(
       writeJson(res, 200, { tasks, timezone: TIMEZONE });
     } catch (err) {
       log.warn('web chat task list failed', { userId, groupId: m.groupId, threadId: m.threadId, err });
-      writeJson(res, 200, { tasks: [], timezone: TIMEZONE });
+      writeJson(res, 500, { error: 'task_list_failed' });
     }
     return true;
   }
@@ -1359,31 +1359,34 @@ function parseTaskContent(content: string): {
   }
 }
 
-function readTaskAttempts(groupId: string, sessionId: string, seriesId: string): TaskAttemptDto[] {
+function readTaskAttempts(groupId: string, sessionId: string, seriesIds: string[]): Map<string, TaskAttemptDto[]> {
+  const outDb = openOutboundDb(groupId, sessionId);
   try {
-    const outDb = openOutboundDb(groupId, sessionId);
-    try {
-      const rows = outDb
-        .prepare(
-          `SELECT task_message_id, trigger_source, status, started_at, completed_at,
-                  duration_ms, exit_code, signal, error, wake_agent, provider_invoked
-             FROM task_attempts WHERE series_id = ?
-             ORDER BY started_at DESC LIMIT 10`,
-        )
-        .all(seriesId) as Array<{
-        task_message_id: string;
-        trigger_source: string;
-        status: TaskAttemptDto['status'];
-        started_at: number;
-        completed_at: number | null;
-        duration_ms: number | null;
-        exit_code: number | null;
-        signal: string | null;
-        error: string | null;
-        wake_agent: number | null;
-        provider_invoked: number;
-      }>;
-      return rows.map((row) => ({
+    const rows = outDb
+      .prepare(
+        `SELECT attempt.* FROM json_each(?) series JOIN task_attempts attempt ON attempt.task_message_id IN (
+             SELECT task_message_id FROM task_attempts WHERE series_id=series.value
+             ORDER BY started_at DESC LIMIT 10
+           ) ORDER BY attempt.series_id, attempt.started_at DESC`,
+      )
+      .all(JSON.stringify(seriesIds)) as Array<{
+      series_id: string;
+      task_message_id: string;
+      trigger_source: string;
+      status: TaskAttemptDto['status'];
+      started_at: number;
+      completed_at: number | null;
+      duration_ms: number | null;
+      exit_code: number | null;
+      signal: string | null;
+      error: string | null;
+      wake_agent: number | null;
+      provider_invoked: number;
+    }>;
+    const attempts = new Map<string, TaskAttemptDto[]>();
+    for (const row of rows) {
+      const group = attempts.get(row.series_id) ?? [];
+      group.push({
         taskMessageId: row.task_message_id,
         triggerSource: row.trigger_source === 'manual' ? 'manual' : 'scheduled',
         status: row.status,
@@ -1395,12 +1398,12 @@ function readTaskAttempts(groupId: string, sessionId: string, seriesId: string):
         error: row.error,
         wakeAgent: row.wake_agent === null ? null : row.wake_agent === 1,
         providerInvoked: row.provider_invoked === 1,
-      }));
-    } finally {
-      outDb.close();
+      });
+      attempts.set(row.series_id, group);
     }
-  } catch {
-    return [];
+    return attempts;
+  } finally {
+    outDb.close();
   }
 }
 
@@ -1451,64 +1454,49 @@ function readLiveTaskDetails(
   threadId: string,
   isDm: boolean,
 ): TaskDetailDto[] {
-  const out: TaskDetailDto[] = [];
+  const inDb = openInboundDb(groupId, sessionId);
   try {
-    const inDb = openInboundDb(groupId, sessionId);
-    try {
-      const rows = (
-        isDm
-          ? inDb
-              .prepare(
-                `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
+    const rows = inDb
+      .prepare(
+        `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
                    FROM messages_in
                   WHERE kind = 'task' AND status IN ('pending', 'paused')
                     AND COALESCE(json_extract(content, '$.triggerSource'), 'scheduled') != 'manual'
-                    AND channel_type = ? AND thread_id IS NULL
+                    AND channel_type = ? AND thread_id IS ?
                   GROUP BY series_id
                   ORDER BY (process_after IS NULL) ASC, process_after ASC`,
-              )
-              .all(channelType)
-          : inDb
-              .prepare(
-                `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
-                   FROM messages_in
-                  WHERE kind = 'task' AND status IN ('pending', 'paused')
-                    AND COALESCE(json_extract(content, '$.triggerSource'), 'scheduled') != 'manual'
-                    AND channel_type = ? AND thread_id = ?
-                  GROUP BY series_id
-                  ORDER BY (process_after IS NULL) ASC, process_after ASC`,
-              )
-              .all(channelType, threadId)
-      ) as {
-        id: string;
-        status: string;
-        process_after: number | null;
-        recurrence: string | null;
-        content: string;
-      }[];
-      for (const r of rows) {
-        const { prompt, script, scriptTimeoutMs, consecutiveFailures } = parseTaskContent(r.content);
-        out.push({
-          seriesId: r.id,
-          status: r.status === 'paused' ? 'paused' : 'pending',
-          nextRunAt: r.process_after,
-          recurrence: r.recurrence,
-          summary: summarizeTaskPrompt(r.content),
-          prompt,
-          hasScript: script.length > 0,
-          script,
-          scriptTimeoutMs,
-          consecutiveFailures,
-          attempts: readTaskAttempts(groupId, sessionId, r.id),
-        });
-      }
-    } finally {
-      inDb.close();
-    }
-  } catch {
-    // inbound db missing or predates task columns
+      )
+      .all(channelType, isDm ? null : threadId) as {
+      id: string;
+      status: string;
+      process_after: number | null;
+      recurrence: string | null;
+      content: string;
+    }[];
+    const attempts = readTaskAttempts(
+      groupId,
+      sessionId,
+      rows.map((row) => row.id),
+    );
+    return rows.map((r) => {
+      const { prompt, script, scriptTimeoutMs, consecutiveFailures } = parseTaskContent(r.content);
+      return {
+        seriesId: r.id,
+        status: r.status === 'paused' ? 'paused' : 'pending',
+        nextRunAt: r.process_after,
+        recurrence: r.recurrence,
+        summary: summarizeTaskPrompt(r.content),
+        prompt,
+        hasScript: script.length > 0,
+        script,
+        scriptTimeoutMs,
+        consecutiveFailures,
+        attempts: attempts.get(r.id) ?? [],
+      };
+    });
+  } finally {
+    inDb.close();
   }
-  return out;
 }
 
 /**

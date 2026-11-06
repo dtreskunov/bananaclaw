@@ -19,7 +19,8 @@ vi.mock('../../../container-runner.js', () => ({
 }));
 
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { inboundDbPath, initSessionFolder } from '../../../session-manager.js';
+import { inboundDbPath, outboundDbPath, initSessionFolder } from '../../../session-manager.js';
+import * as sessionManager from '../../../session-manager.js';
 import { handleChatRequest } from './chat.js';
 
 const NOW = 1786881600000;
@@ -113,6 +114,71 @@ afterEach(() => {
 });
 
 describe('POST chat task run', () => {
+  it('batches exactly ten newest attempts per visible series using the series index', async () => {
+    const inbound = new Database(inboundDbPath(GROUP_ID, SESSION_ID));
+    inbound
+      .prepare(
+        `INSERT INTO messages_in(id,seq,kind,timestamp,status,process_after,series_id,channel_type,platform_id,thread_id,content)
+      VALUES('series-2',4,'task',?,'paused',0,'series-2','web',?,?,'{"prompt":"Second"}')`,
+      )
+      .run(NOW, PLATFORM_ID, THREAD_ID);
+    inbound.close();
+    const outbound = new Database(outboundDbPath(GROUP_ID, SESSION_ID));
+    for (const series of [SERIES_ID, 'series-2', 'hidden-series']) {
+      for (let index = 0; index < 12; index++) {
+        outbound
+          .prepare(
+            `INSERT INTO task_attempts(task_message_id,series_id,trigger_source,status,started_at)
+          VALUES(?,?,'scheduled','completed',?)`,
+          )
+          .run(`${series}-${index}`, series, index);
+      }
+    }
+    const all = vi.spyOn(Object.getPrototypeOf(outbound.prepare('SELECT 1')), 'all');
+    const open = vi.spyOn(sessionManager, 'openOutboundDb');
+    try {
+      const pathname = `/api/groups/${GROUP_ID}/chat/${THREAD_ID}/tasks`;
+      const req = Readable.from([]) as http.IncomingMessage;
+      req.method = 'GET';
+      req.url = pathname;
+      const captured = makeRes();
+      await handleChatRequest(req, captured.res, pathname, USER_ID);
+      await captured.done;
+      expect(captured.status()).toBe(200);
+      const tasks = JSON.parse(captured.body()).tasks as { seriesId: string; attempts: { startedAt: number }[] }[];
+      expect(tasks).toHaveLength(2);
+      expect(tasks.map((task) => task.seriesId).sort()).toEqual([SERIES_ID, 'series-2']);
+      for (const task of tasks)
+        expect(task.attempts.map((attempt) => attempt.startedAt)).toEqual([11, 10, 9, 8, 7, 6, 5, 4, 3, 2]);
+      expect(open).toHaveBeenCalledTimes(1);
+      const index = all.mock.contexts.findIndex((statement) => statement.source.includes('JOIN task_attempts'));
+      expect(all.mock.results[index].value).toHaveLength(20);
+      const query = all.mock.contexts[index].source as string;
+      const plan = outbound.prepare(`EXPLAIN QUERY PLAN ${query}`).all(JSON.stringify([SERIES_ID, 'series-2']));
+      expect(JSON.stringify(plan)).toContain('idx_task_attempts_series_started');
+      expect(JSON.stringify(plan)).not.toContain('SCAN attempt');
+    } finally {
+      all.mockRestore();
+      open.mockRestore();
+      outbound.close();
+    }
+  });
+
+  it('surfaces missing task-attempt storage instead of returning empty success', async () => {
+    const db = new Database(outboundDbPath(GROUP_ID, SESSION_ID));
+    db.exec('DROP TABLE task_attempts');
+    db.close();
+    const pathname = `/api/groups/${GROUP_ID}/chat/${THREAD_ID}/tasks`;
+    const req = Readable.from([]) as http.IncomingMessage;
+    req.method = 'GET';
+    req.url = pathname;
+    const captured = makeRes();
+    await handleChatRequest(req, captured.res, pathname, USER_ID);
+    await captured.done;
+    expect(captured.status()).toBe(500);
+    expect(JSON.parse(captured.body())).toEqual({ error: 'task_list_failed' });
+  });
+
   it.each([0, 1793934000123])('updates scheduled instants using exact epoch milliseconds %s', async (processAfter) => {
     const pathname = `/api/groups/${GROUP_ID}/chat/${THREAD_ID}/tasks/${SERIES_ID}`;
     const req = Readable.from([Buffer.from(JSON.stringify({ processAfter }))]) as http.IncomingMessage;

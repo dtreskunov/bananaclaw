@@ -57,6 +57,10 @@ context returned with the messages. Receipt and acknowledgement queries are
 restricted to authorized input IDs; scheduled-event attempts are read in one
 batch rather than opening the outbound database for every task.
 
+Task detail lists use one nullable-thread query and one indexed attempt batch,
+limited to the ten newest attempts per selected series. Missing or incompatible
+task storage is an error, not a successful empty task list.
+
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 
