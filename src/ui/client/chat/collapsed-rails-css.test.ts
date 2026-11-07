@@ -12,9 +12,15 @@ describe('collapsed desktop rails CSS contract', () => {
   const desktopPane = pane.split('@media (min-width: 721px)')[1];
 
   it('releases either or both collapsed columns without moving the transcript out of its grid slot', () => {
-    expect(global).toContain('main.threads-collapsed { grid-template-columns: 0 minmax(0, 1fr) 1fr; }');
-    expect(global).toContain('main.files-collapsed { grid-template-columns: var(--rail-w) minmax(0, 1fr) 0; }');
-    expect(global).toContain('main.threads-collapsed.files-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }');
+    expect(global).toContain(
+      'main.threads-collapsed { grid-template-columns: minmax(0px, 0px) minmax(0, 1fr) minmax(0, 1fr); }',
+    );
+    expect(global).toContain(
+      'main.files-collapsed { grid-template-columns: var(--rail-w) minmax(0, 1fr) minmax(0, 0fr); }',
+    );
+    expect(global).toContain(
+      'main.threads-collapsed.files-collapsed { grid-template-columns: minmax(0px, 0px) minmax(0, 1fr) minmax(0, 0fr); }',
+    );
     expect(desktopLayout).toContain('main { position: relative;');
     const desktop = global.split('@media (min-width: 721px)')[1];
     expect(desktop).toContain('main > .threads-rail { grid-area: 1 / 1; }');
@@ -67,5 +73,15 @@ describe('collapsed desktop rails CSS contract', () => {
     expect(desktop).toContain(
       'main.files-collapsed .chat-main > .log {\n    padding-inline-end: max(var(--chat-gutter), calc(var(--collapsed-w) + 16px));',
     );
+  });
+
+  it('animates compatible desktop tracks and rail controls only without reduced motion', () => {
+    expect(global).toContain('grid-template-columns: var(--rail-w) minmax(0, 1fr) minmax(0, 1fr)');
+    const motionQuery = '@media (min-width: 721px) and (prefers-reduced-motion: no-preference)';
+    expect(global.split(motionQuery)[1]).toContain('transition: grid-template-columns 180ms ease-out');
+    expect(read('components/ChatMain.css')).not.toContain('transition: padding-inline');
+    const controls = pane.split(motionQuery)[1];
+    expect(controls).toContain('.nc-pane:not(.collapsed) { animation: pane-expand 180ms ease-out; }');
+    expect(controls).toContain('.nc-pane.collapsed { animation: pane-collapse 180ms ease-out; }');
   });
 });

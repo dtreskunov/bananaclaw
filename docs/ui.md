@@ -792,6 +792,10 @@ respective top corners. Each rail is only as tall as its label and quick actions
 and reserves no transcript column. Transcript padding on each collapsed side
 leaves at least 16 px between the rail and message bubbles, while preserving
 larger centered gutters. Expanded panes and mobile drawers are unchanged.
+Desktop expansion and collapse resize the columns over 180 ms, with a brief fade
+for the panel controls. Safety padding updates immediately so bubbles stay clear
+throughout the transition. These desktop effects are disabled when reduced
+motion is requested.
 
 Normal message bubbles use at most 90% of the conversation column. On desktop,
 the column and composer share a 760 px maximum and the same centered gutters,

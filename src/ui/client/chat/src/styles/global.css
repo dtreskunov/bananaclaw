@@ -383,19 +383,24 @@ button:hover { background: var(--wash); }
 main {
   flex: 1;
   display: grid;
-  grid-template-columns: var(--rail-w) 1fr 1fr;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
-main.threads-collapsed { grid-template-columns: 0 minmax(0, 1fr) 1fr; }
-main.files-collapsed { grid-template-columns: var(--rail-w) minmax(0, 1fr) 0; }
-main.threads-collapsed.files-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }
+/* Matching track types let the desktop columns interpolate in both directions. */
+main.threads-collapsed { grid-template-columns: minmax(0px, 0px) minmax(0, 1fr) minmax(0, 1fr); }
+main.files-collapsed { grid-template-columns: var(--rail-w) minmax(0, 1fr) minmax(0, 0fr); }
+main.threads-collapsed.files-collapsed { grid-template-columns: minmax(0px, 0px) minmax(0, 1fr) minmax(0, 0fr); }
 
 @media (min-width: 721px) {
   main { position: relative; }
   main > .threads-rail { grid-area: 1 / 1; }
   main > .chat-main { grid-area: 1 / 2; }
   main > .files-pane { grid-area: 1 / 3; }
+}
+
+@media (min-width: 721px) and (prefers-reduced-motion: no-preference) {
+  main { transition: grid-template-columns 180ms ease-out; }
 }
 
 /* admin-only UI is hidden until JS adds .is-admin on body */

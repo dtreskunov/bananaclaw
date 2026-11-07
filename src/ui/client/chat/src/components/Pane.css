@@ -1,6 +1,6 @@
 /* .nc-pane — reusable collapsible side panel.
    Markup:
-     <aside class="nc-pane [my-pane] [no-animate]">
+     <aside class="nc-pane [my-pane]">
        <div class="head">
          <button class="icon-btn">›</button>
          <span class="title">Label</span>
@@ -87,5 +87,18 @@
     height: auto;
     border: 0;
     border-radius: inherit;
+  }
+}
+
+@media (min-width: 721px) and (prefers-reduced-motion: no-preference) {
+  .nc-pane:not(.collapsed) { animation: pane-expand 180ms ease-out; }
+  .nc-pane.collapsed { animation: pane-collapse 180ms ease-out; }
+  @keyframes pane-expand {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes pane-collapse {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 }
