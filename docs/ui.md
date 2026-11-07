@@ -787,6 +787,12 @@ the app and the bootstrap.
 
 #### Conversation layout
 
+On desktop, collapsed THREADS and FILES rails float over the transcript at their
+respective top corners. Each rail is only as tall as its label and quick actions,
+and reserves no transcript column. Transcript padding on each collapsed side
+leaves at least 16 px between the rail and message bubbles, while preserving
+larger centered gutters. Expanded panes and mobile drawers are unchanged.
+
 Normal message bubbles use at most 90% of the conversation column. On desktop,
 the column and composer share a 760 px maximum and the same centered gutters,
 defined once by `--chat-max` / `--chat-gutter` in

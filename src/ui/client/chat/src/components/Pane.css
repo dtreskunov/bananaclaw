@@ -65,3 +65,27 @@
 .nc-pane .collapsed-actions .action-menu.open .rail-icon-btn {
   opacity: 1; background: var(--wash);
 }
+
+@media (min-width: 721px) {
+  .nc-pane.collapsed {
+    position: absolute;
+    inset-block-start: 0;
+    width: var(--collapsed-w);
+    height: max-content;
+    overflow: visible;
+    z-index: 4;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: 0 4px 12px var(--shadow-color);
+  }
+  .nc-pane.threads-rail.collapsed { inset-inline-start: 0; }
+  .nc-pane.files-pane.collapsed { inset-inline-end: 0; }
+  .nc-pane.collapsed > .head {
+    position: relative;
+    width: auto;
+    height: auto;
+    border: 0;
+    border-radius: inherit;
+  }
+}

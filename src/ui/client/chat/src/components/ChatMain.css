@@ -103,6 +103,14 @@
     repeating-linear-gradient(-45deg, var(--transcript-hatch) 0 1px, transparent 1px 16px);
   background-attachment: local;
 }
+@media (min-width: 721px) {
+  main.threads-collapsed .chat-main > .log {
+    padding-inline-start: max(var(--chat-gutter), calc(var(--collapsed-w) + 16px));
+  }
+  main.files-collapsed .chat-main > .log {
+    padding-inline-end: max(var(--chat-gutter), calc(var(--collapsed-w) + 16px));
+  }
+}
 /* Flex items preserve edge space in Chromium, including the floating dock. */
 .chat-main .log::before,
 .chat-main .log::after { content: ''; flex: 0 0 calc(var(--transcript-edge-space) - var(--message-gap)); }
