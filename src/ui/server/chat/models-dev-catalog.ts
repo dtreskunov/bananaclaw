@@ -160,11 +160,40 @@ const NATIVE_CHAT_PACKAGES = new Set([
 ]);
 const NATIVE_ANTHROPIC_PACKAGES = new Set(['@ai-sdk/anthropic']);
 
-export function isNativeCompatible(provider: ModelsDevProvider, model: ModelsDevModel): boolean {
-  const packageName = model.provider?.npm ?? provider.npm ?? '@ai-sdk/openai-compatible';
-  const api = model.provider?.api ?? provider.api;
-  const supportedPackage = NATIVE_CHAT_PACKAGES.has(packageName) || NATIVE_ANTHROPIC_PACKAGES.has(packageName);
-  return supportedPackage && typeof api === 'string' && api.length > 0 && !api.includes('${');
+export function resolveCatalogEndpoint(
+  providerId: string,
+  provider: ModelsDevProvider,
+  model: ModelsDevModel,
+): {
+  api?: string;
+  npm: string;
+} {
+  const npm = model.provider?.npm ?? provider.npm ?? '@ai-sdk/openai-compatible';
+  // Some SDK-backed catalog entries omit the SDK's default API URL.
+  const api =
+    model.provider?.api ??
+    provider.api ??
+    (providerId === 'groq' && npm === '@ai-sdk/groq' ? 'https://api.groq.com/openai/v1' : undefined);
+  return { api, npm };
+}
+
+export function isNativeCompatible(
+  provider: ModelsDevProvider,
+  model: ModelsDevModel,
+  providerId = provider.id ?? '',
+): boolean {
+  const { api, npm } = resolveCatalogEndpoint(providerId, provider, model);
+  const url = typeof api === 'string' && !api.includes('${') ? URL.parse(api) : null;
+  const supportedPackage = NATIVE_CHAT_PACKAGES.has(npm) || NATIVE_ANTHROPIC_PACKAGES.has(npm);
+  return (
+    supportedPackage &&
+    url !== null &&
+    (url.protocol === 'https:' || url.protocol === 'http:') &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash
+  );
 }
 
 export function nativeInputModalities(
@@ -181,7 +210,7 @@ export function nativeInputModalities(
 
 async function listModelsDevModels(
   filter?: ModelsDevFilter,
-  accept: (provider: ModelsDevProvider, model: ModelsDevModel) => boolean = () => true,
+  accept: (provider: ModelsDevProvider, model: ModelsDevModel, providerId: string) => boolean = () => true,
   projectInputModalities: (provider: ModelsDevProvider, model: ModelsDevModel, modalities: string[]) => string[] = (
     _provider,
     _model,
@@ -196,7 +225,7 @@ async function listModelsDevModels(
     if (filter?.upstream && providerId !== filter.upstream) continue;
     const providerLabel = provider.name || providerId;
     for (const [modelId, model] of Object.entries(provider.models ?? {})) {
-      if (!model.tool_call || !accept(provider, model)) continue;
+      if (!model.tool_call || !accept(provider, model, providerId)) continue;
       const outMods = model.modalities?.output ?? [];
       const inMods = projectInputModalities(provider, model, model.modalities?.input ?? []);
       if (!outMods.includes('text')) continue;
@@ -242,11 +271,7 @@ export async function listNativeModels(filter?: ModelsDevFilter): Promise<Models
 export async function modelEndpoint(upstream: string, modelId: string): Promise<{ api?: string; npm?: string } | null> {
   const provider = (await fetchModelsDev())?.[upstream];
   if (!provider) return null;
-  const model = provider.models?.[modelId];
-  return {
-    api: model?.provider?.api ?? provider.api,
-    npm: model?.provider?.npm ?? provider.npm,
-  };
+  return resolveCatalogEndpoint(upstream, provider, provider.models?.[modelId] ?? {});
 }
 
 /**

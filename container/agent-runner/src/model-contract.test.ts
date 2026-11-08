@@ -8,6 +8,7 @@ import { describe, it, expect } from 'bun:test';
 import cases from './providers/model-contract-cases.json';
 import { normalizeLimits } from './providers/model-catalog.js';
 import { stripUpstreamPrefix } from './providers/opencode.js';
+import { resolveCatalogEndpoint } from './providers/native/catalog.js';
 
 describe('model limits contract', () => {
   for (const c of cases.limits.cases) {
@@ -24,6 +25,17 @@ describe('model wire contract', () => {
   for (const c of cases.wire.cases) {
     it(`peels the upstream back off: ${c.why}`, () => {
       expect(stripUpstreamPrefix(c.stored, c.upstream)).toBe(c.modelId);
+    });
+  }
+});
+
+describe('model endpoint contract', () => {
+  for (const c of cases.endpoints.cases) {
+    it(c.why, () => {
+      expect(resolveCatalogEndpoint(c.upstream, c.provider, c.model)).toEqual({
+        api: c.api ?? undefined,
+        npm: c.npm,
+      });
     });
   }
 });

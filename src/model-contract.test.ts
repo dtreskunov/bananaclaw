@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import cases from '../container/agent-runner/src/providers/model-contract-cases.json' with { type: 'json' };
 import { normalizeLimits } from './model-limits.js';
 import { joinWireModel } from './model-wire.js';
+import { isNativeCompatible, resolveCatalogEndpoint } from './ui/server/chat/models-dev-catalog.js';
 
 describe('model limits contract', () => {
   for (const c of cases.limits.cases) {
@@ -26,6 +27,18 @@ describe('model wire contract', () => {
   for (const c of cases.wire.cases) {
     it(`stores fully qualified: ${c.why}`, () => {
       expect(joinWireModel(c.upstream, c.modelId)).toBe(c.stored);
+    });
+  }
+});
+
+describe('model endpoint contract', () => {
+  for (const c of cases.endpoints.cases) {
+    it(c.why, () => {
+      expect(resolveCatalogEndpoint(c.upstream, c.provider, c.model)).toEqual({
+        api: c.api ?? undefined,
+        npm: c.npm,
+      });
+      expect(isNativeCompatible(c.provider, c.model, c.upstream)).toBe(c.compatible);
     });
   }
 });

@@ -53,6 +53,7 @@ let scriptedTexts: string[];
 /** Text streamed before each tool call, in the same step. */
 let toolCallText: string;
 let catalogFetch: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
+let realFetch: typeof globalThis.fetch;
 let catalogModels: Record<string, unknown>;
 let contextOverflows: number;
 let overflowAfterTool: boolean;
@@ -99,7 +100,7 @@ beforeEach(() => {
   resetTurnSendTracking();
   nativeCatalog.clearNativeCatalogForTest();
   catalogModels = {};
-  const realFetch = globalThis.fetch;
+  realFetch = globalThis.fetch;
   catalogFetch = spyOn(globalThis, 'fetch').mockImplementation((input, init) =>
     String(input) === 'https://models.dev/api.json' ? Promise.resolve(Response.json(catalogModels)) : realFetch(input, init));
   root = fs.mkdtempSync(path.join(process.cwd(), '.native-provider-'));
@@ -344,6 +345,32 @@ afterEach(() => {
 });
 
 describe('NativeProvider', () => {
+  it('calls the Groq default endpoint with the unprefixed model ID', async () => {
+    delete process.env.NATIVE_BASE_URL;
+    catalogModels = {
+      groq: {
+        npm: '@ai-sdk/groq',
+        models: {
+          'qwen/qwen3.8-27b': {
+            tool_call: true,
+            modalities: { input: ['text', 'image'], output: ['text'] },
+          },
+        },
+      },
+    };
+    catalogFetch.mockImplementation((input, init) => {
+      if (String(input) === 'https://models.dev/api.json') return Promise.resolve(Response.json(catalogModels));
+      expect(String(input)).toBe('https://api.groq.com/openai/v1/chat/completions');
+      return realFetch(`http://127.0.0.1:${server.port}/v1/chat/completions`, init);
+    });
+    toolMode = true;
+    const events = await collect(new NativeProvider({ model: 'groq/qwen/qwen3.8-27b' }));
+    expect(events.filter((event) => event.type === 'error')).toEqual([]);
+    expect(replyTexts(events).flat()).toEqual(['hello from stub']);
+    expect(requests).toHaveLength(2);
+    for (const request of requests) expect(request.model).toBe('qwen/qwen3.8-27b');
+  });
+
   it.each(['openai-chat', 'anthropic-messages'] as const)(
     'uses the same default tool text on the %s wire and in canonical history', async (protocol) => {
       process.env.NATIVE_PROTOCOL = protocol;

@@ -8,6 +8,10 @@ vi.mock('../../../providers/provider-container-registry.js', () => ({
 
 const model = { tool_call: true, modalities: { output: ['text'] } };
 const catalog = {
+  groq: {
+    npm: '@ai-sdk/groq',
+    models: { 'qwen/qwen3.8-27b': model },
+  },
   nvidia: {
     api: 'https://integrate.api.nvidia.com/v1',
     npm: '@ai-sdk/openai-compatible',
@@ -50,6 +54,14 @@ afterEach(() => {
 });
 
 describe('model credential destination', () => {
+  it.each(['native', 'opencode'])('uses the reviewed Groq endpoint for %s', async (provider) => {
+    const { getModelConnection } = await import('./model-connection.js');
+    expect(await getModelConnection(provider, 'groq/qwen/qwen3.8-27b')).toEqual({
+      resource_url: 'https://api.groq.com/openai/v1/*',
+      authentication: { type: 'bearer' },
+    });
+  });
+
   it.each(['native', 'opencode'])('uses NVIDIA, not the model developer, for %s', async (provider) => {
     const { getModelConnection } = await import('./model-connection.js');
     expect(await getModelConnection(provider, 'nvidia/minimaxai/minimax-m3.1-flash')).toEqual({

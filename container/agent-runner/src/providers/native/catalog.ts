@@ -42,6 +42,23 @@ interface CatalogProvider {
 
 type Catalog = Record<string, CatalogProvider>;
 
+export function resolveCatalogEndpoint(
+  providerId: string,
+  provider: CatalogProvider,
+  model: CatalogModel,
+): {
+  api?: string;
+  npm: string;
+} {
+  const npm = model.provider?.npm ?? provider.npm ?? '@ai-sdk/openai-compatible';
+  // Some SDK-backed catalog entries omit the SDK's default API URL.
+  const api =
+    model.provider?.api ??
+    provider.api ??
+    (providerId === 'groq' && npm === '@ai-sdk/groq' ? 'https://api.groq.com/openai/v1' : undefined);
+  return { api, npm };
+}
+
 export interface NativeModel {
   wireId: string;
   providerId: string;
@@ -120,18 +137,27 @@ export async function resolveNativeModel(wireId: string): Promise<NativeModel> {
     throw new Error(`Model ${wireId} does not support the text/tool surface required by native`);
   }
 
-  const packageName = model?.provider?.npm ?? provider?.npm ?? '@ai-sdk/openai-compatible';
+  const endpoint = resolveCatalogEndpoint(providerId, provider ?? {}, model ?? {});
   const protocol = explicitBaseURL
     ? explicitProtocol === 'anthropic-messages'
       ? 'anthropic-messages'
       : 'openai-chat'
-    : nativeProtocolForPackage(packageName);
+    : nativeProtocolForPackage(endpoint.npm);
   if (!protocol) {
-    throw new Error(`Model ${wireId} uses unsupported protocol package ${packageName}`);
+    throw new Error(`Model ${wireId} uses unsupported protocol package ${endpoint.npm}`);
   }
 
-  const baseURL = explicitBaseURL ?? (model?.provider?.api ?? provider?.api)?.replace(/\/+$/, '');
-  if (!baseURL || baseURL.includes('${')) {
+  const baseURL = explicitBaseURL ?? endpoint.api?.replace(/\/+$/, '');
+  const url = baseURL && !baseURL.includes('${') ? URL.parse(baseURL) : null;
+  if (
+    !baseURL ||
+    !url ||
+    (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
     throw new Error(`Model ${wireId} has no directly callable Chat Completions endpoint`);
   }
 

@@ -13,6 +13,27 @@
     ]
   },
 
+  "endpoints": {
+    "_": "Host picker/credential mapping and the native runner resolve the same endpoint. Defaults apply only to reviewed upstream/package pairs with no model or provider API URL.",
+    "cases": [
+      { "why": "Groq SDK default when models.dev omits the API URL", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq" }, "model": {}, "api": "https://api.groq.com/openai/v1", "npm": "@ai-sdk/groq", "compatible": true },
+      { "why": "provider API takes precedence over the SDK default", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "https://provider.test/v1" }, "model": {}, "api": "https://provider.test/v1", "npm": "@ai-sdk/groq", "compatible": true },
+      { "why": "model API and package take precedence over provider metadata", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "https://provider.test/v1" }, "model": { "provider": { "npm": "@ai-sdk/anthropic", "api": "https://model.test/anthropic/v1" } }, "api": "https://model.test/anthropic/v1", "npm": "@ai-sdk/anthropic", "compatible": true },
+      { "why": "another upstream using the Groq SDK does not inherit Groq's endpoint", "upstream": "unknown", "provider": { "npm": "@ai-sdk/groq" }, "model": {}, "api": null, "npm": "@ai-sdk/groq", "compatible": false },
+      { "why": "a Groq model with another package does not inherit the SDK default", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq" }, "model": { "provider": { "npm": "@ai-sdk/openai-compatible" } }, "api": null, "npm": "@ai-sdk/openai-compatible", "compatible": false },
+      { "why": "unsupported packages remain excluded", "upstream": "groq", "provider": { "npm": "@ai-sdk/google", "api": "https://provider.test/v1" }, "model": {}, "api": "https://provider.test/v1", "npm": "@ai-sdk/google", "compatible": false },
+      { "why": "unknown providers without endpoints remain excluded", "upstream": "unknown", "provider": {}, "model": {}, "api": null, "npm": "@ai-sdk/openai-compatible", "compatible": false },
+      { "why": "empty provider URLs do not fall back to the SDK default", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "" }, "model": {}, "api": "", "npm": "@ai-sdk/groq", "compatible": false },
+      { "why": "empty model URLs do not fall back to the provider URL", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "https://provider.test/v1" }, "model": { "provider": { "api": "" } }, "api": "", "npm": "@ai-sdk/groq", "compatible": false },
+      { "why": "unresolved templates do not fall back to the SDK default", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "https://${REGION}.test/v1" }, "model": {}, "api": "https://${REGION}.test/v1", "npm": "@ai-sdk/groq", "compatible": false },
+      { "why": "malformed URLs do not fall back to the SDK default", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "not-a-url" }, "model": {}, "api": "not-a-url", "npm": "@ai-sdk/groq", "compatible": false },
+      { "why": "non-HTTP endpoints remain excluded", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "ftp://provider.test/v1" }, "model": {}, "api": "ftp://provider.test/v1", "npm": "@ai-sdk/groq", "compatible": false },
+      { "why": "URLs with embedded credentials remain excluded", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "https://user:password@provider.test/v1" }, "model": {}, "api": "https://user:password@provider.test/v1", "npm": "@ai-sdk/groq", "compatible": false },
+      { "why": "URLs with query parameters remain excluded", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "https://provider.test/v1?key=example" }, "model": {}, "api": "https://provider.test/v1?key=example", "npm": "@ai-sdk/groq", "compatible": false },
+      { "why": "URLs with fragments remain excluded", "upstream": "groq", "provider": { "npm": "@ai-sdk/groq", "api": "https://provider.test/v1#fragment" }, "model": {}, "api": "https://provider.test/v1#fragment", "npm": "@ai-sdk/groq", "compatible": false }
+    ]
+  },
+
   "wire": {
     "_": "container_configs.model under the opencode provider is always stored fully qualified as <upstream>/<model-id>, with upstream_provider naming that same upstream. The host joins (src/model-wire.ts), the container peels the prefix back off (providers/opencode.ts).",
     "cases": [

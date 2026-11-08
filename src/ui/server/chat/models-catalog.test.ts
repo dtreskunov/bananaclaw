@@ -43,6 +43,48 @@ describe('public OpenRouter catalog', () => {
     expect(headers.has('proxy-authorization')).toBe(false);
   });
 
+  describe('native models.dev catalog', () => {
+    it('includes Groq SDK models without explicit API URLs and preserves text/tool requirements', async () => {
+      const model = {
+        name: 'Qwen3.8 27B',
+        tool_call: true,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+        limit: { context: 131072, output: 16384 },
+        cost: { input: 0.8, output: 4 },
+      };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          Response.json({
+            groq: {
+              npm: '@ai-sdk/groq',
+              name: 'Groq',
+              models: {
+                'qwen/qwen3.8-27b': model,
+                'no-tools': { ...model, tool_call: false },
+                'image-only': { ...model, modalities: { output: ['image'] } },
+              },
+            },
+          }),
+        ),
+      );
+      const { listModelsForProvider } = await import('./models-catalog.js');
+      const result = await listModelsForProvider('native', { upstream: 'groq' });
+      expect(result.source).toBe('models.dev');
+      expect(result.models).toHaveLength(1);
+      expect(result.models[0]).toMatchObject({
+        id: 'groq/qwen/qwen3.8-27b',
+        label: 'Qwen3.8 27B',
+        upstream: 'groq',
+        upstreamLabel: 'Groq',
+        contextWindow: 131072,
+        inputCostPerMTok: 0.8,
+        outputCostPerMTok: 4,
+        modalitiesIn: ['text', 'image'],
+      });
+    });
+  });
+
   it('preserves caching, modality filtering and model-detail lookup', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: models })));
     vi.stubGlobal('fetch', fetch);

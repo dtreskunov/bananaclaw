@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
 import { clearNativeCatalogForTest, nativeProtocolForPackage, resolveNativeModel } from './catalog.js';
+import cases from '../model-contract-cases.json';
 
 let fetchMock: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 beforeEach(() => {
@@ -24,6 +25,37 @@ afterEach(() => {
 });
 
 describe('native protocol resolution', () => {
+  for (const c of cases.endpoints.cases) {
+    it(c.why, async () => {
+      fetchMock.mockResolvedValue(
+        Response.json({
+          [c.upstream]: {
+            ...c.provider,
+            models: {
+              'qwen/qwen3.8-27b': {
+                tool_call: true,
+                modalities: { input: ['text', 'image'], output: ['text'] },
+                ...c.model,
+              },
+            },
+          },
+        }),
+      );
+      const model = resolveNativeModel(`${c.upstream}/qwen/qwen3.8-27b`);
+      if (c.compatible) {
+        expect(await model).toMatchObject({
+          providerId: c.upstream,
+          modelId: 'qwen/qwen3.8-27b',
+          baseURL: c.api,
+          protocol: c.npm === '@ai-sdk/anthropic' ? 'anthropic-messages' : 'openai-chat',
+          inputModalities: ['text', 'image'],
+        });
+      } else {
+        await expect(model).rejects.toThrow(/unsupported protocol package|no directly callable/);
+      }
+    });
+  }
+
   it('maps the models.dev Anthropic package to Messages', () => {
     expect(nativeProtocolForPackage('@ai-sdk/anthropic')).toBe('anthropic-messages');
   });
@@ -53,6 +85,23 @@ describe('native protocol resolution', () => {
     });
     await resolveNativeModel('example/audio');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an explicit endpoint ahead of Groq defaults', async () => {
+    process.env.NATIVE_BASE_URL = 'http://127.0.0.1:3001/proxy/';
+    fetchMock.mockResolvedValue(
+      Response.json({
+        groq: {
+          npm: '@ai-sdk/groq',
+          models: { 'qwen/qwen3.8-27b': { tool_call: true, modalities: { output: ['text'] } } },
+        },
+      }),
+    );
+    expect(await resolveNativeModel('groq/qwen/qwen3.8-27b')).toMatchObject({
+      modelId: 'qwen/qwen3.8-27b',
+      baseURL: 'http://127.0.0.1:3001/proxy',
+      protocol: 'openai-chat',
+    });
   });
 
   it('keeps explicit protocol selection independent of the catalog', async () => {

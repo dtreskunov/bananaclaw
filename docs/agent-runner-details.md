@@ -320,6 +320,26 @@ class OpenCodeProvider implements AgentProvider {
 - System prompt injected via `<system>` prefix in prompt text
 - No resume support (sessions are always new or reused by ID)
 
+### Native Provider: Model Endpoints
+
+Native model IDs include their upstream, for example
+`groq/qwen/qwen3.8-27b`. Endpoint resolution uses an explicit operator override
+first, then the model's models.dev API URL, then the provider's API URL.
+When both catalog URLs are absent, the reviewed `groq` + `@ai-sdk/groq` pair
+uses Groq's documented default, `https://api.groq.com/openai/v1`.
+Other upstream/package pairs do not inherit that default.
+
+The host model picker, credential destination lookup, and native runner use
+the same catalog fallback rules, covered by shared contract fixtures.
+Empty, malformed, credential-bearing, query-bearing, fragmented, and unresolved
+template URLs are rejected rather than replaced with a default. Unsupported
+protocol packages and models lacking text/tool support remain excluded.
+Existing local HTTP operator overrides continue to work.
+
+Selecting a Groq model does not create or broaden credential grants. Connect
+the user's Groq credential and explicitly grant the agent access through Agent
+Vault; runtime model requests still use the private session egress socket.
+
 ### Native Provider: Errors
 
 The AI SDK retries transient model-request failures before the native provider
