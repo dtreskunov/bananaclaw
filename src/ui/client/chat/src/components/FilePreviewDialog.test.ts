@@ -104,7 +104,7 @@ describe('persistent fullscreen file preview', () => {
     expect(hooks.dialog.current?.close).toHaveBeenCalledTimes(2);
     expect(hooks.dialog.current?.show).toHaveBeenCalledOnce();
     expect(focus.focus).toHaveBeenCalledWith({ preventScroll: true });
-    expect(hooks.back).toHaveBeenLastCalledWith(false, onClose);
+    expect(hooks.back).toHaveBeenLastCalledWith(false, onClose, undefined);
   });
 
   it('does not focus an opener removed by file navigation', () => {
@@ -121,7 +121,7 @@ describe('persistent fullscreen file preview', () => {
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(event.stopPropagation).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
-    expect(hooks.back).toHaveBeenCalledWith(true, onClose);
+    expect(hooks.back).toHaveBeenCalledWith(true, onClose, undefined);
   });
 
   it('keeps modal pointer and wheel events out of the sidebar without changing inline events', () => {

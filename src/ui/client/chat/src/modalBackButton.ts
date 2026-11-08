@@ -8,26 +8,39 @@
 //
 // Without this, mobile users have no obvious way to dismiss a modal that
 // fills the screen — and "back" feels like the natural gesture.
-import { useEffect, useRef } from 'preact/hooks';
+import { useLayoutEffect, useRef } from 'preact/hooks';
 
 const MARKER = '__modal_back__';
 
-export function useBackButtonCloses(open: boolean, onClose: () => void): void {
+export function useBackButtonCloses(open: boolean, onClose: () => void, onAfterClose?: () => void): void {
   // Tracks whether *we* pushed a history entry that hasn't been consumed
   // yet. We use a ref (not state) so the popstate listener captures the
   // current value without re-binding on every render.
   const pushedRef = useRef(false);
+  const openedRef = useRef(false);
+  const afterCloseRef = useRef(onAfterClose);
+  afterCloseRef.current = onAfterClose;
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) {
+      if (!openedRef.current) return undefined;
+      openedRef.current = false;
       // Modal closed by the parent (e.g. via X / Escape / backdrop). If
       // we pushed an entry, pop it back so the history stack stays clean.
-      if (pushedRef.current) {
+      if (pushedRef.current && history.state?.[MARKER] === true) {
         pushedRef.current = false;
+        if (afterCloseRef.current) {
+          window.addEventListener('popstate', () => afterCloseRef.current?.(), { once: true });
+        }
         // Skip our own popstate handler — there's nothing more to do.
         // history.back() fires popstate asynchronously, and our listener
         // is already torn down by then.
         history.back();
+      } else {
+        pushedRef.current = false;
+        if (afterCloseRef.current) queueMicrotask(() => afterCloseRef.current?.());
       }
       return undefined;
     }
@@ -35,6 +48,7 @@ export function useBackButtonCloses(open: boolean, onClose: () => void): void {
     // Push an entry so the next back press triggers popstate. Reuse the
     // current URL so we don't disturb the chat app's hash routing.
     history.pushState({ ...history.state, [MARKER]: true }, '', location.href);
+    openedRef.current = true;
     pushedRef.current = true;
 
     const onPop = (): void => {
@@ -42,9 +56,18 @@ export function useBackButtonCloses(open: boolean, onClose: () => void): void {
       // entry we pushed is no longer in the stack — drop the bookkeeping
       // flag so we don't try to consume it again on the next render.
       pushedRef.current = false;
-      onClose();
+      closeRef.current();
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, [open]);
+  useLayoutEffect(
+    () => () => {
+      if (!pushedRef.current) return;
+      pushedRef.current = false;
+      openedRef.current = false;
+      if (history.state?.[MARKER] === true) history.back();
+    },
+    [],
+  );
 }

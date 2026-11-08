@@ -3,6 +3,9 @@ import { useLayoutEffect, useRef } from 'preact/hooks';
 import { attachScrollEdges } from '../scroll-edges';
 import { RelativeTime } from './RelativeTime';
 import type { EpochMs } from '../../../../shared/time';
+import { revealedMobileMessageActionsId } from '../state';
+import { openTranscriptReader, type ReaderId } from '../transcript-reader';
+import { FullFrameIcon } from './ActionIcons';
 
 interface Props {
   class: string;
@@ -16,12 +19,13 @@ interface Props {
   from?: string;
   timestamp?: EpochMs | null;
   metadata?: ComponentChildren;
+  read?: ReaderId;
   children: ComponentChildren;
 }
 
 export function MessageBubble({
   class: className, 'data-msg-id': id, elementRef, reveal, from, timestamp, metadata,
-  children, id: elementId, tabIndex, 'data-attention-target': attentionTarget, onFocus,
+  children, id: elementId, tabIndex, 'data-attention-target': attentionTarget, onFocus, read,
 }: Props) {
   const ownRef = useRef<HTMLDivElement | null>(null);
   const ref = elementRef ?? ownRef;
@@ -52,16 +56,24 @@ export function MessageBubble({
         match.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  const content = from || timestamp != null || metadata ? <>
+  const content = from || timestamp != null || metadata || read ? <>
     {from ? <div class="message-author">{from}</div> : null}
     {children}
-    {timestamp != null || metadata ? <div class="meta turn-info">
+    {timestamp != null || metadata || read ? <div class="meta turn-info">
       {timestamp != null ? <RelativeTime ts={timestamp} /> : null}
       {metadata}
+      {read ? <span class="msg-inline-actions">
+        <button type="button" class="msg-action-btn" title="Read full screen" aria-label="Read full screen"
+          aria-haspopup="dialog" onClick={(event) => {
+            event.stopPropagation();
+            openTranscriptReader(read);
+          }}><FullFrameIcon /></button>
+      </span> : null}
     </div> : null}
   </> : children;
   return (
-    <div class={className} data-msg-id={id} id={elementId} tabIndex={tabIndex}
+    <div class={className + (revealedMobileMessageActionsId.value === id ? ' mobile-actions-visible' : '')}
+      data-msg-id={id} id={elementId} tabIndex={tabIndex}
       data-attention-target={attentionTarget} onFocus={onFocus} ref={ref}>
       <div class="message-scroll" ref={scrollRef}>
         {content}

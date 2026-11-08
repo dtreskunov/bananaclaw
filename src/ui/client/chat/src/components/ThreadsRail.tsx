@@ -28,6 +28,7 @@ import { threadAttentionCount } from '../attention-state';
 import { withPendingActivity } from '../conversation-state';
 import { buildThreadTree } from '../thread-tree';
 import { attachScrollEdges } from '../scroll-edges';
+import type { ReaderNavigate } from '../transcript-reader';
 
 export function ThreadTitle({ title, unread }: { title: string; unread?: boolean }) {
   const ref = useRef<HTMLSpanElement | null>(null);
@@ -47,7 +48,7 @@ export function ThreadTitle({ title, unread }: { title: string; unread?: boolean
   );
 }
 
-function ThreadAttention({ thread }: { thread: Thread }) {
+export function ThreadAttention({ thread, onNavigate }: { thread: Thread; onNavigate?: ReaderNavigate }) {
   const location = {
     agentGroupId: groupId.value, threadId: thread.threadId,
     channelType: thread.channelType || 'web', messagingGroupId: thread.messagingGroupId ?? null,
@@ -63,7 +64,11 @@ function ThreadAttention({ thread }: { thread: Thread }) {
       title={description}
       onClick={(event: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        if (actionable) void navigateAttention(location);
+        if (actionable) {
+          const navigate = (): void => { void navigateAttention(location); };
+          if (onNavigate) onNavigate(navigate);
+          else navigate();
+        }
       }}>
       {indicator}
     </button>

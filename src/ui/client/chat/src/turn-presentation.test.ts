@@ -450,6 +450,7 @@ describe('authoritative turn presentation', () => {
         ],
       }).conversation;
       const projection = conversationPresentation(view);
+      expect(projection.transcript.every((row) => row.kind !== 'question-answer')).toBe(true);
       expect(dockQuestions(view.interactions, view.messages, 'group', 'thread')).toEqual([question]);
       const steps = projection.messages[0].activity!.map((line) => JSON.parse(line.text));
       expect(steps.map((step) => step.id)).toEqual(recorded ? ['ui:start:turn-1', 'question-call'] : []);

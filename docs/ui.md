@@ -805,7 +805,38 @@ its existing 90% bubbles and 12 px composer gutters.
 The normal composer placeholder uses the selected agent group's display name,
 such as **Message Denis's Lab…**, and follows group switches and renames. While
 group metadata is unavailable it uses **Message the agent…**. Editing, pending
-question-dock and reconnecting prompts retain their specific wording.
+questions and reconnecting prompts retain their specific wording.
+
+**Full-frame reading mode.** Readable transcript bubbles offer **Read full screen**
+using the file browser's shared full-frame icon and native preview dialog.
+The reader uses the same Markdown preview component, typography, spacing and
+code-block styling as FILES `.md` previews. It shows message bodies and attachments without sender metadata,
+activity, statistics, composer controls, or the agent selector. User and agent
+messages, cards and completed question answers are pageable; approval/account
+requests and task/status/trace-only entries are not. Desktop text is centered at `80ch`;
+mobile uses the full available content area. Tables retain horizontal scrolling.
+
+The header keeps Previous (`<`), Next (`>`), a live position/count, the existing
+thread activity/waiting/unread indicator, a horizontally scrollable thread title
+with edge fades, and Close on one line. Navigation buttons disable at the ends.
+Left/Right keys page unless focus is in an editor, media player, table or the
+scrollable title; modified arrow keys retain their ordinary behavior.
+Message IDs keep the selected page stable through new messages and live updates.
+Revisiting a page restores its reading position; new pages start at the top.
+New activity never automatically advances the reader.
+
+Opening, paging and closing align the viewed bubble at the transcript's readable
+top. Minimal trailing scroll space allows even the last short bubble to align;
+it persists on close and clears when sending or changing conversations.
+Close, Escape and Browser Back leave the last viewed message at that position.
+Pending questions remain in the bounded bottom input dock, outside reader
+pagination. The waiting indicator closes the reader and navigates to the
+existing question or approval controls. Requests and their outcomes remain in
+the normal chat workflows rather than gaining a separate reader presentation.
+The reader never mounts credential review forms or submits interaction decisions.
+Waiting-indicator navigation and attachment/image/file navigation close the
+reader and consume its browser-history entry before opening the existing flow.
+Changing conversations closes the reader.
 
 #### Access and file browsing
 

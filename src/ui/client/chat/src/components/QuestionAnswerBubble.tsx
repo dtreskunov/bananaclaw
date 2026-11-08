@@ -1,19 +1,15 @@
-import { formatQuestionResponse } from '../../../../../channels/ask-question';
+import { questionAnswerText } from '../question-presentation';
 import { currentUserId, groupId, highlightMessageId, searchQuery } from '../state';
 import type { ChatMessage, PendingQuestionDto } from '../types';
 import { renderMarkdown } from '../utils';
 import { MessageBubble } from './MessageBubble';
 
 export function QuestionAnswerBubble({ question, answer }: { question: PendingQuestionDto; answer: ChatMessage }) {
-  const response = answer.questionResponseType === 'skipped'
-    ? 'Question skipped'
-    : answer.questionResponseType === 'choice'
-      ? (question.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text)
-      : answer.text;
-  const text = formatQuestionResponse(question.question, response);
+  const text = questionAnswerText(question, answer);
   const md = renderMarkdown(text, groupId.value);
   return (
     <MessageBubble class={`msg in${md != null ? ' markdown' : ''}`} data-msg-id={answer.id}
+      read={{ kind: 'question', id: question.id }}
       from={answer.author && answer.author.userId !== currentUserId.value ? answer.author.displayName : undefined}
       timestamp={answer.timestamp}
       reveal={highlightMessageId.value === answer.id ? searchQuery.value : undefined}>

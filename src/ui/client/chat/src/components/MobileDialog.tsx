@@ -4,6 +4,7 @@ import type { ComponentChildren, JSX } from 'preact';
 
 interface MobileDialogProps {
   title: string;
+  header?: ComponentChildren;
   ariaLabel?: string;
   onClose: () => void;
   onBack?: () => void;
@@ -20,7 +21,7 @@ interface MobileDialogProps {
 
 export function MobileDialog(props: MobileDialogProps): JSX.Element {
   const {
-    title, ariaLabel, onClose, onBack, backLabel = 'Back', actions, children,
+    title, header, ariaLabel, onClose, onBack, backLabel = 'Back', actions, children,
     className, backdropClassName, maxWidth, closeDisabled, role = 'dialog', onKeyDown,
   } = props;
   const onBackdrop = (event: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
@@ -47,7 +48,7 @@ export function MobileDialog(props: MobileDialogProps): JSX.Element {
               {'\u2039'}
             </button>
           ) : null}
-          <span class="mobile-dialog-title">{title}</span>
+          {header ?? <span class="mobile-dialog-title">{title}</span>}
           {actions ? <div class="mobile-dialog-actions">{actions}</div> : null}
           <button type="button" class="mobile-dialog-icon" aria-label="Close" disabled={closeDisabled} onClick={onClose}>{'\u2715'}</button>
         </header>

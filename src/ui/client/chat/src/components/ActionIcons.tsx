@@ -2,6 +2,14 @@ import './ActionIcons.css';
 
 /** 16px line icons shared by the bubble action buttons, drawn with currentColor. */
 
+export function FullFrameIcon({ className = 'msg-action-icon' }: { className?: string }) {
+  return (
+    <svg class={className} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" />
+    </svg>
+  );
+}
+
 export function CopyIcon() {
   return (
     <svg class="msg-action-icon" viewBox="0 0 16 16" aria-hidden="true">

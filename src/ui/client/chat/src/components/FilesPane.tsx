@@ -18,7 +18,7 @@ import {
   uploadFiles, clearUploadStrip, resolveConflict, notifyAgent, saveFile,
   createFile, promptNewFilePath, promptSaveAsPath, isEditableFileName,
 } from '../uploads';
-import { displayWorkspacePath, fmtBytes, renderMarkdown, parentPath, pathBelowRoot } from '../utils';
+import { displayWorkspacePath, fmtBytes, parentPath, pathBelowRoot } from '../utils';
 import { Pane } from './Pane';
 import { RelativeTime } from './RelativeTime';
 import { ActionsMenu } from './ActionsMenu';
@@ -27,6 +27,8 @@ import { LyricsPanel } from './LyricsPanel';
 import { PrivateWebView } from './PrivateWebView';
 import { ZoomableImage } from './ZoomableImage';
 import { FilePreviewDialog } from './FilePreviewDialog';
+import { FullFrameIcon } from './ActionIcons';
+import { MarkdownPreview } from './MarkdownPreview';
 import './ZoomableImage.css';
 import { requestChoice, requestConfirm } from './PromptModal';
 import { showToast } from './Toast';
@@ -317,9 +319,7 @@ function Crumb({
       aria-haspopup="dialog"
       onClick={onOpenFullScreen}
     >
-      <svg class="preview-fullscreen-icon" viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" />
-      </svg>
+      <FullFrameIcon className="preview-fullscreen-icon" />
     </button>
   ) : null;
   let acc = '';
@@ -775,10 +775,7 @@ function Preview({ editor }: { editor: PreviewEditorState }) {
       );
   }
   else if (p.kind === 'markdown') {
-    const md = renderMarkdown(p.text);
-    body = md != null
-      ? <div class="markdown-preview" dangerouslySetInnerHTML={{ __html: md }} />
-      : <pre>{p.text}</pre>;
+    body = <MarkdownPreview text={p.text} />;
   } else if (p.kind === 'text') {
     const hi = highlightCode(p.text || '', p.name);
     body = hi

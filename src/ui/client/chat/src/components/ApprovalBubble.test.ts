@@ -35,6 +35,7 @@ describe('shared approval bubble chrome', () => {
     expect(node.props.timestamp).toBe(approval.createdAt);
     expect(node.props['data-msg-id']).toBe(approval.id);
     expect(node.props.children.type).toBe(ApprovalCard);
+    expect(node.props).not.toHaveProperty('read');
   });
   it('timestamps a resolved response using the decision time, without duplicating metadata in its body', () => {
     const resolved = {

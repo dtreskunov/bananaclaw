@@ -2,7 +2,7 @@
 // banner, composer.
 import './ChatMain.css';
 import { signal } from '@preact/signals';
-import type { JSX, RefObject } from 'preact';
+import type { ComponentChildren, JSX, RefObject } from 'preact';
 import { memo } from 'preact/compat';
 import { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
 import {
@@ -11,6 +11,7 @@ import {
   pendingQuestions,
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
+  revealedMobileMessageActionsId,
   pendingWebSends,
   activeTurn, turnConnected, stopRequest,
   UPLOAD_MAX_FILE_SIZE, UPLOAD_MAX_TOTAL_SIZE, UPLOAD_MAX_FILES,
@@ -64,6 +65,9 @@ import { isApprovalThread } from '../approval-origin';
 import { ApprovalBubble } from './ApprovalBubble';
 import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { dockQuestions } from '../question-dock';
+import { readerLocation, readerSelection, alignReaderMessage, type ReaderNavigate } from '../transcript-reader';
+import { TranscriptReader } from './TranscriptReader';
+import { MarkdownPreview } from './MarkdownPreview';
 import { RelativeTime } from './RelativeTime';
 import { ModalDialog } from './ModalDialog';
 import { MessageBubble } from './MessageBubble';
@@ -82,7 +86,6 @@ import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingApprovalDto, PendingWebSend, Thread, TranscriptRow, TurnUsage } from '../types';
 
 const imageViewer = signal<{ src: string; alt: string; name: string } | null>(null);
-const revealedMobileMessageActionsId = signal<string | null>(null);
 
 function imageFileName(src: string): string {
   try {
@@ -682,22 +685,29 @@ function openThreadAt(targetThreadId: string, messageId: string): void {
   openChat(groupId.value, targetThreadId, null).catch(console.error);
 }
 
-function MessageText({ text, md }: { text: string; md: string | null }) {
-  const mdRef = useRef<HTMLDivElement | null>(null);
-  const q = searchQuery.value;
+function MessageText({ text, md, onNavigate, preview = false, children }: {
+  text: string; md: string | null; onNavigate?: ReaderNavigate; preview?: boolean; children?: ComponentChildren;
+}) {
+  const inlineRef = useRef<HTMLDivElement | null>(null);
+  const previewRef = useRef<HTMLElement | null>(null);
+  const mdRef = preview ? previewRef : inlineRef;
+  const navigationRef = useRef(onNavigate);
+  navigationRef.current = onNavigate;
+  const q = preview ? '' : searchQuery.value;
   const gid = groupId.value;
+  const navigate = (action: () => void): void => { if (navigationRef.current) navigationRef.current(action); else action(); };
   useLayoutEffect(() => {
     // Reset markdown DOM before re-processing (handles search query changes).
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
     if (md != null && mdRef.current && gid) {
-      rewriteFileLinks(mdRef.current, gid, (entry) => navFile(entry).catch(console.error));
+      rewriteFileLinks(mdRef.current, gid, (entry) => navigate(() => { void navFile(entry).catch(console.error); }));
       for (const img of mdRef.current.querySelectorAll<HTMLImageElement>('img[src]')) {
         img.tabIndex = 0;
         img.setAttribute('role', 'button');
         img.setAttribute('aria-label', img.alt ? `View ${img.alt}` : 'View image');
         const openImage = (): void => {
           const src = img.currentSrc || img.src;
-          imageViewer.value = { src, alt: img.alt || '', name: imageFileName(src) };
+          navigate(() => { imageViewer.value = { src, alt: img.alt || '', name: imageFileName(src) }; });
         };
         img.addEventListener('click', openImage);
         img.addEventListener('keydown', (event) => {
@@ -714,31 +724,60 @@ function MessageText({ text, md }: { text: string; md: string | null }) {
           const tid = a.dataset.threadId;
           const msgId = a.dataset.msgId;
           if (tid && gid) {
-            highlightMessageId.value = msgId || null;
-            if (threadId.value === tid) {
-              setTimeout(() => { highlightMessageId.value = msgId || null; }, 50);
-            } else {
-              openChat(gid, tid, null).catch(console.error);
-            }
+            navigate(() => {
+              highlightMessageId.value = msgId || null;
+              if (threadId.value === tid) {
+                setTimeout(() => { highlightMessageId.value = msgId || null; }, 50);
+              } else {
+                openChat(gid, tid, null).catch(console.error);
+              }
+            });
           }
         });
       }
     }
     // Highlight search query terms in the rendered message.
     if (q && mdRef.current) highlightTextNodes(mdRef.current, q);
-  }, [text, md, q, gid]);
+  }, [text, md, q, gid, preview]);
+  if (preview) return <MarkdownPreview text={text} html={md} className="reader-message" contentRef={mdRef}>{children}</MarkdownPreview>;
   return md != null
-    ? <div class="transcript-copy-content" ref={mdRef} dangerouslySetInnerHTML={{ __html: md }} />
-    : <div class="transcript-copy-content" ref={mdRef}>{text || ''}</div>;
+    ? <div class="transcript-copy-content" ref={inlineRef} dangerouslySetInnerHTML={{ __html: md }} />
+    : <div class="transcript-copy-content" ref={inlineRef}>{text || ''}</div>;
+}
+
+function MessageAttachments({ message, onNavigate }: { message: ChatMessage; onNavigate?: ReaderNavigate }) {
+  if (!message.files?.length) return null;
+  const navigate = onNavigate ?? ((action: () => void) => action());
+  const singleFile = message.files.length === 1 ? message.files[0] : null;
+  const kind = singleFile?.url && !message.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
+  if (singleFile && kind) {
+    const Media = kind === 'audio' ? 'audio' : 'video';
+    return <div class="inline-media">
+      <Media controls preload="metadata" src={singleFile.url!} title={singleFile.filename} />
+      <div class="inline-media-name">{singleFile.filename}</div>
+    </div>;
+  }
+  return <div class="files">
+    {message.files.map(file => {
+      const path = file.path;
+      const open = path
+        ? () => { void navFile({ path, name: file.filename, size: file.size }).catch(console.error); }
+        : file.url ? () => { void previewAttachment(file).catch(console.error); } : null;
+      const label = <>{'\uD83D\uDCCE '}{file.filename}</>;
+      return open ? <button type="button" class="file-chip"
+        title={file.path ? displayWorkspacePath(file.path) : `Preview ${file.filename}`}
+        onClick={() => navigate(open)} key={file.path || file.url}>{label}</button>
+        : <span class="file-chip inert" title="Source not in workspace" key={file.filename}>{label}</span>;
+    })}
+  </div>;
 }
 
 function Message(
-  { m, allowContinue = false, isLatest = false }:
-  { m: ChatMessage; allowContinue?: boolean; isLatest?: boolean },
+  { m, allowContinue = false, isLatest = false, reading = false, onNavigate }:
+  { m: ChatMessage; allowContinue?: boolean; isLatest?: boolean; reading?: boolean; onNavigate?: ReaderNavigate },
 ) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [continueState, setContinueState] = useState<'idle' | 'sending' | 'sent'>('idle');
-  const traceOwner = activityTraceOwner(m);
   if (m.direction === 'event') {
     const ev = m.event;
     const recur = ev?.recurrence ? ` \u00b7 ${ev.recurrence}` : '';
@@ -759,8 +798,11 @@ function Message(
       </button>
     );
   }
-  if (m.card) return <DisplayCardMessage message={m} card={m.card} />;
+  if (m.card) return <DisplayCardMessage message={m} card={m.card} reading={reading} />;
   const md = renderMarkdown(m.text, groupId.value);
+  const attachments = <MessageAttachments message={m} onNavigate={onNavigate} />;
+  if (reading) return <MessageText text={m.text} md={md} preview onNavigate={onNavigate}>{attachments}</MessageText>;
+  const traceOwner = activityTraceOwner(m);
   const isToolDelivery = m.deliveryOrigin === 'send_message' || m.deliveryOrigin === 'send_file';
   const systemNotice = isSystemNotice(m.direction, m.systemGenerated, m.suggestedAction);
   const systemNoticeTone = systemNotice && m.statsTurn?.outcome === 'failed'
@@ -774,10 +816,7 @@ function Message(
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
   const cls = 'msg ' + m.direction + (md != null ? ' markdown' : '') + (isToolDelivery ? ' agent-action' : '')
     + (systemNotice ? ` system-notice${systemNoticeTone}` : '')
-    + (inputPresentation ? ` ${inputPresentation.className}` : '') + (isLatest ? ' latest' : '')
-    + (revealedMobileMessageActionsId.value === m.id ? ' mobile-actions-visible' : '');
-  const singleFile = m.files?.length === 1 ? m.files[0] : null;
-  const singleMediaKind = singleFile?.url && !m.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
+    + (inputPresentation ? ` ${inputPresentation.className}` : '') + (isLatest ? ' latest' : '');
   const isWebChannel = !channelType.value || channelType.value === 'web';
   const suggestedAction = m.suggestedAction ?? (isFutureWorkMessage(m.text) ? 'continue' : undefined);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : undefined;
@@ -788,7 +827,7 @@ function Message(
       send.groupId === groupId.value && send.threadId === threadId.value && send.status !== 'failed');
   const midTurnUpdate = m.deliveryOrigin === 'send_message' &&
     !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled');
-  const metadata = m.timestamp != null || m.inputState || activity.length ? <>
+  const metadata = <>
     {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
     {submission?.status === 'sending' && !m.hideInitialQueuedCaption
       ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
@@ -802,12 +841,11 @@ function Message(
       {!m.submission ? <ForkButton m={m} isLatest={isLatest} /> : null}
       <CopyTranscriptButton getContent={() => ref.current?.querySelector<HTMLElement>('.transcript-copy-content') ?? null} />
     </PendingMessageActions>
-  </> : null;
+  </>;
   return (
     <MessageBubble
-      class={cls}
-      data-msg-id={m.id}
-      elementRef={ref}
+      class={cls} data-msg-id={m.id} elementRef={ref}
+      read={!systemNotice && (!!m.text.trim() || !!m.files?.length) ? { kind: 'message', id: m.id } : undefined}
       from={m.direction === 'in' && m.author && m.author.userId !== currentUserId.value ? m.author.displayName : undefined}
       timestamp={m.timestamp} metadata={metadata}
       reveal={highlightMessageId.value === m.id ? searchQuery.value : undefined}
@@ -820,46 +858,10 @@ function Message(
             live={m.turnTraceLive}
           />
         : null}
-      <MessageText text={m.text} md={md} />
+      <MessageText text={m.text} md={md} onNavigate={onNavigate} />
       {systemNotice && /\bHTTP (?:401|403)\b/.test(m.text)
         ? <button type="button" class="ga-cred-link" onClick={() => openCredentials()}>Credentials</button> : null}
-      {singleFile && singleMediaKind
-        ? (
-          <div class="inline-media">
-            {singleMediaKind === 'audio'
-              ? <audio controls preload="metadata" src={singleFile.url!} title={singleFile.filename} />
-              : <video controls preload="metadata" src={singleFile.url!} title={singleFile.filename} />}
-            <div class="inline-media-name">{singleFile.filename}</div>
-          </div>
-        )
-        : null}
-      {m.files && m.files.length && !singleMediaKind
-        ? (
-          <div class="files">
-            {m.files.map((f) => f.path
-              ? (
-                <button
-                  type="button"
-                  class="file-chip"
-                  title={displayWorkspacePath(f.path)}
-                  onClick={() => navFile({ path: f.path!, name: f.filename, size: f.size }).catch(console.error)}
-                  key={f.path}
-                >{'\uD83D\uDCCE '}{f.filename}</button>
-              )
-              : f.url
-                ? (
-                  <button
-                    type="button"
-                    class="file-chip"
-                    title={`Preview ${f.filename}`}
-                    onClick={() => { previewAttachment(f).catch(console.error); }}
-                    key={f.url}
-                  >{'\uD83D\uDCCE '}{f.filename}</button>
-                )
-              : <span class="file-chip inert" title="Source not in workspace" key={f.filename}>{'\uD83D\uDCCE '}{f.filename}</span>)}
-          </div>
-        )
-        : null}
+      {attachments}
       {showContinue
         ? (
           <div class="message-actions">
@@ -909,20 +911,18 @@ function Message(
 const MessageRow = memo(Message);
 const QuestionAnswer = memo(QuestionAnswerBubble);
 
-function DisplayCardMessage({ message, card }: { message: ChatMessage; card: DisplayCard }) {
+function DisplayCardMessage({ message, card, reading = false }: { message: ChatMessage; card: DisplayCard; reading?: boolean }) {
   const traceOwner = activityTraceOwner(message);
   const activity = message.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
-  return (
-    <MessageBubble class="msg out display-card agent-action" data-msg-id={message.id}
-      timestamp={message.timestamp} metadata={message.timestamp != null || activity.length ? <AgentActionLabel label="card" title="Sent with send_card" /> : null}
-      reveal={highlightMessageId.value === message.id ? searchQuery.value : undefined}>
-      {showTechnicalStatus
+  const content = (
+    <>
+      {!reading && showTechnicalStatus
         ? <TurnTechnicalDetails turn={message.statsTurn} lines={activity}
             ownerId={traceOwner} live={message.turnTraceLive} />
         : null}
-      {card.title ? <div class="display-card-title">{card.title}</div> : null}
-      {card.description ? <div class="display-card-description">{card.description}</div> : null}
+      {card.title ? reading ? <h2>{card.title}</h2> : <div class="display-card-title">{card.title}</div> : null}
+      {card.description ? reading ? <p class="display-card-description">{card.description}</p> : <div class="display-card-description">{card.description}</div> : null}
       {card.children.length > 0 ? (
         <div class="display-card-blocks">
           {card.children.map((child, index) => <div class="display-card-block" key={index}>{child}</div>)}
@@ -941,14 +941,20 @@ function DisplayCardMessage({ message, card }: { message: ChatMessage; card: Dis
           ))}
         </div>
       ) : null}
-      {message.reactions?.length ? (
+      {!reading && message.reactions?.length ? (
         <div class="reactions">
           {message.reactions.map((reaction, index) => (
             <span class="reaction-chip" key={index} title={`Reacted ${reaction.emoji}`}>{reaction.emoji}</span>
           ))}
         </div>
       ) : null}
-    </MessageBubble>
+    </>
+  );
+  return reading ? <MarkdownPreview html="" className="reader-message">{content.props.children}</MarkdownPreview> : (
+    <MessageBubble class="msg out display-card agent-action" data-msg-id={message.id}
+      read={{ kind: 'message', id: message.id }}
+      timestamp={message.timestamp} metadata={<AgentActionLabel label="card" title="Sent with send_card" />}
+      reveal={highlightMessageId.value === message.id ? searchQuery.value : undefined}>{content.props.children}</MessageBubble>
   );
 }
 
@@ -1321,10 +1327,12 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
   const readChannel = channelType.value;
   const readMessagingGroup = messagingGroupId.value;
   const readyForRead = chatReady.value;
+  const reading = readerSelection.value?.location === readerLocation();
   const atBottomRef = useRef<boolean>(true);
   const followingBottomRef = useRef<boolean>(true);
   const responseReadingTopRef = useRef<number | null>(null);
   const densityReflowRef = useRef(false);
+  const readerAlignedRef = useRef(false);
   const onLogClick = (event: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
     if (!isMobile.value || !(event.target instanceof Element)) return;
     const message = event.target.closest<HTMLElement>('.msg[data-msg-id]');
@@ -1344,6 +1352,10 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
   const scrollToBottom = () => {
     const el = ref.current;
     if (!el) return;
+    if (readerAlignedRef.current) {
+      el.style.removeProperty('--reader-tail-space');
+      readerAlignedRef.current = false;
+    }
     responseReadingTopRef.current = null;
     el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
@@ -1384,6 +1396,10 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
     atBottomRef.current = true;
     followingBottomRef.current = true;
     responseReadingTopRef.current = null;
+    if (readerAlignedRef.current && ref.current) {
+      ref.current.style.removeProperty('--reader-tail-space');
+      readerAlignedRef.current = false;
+    }
     return cancelScheduledScroll;
   }, [activeThreadId]);
 
@@ -1418,6 +1434,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
       return;
     }
     if (responseId === revealedResponse.current) return;
+    if (reading) { revealedResponse.current = responseId; return; }
     const log = ref.current;
     const response = log?.querySelector<HTMLElement>(`.msg[data-msg-id="${CSS.escape(responseId)}"]`);
     if (!log || !response) return;
@@ -1464,6 +1481,14 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
   useLayoutEffect(() => {
     if (!ref.current) return;
     if (densityReflowRef.current) return;
+    if (reading) {
+      cancelScheduledScroll();
+      atBottomRef.current = false;
+      followingBottomRef.current = false;
+      prevMsgCountRef.current = msgCount;
+      prevLayoutRef.current = layoutKey;
+      return;
+    }
     // Check for explicit scroll-to-bottom request (e.g. user sent a message)
     if (scrollTick !== prevScrollTickRef.current) {
       prevScrollTickRef.current = scrollTick;
@@ -1534,7 +1559,23 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
       break;
     }
   }
+  const alignReader = (anchorId: string): void => {
+    const log = ref.current;
+    const target = log?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
+    if (!log || !target) {
+      console.warn('Reader transcript target unavailable', anchorId);
+      showToast('Could not locate this message in the transcript.', 'err');
+      return;
+    }
+    cancelScheduledScroll();
+    atBottomRef.current = false;
+    followingBottomRef.current = false;
+    responseReadingTopRef.current = alignReaderMessage(log, target);
+    readerAlignedRef.current = true;
+  };
+  const readerRows: TranscriptRow[] = [...list, ...queued.map(message => ({ kind: 'message' as const, message }))];
   return (
+    <>
     <div class="log" id="chat-log" ref={ref} tabIndex={-1} onClick={onLogClick} onScroll={onLogScroll} onLoadCapture={measureScroll}>
         {chatLoading.value
           ? null
@@ -1573,6 +1614,9 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
         {!chatLoading.value && <ApprovalReferences />}
         <TaskIndicator />
     </div>
+    <TranscriptReader rows={readerRows} onNavigate={alignReader}
+      renderMessage={(message, onNavigate) => <MessageRow m={message} reading onNavigate={onNavigate} />} />
+    </>
   );
 }
 

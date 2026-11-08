@@ -1,4 +1,4 @@
-import type { ComponentChildren } from 'preact';
+import type { ComponentChildren, JSX } from 'preact';
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { useBackButtonCloses } from '../modalBackButton';
 import { MobileDialog } from './MobileDialog';
@@ -9,12 +9,17 @@ interface Props {
   title: string;
   onClose: () => void;
   children: ComponentChildren;
+  header?: ComponentChildren;
+  ariaLabel?: string;
+  onKeyDown?: JSX.KeyboardEventHandler<HTMLDialogElement>;
+  onAfterClose?: () => void;
+  className?: string;
 }
 
-export function FilePreviewDialog({ expanded, title, onClose, children }: Props) {
+export function FilePreviewDialog({ expanded, title, onClose, children, header, ariaLabel, onKeyDown, onAfterClose, className = '' }: Props) {
   const ref = useRef<HTMLDialogElement | null>(null);
   const opener = useRef<HTMLElement | null>(null);
-  useBackButtonCloses(expanded, onClose);
+  useBackButtonCloses(expanded, onClose, onAfterClose);
   // Changing modality, rather than remounting, preserves media, iframe and editor state.
   useLayoutEffect(() => {
     const dialog = ref.current;
@@ -43,10 +48,11 @@ export function FilePreviewDialog({ expanded, title, onClose, children }: Props)
     <dialog
       ref={ref}
       open
-      class={`file-preview-host${expanded ? ' is-expanded' : ''}`}
+      class={`file-preview-host${expanded ? ' is-expanded' : ''}${className ? ` ${className}` : ''}`}
       role={expanded ? 'dialog' : 'presentation'}
       aria-modal={expanded ? 'true' : undefined}
-      aria-label={expanded ? `Full screen preview: ${title}` : undefined}
+      aria-label={expanded ? ariaLabel ?? `Full screen preview: ${title}` : undefined}
+      onKeyDown={onKeyDown}
       onClick={stopModalEvent}
       onWheel={stopModalEvent}
       onTouchMove={stopModalEvent}
@@ -59,6 +65,7 @@ export function FilePreviewDialog({ expanded, title, onClose, children }: Props)
     >
       <MobileDialog
         title={title}
+        header={header}
         onClose={onClose}
         role="presentation"
         className="file-preview-panel"

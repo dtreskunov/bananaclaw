@@ -4,6 +4,7 @@ import { effect } from '@preact/signals';
 import { isValidElement } from 'preact';
 import { ActivityTraceList as PreparedActivityTraceList, Composer, ChatMain, InputDock } from './ChatMain';
 import { QuestionPrompt } from './QuestionPrompt';
+import { MarkdownPreview } from './MarkdownPreview';
 import { formatStopwatch } from '../duration-format';
 import { ComposerInput } from './ComposerInput';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
@@ -35,7 +36,16 @@ import {
 import { composerSendInFlight, currentPendingEditor, pendingEditorSessions, openPendingEditor } from '../pending-edit';
 import { pendingComposerBackups } from '../pending-composer';
 import { cancelledInputs, confirmCancelledInput, PendingCancellation, pendingCancellations } from '../pending-cancel';
-import { clearPinnedContext, removePending, respondInteraction, retryChatSend, sendChat, warmChat } from '../actions';
+import {
+  clearPinnedContext,
+  navFile,
+  previewAttachment,
+  removePending,
+  respondInteraction,
+  retryChatSend,
+  sendChat,
+  warmChat,
+} from '../actions';
 import type { ActivityLine, ChatMessage, PendingQuestionDto } from '../types';
 import { testThread } from '../conversation-test-fixtures';
 import type { ConversationMessage, ConversationTurn } from '../../../../shared/conversation';
@@ -127,6 +137,8 @@ vi.mock('../actions', () => ({
   addPendingFiles: vi.fn(),
   removePending: vi.fn(),
   respondInteraction: vi.fn(),
+  navFile: vi.fn().mockResolvedValue(undefined),
+  previewAttachment: vi.fn().mockResolvedValue(undefined),
 }));
 
 const thread = testThread({ messagingGroupId: null });
@@ -259,14 +271,12 @@ beforeEach(() => {
   turnConnected.value = true;
   vi.stubGlobal(
     'fetch',
-    vi
-      .fn()
-      .mockResolvedValue({
-        headers: uiHeaders,
-        ok: true,
-        status: 200,
-        json: async () => ({ ok: true, id: 'message', text: 'Revision' }),
-      }),
+    vi.fn().mockResolvedValue({
+      headers: uiHeaders,
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, id: 'message', text: 'Revision' }),
+    }),
   );
   vi.mocked(sendChat).mockReset();
   vi.mocked(warmChat).mockClear();
@@ -759,7 +769,7 @@ describe('main composer pending edits', () => {
     expect(input.value).toBe('Unsent composer draft');
     expect(pending.value[0].name).toBe('unsent.txt');
   });
-  it('suspends composition for a dock prompt without replacing its draft, attachments or context', () => {
+  it('suspends composition for a dock question without replacing its draft, attachments or context', () => {
     const draft = input.value;
     const files = pending.value;
     const pins = pinnedContext.value;
@@ -779,6 +789,173 @@ describe('main composer pending edits', () => {
     expect(find(tree, 'form').props.style).toBe('');
     expect(input.value).toBe(draft);
     expect(pending.value).toBe(files);
+  });
+  it('renders pending questions only in the bottom dock, not the transcript or reader', () => {
+    applyConversationFrame(testSnapshot({ interactions: [dockQuestion] }), 'thread');
+    resetMount();
+    const component = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    const log = component.type(component.props);
+    expect(findComponent(log, 'QuestionPrompt')).toBeUndefined();
+    expect(findComponent(log, 'MessageBubble')).toBeUndefined();
+    expect(findComponent(log, 'TranscriptReader').props.rows).toEqual([]);
+    const dock = InputDock();
+    expect(findComponent(dock, 'QuestionPrompt').props.question).toBe(dockQuestion);
+    expect(find(dock, 'div').props.children[1].props.class).toBe('question-dock');
+  });
+  it('renders reader message bodies without technical details, metadata or submit actions', () => {
+    resetMount();
+    const component = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    const log = component.type(component.props);
+    const reader = findComponent(log, 'TranscriptReader');
+    const body = reader.props.renderMessage(
+      {
+        id: 'reader-message',
+        direction: 'out',
+        timestamp: 1791219600000,
+        text: 'Please continue with the next steps.',
+        suggestedAction: 'continue',
+        statsTurn: testTurn,
+        files: [{ filename: 'note.txt', size: 10, url: '/note.txt' }],
+      },
+      vi.fn(),
+    );
+    resetMount();
+    const content = body.type(body.props);
+    expect(content.type.name).toBe('MessageText');
+    expect(content.props.preview).toBe(true);
+    expect(findComponent(content, 'TurnTechnicalDetails')).toBeUndefined();
+    expect(findComponent(content, 'PendingMessageActions')).toBeUndefined();
+    expect(find(content, 'button', 'Continue')).toBeUndefined();
+    expect(content.props.text).toContain('Please continue');
+    resetMount();
+    hooks.cursor = 0;
+    const preview = content.type(content.props);
+    expect(preview.type).toBe(MarkdownPreview);
+    expect(preview.props.className).toBe('reader-message');
+  });
+  describe.each([false, true])('shared message attachments (reading=%s)', (reading) => {
+    function attachments(
+      text: string,
+      files: NonNullable<ChatMessage['files']>,
+      onNavigate?: (action: () => void) => void,
+    ) {
+      applyConversationFrame(
+        testSnapshot(
+          {
+            messages: [{ id: 'attachment-message', direction: 'out', text, files, timestamp: 1791219600000 }],
+          },
+          'attachments',
+        ),
+        'thread',
+      );
+      resetMount();
+      hooks.cursor = 0;
+      const log = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      hooks.cursor = 0;
+      const row = findComponent(log.type(log.props), 'Message');
+      resetMount();
+      hooks.cursor = 0;
+      const component = findComponent(row.type({ ...row.props, reading, onNavigate }), 'MessageAttachments');
+      return component.type(component.props);
+    }
+    it.each(['audio', 'video'] as const)('keeps a single %s file inline with native playback controls', (kind) => {
+      const file = {
+        filename: kind === 'audio' ? 'reply.wav' : 'reply.mp4',
+        size: 128,
+        contentType: `${kind}/${kind === 'audio' ? 'wav' : 'mp4'}`,
+        url: `blob:fixture-${kind}`,
+      };
+      const body = attachments('', [file]);
+      expect(body.props.class).toBe('inline-media');
+      expect(body.props.children[0].type).toBe(kind);
+      expect(body.props.children[0].props).toMatchObject({
+        controls: true,
+        preload: 'metadata',
+        src: file.url,
+        title: file.filename,
+      });
+    });
+    it('renders workspace and URL chips with the same navigation and inert-file behavior', () => {
+      const files = [
+        { filename: 'report.txt', path: 'reports/report.txt', size: 12 },
+        { filename: 'attachment.wav', path: '', url: '/attachments/recording', contentType: 'audio/wav', size: 128 },
+        { filename: 'unavailable.txt', size: 10 },
+      ];
+      const navigate = vi.fn((action: () => void) => action());
+      const body = attachments('Message with multiple files', files, reading ? navigate : undefined);
+      const [workspace, url, inert] = body.props.children;
+      expect(workspace.props.title).toBe('~/reports/report.txt');
+      expect(url.props.title).toBe('Preview attachment.wav');
+      expect(url.key).toBe(files[1].url);
+      expect(inert.props.class).toBe('file-chip inert');
+      expect(inert.props.onClick).toBeUndefined();
+      workspace.props.onClick();
+      url.props.onClick();
+      expect(navFile).toHaveBeenCalledWith({ path: files[0].path, name: files[0].filename, size: files[0].size });
+      expect(previewAttachment).toHaveBeenCalledWith(files[1]);
+      expect(navigate).toHaveBeenCalledTimes(reading ? 2 : 0);
+    });
+    it('defers attachment navigation until the reader has handed off', () => {
+      const navigate = vi.fn();
+      const file = { filename: 'document.txt', url: '/attachments/document', size: 10 };
+      const body = attachments('', [file], navigate);
+      vi.mocked(previewAttachment).mockClear();
+      body.props.children[0].props.onClick();
+      expect(previewAttachment).not.toHaveBeenCalled();
+      navigate.mock.calls[0][0]();
+      expect(previewAttachment).toHaveBeenCalledWith(file);
+    });
+  });
+  it.each(['text', 'skipped'] as const)(
+    'keeps the %s prompt docked until its actual response arrives',
+    (responseType) => {
+      const response = responseType === 'text' ? { responseType, value: 'Answered elsewhere' } : { responseType };
+      const question: PendingQuestionDto = { ...dockQuestion, status: 'answered', response };
+      applyConversationFrame(testSnapshot({ interactions: [question] }, 'accepted'), 'thread');
+      expect(findComponent(InputDock(), 'QuestionPrompt').props.question).toBe(question);
+      expect(find(InputDock(), 'div').props.children[0].props.hidden).toBe(true);
+      applyConversationFrame(
+        testSnapshot(
+          {
+            interactions: [question],
+            messages: [
+              {
+                id: 'answer',
+                direction: 'in',
+                questionId: question.id,
+                questionResponseType: responseType,
+                text: responseType === 'skipped' ? 'Question skipped' : 'Answered elsewhere',
+                timestamp: question.createdAt + 1,
+              },
+            ],
+          },
+          'answered',
+        ),
+        'thread',
+      );
+      expect(findComponent(InputDock(), 'QuestionPrompt')).toBeUndefined();
+      expect(find(InputDock(), 'div').props.children[0].props.hidden).toBe(false);
+      resetMount();
+      const component = findComponent(ChatMain(), 'MessageLog');
+      resetMount();
+      const log = component.type(component.props);
+      expect(findComponent(log, 'QuestionAnswerBubble')).toBeDefined();
+      expect(findComponent(log, 'TranscriptReader').props.rows).toMatchObject([
+        { kind: 'question-answer', question: { id: question.id }, answer: { id: 'answer' } },
+      ]);
+    },
+  );
+  it('removes cancelled dock questions without creating a transcript or reader page', () => {
+    applyConversationFrame(testSnapshot({ interactions: [{ ...dockQuestion, status: 'cancelled' }] }), 'thread');
+    expect(findComponent(InputDock(), 'QuestionPrompt')).toBeUndefined();
+    expect(find(InputDock(), 'div').props.children[0].props.hidden).toBe(false);
+    resetMount();
+    const component = findComponent(ChatMain(), 'MessageLog');
+    resetMount();
+    expect(findComponent(component.type(component.props), 'TranscriptReader').props.rows).toEqual([]);
   });
   it('autosizes an existing draft on a density change without replacing it', () => {
     const draft = input.value;

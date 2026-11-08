@@ -1,0 +1,25 @@
+.transcript-reader-host .mobile-dialog-head { gap: 6px; }
+.transcript-reader-host .reader-position { flex: none; white-space: nowrap; font-size: var(--font-sm); }
+.transcript-reader-host .title-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+}
+.transcript-reader-host .title-text:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.transcript-reader-host .thread-attention { flex: none; }
+.transcript-reader-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.reader-body { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .transcript-reader-host .mobile-dialog-head { padding-inline: 8px; }
+}

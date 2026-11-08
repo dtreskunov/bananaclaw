@@ -15740,6 +15740,7 @@ var searchLoading = y3(false);
 var searchError = y3("");
 var searchOpen = y3(false);
 var highlightMessageId = y3(null);
+var revealedMobileMessageActionsId = y3(null);
 var scrollToBottomTick = y3(0);
 var paneOpen = {
   threads: y3(false),
@@ -20774,6 +20775,7 @@ function urlBase64ToUint8Array(base64String) {
 function MobileDialog(props) {
   const {
     title,
+    header,
     ariaLabel,
     onClose,
     onBack,
@@ -20808,7 +20810,7 @@ function MobileDialog(props) {
           children: [
             /* @__PURE__ */ u4("header", { class: "mobile-dialog-head", children: [
               onBack ? /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": backLabel, onClick: onBack, children: "\u2039" }) : null,
-              /* @__PURE__ */ u4("span", { class: "mobile-dialog-title", children: title }),
+              header ?? /* @__PURE__ */ u4("span", { class: "mobile-dialog-title", children: title }),
               actions ? /* @__PURE__ */ u4("div", { class: "mobile-dialog-actions", children: actions }) : null,
               /* @__PURE__ */ u4("button", { type: "button", class: "mobile-dialog-icon", "aria-label": "Close", disabled: closeDisabled, onClick: onClose, children: "\u2715" })
             ] }),
@@ -22795,6 +22797,9 @@ function Pane({ paneKey, name, label, extraClass, headActions, collapsedActions,
 }
 
 // src/components/ActionIcons.tsx
+function FullFrameIcon({ className = "msg-action-icon" }) {
+  return /* @__PURE__ */ u4("svg", { class: className, viewBox: "0 0 16 16", "aria-hidden": "true", children: /* @__PURE__ */ u4("path", { d: "M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" }) });
+}
 function CopyIcon() {
   return /* @__PURE__ */ u4("svg", { class: "msg-action-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: [
     /* @__PURE__ */ u4("rect", { x: "5.5", y: "5.5", width: "8", height: "8", rx: "1.5" }),
@@ -22961,7 +22966,7 @@ function ThreadTitle({ title, unread }) {
     title
   ] }) });
 }
-function ThreadAttention({ thread: thread2 }) {
+function ThreadAttention({ thread: thread2, onNavigate }) {
   const location2 = {
     agentGroupId: groupId.value,
     threadId: thread2.threadId,
@@ -22982,7 +22987,13 @@ function ThreadAttention({ thread: thread2 }) {
       title: description,
       onClick: (event) => {
         event.stopPropagation();
-        if (actionable) void navigateAttention(location2);
+        if (actionable) {
+          const navigate = () => {
+            void navigateAttention(location2);
+          };
+          if (onNavigate) onNavigate(navigate);
+          else navigate();
+        }
       },
       children: indicator
     }
@@ -24676,6 +24687,51 @@ function ApprovalCard({ approval: a4, busy, onRespond }) {
   ] });
 }
 
+// src/transcript-reader.ts
+var readerSelection = y3(null);
+function readerLocation() {
+  return JSON.stringify([groupId.value, threadId.value, channelType.value, messagingGroupId.value]);
+}
+function readerKey(id2) {
+  return `${id2.kind}:${id2.id}`;
+}
+function openTranscriptReader(id2) {
+  readerSelection.value = { location: readerLocation(), key: readerKey(id2) };
+}
+function readerPages(rows) {
+  const seen = /* @__PURE__ */ new Set();
+  return rows.flatMap((row) => {
+    let id2;
+    let anchorId;
+    if (row.kind === "message") {
+      const message2 = row.message;
+      if (message2.direction === "event" || isSystemNotice(message2.direction, message2.systemGenerated, message2.suggestedAction) || !message2.text.trim() && !message2.files?.length && !message2.card)
+        return [];
+      id2 = { kind: "message", id: message2.id };
+      anchorId = message2.id;
+    } else if (row.kind === "question-answer") {
+      id2 = { kind: "question", id: row.question.id };
+      anchorId = row.answer.id;
+    } else return [];
+    const key = readerKey(id2);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, anchorId, row }];
+  });
+}
+function alignReaderMessage(viewport, message2) {
+  viewport.style.removeProperty("--reader-tail-space");
+  const top = responseScrollTop(
+    viewport.scrollTop,
+    message2.getBoundingClientRect().top,
+    transcriptReadingTop(viewport)
+  );
+  const space = Math.max(0, top - Math.max(0, viewport.scrollHeight - viewport.clientHeight));
+  viewport.style.setProperty("--reader-tail-space", `${space}px`);
+  viewport.scrollTop = top;
+  return viewport.scrollTop;
+}
+
 // src/components/MessageBubble.tsx
 function MessageBubble({
   class: className,
@@ -24689,7 +24745,8 @@ function MessageBubble({
   id: elementId,
   tabIndex,
   "data-attention-target": attentionTarget,
-  onFocus
+  onFocus,
+  read
 }) {
   const ownRef = A2(null);
   const ref = elementRef ?? ownRef;
@@ -24719,18 +24776,33 @@ function MessageBubble({
       bubble.scrollTop += match2.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  const content = from || timestamp != null || metadata ? /* @__PURE__ */ u4(k, { children: [
+  const content = from || timestamp != null || metadata || read ? /* @__PURE__ */ u4(k, { children: [
     from ? /* @__PURE__ */ u4("div", { class: "message-author", children: from }) : null,
     children,
-    timestamp != null || metadata ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
+    timestamp != null || metadata || read ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
       timestamp != null ? /* @__PURE__ */ u4(RelativeTime, { ts: timestamp }) : null,
-      metadata
+      metadata,
+      read ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "msg-action-btn",
+          title: "Read full screen",
+          "aria-label": "Read full screen",
+          "aria-haspopup": "dialog",
+          onClick: (event) => {
+            event.stopPropagation();
+            openTranscriptReader(read);
+          },
+          children: /* @__PURE__ */ u4(FullFrameIcon, {})
+        }
+      ) }) : null
     ] }) : null
   ] }) : children;
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: className,
+      class: className + (revealedMobileMessageActionsId.value === id2 ? " mobile-actions-visible" : ""),
       "data-msg-id": id2,
       id: elementId,
       tabIndex,
@@ -27419,16 +27491,22 @@ function formatQuestionResponse(question2, response) {
 ${response}`;
 }
 
+// src/question-presentation.ts
+function questionAnswerText(question2, answer) {
+  const response = answer.questionResponseType === "skipped" ? "Question skipped" : answer.questionResponseType === "choice" ? question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text : answer.text;
+  return formatQuestionResponse(question2.question, response);
+}
+
 // src/components/QuestionAnswerBubble.tsx
 function QuestionAnswerBubble({ question: question2, answer }) {
-  const response = answer.questionResponseType === "skipped" ? "Question skipped" : answer.questionResponseType === "choice" ? question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text : answer.text;
-  const text2 = formatQuestionResponse(question2.question, response);
+  const text2 = questionAnswerText(question2, answer);
   const md = renderMarkdown(text2, groupId.value);
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
       class: `msg in${md != null ? " markdown" : ""}`,
       "data-msg-id": answer.id,
+      read: { kind: "question", id: question2.id },
       from: answer.author && answer.author.userId !== currentUserId.value ? answer.author.displayName : void 0,
       timestamp: answer.timestamp,
       reveal: highlightMessageId.value === answer.id ? searchQuery.value : void 0,
@@ -27447,6 +27525,251 @@ function dockQuestions(questions, messages, groupId3, threadId2) {
   ).sort(
     (a4, b5) => timelineSortKey(a4.createdAt, a4.timelinePosition) - timelineSortKey(b5.createdAt, b5.timelinePosition)
   );
+}
+
+// src/modalBackButton.ts
+var MARKER = "__modal_back__";
+function useBackButtonCloses(open, onClose, onAfterClose) {
+  const pushedRef = A2(false);
+  const openedRef = A2(false);
+  const afterCloseRef = A2(onAfterClose);
+  afterCloseRef.current = onAfterClose;
+  const closeRef = A2(onClose);
+  closeRef.current = onClose;
+  _2(() => {
+    if (!open) {
+      if (!openedRef.current) return void 0;
+      openedRef.current = false;
+      if (pushedRef.current && history.state?.[MARKER] === true) {
+        pushedRef.current = false;
+        if (afterCloseRef.current) {
+          window.addEventListener("popstate", () => afterCloseRef.current?.(), { once: true });
+        }
+        history.back();
+      } else {
+        pushedRef.current = false;
+        if (afterCloseRef.current) queueMicrotask(() => afterCloseRef.current?.());
+      }
+      return void 0;
+    }
+    history.pushState({ ...history.state, [MARKER]: true }, "", location.href);
+    openedRef.current = true;
+    pushedRef.current = true;
+    const onPop = () => {
+      pushedRef.current = false;
+      closeRef.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [open]);
+  _2(
+    () => () => {
+      if (!pushedRef.current) return;
+      pushedRef.current = false;
+      openedRef.current = false;
+      if (history.state?.[MARKER] === true) history.back();
+    },
+    []
+  );
+}
+
+// src/components/FilePreviewDialog.tsx
+function FilePreviewDialog({ expanded, title, onClose, children, header, ariaLabel, onKeyDown, onAfterClose, className = "" }) {
+  const ref = A2(null);
+  const opener = A2(null);
+  useBackButtonCloses(expanded, onClose, onAfterClose);
+  _2(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (expanded) {
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      dialog.close();
+      dialog.showModal();
+    } else if (dialog.matches(":modal")) {
+      dialog.close();
+      dialog.show();
+      if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+      opener.current = null;
+    }
+  }, [expanded]);
+  _2(() => {
+    const dialog = ref.current;
+    return () => {
+      dialog?.close();
+    };
+  }, []);
+  const stopModalEvent = (event) => {
+    if (expanded) event.stopPropagation();
+  };
+  return /* @__PURE__ */ u4(
+    "dialog",
+    {
+      ref,
+      open: true,
+      class: `file-preview-host${expanded ? " is-expanded" : ""}${className ? ` ${className}` : ""}`,
+      role: expanded ? "dialog" : "presentation",
+      "aria-modal": expanded ? "true" : void 0,
+      "aria-label": expanded ? ariaLabel ?? `Full screen preview: ${title}` : void 0,
+      onKeyDown,
+      onClick: stopModalEvent,
+      onWheel: stopModalEvent,
+      onTouchMove: stopModalEvent,
+      onPointerDown: stopModalEvent,
+      onCancel: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (expanded) onClose();
+      },
+      children: /* @__PURE__ */ u4(
+        MobileDialog,
+        {
+          title,
+          header,
+          onClose,
+          role: "presentation",
+          className: "file-preview-panel",
+          backdropClassName: "file-preview-backdrop",
+          maxWidth: "1280px",
+          children
+        }
+      )
+    }
+  );
+}
+
+// src/components/TranscriptReader.tsx
+function TranscriptReader({ rows, onNavigate, renderMessage }) {
+  const viewport = A2(null);
+  const positions = A2(/* @__PURE__ */ new Map());
+  const pendingAction = A2(null);
+  const selection = readerSelection.value;
+  const location2 = readerLocation();
+  const pages = readerPages(rows);
+  const sameLocation = selection?.location === location2;
+  const index = sameLocation ? pages.findIndex((page2) => page2.key === selection.key) : -1;
+  const page = pages[index];
+  const expanded = !!page;
+  const thread2 = threads.value.find((thread3) => thread3.threadId === threadId.value);
+  const title = thread2?.title || "Conversation";
+  const close = () => {
+    if (page) onNavigate(page.anchorId);
+    readerSelection.value = null;
+  };
+  const handoff = (action) => {
+    pendingAction.current = action;
+    close();
+  };
+  const afterClose = () => {
+    const action = pendingAction.current;
+    pendingAction.current = null;
+    action?.();
+  };
+  const navigate = (delta) => {
+    const next = pages[index + delta];
+    if (!selection || !next) return;
+    if (viewport.current && page) positions.current.set(page.key, viewport.current.scrollTop);
+    readerSelection.value = { location: location2, key: next.key };
+  };
+  const onKeyDown = (event) => {
+    if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable], audio, video, table, .title-text")) return;
+    event.preventDefault();
+    navigate(event.key === "ArrowLeft" ? -1 : 1);
+  };
+  _2(() => {
+    if (!selection) return;
+    if (!sameLocation) {
+      readerSelection.value = null;
+    } else if (!page && !chatLoading.value) {
+      console.warn("Reader message unavailable", selection.key);
+      showToast("This message is no longer available.", "err");
+      readerSelection.value = null;
+    }
+  }, [selection, sameLocation, !!page, chatLoading.value]);
+  _2(() => {
+    if (!page || !viewport.current) return;
+    viewport.current.scrollTop = positions.current.get(page.key) ?? 0;
+  }, [page?.key]);
+  _2(() => {
+    if (page) onNavigate(page.anchorId);
+  }, [page?.key, page?.anchorId]);
+  _2(() => {
+    if (!expanded) positions.current.clear();
+  }, [expanded]);
+  _2(() => {
+    pendingAction.current = null;
+    return () => {
+      pendingAction.current = null;
+      if (readerSelection.peek()?.location === location2) readerSelection.value = null;
+    };
+  }, [location2]);
+  let content = null;
+  if (page?.row.kind === "message") {
+    content = renderMessage(page.row.message, handoff);
+  } else if (page?.row.kind === "question-answer") {
+    content = renderMessage({ ...page.row.answer, text: questionAnswerText(page.row.question, page.row.answer) }, handoff);
+  }
+  return /* @__PURE__ */ u4(
+    FilePreviewDialog,
+    {
+      expanded,
+      title,
+      className: "transcript-reader-host",
+      ariaLabel: `Reading: ${title}`,
+      onClose: close,
+      onAfterClose: afterClose,
+      onKeyDown,
+      header: /* @__PURE__ */ u4(k, { children: [
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "mobile-dialog-icon",
+            "aria-label": "Previous message",
+            title: "Previous message",
+            disabled: index <= 0,
+            onClick: () => navigate(-1),
+            children: "\u2039"
+          }
+        ),
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: "mobile-dialog-icon",
+            "aria-label": "Next message",
+            title: "Next message",
+            disabled: index < 0 || index >= pages.length - 1,
+            onClick: () => navigate(1),
+            children: "\u203A"
+          }
+        ),
+        /* @__PURE__ */ u4("span", { class: "reader-position", "aria-live": "polite", "aria-atomic": "true", children: [
+          index + 1,
+          " / ",
+          pages.length
+        ] }),
+        thread2 ? /* @__PURE__ */ u4(ThreadAttention, { thread: thread2, onNavigate: handoff }) : /* @__PURE__ */ u4("span", { title: "Thread status unavailable", "aria-label": "Thread status unavailable", children: "?" }),
+        /* @__PURE__ */ u4(ThreadTitle, { title })
+      ] }),
+      children: expanded && /* @__PURE__ */ u4("div", { class: "transcript-reader-content", ref: viewport, tabIndex: 0, "aria-label": "Message content", children: /* @__PURE__ */ u4("div", { class: "reader-body preview-body", children: content }) })
+    }
+  );
+}
+
+// src/components/MarkdownPreview.tsx
+function MarkdownPreview({ text: text2, html, className = "", contentRef, children }) {
+  const rendered = html === void 0 ? renderMarkdown(text2) : html;
+  const ref = (element) => {
+    if (contentRef) contentRef.current = element;
+  };
+  return rendered == null ? /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("pre", { class: "markdown-preview-fallback", ref, children: text2 }),
+    children
+  ] }) : /* @__PURE__ */ u4("div", { class: `markdown-preview${className ? ` ${className}` : ""}`, children: [
+    /* @__PURE__ */ u4("div", { class: "markdown-preview-content", ref, dangerouslySetInnerHTML: { __html: rendered } }),
+    children
+  ] });
 }
 
 // src/components/ZoomableImage.tsx
@@ -27776,7 +28099,6 @@ function attachReadTracking(log, target) {
 
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
-var revealedMobileMessageActionsId = y3(null);
 function imageFileName(src) {
   try {
     const name = new URL(src, window.location.href).pathname.split("/").filter(Boolean).pop();
@@ -28326,21 +28648,33 @@ function openThreadAt(targetThreadId, messageId) {
   highlightMessageId.value = messageId;
   openChat2(groupId.value, targetThreadId, null).catch(console.error);
 }
-function MessageText({ text: text2, md }) {
-  const mdRef = A2(null);
-  const q5 = searchQuery.value;
+function MessageText({ text: text2, md, onNavigate, preview = false, children }) {
+  const inlineRef = A2(null);
+  const previewRef = A2(null);
+  const mdRef = preview ? previewRef : inlineRef;
+  const navigationRef = A2(onNavigate);
+  navigationRef.current = onNavigate;
+  const q5 = preview ? "" : searchQuery.value;
   const gid = groupId.value;
+  const navigate = (action) => {
+    if (navigationRef.current) navigationRef.current(action);
+    else action();
+  };
   _2(() => {
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
     if (md != null && mdRef.current && gid) {
-      rewriteFileLinks(mdRef.current, gid, (entry) => navFile(entry).catch(console.error));
+      rewriteFileLinks(mdRef.current, gid, (entry) => navigate(() => {
+        void navFile(entry).catch(console.error);
+      }));
       for (const img of mdRef.current.querySelectorAll("img[src]")) {
         img.tabIndex = 0;
         img.setAttribute("role", "button");
         img.setAttribute("aria-label", img.alt ? `View ${img.alt}` : "View image");
         const openImage = () => {
           const src = img.currentSrc || img.src;
-          imageViewer.value = { src, alt: img.alt || "", name: imageFileName(src) };
+          navigate(() => {
+            imageViewer.value = { src, alt: img.alt || "", name: imageFileName(src) };
+          });
         };
         img.addEventListener("click", openImage);
         img.addEventListener("keydown", (event) => {
@@ -28356,26 +28690,64 @@ function MessageText({ text: text2, md }) {
           const tid = a4.dataset.threadId;
           const msgId = a4.dataset.msgId;
           if (tid && gid) {
-            highlightMessageId.value = msgId || null;
-            if (threadId.value === tid) {
-              setTimeout(() => {
-                highlightMessageId.value = msgId || null;
-              }, 50);
-            } else {
-              openChat2(gid, tid, null).catch(console.error);
-            }
+            navigate(() => {
+              highlightMessageId.value = msgId || null;
+              if (threadId.value === tid) {
+                setTimeout(() => {
+                  highlightMessageId.value = msgId || null;
+                }, 50);
+              } else {
+                openChat2(gid, tid, null).catch(console.error);
+              }
+            });
           }
         });
       }
     }
     if (q5 && mdRef.current) highlightTextNodes(mdRef.current, q5);
-  }, [text2, md, q5, gid]);
-  return md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: mdRef, children: text2 || "" });
+  }, [text2, md, q5, gid, preview]);
+  if (preview) return /* @__PURE__ */ u4(MarkdownPreview, { text: text2, html: md, className: "reader-message", contentRef: mdRef, children });
+  return md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: inlineRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: inlineRef, children: text2 || "" });
 }
-function Message({ m: m6, allowContinue = false, isLatest = false }) {
+function MessageAttachments({ message: message2, onNavigate }) {
+  if (!message2.files?.length) return null;
+  const navigate = onNavigate ?? ((action) => action());
+  const singleFile = message2.files.length === 1 ? message2.files[0] : null;
+  const kind = singleFile?.url && !message2.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
+  if (singleFile && kind) {
+    const Media = kind === "audio" ? "audio" : "video";
+    return /* @__PURE__ */ u4("div", { class: "inline-media", children: [
+      /* @__PURE__ */ u4(Media, { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
+      /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
+    ] });
+  }
+  return /* @__PURE__ */ u4("div", { class: "files", children: message2.files.map((file) => {
+    const path = file.path;
+    const open = path ? () => {
+      void navFile({ path, name: file.filename, size: file.size }).catch(console.error);
+    } : file.url ? () => {
+      void previewAttachment(file).catch(console.error);
+    } : null;
+    const label = /* @__PURE__ */ u4(k, { children: [
+      "\u{1F4CE} ",
+      file.filename
+    ] });
+    return open ? /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "file-chip",
+        title: file.path ? displayWorkspacePath(file.path) : `Preview ${file.filename}`,
+        onClick: () => navigate(open),
+        children: label
+      },
+      file.path || file.url
+    ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: label }, file.filename);
+  }) });
+}
+function Message({ m: m6, allowContinue = false, isLatest = false, reading = false, onNavigate }) {
   const ref = A2(null);
   const [continueState, setContinueState] = h2("idle");
-  const traceOwner = activityTraceOwner(m6);
   if (m6.direction === "event") {
     const ev = m6.event;
     const recur = ev?.recurrence ? ` \xB7 ${ev.recurrence}` : "";
@@ -28401,8 +28773,11 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
       }
     );
   }
-  if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card });
+  if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card, reading });
   const md = renderMarkdown(m6.text, groupId.value);
+  const attachments = /* @__PURE__ */ u4(MessageAttachments, { message: m6, onNavigate });
+  if (reading) return /* @__PURE__ */ u4(MessageText, { text: m6.text, md, preview: true, onNavigate, children: attachments });
+  const traceOwner = activityTraceOwner(m6);
   const isToolDelivery = m6.deliveryOrigin === "send_message" || m6.deliveryOrigin === "send_file";
   const systemNotice = isSystemNotice(m6.direction, m6.systemGenerated, m6.suggestedAction);
   const systemNoticeTone = systemNotice && m6.statsTurn?.outcome === "failed" ? " provenance-error" : systemNotice && ["warning", "stopped", "interrupted"].includes(m6.statsTurn?.outcome ?? "") ? " provenance-warning" : "";
@@ -28410,15 +28785,13 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
   const submission = m6.submission;
   const activity = m6.direction === "out" ? m6.activity ?? [] : [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
-  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (systemNotice ? ` system-notice${systemNoticeTone}` : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "") + (revealedMobileMessageActionsId.value === m6.id ? " mobile-actions-visible" : "");
-  const singleFile = m6.files?.length === 1 ? m6.files[0] : null;
-  const singleMediaKind = singleFile?.url && !m6.text.trim() ? mediaKind(singleFile.filename, singleFile.contentType) : null;
+  const cls = "msg " + m6.direction + (md != null ? " markdown" : "") + (isToolDelivery ? " agent-action" : "") + (systemNotice ? ` system-notice${systemNoticeTone}` : "") + (inputPresentation ? ` ${inputPresentation.className}` : "") + (isLatest ? " latest" : "");
   const isWebChannel = !channelType.value || channelType.value === "web";
   const suggestedAction = m6.suggestedAction ?? (isFutureWorkMessage(m6.text) ? "continue" : void 0);
   const action = suggestedAction ? SUGGESTED_ACTIONS[suggestedAction] : void 0;
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
-  const metadata = m6.timestamp != null || m6.inputState || activity.length ? /* @__PURE__ */ u4(k, { children: [
+  const metadata = /* @__PURE__ */ u4(k, { children: [
     inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
     submission?.status === "sending" && !m6.hideInitialQueuedCaption ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: [
       "Sending",
@@ -28430,13 +28803,14 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
       !m6.submission ? /* @__PURE__ */ u4(ForkButton, { m: m6, isLatest }) : null,
       /* @__PURE__ */ u4(CopyTranscriptButton, { getContent: () => ref.current?.querySelector(".transcript-copy-content") ?? null })
     ] })
-  ] }) : null;
+  ] });
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
       class: cls,
       "data-msg-id": m6.id,
       elementRef: ref,
+      read: !systemNotice && (!!m6.text.trim() || !!m6.files?.length) ? { kind: "message", id: m6.id } : void 0,
       from: m6.direction === "in" && m6.author && m6.author.userId !== currentUserId.value ? m6.author.displayName : void 0,
       timestamp: m6.timestamp,
       metadata,
@@ -28451,44 +28825,9 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
             live: m6.turnTraceLive
           }
         ) : null,
-        /* @__PURE__ */ u4(MessageText, { text: m6.text, md }),
+        /* @__PURE__ */ u4(MessageText, { text: m6.text, md, onNavigate }),
         systemNotice && /\bHTTP (?:401|403)\b/.test(m6.text) ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => openCredentials(), children: "Credentials" }) : null,
-        singleFile && singleMediaKind ? /* @__PURE__ */ u4("div", { class: "inline-media", children: [
-          singleMediaKind === "audio" ? /* @__PURE__ */ u4("audio", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }) : /* @__PURE__ */ u4("video", { controls: true, preload: "metadata", src: singleFile.url, title: singleFile.filename }),
-          /* @__PURE__ */ u4("div", { class: "inline-media-name", children: singleFile.filename })
-        ] }) : null,
-        m6.files && m6.files.length && !singleMediaKind ? /* @__PURE__ */ u4("div", { class: "files", children: m6.files.map((f5) => f5.path ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "file-chip",
-            title: displayWorkspacePath(f5.path),
-            onClick: () => navFile({ path: f5.path, name: f5.filename, size: f5.size }).catch(console.error),
-            children: [
-              "\u{1F4CE} ",
-              f5.filename
-            ]
-          },
-          f5.path
-        ) : f5.url ? /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "file-chip",
-            title: `Preview ${f5.filename}`,
-            onClick: () => {
-              previewAttachment(f5).catch(console.error);
-            },
-            children: [
-              "\u{1F4CE} ",
-              f5.filename
-            ]
-          },
-          f5.url
-        ) : /* @__PURE__ */ u4("span", { class: "file-chip inert", title: "Source not in workspace", children: [
-          "\u{1F4CE} ",
-          f5.filename
-        ] }, f5.filename)) }) : null,
+        attachments,
         showContinue ? /* @__PURE__ */ u4("div", { class: "message-actions", children: /* @__PURE__ */ u4(
           "button",
           {
@@ -28531,50 +28870,52 @@ function Message({ m: m6, allowContinue = false, isLatest = false }) {
 }
 var MessageRow = M3(Message);
 var QuestionAnswer = M3(QuestionAnswerBubble);
-function DisplayCardMessage({ message: message2, card }) {
+function DisplayCardMessage({ message: message2, card, reading = false }) {
   const traceOwner = activityTraceOwner(message2);
   const activity = message2.activity ?? [];
   const showTechnicalStatus = appearance.value.preferences.showTechnicalStatus;
-  return /* @__PURE__ */ u4(
+  const content = /* @__PURE__ */ u4(k, { children: [
+    !reading && showTechnicalStatus ? /* @__PURE__ */ u4(
+      TurnTechnicalDetails,
+      {
+        turn: message2.statsTurn,
+        lines: activity,
+        ownerId: traceOwner,
+        live: message2.turnTraceLive
+      }
+    ) : null,
+    card.title ? reading ? /* @__PURE__ */ u4("h2", { children: card.title }) : /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
+    card.description ? reading ? /* @__PURE__ */ u4("p", { class: "display-card-description", children: card.description }) : /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
+    card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
+    card.actions.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-actions", children: card.actions.map((action) => /* @__PURE__ */ u4(
+      "a",
+      {
+        class: `display-card-action display-card-action-${action.style || "default"}`,
+        href: action.url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        children: [
+          action.label,
+          /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: [
+            " ",
+            "\u2197"
+          ] })
+        ]
+      },
+      `${action.label}:${action.url}`
+    )) }) : null,
+    !reading && message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null
+  ] });
+  return reading ? /* @__PURE__ */ u4(MarkdownPreview, { html: "", className: "reader-message", children: content.props.children }) : /* @__PURE__ */ u4(
     MessageBubble,
     {
       class: "msg out display-card agent-action",
       "data-msg-id": message2.id,
+      read: { kind: "message", id: message2.id },
       timestamp: message2.timestamp,
-      metadata: message2.timestamp != null || activity.length ? /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }) : null,
+      metadata: /* @__PURE__ */ u4(AgentActionLabel, { label: "card", title: "Sent with send_card" }),
       reveal: highlightMessageId.value === message2.id ? searchQuery.value : void 0,
-      children: [
-        showTechnicalStatus ? /* @__PURE__ */ u4(
-          TurnTechnicalDetails,
-          {
-            turn: message2.statsTurn,
-            lines: activity,
-            ownerId: traceOwner,
-            live: message2.turnTraceLive
-          }
-        ) : null,
-        card.title ? /* @__PURE__ */ u4("div", { class: "display-card-title", children: card.title }) : null,
-        card.description ? /* @__PURE__ */ u4("div", { class: "display-card-description", children: card.description }) : null,
-        card.children.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-blocks", children: card.children.map((child, index) => /* @__PURE__ */ u4("div", { class: "display-card-block", children: child }, index)) }) : null,
-        card.actions.length > 0 ? /* @__PURE__ */ u4("div", { class: "display-card-actions", children: card.actions.map((action) => /* @__PURE__ */ u4(
-          "a",
-          {
-            class: `display-card-action display-card-action-${action.style || "default"}`,
-            href: action.url,
-            target: "_blank",
-            rel: "noopener noreferrer",
-            children: [
-              action.label,
-              /* @__PURE__ */ u4("span", { "aria-hidden": "true", children: [
-                " ",
-                "\u2197"
-              ] })
-            ]
-          },
-          `${action.label}:${action.url}`
-        )) }) : null,
-        message2.reactions?.length ? /* @__PURE__ */ u4("div", { class: "reactions", children: message2.reactions.map((reaction, index) => /* @__PURE__ */ u4("span", { class: "reaction-chip", title: `Reacted ${reaction.emoji}`, children: reaction.emoji }, index)) }) : null
-      ]
+      children: content.props.children
     }
   );
 }
@@ -28943,10 +29284,12 @@ function MessageLog({ dockRef }) {
   const readChannel = channelType.value;
   const readMessagingGroup = messagingGroupId.value;
   const readyForRead = chatReady.value;
+  const reading = readerSelection.value?.location === readerLocation();
   const atBottomRef = A2(true);
   const followingBottomRef = A2(true);
   const responseReadingTopRef = A2(null);
   const densityReflowRef = A2(false);
+  const readerAlignedRef = A2(false);
   const onLogClick = (event) => {
     if (!isMobile.value || !(event.target instanceof Element)) return;
     const message2 = event.target.closest(".msg[data-msg-id]");
@@ -28964,6 +29307,10 @@ function MessageLog({ dockRef }) {
   const scrollToBottom = () => {
     const el = ref.current;
     if (!el) return;
+    if (readerAlignedRef.current) {
+      el.style.removeProperty("--reader-tail-space");
+      readerAlignedRef.current = false;
+    }
     responseReadingTopRef.current = null;
     el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
@@ -28999,6 +29346,10 @@ function MessageLog({ dockRef }) {
     atBottomRef.current = true;
     followingBottomRef.current = true;
     responseReadingTopRef.current = null;
+    if (readerAlignedRef.current && ref.current) {
+      ref.current.style.removeProperty("--reader-tail-space");
+      readerAlignedRef.current = false;
+    }
     return cancelScheduledScroll;
   }, [activeThreadId]);
   _2(() => {
@@ -29031,6 +29382,10 @@ function MessageLog({ dockRef }) {
       return;
     }
     if (responseId === revealedResponse.current) return;
+    if (reading) {
+      revealedResponse.current = responseId;
+      return;
+    }
     const log = ref.current;
     const response = log?.querySelector(`.msg[data-msg-id="${CSS.escape(responseId)}"]`);
     if (!log || !response) return;
@@ -29076,6 +29431,14 @@ function MessageLog({ dockRef }) {
   _2(() => {
     if (!ref.current) return;
     if (densityReflowRef.current) return;
+    if (reading) {
+      cancelScheduledScroll();
+      atBottomRef.current = false;
+      followingBottomRef.current = false;
+      prevMsgCountRef.current = msgCount;
+      prevLayoutRef.current = layoutKey;
+      return;
+    }
     if (scrollTick !== prevScrollTickRef.current) {
       prevScrollTickRef.current = scrollTick;
       scrollToBottom();
@@ -29133,30 +29496,55 @@ function MessageLog({ dockRef }) {
       break;
     }
   }
-  return /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
-    chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
-      const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
-      const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "interaction" ? /* @__PURE__ */ u4(ApprovalRow, { approval: g8.row.interaction }, key) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
-        MessageRow,
-        {
-          m: g8.m,
-          allowContinue: g8.m === latestConversationalMessage,
-          isLatest: g8.m === latestConversationalMessage
-        },
-        key
-      );
-      const inherited = inheritedUntil !== null && groupContains(g8, inheritedUntil);
-      const branches = [...branchesAt].filter(([id2]) => groupContains(g8, id2)).flatMap(([, c4]) => c4);
-      if (!inherited && branches.length === 0) return body;
-      return /* @__PURE__ */ u4(k, { children: [
-        body,
-        inherited ? /* @__PURE__ */ u4(InheritedDivider, { origin: forkOrigin }, `${key}:fork`) : null,
-        branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
-      ] });
-    }),
-    !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${message2.id}`)),
-    !chatLoading.value && /* @__PURE__ */ u4(ApprovalReferences, {}),
-    /* @__PURE__ */ u4(TaskIndicator, {})
+  const alignReader = (anchorId) => {
+    const log = ref.current;
+    const target = log?.querySelector(`[data-msg-id="${CSS.escape(anchorId)}"]`);
+    if (!log || !target) {
+      console.warn("Reader transcript target unavailable", anchorId);
+      showToast("Could not locate this message in the transcript.", "err");
+      return;
+    }
+    cancelScheduledScroll();
+    atBottomRef.current = false;
+    followingBottomRef.current = false;
+    responseReadingTopRef.current = alignReaderMessage(log, target);
+    readerAlignedRef.current = true;
+  };
+  const readerRows = [...list, ...queued.map((message2) => ({ kind: "message", message: message2 }))];
+  return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
+      chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
+        const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
+        const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "interaction" ? /* @__PURE__ */ u4(ApprovalRow, { approval: g8.row.interaction }, key) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
+          MessageRow,
+          {
+            m: g8.m,
+            allowContinue: g8.m === latestConversationalMessage,
+            isLatest: g8.m === latestConversationalMessage
+          },
+          key
+        );
+        const inherited = inheritedUntil !== null && groupContains(g8, inheritedUntil);
+        const branches = [...branchesAt].filter(([id2]) => groupContains(g8, id2)).flatMap(([, c4]) => c4);
+        if (!inherited && branches.length === 0) return body;
+        return /* @__PURE__ */ u4(k, { children: [
+          body,
+          inherited ? /* @__PURE__ */ u4(InheritedDivider, { origin: forkOrigin }, `${key}:fork`) : null,
+          branches.map((c4) => /* @__PURE__ */ u4(BranchDivider, { child: c4 }, `${key}:branch:${c4.threadId}`))
+        ] });
+      }),
+      !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${message2.id}`)),
+      !chatLoading.value && /* @__PURE__ */ u4(ApprovalReferences, {}),
+      /* @__PURE__ */ u4(TaskIndicator, {})
+    ] }),
+    /* @__PURE__ */ u4(
+      TranscriptReader,
+      {
+        rows: readerRows,
+        onNavigate: alignReader,
+        renderMessage: (message2, onNavigate) => /* @__PURE__ */ u4(MessageRow, { m: message2, reading: true, onNavigate })
+      }
+    )
   ] });
 }
 function ContextChip() {
@@ -30260,91 +30648,6 @@ function PrivateWebView({ groupId: groupId3, path, title, fragment }) {
   ) });
 }
 
-// src/modalBackButton.ts
-var MARKER = "__modal_back__";
-function useBackButtonCloses(open, onClose) {
-  const pushedRef = A2(false);
-  y2(() => {
-    if (!open) {
-      if (pushedRef.current) {
-        pushedRef.current = false;
-        history.back();
-      }
-      return void 0;
-    }
-    history.pushState({ ...history.state, [MARKER]: true }, "", location.href);
-    pushedRef.current = true;
-    const onPop = () => {
-      pushedRef.current = false;
-      onClose();
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, [open]);
-}
-
-// src/components/FilePreviewDialog.tsx
-function FilePreviewDialog({ expanded, title, onClose, children }) {
-  const ref = A2(null);
-  const opener = A2(null);
-  useBackButtonCloses(expanded, onClose);
-  _2(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (expanded) {
-      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      dialog.close();
-      dialog.showModal();
-    } else if (dialog.matches(":modal")) {
-      dialog.close();
-      dialog.show();
-      if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
-      opener.current = null;
-    }
-  }, [expanded]);
-  _2(() => {
-    const dialog = ref.current;
-    return () => {
-      dialog?.close();
-    };
-  }, []);
-  const stopModalEvent = (event) => {
-    if (expanded) event.stopPropagation();
-  };
-  return /* @__PURE__ */ u4(
-    "dialog",
-    {
-      ref,
-      open: true,
-      class: `file-preview-host${expanded ? " is-expanded" : ""}`,
-      role: expanded ? "dialog" : "presentation",
-      "aria-modal": expanded ? "true" : void 0,
-      "aria-label": expanded ? `Full screen preview: ${title}` : void 0,
-      onClick: stopModalEvent,
-      onWheel: stopModalEvent,
-      onTouchMove: stopModalEvent,
-      onPointerDown: stopModalEvent,
-      onCancel: (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (expanded) onClose();
-      },
-      children: /* @__PURE__ */ u4(
-        MobileDialog,
-        {
-          title,
-          onClose,
-          role: "presentation",
-          className: "file-preview-panel",
-          backdropClassName: "file-preview-backdrop",
-          maxWidth: "1280px",
-          children
-        }
-      )
-    }
-  );
-}
-
 // node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
@@ -30677,7 +30980,7 @@ function Crumb({
       "aria-label": "Full screen preview",
       "aria-haspopup": "dialog",
       onClick: onOpenFullScreen,
-      children: /* @__PURE__ */ u4("svg", { class: "preview-fullscreen-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: /* @__PURE__ */ u4("path", { d: "M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" }) })
+      children: /* @__PURE__ */ u4(FullFrameIcon, { className: "preview-fullscreen-icon" })
     }
   ) : null;
   let acc = "";
@@ -31133,8 +31436,7 @@ function Preview({ editor }) {
       }
     );
   } else if (p5.kind === "markdown") {
-    const md = renderMarkdown(p5.text);
-    body = md != null ? /* @__PURE__ */ u4("div", { class: "markdown-preview", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("pre", { children: p5.text });
+    body = /* @__PURE__ */ u4(MarkdownPreview, { text: p5.text });
   } else if (p5.kind === "text") {
     const hi = highlightCode(p5.text || "", p5.name);
     body = hi ? /* @__PURE__ */ u4("pre", { class: "hljs", "data-lang": hi.language, children: /* @__PURE__ */ u4("code", { dangerouslySetInnerHTML: { __html: hi.html } }) }) : /* @__PURE__ */ u4("pre", { children: p5.text });

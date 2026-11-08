@@ -91,6 +91,7 @@ export const searchLoading: Signal<boolean> = signal(false);
 export const searchError: Signal<string> = signal('');
 export const searchOpen: Signal<boolean> = signal(false);
 export const highlightMessageId: Signal<string | null> = signal<string | null>(null);
+export const revealedMobileMessageActionsId = signal<string | null>(null);
 // Scroll trigger — incremented to force scroll-to-bottom (e.g. after send)
 export const scrollToBottomTick: Signal<number> = signal(0);
 
