@@ -70,13 +70,13 @@ import { readConversation } from './conversation.js';
 import { conversationSnapshot } from './conversation-stream.js';
 import { acknowledgeRead, ReadStateError } from './read-state.js';
 import { isReadCursor } from '../../shared/read-state.js';
+import { chatAssetVersion } from './asset-version.js';
 
 // UI assets live under src/ (not compiled by tsc); resolve from project root,
 // which the host always runs from.
 const UI_DIR = path.resolve(process.cwd(), 'src', 'ui', 'client', 'chat');
 const MAX_INLINE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
-const ASSET_VERSION = String(Date.now());
 
 /** Path prefix the chat web app is mounted under on the shared HTTP server. */
 export const CHAT_MOUNT_PREFIX = '/ui/chat';
@@ -1188,43 +1188,12 @@ let cachedSw: { version: string; body: Buffer } | null = null;
 
 function serveServiceWorker(ctx: Ctx): void {
   const swPath = path.join(UI_DIR, 'sw.js');
-  const appJsPath = path.join(UI_DIR, 'dist', 'app.js');
-  let swStat: fs.Stats;
   try {
-    swStat = fs.statSync(swPath);
+    fs.statSync(swPath);
   } catch {
     return text(ctx, 404, 'Not found');
   }
-  // Per-deploy stamp so each new dist activates a fresh cache. Includes the
-  // bundle size to guard against mtime preservation across rsync/copy.
-  let version = `sw-${Math.floor(swStat.mtimeMs)}`;
-  try {
-    const appStat = fs.statSync(appJsPath);
-    let maxMtime = Math.max(Math.floor(swStat.mtimeMs), Math.floor(appStat.mtimeMs));
-    // Roll the cache key when a shell-cached static asset (bootstrap, CSS, icons)
-    // changes on disk, so installed PWAs pick up the new file on next launch
-    // instead of holding the previous version forever via stale-while-revalidate.
-    for (const name of [
-      'index.html',
-      'dist/appearance.js',
-      'dist/app.css',
-      'icon.svg',
-      'icon-192.png',
-      'icon-512.png',
-      'icon-maskable-512.png',
-      'manifest.webmanifest',
-    ]) {
-      try {
-        const s = fs.statSync(path.join(UI_DIR, name));
-        if (Math.floor(s.mtimeMs) > maxMtime) maxMtime = Math.floor(s.mtimeMs);
-      } catch {
-        /* missing asset is fine */
-      }
-    }
-    version = `${maxMtime}-${appStat.size}`;
-  } catch {
-    /* fall back to sw mtime only */
-  }
+  const version = chatAssetVersion(UI_DIR);
   if (!cachedSw || cachedSw.version !== version) {
     const raw = fs.readFileSync(swPath, 'utf-8').replace(/__CACHE_VERSION__/g, version);
     cachedSw = { version, body: Buffer.from(applyBrandTokens(raw), 'utf-8') };
@@ -1506,10 +1475,11 @@ function serveStatic(ctx: Ctx, relName: string): void {
                   ? 'application/manifest+json; charset=utf-8'
                   : 'application/octet-stream';
   if (ext === '.html') {
+    const version = chatAssetVersion(UI_DIR);
     let body = fs
       .readFileSync(full, 'utf8')
-      .replace(/(<script[^>]+src="dist\/app\.js)"/g, `$1?v=${ASSET_VERSION}"`)
-      .replace(/(<link[^>]+href="dist\/app\.css)"/g, `$1?v=${ASSET_VERSION}"`);
+      .replace(/(<script[^>]+src="dist\/(?:appearance|app)\.js)"/g, `$1?v=${version}"`)
+      .replace(/(<link[^>]+href="dist\/app\.css)"/g, `$1?v=${version}"`);
     body = applyBrandTokens(body).replace(/\{\{BRAND_BOOTSTRAP\}\}/g, brandBootstrapScript());
     const buf = Buffer.from(body, 'utf8');
     ctx.res.writeHead(200, {

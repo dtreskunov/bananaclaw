@@ -75,6 +75,17 @@ approval. Decline keeps its separate interaction-response error behavior.
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 
+### Browser asset updates
+
+The chat shell versions its app script, appearance bootstrap and stylesheet
+from the current asset files' modification times and sizes, not the host's
+startup time. The service worker uses the same stamp for its shell cache.
+A UI rebuild therefore changes asset URLs even while the host stays running,
+so a refresh cannot reuse an old renderer under an unchanged URL.
+Already-open pages still need to reload to execute new JavaScript; accepting
+the update toast activates a waiting worker before reloading. Updates never
+silently reload a page or discard a draft.
+
 ### Input attention
 
 Requests have an explicit-resolution lifetime: approvals stay
