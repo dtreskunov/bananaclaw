@@ -1462,8 +1462,10 @@ state lifecycle. Links appear with the completed response's settlement barrier.
 Clicking bordered suggestion text sends the associated message immediately
 through normal chat submission, without changing draft text, attachments or
 pinned context. A subtle gray pencil fills the composer for editing instead.
-There is no separate send-now button or label hover highlight. The compact
-pencil reuses the standard icon-button hover/focus behavior. All reply links
+There is no separate send-now button. Enabled widgets use the standard button
+tint on hover and keyboard focus. The compact pencil reuses the standard
+icon-button hover/focus behavior and the same `--radius-lg` corner radius as
+the THREADS trash button and THREADS/FILES refresh buttons. All reply links
 use the same two-action component, with no nested buttons.
 Inline labels preserve their original Markdown formatting and inherit their
 surrounding typography. The shared control uses the standard rounded button

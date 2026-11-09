@@ -1430,11 +1430,14 @@ header .mobile-only {
   padding: 0;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-lg);
   color: var(--muted);
   font: inherit;
   line-height: 1;
   cursor: pointer;
+}
+.msg-action-btn,
+.rail-control-btn.refresh-btn {
+  border-radius: var(--radius-lg);
 }
 .msg-action-btn:hover {
   background: rgba(127, 127, 127, 0.12);
@@ -4537,6 +4540,9 @@ nav.tab-bar-strip.group-strip {
   color: inherit;
   font: inherit;
   line-height: inherit;
+}
+.reply-suggestion:has(> button:not(:disabled)):is(:hover, :focus-within) {
+  background: var(--wash);
 }
 .reply-suggestion > .reply-suggestion-label {
   min-width: 0;

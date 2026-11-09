@@ -1,3 +1,5 @@
+@import './styles/themes/default.css';
+
 :root { font: 16px/1.5 system-ui, sans-serif; color: #242526; background: #f5f6f7; }
 * { box-sizing: border-box; }
 body { margin: 0; }

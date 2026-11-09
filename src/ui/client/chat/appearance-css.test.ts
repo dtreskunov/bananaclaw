@@ -733,7 +733,7 @@ describe('theme CSS contract', () => {
     expect(disabled).toContain('opacity: 0.7');
   });
 
-  it('keeps label hover plain and reuses the conventional compact pencil button styling', () => {
+  it('tints enabled suggestion widgets on hover and focus without obscuring the compact pencil', () => {
     const css = read('./components/ReplySuggestion.css');
     expect(css).toContain('display: inline-flex');
     expect(css).toContain('font: inherit');
@@ -742,14 +742,31 @@ describe('theme CSS contract', () => {
     expect(css).toContain('border-radius: var(--radius-md, 6px)');
     expect(css).toContain('gap: 0.15em');
     expect(css).toContain('width: 18px');
+    const hover = css.match(
+      /\.reply-suggestion:has\(> button:not\(:disabled\)\):is\(:hover, :focus-within\) \{([^}]+)\}/,
+    )?.[1];
+    expect(hover).toContain('background: var(--wash)');
     const icons = read('./components/ActionIcons.css');
     expect(icons).toContain('.msg-action-btn:hover');
     expect(icons).toContain('.msg-action-btn:focus-visible');
     const component = read('./components/ReplySuggestion.tsx');
     expect(component).toContain('class="msg-action-btn reply-suggestion-edit"');
     expect(css).not.toContain('position: absolute');
-    expect(css).not.toContain(':hover');
     expect(css).not.toContain('reply-suggestion-send');
+  });
+
+  it('shares the trash button corner radius with the compact pencil and all rail refresh controls', () => {
+    const icons = read('./components/ActionIcons.css');
+    expect(icons).toContain('.msg-action-btn,\n.rail-control-btn.refresh-btn { border-radius: var(--radius-lg); }');
+    const pencil = read('./components/ReplySuggestion.css').match(
+      /\.reply-suggestion > \.reply-suggestion-edit \{([^}]+)\}/,
+    )?.[1];
+    expect(pencil).not.toContain('border-radius');
+    expect(read('./components/ThreadsRail.tsx')).toContain('class="msg-action-btn danger del"');
+    for (const component of ['ThreadsRail', 'FilesPane']) {
+      expect(read(`./components/${component}.tsx`)).toMatch(/class="[^"]*rail-control-btn refresh-btn"/);
+    }
+    expect(read('./reply-suggestions-demo.css')).toContain("@import './styles/themes/default.css'");
   });
   it.each(THEMES.flatMap((theme) => ['light', 'dark'].map((mode) => [theme.id, mode])))(
     '%s / %s reply drafts meet 4.5:1 in normal, hover and disabled states',
