@@ -56,6 +56,7 @@ import type { AgentGroup } from '../../types.js';
 import { pickApprovalDelivery, pickApprover } from '../approvals/primitive.js';
 import { createPendingChannelApproval, hasInFlightChannelApproval } from './db/pending-channel-approvals.js';
 import { hasAdminPrivilege } from './db/user-roles.js';
+import { parseSender } from './sender.js';
 
 // ── Value constants (response handler in index.ts parses these) ──
 
@@ -193,14 +194,7 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
 
   const isGroup = event.message?.isGroup ?? originMg?.is_group === 1;
 
-  let senderName: string | undefined;
-  try {
-    const parsed = JSON.parse(event.message.content) as Record<string, unknown>;
-    senderName = (parsed.senderName ?? parsed.sender) as string | undefined;
-  } catch {
-    // non-critical
-  }
-
+  const senderName = parseSender(event.message.content)?.name ?? undefined;
   const channelName = originMg?.name ?? null;
   const title = isGroup ? '📣 Bot mentioned in new channel' : '💬 New direct message';
   const question = buildQuestionText(isGroup, senderName, channelName, originChannelType);

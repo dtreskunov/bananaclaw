@@ -35,6 +35,10 @@ HTML is stored as an untrusted `original-message.html` attachment. The plain-tex
 
 Outbound mail uses the alias encoded in the canonical `email` destination. Resend thread IDs retain that alias, so email-thread follow-ups continue to send from the same address.
 
+Approval notifications use a new-email subject without `Re:` and retain an approval reference so replies such as `Allow` or `Deny` reach the correct request. New-sender approvals show the sender's display name, when available, and originating channel handle (for example, `Alice (resend:alice@example.net)`), rather than an internal user UUID. Reissued approvals use the same sender details.
+
+CLI approvals show readable user, agent, channel, and wiring context above the exact command, in both notifications and the web UI. IDs remain unchanged in the command and approval payload. Approval response attribution prefers a display name or channel handle rather than an internal UUID.
+
 When an address changes, the old mailbox remains wired while email stays enabled. This lets recipients reply to messages sent before the rename. The new address becomes the canonical sender for new mail, and old aliases remain reserved to the original agent.
 
 Disabling email removes the canonical outbound destination and closes all managed aliases at the inbound gate. Existing mailbox and thread records remain so re-enabling does not lose routing history.

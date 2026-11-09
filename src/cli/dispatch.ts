@@ -14,6 +14,7 @@ import type { CallerContext, ErrorCode, RequestFrame, ResponseFrame } from './fr
 import { getResource } from './crud.js';
 import { lookup } from './registry.js';
 import { serializeCliTimestamps } from './timestamps.js';
+import { presentCliApproval } from './approval-presentation.js';
 
 export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<ResponseFrame> {
   let cmd = lookup(req.command);
@@ -149,9 +150,7 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
     const agentGroup = getAgentGroup(ctx.agentGroupId);
     const agentName = agentGroup?.name ?? ctx.agentGroupId;
 
-    const argSummary = Object.entries(req.args)
-      .map(([k, v]) => `--${k} ${v}`)
-      .join(' ');
+    const display = presentCliApproval(req.command, req.args);
 
     await requestApproval({
       session,
@@ -160,7 +159,7 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
       action: 'cli_command',
       payload: { frame: { id: req.id, command: req.command, args: req.args } },
       title: `CLI: ${req.command}`,
-      question: `Agent "${agentName}" wants to run:\n\`ncl ${req.command}${argSummary ? ' ' + argSummary : ''}\``,
+      question: `Agent "${agentName}" wants to run:\n${display.summary ? `${display.summary}\n\n` : ''}\`${display.command}\``,
     });
 
     return err(req.id, 'approval-pending', 'Approval request sent to admin. You will be notified of the result.');

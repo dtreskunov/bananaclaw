@@ -26,7 +26,7 @@
  * sender_identity). A retry / rapid second message from the same unknown
  * sender is silently dropped (no duplicate card sent).
  */
-import { normalizeOptions, type RawOption, type NormalizedOption } from '../../channels/approval-request.js';
+import { normalizeOptions, type NormalizedOption } from '../../channels/approval-request.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { log } from '../../log.js';
@@ -38,22 +38,29 @@ import {
   hasInFlightSenderApproval,
 } from './db/pending-sender-approvals.js';
 import { hasAdminPrivilege } from './db/user-roles.js';
+import { getPrimaryIdentityForChannel } from './db/identities.js';
+import { getUser } from './db/users.js';
+import { parseSender } from './sender.js';
 
-const APPROVAL_OPTIONS: RawOption[] = [
+const APPROVAL_OPTIONS = normalizeOptions([
   { label: 'Allow', selectedLabel: '✅ Allowed', value: 'approve' },
   { label: 'Deny', selectedLabel: '❌ Denied', value: 'reject' },
-];
-
-function generateId(): string {
-  return `nsa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
+]);
 
 export interface RequestSenderApprovalInput {
   messagingGroupId: string;
   agentGroupId: string;
-  senderIdentity: string; // namespaced user id (channel_type:handle)
+  senderIdentity: string; // users.id UUID, not a platform handle
   senderName: string | null;
   event: InboundEvent;
+}
+
+function senderDisplay(userId: string, senderName: string | null, event: InboundEvent): string {
+  const sender = parseSender(event.message.content);
+  const handle = sender?.handle ?? getPrimaryIdentityForChannel(userId, event.channelType)?.handle;
+  const identity = handle ? (handle.includes(':') ? handle : `${event.channelType}:${handle}`) : userId;
+  const name = senderName?.trim() || sender?.name?.trim() || getUser(userId)?.display_name?.trim();
+  return name && name !== handle && name !== identity ? `${name} (${identity})` : identity;
 }
 
 export async function resendSenderApproval(id: string): Promise<{ approvalId: string; resent: true }> {
@@ -78,6 +85,7 @@ export async function resendSenderApproval(id: string): Promise<{ approvalId: st
     'value' in value &&
     typeof value.value === 'string';
   if (!Array.isArray(saved) || !saved.every(validOption)) throw new Error('Stored approval options are invalid');
+  const event: InboundEvent = JSON.parse(row.original_message);
   await adapter.deliver(
     target.messagingGroup.channel_type,
     target.messagingGroup.platform_id,
@@ -87,7 +95,7 @@ export async function resendSenderApproval(id: string): Promise<{ approvalId: st
       type: 'approval_request',
       approvalId: row.id,
       title: row.title,
-      body: `${row.sender_name || row.sender_identity} wants to talk to your agent in ${origin.name || 'this channel'}. Allow?`,
+      body: `${senderDisplay(row.sender_identity, row.sender_name, event)} wants to talk to your agent in ${origin.name || 'this channel'}. Allow?`,
       options: saved,
     }),
   );
@@ -130,13 +138,11 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
     return;
   }
 
-  const approvalId = generateId();
-  const senderDisplay = senderName && senderName.length > 0 ? senderName : senderIdentity;
+  const approvalId = `nsa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const originName = originMg?.name ?? `a ${originChannelType} channel`;
 
   const title = '👤 New sender';
-  const question = `${senderDisplay} wants to talk to your agent in ${originName}. Allow?`;
-  const options = normalizeOptions(APPROVAL_OPTIONS);
+  const question = `${senderDisplay(senderIdentity, senderName, event)} wants to talk to your agent in ${originName}. Allow?`;
 
   createPendingSenderApproval({
     id: approvalId,
@@ -148,7 +154,7 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
     approver_user_id: target.userId,
     created_at: Date.now(),
     title,
-    options_json: JSON.stringify(options),
+    options_json: JSON.stringify(APPROVAL_OPTIONS),
   });
 
   const adapter = getDeliveryAdapter();
@@ -173,7 +179,7 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
         approvalId,
         title,
         body: question,
-        options,
+        options: APPROVAL_OPTIONS,
       }),
     );
     log.info('Unknown-sender approval card delivered', {

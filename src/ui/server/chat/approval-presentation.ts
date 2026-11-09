@@ -48,12 +48,14 @@ export function presentApproval(action: string, payload: Record<string, unknown>
     if (frame) {
       const cmd = typeof frame.command === 'string' ? frame.command : '';
       const args = (frame.args as Record<string, unknown> | undefined) || {};
-      const argStr = Object.entries(args)
-        .map(([key, value]) => `--${key} ${typeof value === 'string' ? value : JSON.stringify(value)}`)
-        .join(' ');
-      return { details: cmd ? `ncl ${cmd}${argStr ? ' ' + argStr : ''}` : null, packages: null };
+      const display = cmd ? presentCliApproval(cmd, args) : null;
+      return {
+        details: display ? [display.summary, display.command].filter(Boolean).join('\n\n') : null,
+        packages: null,
+      };
     }
   }
 
   return { details: null, packages: null };
 }
+import { presentCliApproval } from '../../../cli/approval-presentation.js';

@@ -82,6 +82,28 @@ const view = (thread = 'source-thread', user = 'owner') => readConversation(user
 const approvals = (conversation = view()) => conversation.interactions;
 
 describe('retained approval transcript', () => {
+  it('labels an unnamed approval responder with their channel handle while retaining their ID', async () => {
+    getDb().prepare("UPDATE users SET display_name=NULL WHERE id='owner'").run();
+    getDb()
+      .prepare(
+        "INSERT INTO identities(user_id,channel,handle,verified_at) VALUES('owner','resend','owner@example.net',1767225600000)",
+      )
+      .run();
+    request();
+    await handleApprovalsResponse({
+      approvalId: 'approval',
+      value: 'approve',
+      userId: 'owner',
+      channelType: 'web',
+      platformId: 'admin-dm',
+      threadId: null,
+    });
+    expect(approvals()[0]).toMatchObject({
+      status: 'approved',
+      respondedBy: { userId: 'owner', displayName: 'resend:owner@example.net' },
+    });
+  });
+
   it('retains account-setup purpose and its responder after completion and reload', () => {
     request('request_access', { resource_url: 'https://api.example.com/', reason: 'Read the report' });
     createApprovalWorkflow('approval', 'account-setup');

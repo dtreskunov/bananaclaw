@@ -3,6 +3,7 @@ import { getDb } from '../../../db/connection.js';
 import { assertTimestampFields } from '../../../db/validate-timestamps.js';
 import { epochMs } from '../../../time.js';
 import { recordHostChange } from '../../../db/transaction.js';
+import { getIdentitiesForUser } from './identities.js';
 
 export function createUser(user: User): void {
   assertTimestampFields(user, ['created_at']);
@@ -32,6 +33,13 @@ export function getUser(id: string): User | undefined {
   return getDb().prepare('SELECT id,kind,display_name,created_at,onboarded_at FROM users WHERE id = ?').get(id) as
     | User
     | undefined;
+}
+
+export function getUserDisplayName(id: string): string {
+  const user = getUser(id);
+  if (user?.display_name?.trim()) return user.display_name.trim();
+  const identity = getIdentitiesForUser(id).find((identity) => identity.channel !== 'web');
+  return identity ? `${identity.channel}:${identity.handle}` : user ? 'Unnamed user' : 'Unavailable user';
 }
 
 export function getAllUsers(): User[] {

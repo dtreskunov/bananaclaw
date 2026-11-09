@@ -5,7 +5,7 @@ import { getApproval, type Approval } from '../../../db/approvals.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
 import { getSession } from '../../../db/sessions.js';
 import { getMessagingGroup } from '../../../db/messaging-groups.js';
-import { getUser } from '../../../modules/permissions/db/users.js';
+import { getUserDisplayName } from '../../../modules/permissions/db/users.js';
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
 import { getAccountRequest } from '../../../modules/approvals/workflows.js';
 import type { AccountInteraction, AccountRequestData } from '../../shared/approval.js';
@@ -49,11 +49,10 @@ export function approvalOrigin(
 }
 
 function responseContext(userId: string, row: Approval) {
-  const responder = row.responded_by ? getUser(row.responded_by) : undefined;
   return {
     decision: row.response.decision,
     respondedBy: row.responded_by
-      ? { userId: row.responded_by, displayName: responder?.display_name || row.responded_by }
+      ? { userId: row.responded_by, displayName: getUserDisplayName(row.responded_by) }
       : null,
     responseMessage: row.response.message,
     origin: approvalOrigin(userId, row),

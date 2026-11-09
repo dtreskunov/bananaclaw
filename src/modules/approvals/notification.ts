@@ -4,7 +4,7 @@ import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { log } from '../../log.js';
 import { openInboundDb, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
-import { getUser } from '../permissions/db/users.js';
+import { getUserDisplayName } from '../permissions/db/users.js';
 import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
 
 export interface ApprovalNotificationOptions {
@@ -59,9 +59,7 @@ export function writeApprovalNotification(
       originMessageId: options.originMessageId,
     });
   }
-  const responder = options.responseMessage
-    ? getUser(options.responseMessage.userId)?.display_name?.trim() || options.responseMessage.userId
-    : undefined;
+  const responder = options.responseMessage ? getUserDisplayName(options.responseMessage.userId) : undefined;
   const contentText = options.responseMessage
     ? `${text}\n\nUser message from ${JSON.stringify(responder)}:\n${options.responseMessage.message}`
     : text;

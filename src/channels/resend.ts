@@ -629,7 +629,7 @@ registerChannelAdapter('resend', {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const origSend = resendClient.emails.send.bind(resendClient.emails);
     let pendingAttachments: Array<{ filename: string; content: string }> | null = null;
-    // For email_compose (new outbound emails): override the subject postMessage
+    // For new outbound emails and approval notifications: override the subject postMessage
     // would otherwise build ("Re: <stored>" or "New message"). Cleared after one send.
     let pendingSubjectOverride: string | null = null;
     // Extra Reply-To address (e.g. routing replies to a human owner). Set
@@ -694,29 +694,30 @@ registerChannelAdapter('resend', {
     const origPostMessage = adapter.postMessage.bind(adapter);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     adapter.postMessage = async function (threadId: string, message: any) {
-      const { alias } = tr.decodeThreadId(threadId);
       const savedAddress = this.config.fromAddress;
       const savedName = this.config.fromName;
-      this.config.fromAddress = alias;
-      if (alias !== FROM) {
-        const managedAgent = getEnabledAgentGroupForEmailAlias(alias);
-        const bot = readBotFolder(alias);
-        this.config.fromName = managedAgent?.name || bot?.config?.name || alias.split('@')[0];
-      }
-      const files = message?.files as Array<{ data: Buffer; filename: string }> | undefined;
-      if (files && files.length > 0) {
-        pendingAttachments = files.map((f) => ({
-          filename: f.filename,
-          content: f.data.toString('base64'),
-        }));
-      }
-      message = ensureBodyForAttachments(message);
       try {
+        const { alias } = tr.decodeThreadId(threadId);
+        this.config.fromAddress = alias;
+        if (alias !== FROM) {
+          const managedAgent = getEnabledAgentGroupForEmailAlias(alias);
+          const bot = readBotFolder(alias);
+          this.config.fromName = managedAgent?.name || bot?.config?.name || alias.split('@')[0];
+        }
+        const files = message?.files as Array<{ data: Buffer; filename: string }> | undefined;
+        if (files && files.length > 0) {
+          pendingAttachments = files.map((f) => ({
+            filename: f.filename,
+            content: f.data.toString('base64'),
+          }));
+        }
+        message = ensureBodyForAttachments(message);
         return await origPostMessage(threadId, message);
       } finally {
         this.config.fromAddress = savedAddress;
         this.config.fromName = savedName;
         pendingAttachments = null;
+        pendingSubjectOverride = null;
         pendingCorrelation = null;
         pendingReplyTo = null;
         pendingBcc = null;
@@ -826,10 +827,11 @@ registerChannelAdapter('resend', {
         for (const o of options) lines.push(`- ${o.label}`);
         lines.push('', `(Approval ref: ${approvalId})`);
         // Embed the approval ref in the subject too so reply matching
-        // survives clients that strip the quoted body. The adapter reads
-        // the stored subject and prepends "Re:" automatically.
-        const subjectBase = title || 'Approval';
-        tr.trackSubject(tid, `${subjectBase} [ref:${approvalId}]`);
+        // survives clients that strip the quoted body. Approval notifications
+        // are new requests, not replies to an earlier email in this DM.
+        const subject = `${title || 'Approval'} [ref:${approvalId}]`;
+        tr.trackSubject(tid, subject);
+        pendingSubjectOverride = subject;
         const result = await adapter.postMessage(tid, { markdown: lines.join('\n') });
         return result?.id;
       }

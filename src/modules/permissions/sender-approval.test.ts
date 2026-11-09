@@ -16,9 +16,14 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
 import { createAgentGroup } from '../../db/agent-groups.js';
-import { createMessagingGroup, createMessagingGroupAgent } from '../../db/messaging-groups.js';
+import {
+  createMessagingGroup,
+  createMessagingGroupAgent,
+  getMessagingGroup,
+  getMessagingGroupAgents,
+} from '../../db/messaging-groups.js';
 import { seedUserWithIdentity } from '../../test-utils/seed-identity.js';
-import { getIdentity } from './db/identities.js';
+import { getIdentity, insertIdentity } from './db/identities.js';
 import { grantRole } from './db/user-roles.js';
 import { dispatchResponse } from '../../response-registry.js';
 
@@ -162,24 +167,38 @@ function stranger(text: string) {
 }
 
 describe('unknown-sender request_approval flow', () => {
-  it('reissues canonical controls without changing the request or its approver', async () => {
-    const { routeInbound } = await import('../../router.js');
-    const { getDb } = await import('../../db/connection.js');
-    const { resendSenderApproval } = await import('./sender-approval.js');
-    await routeInbound(stranger('hello'));
-    await vi.waitFor(() => expect(deliverMock).toHaveBeenCalledOnce());
-    const before = getDb().prepare('SELECT * FROM pending_sender_approvals').get() as { id: string };
-    expect(await resendSenderApproval(before.id)).toEqual({ approvalId: before.id, resent: true });
-    expect(getDb().prepare('SELECT * FROM pending_sender_approvals').get()).toEqual(before);
-    expect(deliverMock).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(deliverMock.mock.calls[1][4])).toMatchObject({
-      type: 'approval_request',
-      approvalId: before.id,
-    });
-    getDb().prepare('DELETE FROM user_roles WHERE user_id=?').run(ownerId);
-    await expect(resendSenderApproval(before.id)).rejects.toThrow('no longer authorized');
-    expect(deliverMock).toHaveBeenCalledTimes(2);
-  });
+  it.each(['unchanged', 'missing stored name', 'changed primary identity'])(
+    'reissues canonical controls (%s)',
+    async (scenario) => {
+      const { routeInbound } = await import('../../router.js');
+      const { getDb } = await import('../../db/connection.js');
+      const { resendSenderApproval } = await import('./sender-approval.js');
+      await routeInbound(stranger('hello'));
+      await vi.waitFor(() => expect(deliverMock).toHaveBeenCalledOnce());
+      if (scenario === 'missing stored name') {
+        getDb().prepare('UPDATE pending_sender_approvals SET sender_name=NULL').run();
+      } else if (scenario === 'changed primary identity') {
+        insertIdentity({
+          userId: getIdentity('telegram', 'stranger')!.user_id,
+          channel: 'telegram',
+          handle: 'other-account',
+          primary: true,
+        });
+      }
+      const before = getDb().prepare('SELECT * FROM pending_sender_approvals').get() as { id: string };
+      expect(await resendSenderApproval(before.id)).toEqual({ approvalId: before.id, resent: true });
+      expect(getDb().prepare('SELECT * FROM pending_sender_approvals').get()).toEqual(before);
+      expect(deliverMock).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(deliverMock.mock.calls[1][4])).toMatchObject({
+        type: 'approval_request',
+        approvalId: before.id,
+        body: 'Stranger (telegram:stranger) wants to talk to your agent in Group Chat. Allow?',
+      });
+      getDb().prepare('DELETE FROM user_roles WHERE user_id=?').run(ownerId);
+      await expect(resendSenderApproval(before.id)).rejects.toThrow('no longer authorized');
+      expect(deliverMock).toHaveBeenCalledTimes(2);
+    },
+  );
   it('delivers an approval card on first unknown message', async () => {
     const { routeInbound } = await import('../../router.js');
     await routeInbound(stranger('hi'));
@@ -196,10 +215,67 @@ describe('unknown-sender request_approval flow', () => {
     const payload = JSON.parse(content as string);
     expect(payload.type).toBe('approval_request');
     expect(payload.approvalId).toMatch(/^nsa-/);
+    expect(payload.body).toBe('Stranger (telegram:stranger) wants to talk to your agent in Group Chat. Allow?');
 
     const { getDb } = await import('../../db/connection.js');
     const rows = getDb().prepare('SELECT * FROM pending_sender_approvals').all();
     expect(rows).toHaveLength(1);
+  });
+
+  it.each([
+    { senderId: 'stranger', senderName: 'Stranger', text: 'hi' },
+    { sender: 'stranger', text: 'hi' },
+    { author: { userId: 'stranger', fullName: 'Stranger', userName: 'stranger' }, text: 'hi' },
+    { author: { userId: 'stranger', userName: 'Stranger' }, text: 'hi' },
+    { senderId: 'stranger', text: 'hi' },
+  ])('shows a recognizable identity for native and Chat SDK senders: %j', async (content) => {
+    const { routeInbound } = await import('../../router.js');
+    const event = stranger('hi');
+    event.message.content = JSON.stringify(content);
+    await routeInbound(event);
+    await vi.waitFor(() => expect(deliverMock).toHaveBeenCalledOnce());
+
+    const payload = JSON.parse(deliverMock.mock.calls[0][4]);
+    expect(payload.body).toContain('telegram:stranger');
+    expect(payload.body).not.toContain(getIdentity('telegram', 'stranger')!.user_id);
+    if ('senderName' in content || 'author' in content) expect(payload.body).toContain('Stranger (telegram:stranger)');
+  });
+
+  it('uses the origin channel identity even when approval is delivered over another channel', async () => {
+    const { routeInbound } = await import('../../router.js');
+    createMessagingGroup({
+      ...getMessagingGroup('mg-chat')!,
+      id: 'mg-email',
+      channel_type: 'resend',
+      instance: 'resend',
+      platform_id: 'resend:agent@example.com',
+      name: 'Agent inbox',
+      is_group: 0,
+    });
+    createMessagingGroupAgent({
+      ...getMessagingGroupAgents('mg-chat')[0],
+      id: 'mga-email',
+      messaging_group_id: 'mg-email',
+    });
+    await routeInbound({
+      channelType: 'resend',
+      platformId: 'resend:agent@example.com',
+      threadId: 'email-thread',
+      message: {
+        id: 'email-1',
+        kind: 'chat-sdk',
+        content: JSON.stringify({
+          author: { userId: 'alice@example.net', fullName: 'Alice', userName: 'alice@example.net' },
+          text: 'Hello',
+        }),
+        timestamp: formatTimestamp(now()),
+      },
+    });
+    await vi.waitFor(() => expect(deliverMock).toHaveBeenCalledOnce());
+    expect(deliverMock.mock.calls[0][0]).toBe('telegram');
+    expect(JSON.parse(deliverMock.mock.calls[0][4]).body).toBe(
+      'Alice (resend:alice@example.net) wants to talk to your agent in Agent inbox. Allow?',
+    );
   });
 
   it('dedups a second message from the same stranger while pending', async () => {

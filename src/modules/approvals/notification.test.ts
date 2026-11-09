@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { closeDb, getDb, initTestDb } from '../../db/connection.js';
 import { runMigrations } from '../../db/migrations/index.js';
-import { createMessagingGroup } from '../../db/messaging-groups.js';
+import { createMessagingGroup, getMessagingGroup } from '../../db/messaging-groups.js';
 import { createSession } from '../../db/sessions.js';
 import { createApproval, getApproval } from '../../db/approvals.js';
 import { initSessionFolder, openInboundDb, writeSessionMessage } from '../../session-manager.js';
@@ -15,6 +15,8 @@ import { writeApprovalNotification } from './notification.js';
 import { registerApprovalHandler, requestApproval } from './primitive.js';
 import { handleApprovalsResponse } from './response-handler.js';
 import { createApprovalWorkflow, finishApprovalWorkflow, notifyApprovalWorkflow } from './workflows.js';
+import { ensureUserDm } from '../permissions/user-dm.js';
+import * as delivery from '../../delivery.js';
 
 const mocks = vi.hoisted(() => ({ wake: vi.fn().mockResolvedValue(true), kill: vi.fn() }));
 vi.mock('../../container-runner.js', () => ({
@@ -74,6 +76,7 @@ beforeEach(() => {
   mocks.kill.mockClear();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   closeDb();
   fs.rmSync(directory, { recursive: true, force: true });
 });
@@ -146,6 +149,44 @@ function expectOriginalRoute(row: ReturnType<typeof notifications>[number]) {
 }
 
 describe('approval conversation identity', () => {
+  it('reports failed approval delivery without showing the approver UUID', async () => {
+    input('original');
+    vi.mocked(ensureUserDm).mockResolvedValueOnce(getMessagingGroup('web-group')!);
+    vi.spyOn(delivery, 'getDeliveryAdapter').mockReturnValue({
+      deliver: vi.fn().mockRejectedValue(new Error('Delivery unavailable')),
+    });
+    const id = await requestApproval({
+      session,
+      originMessageId: 'original',
+      agentName: 'Agent',
+      action: 'delivery-test',
+      payload: {},
+      title: 'Review',
+      question: 'Allow?',
+    });
+    expect(getApproval(id!)).toBeDefined();
+    expect(JSON.parse(notifications()[0].content).text).toBe(
+      "delivery-test failed: could not deliver approval request to the approver's DM.",
+    );
+  });
+
+  it('attributes an unnamed responder by channel handle without changing their stored user ID', () => {
+    getDb().prepare("UPDATE users SET display_name=NULL WHERE id='owner'").run();
+    getDb()
+      .prepare(
+        "INSERT INTO identities(user_id,channel,handle,verified_at) VALUES('owner','resend','owner@example.net',1767225600000)",
+      )
+      .run();
+    input('original');
+    writeApprovalNotification(session, 'Approved.', {
+      originMessageId: 'original',
+      responseMessage: { userId: 'owner', message: 'Read only.' },
+    });
+    const content = JSON.parse(notifications()[0].content);
+    expect(content.text).toContain('User message from "resend:owner@example.net":\nRead only.');
+    expect(content.approvalResponse).toEqual({ userId: 'owner', message: 'Read only.' });
+  });
+
   it.each(['approve', 'reject'])(
     'includes an attributed user message in the same %s notification',
     async (decision) => {

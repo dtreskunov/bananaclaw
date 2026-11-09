@@ -178,12 +178,21 @@ describe('unknown-channel registration flow', () => {
     expect(rows).toHaveLength(1);
   });
 
-  it('delivers a card on DM too (non-threaded event)', async () => {
+  it.each([
+    JSON.stringify({ senderId: 'stranger', senderName: 'Stranger', text: 'hello' }),
+    JSON.stringify({ author: { userId: 'stranger', fullName: 'Stranger' }, text: 'hello' }),
+    JSON.stringify({ senderName: 'Stranger', text: 'hello' }),
+  ])('delivers a named card on DM too: %s', async (content) => {
     const { routeInbound } = await import('../../router.js');
-    await routeInbound(dmEvent('dm-new-user'));
+    const event = dmEvent('dm-new-user');
+    event.message.content = content;
+    await routeInbound(event);
     await new Promise((r) => setTimeout(r, 10));
 
     expect(deliverMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(deliverMock.mock.calls[0][4]).body).toBe(
+      'Stranger sent your bot a DM on telegram. How would you like to handle it?',
+    );
     const { getDb } = await import('../../db/connection.js');
     const count = (getDb().prepare('SELECT COUNT(*) AS c FROM pending_channel_approvals').get() as { c: number }).c;
     expect(count).toBe(1);

@@ -244,10 +244,10 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
         }),
       );
     } catch (err) {
-      log.error('Failed to deliver approval card', { action, approvalId, err });
+      log.error('Failed to deliver approval card', { action, approvalId, approver: target.userId, err });
       notifyAgent(
         session,
-        `${action} failed: could not deliver approval request to ${target.userId}.`,
+        `${action} failed: could not deliver approval request to the approver's DM.`,
         opts.originMessageId,
       );
       return approvalId;

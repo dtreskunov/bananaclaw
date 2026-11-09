@@ -33,6 +33,10 @@ vi.mock('../modules/approvals/index.js', () => ({
   requestApproval: vi.fn(),
 }));
 
+vi.mock('./approval-presentation.js', () => ({
+  presentCliApproval: vi.fn(() => ({ summary: 'Agent: Assistant', command: 'ncl groups-test --id group' })),
+}));
+
 // Register a test command so dispatch has something to find
 import { register } from './registry.js';
 
@@ -214,6 +218,20 @@ it('retains the transport-captured input when requesting approval for a CLI comm
     },
   );
   expect(requestApproval).toHaveBeenCalledWith(expect.objectContaining({ originMessageId: 'original-input' }));
+});
+
+it('adds readable approval context without modifying the executable frame', async () => {
+  mockGetContainerConfig.mockReturnValue({ cli_scope: 'global' });
+  mockGetSession.mockReturnValue({ id: 'session', agent_group_id: 'group' });
+  mockGetAgentGroup.mockReturnValue({ name: 'Assistant' });
+  const frame = { id: 'request', command: 'groups-approval-origin-test', args: { id: 'group' } };
+  await dispatch(frame, agentCtx({ sessionId: 'session', agentGroupId: 'group' }));
+  expect(requestApproval).toHaveBeenCalledWith(
+    expect.objectContaining({
+      payload: { frame },
+      question: 'Agent "Assistant" wants to run:\nAgent: Assistant\n\n`ncl groups-test --id group`',
+    }),
+  );
 });
 
 beforeEach(() => {
