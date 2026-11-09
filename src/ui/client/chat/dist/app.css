@@ -5757,6 +5757,10 @@ nav.tab-bar-strip.group-strip {
   flex-direction: column;
   min-height: 0;
 }
+.files-pane .files-body.drag-over {
+  outline: 2px solid var(--drag-target);
+  outline-offset: -2px;
+}
 .files-pane .breadcrumb {
   overflow: visible;
 }
@@ -5911,9 +5915,6 @@ nav.tab-bar-strip.group-strip {
 .files-pane .row .action-menu.open .action-trigger {
   color: inherit;
 }
-body.is-admin .files-pane .drop-hint {
-  display: flex;
-}
 .files-pane.collapsed {
   overflow: visible;
 }
@@ -6023,29 +6024,6 @@ body.is-admin .files-pane.collapsed .admin-only {
   overflow-wrap: anywhere;
   min-width: 0;
 }
-.files-pane .drop-hint {
-  border-top: 1px solid var(--border);
-  padding: 6px 10px;
-  min-height: var(--bottom-row-h);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-size: var(--font-xs);
-  color: var(--muted);
-  text-align: center;
-  background: var(--wash-subtle);
-  transition: background 0.12s, color 0.12s;
-}
-.files-pane .drop-hint code {
-  background: var(--wash-strong);
-  padding: 0 4px;
-  border-radius: var(--radius-sm);
-}
-.files-pane .drop-hint.drag-over {
-  background: var(--drag-target);
-  color: inherit;
-}
 .files-pane .upload-strip {
   border-bottom: 1px solid var(--border);
   background: var(--wash-subtle);
@@ -6141,8 +6119,7 @@ body.is-admin .files-pane.collapsed .admin-only {
   display: none;
 }
 .files-pane.previewing .listing,
-.files-pane.previewing .upload-strip,
-.files-pane.previewing .drop-hint {
+.files-pane.previewing .upload-strip {
   display: none !important;
 }
 .files-pane.previewing .preview-body {
@@ -6329,9 +6306,6 @@ body.is-admin .files-pane.collapsed .admin-only {
     width: 100%;
     max-width: none;
     margin-top: 2px;
-  }
-  .files-pane:not(.previewing) .drop-hint {
-    display: none !important;
   }
 }
 

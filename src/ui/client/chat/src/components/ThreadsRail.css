@@ -109,7 +109,7 @@
   min-height: var(--bottom-row-h);
 }
 /* Collapsed sections at the bottom of the rail show a single compact
-   row so they align with the chat composer and files drop-hint. The
+   row so they align with the chat composer. The
    handle (e.g. email address) only appears when the section is open. */
 .threads-rail .thread-section.collapsed > .thread-section-header > .handle {
   display: none;

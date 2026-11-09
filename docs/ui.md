@@ -845,6 +845,11 @@ Changing conversations closes the reader.
 
 #### Access and file browsing
 
+**File uploads.** Owners and admins can drag files anywhere into the file
+browser to upload them to its current directory, or use **Create or upload**.
+The browser highlights during a file drag; there is no separate upload drop-zone
+banner.
+
 **Full-screen previews.** The file-preview toolbar offers **Full screen preview**
 for documents, source files, images, PDFs, HTML pages and attachments, audio,
 video, and unsupported/error previews. It opens the same dialog chrome as

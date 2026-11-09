@@ -75,7 +75,7 @@
      handing the freed space to the chat/files columns instead. */
   --rail-w: minmax(220px, 320px);
   /* Visual height for the strip pinned to the bottom of each
-     column (chat composer / files drop-hint / collapsed channel
+     column (chat composer / collapsed channel
      section). Mirrors --handle-h's role at the top. */
   --bottom-row-h: 49px;
 }

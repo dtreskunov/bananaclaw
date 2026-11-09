@@ -1,4 +1,4 @@
-/* Files pane: breadcrumb, listing rows, upload strip, drop hint,
+/* Files pane: breadcrumb, listing rows, upload strip,
    preview body shell + markdown preview + hljs syntax highlighting,
    plus the .files-pane.previewing visibility toggles. */
 
@@ -7,6 +7,9 @@
 .files-pane .files-body {
   position: absolute; top: var(--handle-h); left: 0; right: 0; bottom: 0;
   display: flex; flex-direction: column; min-height: 0;
+}
+.files-pane .files-body.drag-over {
+  outline: 2px solid var(--drag-target); outline-offset: -2px;
 }
 .files-pane .breadcrumb {
   overflow: visible;
@@ -62,7 +65,6 @@
 .files-pane .row:hover .row-actions .action-trigger,
 .files-pane .row .action-menu.open .action-trigger { color: inherit; }
 
-body.is-admin .files-pane .drop-hint { display: flex; }
 .files-pane.collapsed { overflow: visible; }
 /* Hide admin actions when the files pane is collapsed. */
 body.is-admin .files-pane.collapsed .admin-only { display: none; }
@@ -142,28 +144,6 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
 .files-pane .preview-meta-rows dt { color: var(--muted); white-space: nowrap; }
 .files-pane .preview-meta-rows dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
 
-/* Drag-and-drop hint pinned to bottom of files-body */
-.files-pane .drop-hint {
-  border-top: 1px solid var(--border);
-  padding: 6px 10px;
-  min-height: var(--bottom-row-h);
-  display: flex; align-items: center; justify-content: center; gap: 4px;
-  font-size: var(--font-xs);
-  color: var(--muted);
-  text-align: center;
-  background: var(--wash-subtle);
-  transition: background 0.12s, color 0.12s;
-}
-.files-pane .drop-hint code {
-  background: var(--wash-strong);
-  padding: 0 4px;
-  border-radius: var(--radius-sm);
-}
-.files-pane .drop-hint.drag-over {
-  background: var(--drag-target);
-  color: inherit;
-}
-
 /* Upload progress strip */
 .files-pane .upload-strip {
   border-bottom: 1px solid var(--border);
@@ -210,8 +190,7 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
   padding: var(--preview-padding); display: none;
 }
 .files-pane.previewing .listing,
-.files-pane.previewing .upload-strip,
-.files-pane.previewing .drop-hint { display: none !important; }
+.files-pane.previewing .upload-strip { display: none !important; }
 .files-pane.previewing .preview-body { display: block; }
 .files-pane.previewing .preview-body.embedded-preview {
   display: flex; flex-direction: column; overflow: hidden;
@@ -299,5 +278,4 @@ body.is-admin .files-pane.collapsed .admin-only { display: none; }
   .files-pane .row .details { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
   .files-pane .row .name { flex: none; }
   .files-pane .row .file-meta { width: 100%; max-width: none; margin-top: 2px; }
-  .files-pane:not(.previewing) .drop-hint { display: none !important; }
 }

@@ -1,4 +1,4 @@
-// Files pane: head + breadcrumb + upload strip + listing + drop hint +
+// Files pane: head + breadcrumb + upload strip + listing +
 // preview body.
 import './FilesPane.css';
 import type { ComponentChildren, JSX, RefObject, VNode } from 'preact';
@@ -867,11 +867,10 @@ export function FilesPane() {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const body = bodyRef.current;
-    const zone = document.getElementById('dropzone');
-    if (!body || !zone) return undefined;
+    if (!body) return undefined;
     let depth = 0;
     const hasFiles = (ev: DragEvent): boolean => !!ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files');
-    const highlight = (on: boolean): void => { zone.classList.toggle('drag-over', !!on); };
+    const highlight = (on: boolean): void => { body.classList.toggle('drag-over', !!on); };
     const onEnter = (ev: DragEvent): void => { if (!isAdmin.value || !hasFiles(ev)) return; ev.preventDefault(); depth++; highlight(true); };
     const onOver = (ev: DragEvent): void => { if (!isAdmin.value || !hasFiles(ev)) return; ev.preventDefault(); if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy'; };
     const onLeave = (): void => { if (!isAdmin.value) return; depth--; if (depth <= 0) { depth = 0; highlight(false); } };
@@ -943,9 +942,6 @@ export function FilesPane() {
         {fileSearchOpen.value
           ? <SearchListing onEdit={editEntry} onNewFile={beginCreateIn} onUpload={chooseUploadTo} />
           : <Listing onEdit={editEntry} onNewFile={beginCreateIn} onUpload={chooseUploadTo} />}
-        <div class="drop-hint admin-only" id="dropzone">
-          Drag &amp; drop files here to upload to <code id="dropzone-path">{displayWorkspacePath(treePath.value)}</code>
-        </div>
         <Preview editor={editor} />
         </FilePreviewDialog>
       </div>
