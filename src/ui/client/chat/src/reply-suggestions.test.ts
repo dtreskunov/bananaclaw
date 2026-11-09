@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fillSuggestedDraft, inlineReplyDraft, suggestionsActive } from './reply-suggestions';
+import { fillSuggestedDraft, isReplyLabel, suggestionsActive } from './reply-suggestions';
 import { testTurn } from './conversation-test-fixtures';
 import type { ConversationMessage } from '../../../shared/conversation';
 
@@ -10,34 +10,21 @@ const response: ConversationMessage = {
   text: 'Here are your options.',
   deliveryOrigin: 'response',
   turnId: testTurn.id,
-  suggestedResponses: ['Explore costs', 'Show alternatives'],
 };
 const turn = { ...testTurn, phase: 'settled' as const, outcome: 'replied' as const, outputIds: [response.id] };
 
 describe('reply draft suggestions', () => {
-  it('decodes an inline draft independently of its link label', () => {
-    expect(inlineReplyDraft('reply:Please%20fix%20the%20references.')).toBe('Please fix the references.');
-    expect(inlineReplyDraft('reply:Use%20A%20%26%20B%20%28not%20C%29')).toBe('Use A & B (not C)');
-    expect(inlineReplyDraft('reply:Discuss%20%E6%97%A5%E6%9C%AC')).toBe('Discuss 日本');
-    expect(inlineReplyDraft('reply:Keep%20%2520%20literal')).toBe('Keep %20 literal');
-    for (const href of [
-      'https://example.test',
-      'reply:',
-      'reply:%20',
-      'reply:%ZZ',
-      'reply:%00',
-      `reply:${'x'.repeat(241)}`,
-      'reply:%0DHidden',
-    ]) {
-      expect(inlineReplyDraft(href)).toBeNull();
-    }
+  it('validates rendered labels without URL decoding', () => {
+    for (const label of ['Take food', 'Use A & B (not C)', 'Keep %20 literal', 'Discuss 日本', 'x'.repeat(240)])
+      expect(isReplyLabel(label)).toBe(true);
+    for (const label of ['', ' ', 'x'.repeat(241), '\u0000Hidden', '\rHidden', 'Hidden\u007f'])
+      expect(isReplyLabel(label)).toBe(false);
   });
 
-  it('allows inline-only replies and expires both presentations after a follow-up', () => {
+  it('expires reply links after a follow-up', () => {
     const inline = {
       ...response,
-      suggestedResponses: undefined,
-      text: '[Fix references](reply:Please%20fix%20references)',
+      text: '[Fix references](reply:)',
     };
     expect(suggestionsActive('reply', [inline], [turn], false)).toBe(true);
     const followup: ConversationMessage = { id: 'later', direction: 'in', timestamp: 2, text: 'Something else' };
@@ -59,12 +46,7 @@ describe('reply draft suggestions', () => {
 
   it('fills exactly the visible message, emits input, and never submits', () => {
     const input = {
-      value: '',
-      disabled: false,
-      readOnly: false,
-      dispatchEvent: vi.fn(),
-      focus: vi.fn(),
-      setSelectionRange: vi.fn(),
+      ...draftInput(''),
       form: { requestSubmit: vi.fn() },
     };
     expect(fillSuggestedDraft(input, 'Explore costs')).toEqual({ filled: true });
@@ -74,6 +56,43 @@ describe('reply draft suggestions', () => {
     expect(input.focus).toHaveBeenCalledOnce();
     expect(input.setSelectionRange).toHaveBeenCalledWith(13, 13);
     expect(input.form.requestSubmit).not.toHaveBeenCalled();
+  });
+
+  it('replaces an unedited suggestion and installs only one listener per composer', () => {
+    const input = draftInput('');
+    expect(fillSuggestedDraft(input, 'Explore costs', 'thread')).toEqual({ filled: true });
+    expect(fillSuggestedDraft(input, 'Show alternatives', 'thread')).toEqual({ filled: true });
+    expect(input.value).toBe('Show alternatives');
+    expect(input.addEventListener).toHaveBeenCalledOnce();
+    expect(input.dispatchEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('protects edited suggestions even after undoing back to the original text', () => {
+    const input = draftInput('');
+    fillSuggestedDraft(input, 'Explore costs');
+    input.value = 'Explore costs for next year';
+    input.dispatchEvent(new Event('input'));
+    expect(fillSuggestedDraft(input, 'Show alternatives')).toMatchObject({ filled: false });
+    expect(input.value).toBe('Explore costs for next year');
+    input.value = 'Explore costs';
+    input.dispatchEvent(new Event('input'));
+    expect(fillSuggestedDraft(input, 'Show alternatives')).toMatchObject({ filled: false });
+    input.value = '';
+    input.dispatchEvent(new Event('input'));
+    expect(fillSuggestedDraft(input, 'Show alternatives')).toEqual({ filled: true });
+  });
+
+  it('does not infer suggestion ownership from text or leak it across conversations and inputs', () => {
+    const input = draftInput('');
+    fillSuggestedDraft(input, 'Explore costs', 'first-thread');
+    expect(fillSuggestedDraft(input, 'Show alternatives', 'second-thread')).toMatchObject({ filled: false });
+    expect(fillSuggestedDraft(draftInput('Explore costs'), 'Show alternatives', 'first-thread')).toMatchObject({
+      filled: false,
+    });
+    input.value = '';
+    input.value = 'Explore costs';
+    input.dispatchEvent(new Event('input'));
+    expect(fillSuggestedDraft(input, 'Show alternatives', 'first-thread')).toMatchObject({ filled: false });
   });
 
   it('keeps existing drafts, including whitespace, and refuses locked input', () => {
@@ -88,11 +107,13 @@ describe('reply draft suggestions', () => {
   });
 
   function draftInput(value: string) {
+    const events = new EventTarget();
     return {
       value,
       disabled: false,
       readOnly: false,
-      dispatchEvent: vi.fn(),
+      addEventListener: vi.fn(events.addEventListener.bind(events)),
+      dispatchEvent: vi.fn(events.dispatchEvent.bind(events)),
       focus: vi.fn(),
       setSelectionRange: vi.fn(),
     };

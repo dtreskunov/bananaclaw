@@ -9,7 +9,6 @@ import { writeTurnUsage } from './db/turn-usage.js';
 import type { Database } from 'bun:sqlite';
 import { allocateTimelinePosition } from './db/timeline.js';
 import { toEpoch, decodeTimeRows } from './db/time.js';
-import { finalizeSuggestedResponses } from './suggested-responses.js';
 
 export interface TurnExecution extends TurnContext {
   routing: RoutingContext;
@@ -171,7 +170,6 @@ export async function settleTurn(context: TurnExecution, outcome: Exclude<TurnOu
   db.transaction(() => {
     const row = getTurn(db, context.turnId)!;
     putTurn(db, { ...row, phase: 'settling' });
-    finalizeSuggestedResponses(context, !context.failure && outcome === 'replied');
     finishTurnActivity(db, context.turnId, context.failure ? 'failed' : outcome, context.endedAt!);
     persistTurnMetadata(context, true);
     putTurn(db, {
@@ -189,9 +187,6 @@ export function interruptAbandonedTurns(): void {
     const rows = decodeTimeRows<TurnRow>(db.prepare("SELECT * FROM turns WHERE phase != 'settled'").all(), ['started_at', 'ended_at']);
     for (const row of rows) {
       const endedAt = new Date().toISOString();
-      const discarded = db.prepare('DELETE FROM session_state WHERE key=?')
-        .run(`runner:suggested-responses:${row.id}`);
-      if (discarded.changes) console.error(`[suggested-responses] Discarded drafts for abandoned turn ${row.id}`);
       const key = `turn-metadata:${row.id}`;
       const previous = db.prepare('SELECT value FROM session_state WHERE key = ?').get(key) as { value: string } | undefined;
       const metadata = previous ? JSON.parse(previous.value) : {};

@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/path-to-regexp/dist/index.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "node_modules/path-to-regexp/dist/index.js"(exports) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/core.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "node_modules/highlight.js/lib/core.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/xml.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/bash.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/c.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/cpp.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/csharp.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/css.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/markdown.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/diff.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/ruby.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/go.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/graphql.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/ini.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/java.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/javascript.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/json.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/kotlin.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/less.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/lua.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/makefile.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/perl.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/objectivec.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/php.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/php-template.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/plaintext.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/python.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/python-repl.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/r.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/rust.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/scss.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/shell.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/sql.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/swift.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/yaml.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/typescript.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/vbnet.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/languages/wasm.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// node_modules/highlight.js/lib/common.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "node_modules/highlight.js/lib/common.js"(exports, module) {
+  "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// node_modules/preact/dist/preact.module.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// node_modules/preact/hooks/dist/hooks.module.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// node_modules/@preact/signals-core/dist/signals-core.module.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// node_modules/@preact/signals/dist/signals.module.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -16651,7 +16651,7 @@ function clearApprovalMessage(approvalId) {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// node_modules/marked/lib/marked.esm.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -17890,58 +17890,13 @@ var Xt = g5.parseInline;
 var Vt = b3.parse;
 var Yt = x4.lex;
 
-// ../../shared/suggested-responses.ts
-var MAX_SUGGESTED_RESPONSES = 6;
-var MAX_SUGGESTED_RESPONSE_LENGTH = 240;
-function isSuggestedResponses(value) {
-  return Array.isArray(value) && value.length > 0 && value.length <= MAX_SUGGESTED_RESPONSES && value.every((text2) => typeof text2 === "string" && !!text2.trim() && text2.length <= MAX_SUGGESTED_RESPONSE_LENGTH) && new Set(value).size === value.length;
-}
-
-// src/reply-suggestions.ts
-function inlineReplyDraft(href) {
-  if (!/^reply:/i.test(href)) return null;
-  try {
-    const text2 = decodeURIComponent(href.slice("reply:".length));
-    const control = [...text2].some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 && code !== 10 || code === 127;
-    });
-    return text2.trim() && text2.length <= MAX_SUGGESTED_RESPONSE_LENGTH && !control ? text2 : null;
-  } catch (error) {
-    if (error instanceof URIError) return null;
-    throw error;
-  }
-}
-function suggestionsActive(messageId, messages, turns, sending) {
-  if (sending || turns.some((turn3) => turn3.phase !== "settled")) return false;
-  const index = messages.findIndex((message3) => message3.id === messageId);
-  const message2 = messages[index];
-  if (!message2 || message2.direction !== "out" || message2.deliveryOrigin !== "response") return false;
-  const turn2 = turns.find((candidate) => candidate.id === message2.turnId);
-  return turn2?.phase === "settled" && turn2.outcome === "replied" && !messages.slice(index + 1).some((next) => next.direction !== "event" && next.inputState?.status !== "cancelled");
-}
-function fillSuggestedDraft(input, text2) {
-  if (!input || input.disabled || input.readOnly)
-    return { filled: false, error: "The composer is unavailable. Your draft has been kept." };
-  if (input.value.length)
-    return { filled: false, error: "Your draft has been kept. Clear it before choosing a suggested reply." };
-  input.value = text2;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.focus();
-  input.setSelectionRange(text2.length, text2.length);
-  return { filled: true };
-}
-
 // src/utils.ts
 function markdownRenderer(inlineReplies) {
   const renderer = new y4();
   renderer.link = function({ href, title, tokens }) {
     const text2 = this.parser.parseInline(tokens);
     if (/^reply:/i.test(href)) {
-      const draft = inlineReplyDraft(href);
-      if (!inlineReplies || draft === null) return text2;
-      const value = draft.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&#39;");
-      return `<button type="button" class="inline-reply-suggestion" data-reply-draft="${value}" title="Draft reply: ${value}" aria-description="Draft reply: ${value}">${text2}<span aria-hidden="true"> \u21B5</span></button>`;
+      return inlineReplies ? `<span class="inline-reply-slot">${text2}</span>` : text2;
     }
     const isAbs = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//");
     const titleAttr = title ? ` title="${title.replace(/"/g, "&quot;")}"` : "";
@@ -18070,7 +18025,7 @@ function highlightTextNodes(root, query) {
   if (!query) return;
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`(${escaped})`, "gi");
-  const skip = /* @__PURE__ */ new Set(["CODE", "PRE", "A", "MARK", "SCRIPT", "STYLE"]);
+  const skip = /* @__PURE__ */ new Set(["CODE", "PRE", "A", "BUTTON", "MARK", "SCRIPT", "STYLE"]);
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       let p5 = node.parentElement;
@@ -18399,7 +18354,6 @@ var BUILTIN_TOOL_PRESENTATIONS = /* @__PURE__ */ new Map([
   ["edit_message", ["Editing message", "Edited message", "edit message", "Message edit"]],
   ["add_reaction", ["Reacting", "Reacted", "react", "Reaction", "with"]],
   ["send_email", ["Emailing", "Emailed", "email", "Email"]],
-  ["suggest_responses", ["Suggesting replies", "Suggested replies", "suggest replies", "Reply suggestions", "for"]],
   ["send_card", ["Sending card", "Sent card", "send card", "Card send"]],
   ["schedule_task", ["Scheduling task", "Scheduled task", "schedule task", "Task scheduling", "for"]],
   ["list_tasks", ["Listing tasks", "Listed tasks", "list tasks", "Task listing", "with status"]],
@@ -19038,7 +18992,6 @@ var message = shape({
   direction: oneOf("in", "out", "event"),
   timestamp: isEpochMs,
   text,
-  suggestedResponses: optional(isSuggestedResponses),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -19204,10 +19157,6 @@ function validateTimeline(view) {
   );
   const interactions = new Set(view.interactions.map((item) => item.id));
   const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
-  for (const message2 of view.messages) {
-    if (message2.suggestedResponses && (message2.direction !== "out" || message2.deliveryOrigin !== "response" || !message2.turnId || turns.get(message2.turnId)?.phase !== "settled"))
-      throw new ConversationProtocolError("invalid_frame");
-  }
   for (const turn2 of view.turns) uniqueKeys(turn2.activity, activityOrdinal);
   const seenRows = /* @__PURE__ */ new Set();
   const seenActivity = /* @__PURE__ */ new Set();
@@ -20429,7 +20378,7 @@ function openChat() {
   if (location.hash === "#credentials") location.hash = "";
 }
 
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -23361,7 +23310,7 @@ function ThreadsRail() {
   );
 }
 
-// node_modules/preact/compat/dist/compat.module.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -24359,15 +24308,99 @@ function QuickCapture({ onCapture, onClose }) {
   );
 }
 
+// src/reply-suggestions.ts
+var MAX_REPLY_LENGTH = 240;
+var suggestedDrafts = /* @__PURE__ */ new WeakMap();
+function isReplyLabel(text2) {
+  return !!text2.trim() && text2.length <= MAX_REPLY_LENGTH && ![...text2].some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 && code !== 10 || code === 127;
+  });
+}
+function suggestionsActive(messageId, messages, turns, sending) {
+  if (sending || turns.some((turn3) => turn3.phase !== "settled")) return false;
+  const index = messages.findIndex((message3) => message3.id === messageId);
+  const message2 = messages[index];
+  if (!message2 || message2.direction !== "out" || message2.deliveryOrigin !== "response") return false;
+  const turn2 = turns.find((candidate) => candidate.id === message2.turnId);
+  return turn2?.phase === "settled" && turn2.outcome === "replied" && !messages.slice(index + 1).some((next) => next.direction !== "event" && next.inputState?.status !== "cancelled");
+}
+function fillSuggestedDraft(input, text2, scope = "") {
+  if (!input || input.disabled || input.readOnly)
+    return { filled: false, error: "The composer is unavailable. Your draft has been kept." };
+  let state = suggestedDrafts.get(input);
+  if (input.value.length && (!state || state.scope !== scope || state.text !== input.value))
+    return { filled: false, error: "Finish or clear your draft to try a suggestion." };
+  if (!state) {
+    const tracked = { scope, text: text2, filling: false };
+    suggestedDrafts.set(input, tracked);
+    input.addEventListener("input", () => {
+      if (!tracked.filling) tracked.text = null;
+    });
+    state = tracked;
+  }
+  state.scope = scope;
+  state.text = text2;
+  input.value = text2;
+  state.filling = true;
+  try {
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  } finally {
+    state.filling = false;
+  }
+  input.focus();
+  input.setSelectionRange(text2.length, text2.length);
+  return { filled: true };
+}
+
+// src/components/ReplySuggestion.tsx
+function ReplySuggestion({ label, labelHtml, disabled, sendDisabled, onChoose, onSend }) {
+  return /* @__PURE__ */ u4("span", { class: "reply-suggestion", children: [
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "reply-suggestion-label",
+        "aria-label": `Send suggestion: ${label}`,
+        "aria-description": "Send this reply immediately",
+        disabled: sendDisabled,
+        onClick: (event) => {
+          event.stopPropagation();
+          if (!sendDisabled) onSend(label);
+        },
+        ...labelHtml === void 0 ? { children: label } : { dangerouslySetInnerHTML: { __html: labelHtml } }
+      }
+    ),
+    /* @__PURE__ */ u4(
+      "button",
+      {
+        type: "button",
+        class: "msg-action-btn reply-suggestion-edit",
+        title: "Edit suggestion",
+        "aria-label": `Edit suggestion: ${label}`,
+        "aria-description": "Fill the composer with this reply without sending",
+        disabled,
+        onClick: (event) => {
+          event.stopPropagation();
+          if (!disabled) onChoose(label);
+        },
+        children: /* @__PURE__ */ u4(EditIcon, {})
+      }
+    )
+  ] });
+}
+
 // src/components/SuggestedResponses.tsx
+var sendingSuggestions = y3(/* @__PURE__ */ new Set());
 function suggestionState(messageId) {
   const conversation2 = conversationState.value?.conversation;
   const sending = pendingWebSends.value.some(
     (send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed"
   );
   const active = canSend.value && !!conversation2 && suggestionsActive(messageId, conversation2.messages, conversation2.turns, sending);
-  const busy = composerSendInFlight.value || !!currentPendingEditor() || isRecording.value || !["idle", "error"].includes(voice.state.value.phase);
-  return { active, disabled: busy };
+  const busy = composerSendInFlight.value || sendingSuggestions.value.has(location2()) || !!currentPendingEditor() || isRecording.value || !["idle", "error"].includes(voice.state.value.phase);
+  const isWeb = !channelType.value || channelType.value === "web";
+  return { active, disabled: busy, sendDisabled: busy || isWeb && !chatReady.value };
 }
 function location2() {
   return JSON.stringify([groupId.value, threadId.value, channelType.value, messagingGroupId.value]);
@@ -24380,35 +24413,57 @@ function replySuggestionControls(messageId) {
       const current = suggestionState(messageId);
       if (target !== location2() || !current.active || current.disabled) return;
       const input = document.getElementById("chat-input");
-      const result = fillSuggestedDraft(input instanceof HTMLTextAreaElement ? input : null, text2);
-      if (!result.filled) showToast(result.error, "err");
+      const result = fillSuggestedDraft(input instanceof HTMLTextAreaElement ? input : null, text2, target);
+      if (!result.filled) showToast(result.error);
+    },
+    async send(text2) {
+      const current = suggestionState(messageId);
+      if (target !== location2() || !current.active || current.sendDisabled) return false;
+      sendingSuggestions.value = new Set(sendingSuggestions.value).add(target);
+      try {
+        return await sendChat(text2, []);
+      } catch (error) {
+        console.error("Failed to send suggested reply", error);
+        if (target === location2()) showToast("Could not send this suggestion. Your draft is unchanged.", "err");
+        return false;
+      } finally {
+        const remaining = new Set(sendingSuggestions.value);
+        remaining.delete(target);
+        sendingSuggestions.value = remaining;
+      }
     }
   };
 }
-function bindInlineReplyControls(root, controls) {
-  for (const button of root.querySelectorAll("button.inline-reply-suggestion[data-reply-draft]")) {
-    button.disabled = controls.disabled;
-    button.addEventListener("click", () => {
-      const draft = button.dataset.replyDraft;
-      if (draft) controls.choose(draft);
-    });
+function mountInlineReplySuggestions(root, controls) {
+  const mounted = [];
+  if (controls.active) {
+    for (const slot of root.querySelectorAll("span.inline-reply-slot")) {
+      const label = slot.textContent || "";
+      if (!isReplyLabel(label)) continue;
+      const labelHtml = slot.innerHTML;
+      slot.replaceChildren();
+      D(
+        /* @__PURE__ */ u4(
+          ReplySuggestion,
+          {
+            label,
+            labelHtml,
+            disabled: controls.disabled,
+            sendDisabled: controls.sendDisabled,
+            onChoose: controls.choose,
+            onSend: (text2) => {
+              void controls.send(text2);
+            }
+          }
+        ),
+        slot
+      );
+      mounted.push(slot);
+    }
   }
-}
-function SuggestedResponses({ message: message2 }) {
-  const controls = replySuggestionControls(message2.id);
-  if (!controls.active) return null;
-  return /* @__PURE__ */ u4("div", { class: "reply-suggestions", "aria-label": "Suggested replies", children: message2.suggestedResponses?.map((text2) => /* @__PURE__ */ u4(
-    "button",
-    {
-      type: "button",
-      class: "message-action-btn",
-      title: `Draft reply: ${text2}`,
-      disabled: controls.disabled,
-      onClick: () => controls.choose(text2),
-      children: text2
-    },
-    text2
-  )) });
+  return () => {
+    for (const slot of mounted) D(null, slot);
+  };
 }
 
 // src/components/AttentionFocus.tsx
@@ -28472,9 +28527,10 @@ function MessageText({ text: text2, md, onNavigate, preview = false, children, r
     else action();
   };
   _2(() => {
+    let clearInline;
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
     if (mdRef.current && replyControls?.active && !preview) {
-      bindInlineReplyControls(mdRef.current, replyControls);
+      clearInline = mountInlineReplySuggestions(mdRef.current, replyControls);
     }
     if (md != null && mdRef.current && gid) {
       rewriteFileLinks(mdRef.current, gid, (entry) => navigate(() => {
@@ -28519,7 +28575,8 @@ function MessageText({ text: text2, md, onNavigate, preview = false, children, r
       }
     }
     if (q5 && mdRef.current) highlightTextNodes(mdRef.current, q5);
-  }, [text2, md, q5, gid, preview, replyControls?.active, replyControls?.disabled]);
+    return clearInline;
+  }, [text2, md, q5, gid, preview, replyControls?.active, replyControls?.disabled, replyControls?.sendDisabled]);
   if (preview) return /* @__PURE__ */ u4(MarkdownPreview, { text: text2, html: md, className: "reader-message", contentRef: mdRef, children });
   return md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: inlineRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: inlineRef, children: text2 || "" });
 }
@@ -28643,7 +28700,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false, reading = fal
         /* @__PURE__ */ u4(MessageText, { text: m6.text, md, onNavigate, replyControls }),
         systemNotice && /\bHTTP (?:401|403)\b/.test(m6.text) ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => openCredentials(), children: "Credentials" }) : null,
         attachments,
-        m6.suggestedResponses?.length ? /* @__PURE__ */ u4(SuggestedResponses, { message: m6 }) : null,
         showContinue ? /* @__PURE__ */ u4("div", { class: "message-actions", children: /* @__PURE__ */ u4(
           "button",
           {
@@ -30444,7 +30500,7 @@ function PrivateWebView({ groupId: groupId3, path, title, fragment }) {
   ) });
 }
 
-// node_modules/highlight.js/es/common.js
+// ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 

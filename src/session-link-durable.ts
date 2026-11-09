@@ -19,7 +19,6 @@ import { transaction } from './db/transaction.js';
 import { encodeTimes } from './db/time.js';
 import { assertStorageVersion } from './db/storage-lifecycle.js';
 import { openOutboundDbRw } from './db/session-db.js';
-import { parseSuggestedResponses } from './ui/shared/suggested-responses.js';
 
 class DurableValidationError extends Error {}
 
@@ -234,20 +233,6 @@ function applyState(db: Database.Database, payload: Record<string, unknown>): vo
     !text(payload.updated_at)
   )
     throw new DurableValidationError('invalid state.upsert payload');
-  if (payload.key.startsWith('response-suggestions:')) {
-    parseSuggestedResponses(payload.value);
-    const output = db.prepare(`SELECT turn_id FROM messages_out
-      WHERE id=? AND kind IN ('chat','text')
-        AND json_extract(content,'$.delivery_origin')='response'
-        AND COALESCE(json_extract(content,'$.system_generated'),0)=0`)
-      .get(payload.key.slice('response-suggestions:'.length)) as { turn_id: string | null } | undefined;
-    if (!output?.turn_id) throw new Error('suggestions require a final response');
-    const turn = getTurn(db, output.turn_id);
-    const previous = db.prepare('SELECT value FROM session_state WHERE key=?').get(payload.key) as
-      { value: string } | undefined;
-    if (turn?.phase === 'settled' && previous?.value !== payload.value)
-      throw new Error('settled response suggestions are immutable');
-  }
   if (payload.key.startsWith('turn-metadata:')) {
     let value: Record<string, unknown> | null;
     try {

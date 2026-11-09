@@ -4251,82 +4251,6 @@ nav.tab-bar-strip.group-strip {
 .chat-main .message-composer[hidden] {
   display: none;
 }
-.chat-main .reply-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-.chat-main .reply-suggestions .message-action-btn {
-  max-width: 100%;
-  height: auto;
-  min-height: 36px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  background: var(--surface);
-  color: var(--surface-fg);
-  border: 1px solid currentColor;
-}
-.chat-main .reply-suggestions .message-action-btn:hover:not(:disabled) {
-  background: var(--wash-strong);
-  color: var(--surface-fg);
-}
-.chat-main .reply-suggestions .message-action-btn:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
-}
-.chat-main .reply-suggestions .message-action-btn:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-.chat-main .inline-reply-suggestion {
-  display: inline;
-  position: relative;
-  padding: 1px 5px;
-  border: 1px dotted currentColor;
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--surface-fg);
-  font: inherit;
-  line-height: inherit;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-  box-decoration-break: clone;
-}
-.chat-main .inline-reply-suggestion:hover:not(:disabled) {
-  background: var(--wash-strong);
-}
-.chat-main .inline-reply-suggestion:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
-}
-.chat-main .inline-reply-suggestion:focus-visible::after {
-  content: "Draft: " attr(data-reply-draft);
-  position: absolute;
-  z-index: 2;
-  left: 0;
-  top: 100%;
-  width: max-content;
-  max-width: min(320px, 70vw);
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--surface-fg);
-  font-size: var(--font-sm);
-  text-align: left;
-  pointer-events: none;
-}
-.chat-main .inline-reply-suggestion:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-@media (max-width: 720px) {
-  .chat-main .reply-suggestions .message-action-btn {
-    min-height: 44px;
-  }
-}
 .chat-main .approval-actions {
   display: flex;
   gap: 8px;
@@ -4597,6 +4521,50 @@ nav.tab-bar-strip.group-strip {
 }
 .composer-input-wrap:not(.multi-line) textarea {
   padding-block: max(var(--composer-min-padding-block), calc((var(--control-action-size, 28px) + 2 * var(--composer-control-inset) - 1lh) / 2));
+}
+
+/* src/components/ReplySuggestion.css */
+.reply-suggestion {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  max-width: 100%;
+  gap: 0.15em;
+  padding: 2px 3px 2px 6px;
+  border: 1px solid var(--border-control, currentColor);
+  border-radius: var(--radius-md, 6px);
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+.reply-suggestion > .reply-suggestion-label {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.reply-suggestion > .reply-suggestion-edit {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+}
+.reply-suggestion-label:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.reply-suggestion-label:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 /* src/components/ApprovalMessageInput.css */

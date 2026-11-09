@@ -19,7 +19,6 @@ import {
   type CollectionPatch,
 } from './collection-patch.js';
 import { accessRequestInput, ConnectionInputError } from './connection-input.js';
-import { isSuggestedResponses } from './suggested-responses.js';
 import {
   object,
   text,
@@ -104,7 +103,6 @@ const message = shape({
   direction: oneOf('in', 'out', 'event'),
   timestamp: isEpochMs,
   text,
-  suggestedResponses: optional(isSuggestedResponses),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -286,16 +284,6 @@ function validateTimeline(view: Conversation): void {
   );
   const interactions = new Set(view.interactions.map((item) => item.id));
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
-  for (const message of view.messages) {
-    if (
-      message.suggestedResponses &&
-      (message.direction !== 'out' ||
-        message.deliveryOrigin !== 'response' ||
-        !message.turnId ||
-        turns.get(message.turnId)?.phase !== 'settled')
-    )
-      throw new ConversationProtocolError('invalid_frame');
-  }
   for (const turn of view.turns) uniqueKeys(turn.activity, activityOrdinal);
   const seenRows = new Set<string>();
   const seenActivity = new Set<string>();

@@ -1,6 +1,401 @@
 "use strict";
 (() => {
-  // node_modules/preact/dist/preact.module.js
+  var __create = Object.create;
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __getProtoOf = Object.getPrototypeOf;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __commonJS = (cb, mod) => function __require() {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+    // If the importer is in node compatibility mode or this is not an ESM
+    // file that has been converted to a CommonJS file using a Babel-
+    // compatible transform (i.e. "__esModule" has not been set), then set
+    // "default" to the CommonJS "module.exports" for node compatibility.
+    isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+    mod
+  ));
+
+  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
+  var require_dist = __commonJS({
+    "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
+      "use strict";
+      Object.defineProperty(exports, "__esModule", { value: true });
+      exports.PathError = exports.TokenData = void 0;
+      exports.parse = parse;
+      exports.compile = compile2;
+      exports.match = match2;
+      exports.pathToRegexp = pathToRegexp;
+      exports.stringify = stringify;
+      var DEFAULT_DELIMITER = "/";
+      var NOOP_VALUE = (value) => value;
+      var ID_START = /^[$_\p{ID_Start}]$/u;
+      var ID_CONTINUE = /^[$\u200c\u200d\p{ID_Continue}]$/u;
+      var ID = /^[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*$/u;
+      function escapeText(str) {
+        return str.replace(/[{}()\[\]+?!:*\\]/g, "\\$&");
+      }
+      function escape(str) {
+        return str.replace(/[.+*?^${}()[\]|/\\]/g, "\\$&");
+      }
+      var TokenData = class {
+        constructor(tokens, originalPath) {
+          this.tokens = tokens;
+          this.originalPath = originalPath;
+        }
+      };
+      exports.TokenData = TokenData;
+      var PathError = class extends TypeError {
+        constructor(message2, originalPath) {
+          let text2 = message2;
+          if (originalPath)
+            text2 += `: ${originalPath}`;
+          text2 += `; visit https://git.new/pathToRegexpError for info`;
+          super(text2);
+          this.originalPath = originalPath;
+        }
+      };
+      exports.PathError = PathError;
+      function parse(str, options = {}) {
+        const { encodePath = NOOP_VALUE } = options;
+        const chars = [...str];
+        let index = 0;
+        function consumeUntil(end) {
+          const output = [];
+          let path = "";
+          function writePath() {
+            if (!path)
+              return;
+            output.push({
+              type: "text",
+              value: encodePath(path)
+            });
+            path = "";
+          }
+          while (index < chars.length) {
+            const value = chars[index++];
+            if (value === end) {
+              writePath();
+              return output;
+            }
+            if (value === "\\") {
+              if (index === chars.length) {
+                throw new PathError(`Unexpected end after \\ at index ${index}`, str);
+              }
+              path += chars[index++];
+              continue;
+            }
+            if (value === ":" || value === "*") {
+              const type = value === ":" ? "param" : "wildcard";
+              let name = "";
+              if (ID_START.test(chars[index])) {
+                do {
+                  name += chars[index++];
+                } while (ID_CONTINUE.test(chars[index]));
+              } else if (chars[index] === '"') {
+                let quoteStart = index;
+                while (index < chars.length) {
+                  if (chars[++index] === '"') {
+                    index++;
+                    quoteStart = 0;
+                    break;
+                  }
+                  if (chars[index] === "\\")
+                    index++;
+                  name += chars[index];
+                }
+                if (quoteStart) {
+                  throw new PathError(`Unterminated quote at index ${quoteStart}`, str);
+                }
+              }
+              if (!name) {
+                throw new PathError(`Missing parameter name at index ${index}`, str);
+              }
+              writePath();
+              output.push({ type, name });
+              continue;
+            }
+            if (value === "{") {
+              writePath();
+              output.push({
+                type: "group",
+                tokens: consumeUntil("}")
+              });
+              continue;
+            }
+            if (value === "}" || value === "(" || value === ")" || value === "[" || value === "]" || value === "+" || value === "?" || value === "!") {
+              throw new PathError(`Unexpected ${value} at index ${index - 1}`, str);
+            }
+            path += value;
+          }
+          if (end) {
+            throw new PathError(`Unexpected end at index ${index}, expected ${end}`, str);
+          }
+          writePath();
+          return output;
+        }
+        return new TokenData(consumeUntil(""), str);
+      }
+      function compile2(path, options = {}) {
+        const { encode = encodeURIComponent, delimiter = DEFAULT_DELIMITER } = options;
+        const data = typeof path === "object" ? path : parse(path, options);
+        const fn = tokensToFunction(data.tokens, delimiter, encode);
+        return function path2(params = {}) {
+          const missing = [];
+          const path3 = fn(params, missing);
+          if (missing.length) {
+            throw new TypeError(`Missing parameters: ${missing.join(", ")}`);
+          }
+          return path3;
+        };
+      }
+      function tokensToFunction(tokens, delimiter, encode) {
+        const encoders = tokens.map((token) => tokenToFunction(token, delimiter, encode));
+        return (data, missing) => {
+          let result = "";
+          for (const encoder of encoders) {
+            result += encoder(data, missing);
+          }
+          return result;
+        };
+      }
+      function tokenToFunction(token, delimiter, encode) {
+        if (token.type === "text")
+          return () => token.value;
+        if (token.type === "group") {
+          const fn = tokensToFunction(token.tokens, delimiter, encode);
+          return (data, missing) => {
+            const len = missing.length;
+            const value = fn(data, missing);
+            if (missing.length === len)
+              return value;
+            missing.length = len;
+            return "";
+          };
+        }
+        const encodeValue = encode || NOOP_VALUE;
+        if (token.type === "wildcard" && encode !== false) {
+          return (data, missing) => {
+            const value = data[token.name];
+            if (value == null) {
+              missing.push(token.name);
+              return "";
+            }
+            if (!Array.isArray(value) || value.length === 0) {
+              throw new TypeError(`Expected "${token.name}" to be a non-empty array`);
+            }
+            let result = "";
+            for (let i5 = 0; i5 < value.length; i5++) {
+              if (typeof value[i5] !== "string") {
+                throw new TypeError(`Expected "${token.name}/${i5}" to be a string`);
+              }
+              if (i5 > 0)
+                result += delimiter;
+              result += encodeValue(value[i5]);
+            }
+            return result;
+          };
+        }
+        return (data, missing) => {
+          const value = data[token.name];
+          if (value == null) {
+            missing.push(token.name);
+            return "";
+          }
+          if (typeof value !== "string") {
+            throw new TypeError(`Expected "${token.name}" to be a string`);
+          }
+          return encodeValue(value);
+        };
+      }
+      function match2(path, options = {}) {
+        const { decode = decodeURIComponent, delimiter = DEFAULT_DELIMITER } = options;
+        const { regexp, keys } = pathToRegexp(path, options);
+        const decoders = keys.map((key) => {
+          if (decode === false)
+            return NOOP_VALUE;
+          if (key.type === "param")
+            return decode;
+          return (value) => value.split(delimiter).map(decode);
+        });
+        return function match3(input) {
+          const m6 = regexp.exec(input);
+          if (!m6)
+            return false;
+          const path2 = m6[0];
+          const params = /* @__PURE__ */ Object.create(null);
+          for (let i5 = 1; i5 < m6.length; i5++) {
+            if (m6[i5] === void 0)
+              continue;
+            const key = keys[i5 - 1];
+            const decoder = decoders[i5 - 1];
+            params[key.name] = decoder(m6[i5]);
+          }
+          return { path: path2, params };
+        };
+      }
+      function pathToRegexp(path, options = {}) {
+        const { delimiter = DEFAULT_DELIMITER, end = true, sensitive = false, trailing = true } = options;
+        const keys = [];
+        let source = "";
+        let combinations = 0;
+        function process(path2) {
+          if (Array.isArray(path2)) {
+            for (const p4 of path2)
+              process(p4);
+            return;
+          }
+          const data = typeof path2 === "object" ? path2 : parse(path2, options);
+          flatten(data.tokens, 0, [], (tokens) => {
+            if (combinations >= 256) {
+              throw new PathError("Too many path combinations", data.originalPath);
+            }
+            if (combinations > 0)
+              source += "|";
+            source += toRegExpSource(tokens, delimiter, keys, data.originalPath);
+            combinations++;
+          });
+        }
+        process(path);
+        let pattern = `^(?:${source})`;
+        if (trailing)
+          pattern += "(?:" + escape(delimiter) + "$)?";
+        pattern += end ? "$" : "(?=" + escape(delimiter) + "|$)";
+        return { regexp: new RegExp(pattern, sensitive ? "" : "i"), keys };
+      }
+      function flatten(tokens, index, result, callback) {
+        while (index < tokens.length) {
+          const token = tokens[index++];
+          if (token.type === "group") {
+            const len = result.length;
+            flatten(token.tokens, 0, result, (seq) => flatten(tokens, index, seq, callback));
+            result.length = len;
+            continue;
+          }
+          result.push(token);
+        }
+        callback(result);
+      }
+      function toRegExpSource(tokens, delimiter, keys, originalPath) {
+        let result = "";
+        let backtrack = "";
+        let wildcardBacktrack = "";
+        let prevCaptureType = 0;
+        let hasSegmentCapture = 0;
+        let index = 0;
+        function hasInSegment(index2, type) {
+          while (index2 < tokens.length) {
+            const token = tokens[index2++];
+            if (token.type === type)
+              return true;
+            if (token.type === "text") {
+              if (token.value.includes(delimiter))
+                break;
+            }
+          }
+          return false;
+        }
+        function peekText(index2) {
+          let result2 = "";
+          while (index2 < tokens.length) {
+            const token = tokens[index2++];
+            if (token.type !== "text")
+              break;
+            result2 += token.value;
+          }
+          return result2;
+        }
+        while (index < tokens.length) {
+          const token = tokens[index++];
+          if (token.type === "text") {
+            result += escape(token.value);
+            backtrack += token.value;
+            if (prevCaptureType === 2)
+              wildcardBacktrack += token.value;
+            if (token.value.includes(delimiter))
+              hasSegmentCapture = 0;
+            continue;
+          }
+          if (token.type === "param" || token.type === "wildcard") {
+            if (prevCaptureType && !backtrack) {
+              throw new PathError(`Missing text before "${token.name}" ${token.type}`, originalPath);
+            }
+            if (token.type === "param") {
+              result += hasSegmentCapture & 2 ? `(${negate(delimiter, backtrack)}+)` : hasInSegment(index, "wildcard") ? `(${negate(delimiter, peekText(index))}+)` : hasSegmentCapture & 1 ? `(${negate(delimiter, backtrack)}+|${escape(backtrack)})` : `(${negate(delimiter, "")}+)`;
+              hasSegmentCapture |= prevCaptureType = 1;
+            } else {
+              result += hasSegmentCapture & 2 ? `(${negate(backtrack, "")}+)` : wildcardBacktrack ? `(${negate(wildcardBacktrack, "")}+|${negate(delimiter, "")}+)` : `([^]+)`;
+              wildcardBacktrack = "";
+              hasSegmentCapture |= prevCaptureType = 2;
+            }
+            keys.push(token);
+            backtrack = "";
+            continue;
+          }
+          throw new TypeError(`Unknown token type: ${token.type}`);
+        }
+        return result;
+      }
+      function negate(a4, b4) {
+        if (b4.length > a4.length)
+          return negate(b4, a4);
+        if (a4 === b4)
+          b4 = "";
+        if (b4.length > 1)
+          return `(?:(?!${escape(a4)}|${escape(b4)})[^])`;
+        if (a4.length > 1)
+          return `(?:(?!${escape(a4)})[^${escape(b4)}])`;
+        return `[^${escape(a4 + b4)}]`;
+      }
+      function stringifyTokens(tokens, index) {
+        let value = "";
+        while (index < tokens.length) {
+          const token = tokens[index++];
+          if (token.type === "text") {
+            value += escapeText(token.value);
+            continue;
+          }
+          if (token.type === "group") {
+            value += "{" + stringifyTokens(token.tokens, 0) + "}";
+            continue;
+          }
+          if (token.type === "param") {
+            value += ":" + stringifyName(token.name, tokens[index]);
+            continue;
+          }
+          if (token.type === "wildcard") {
+            value += "*" + stringifyName(token.name, tokens[index]);
+            continue;
+          }
+          throw new TypeError(`Unknown token type: ${token.type}`);
+        }
+        return value;
+      }
+      function stringify(data) {
+        return stringifyTokens(data.tokens, 0);
+      }
+      function stringifyName(name, next) {
+        if (!ID.test(name))
+          return JSON.stringify(name);
+        if ((next === null || next === void 0 ? void 0 : next.type) === "text" && ID_CONTINUE.test(next.value[0])) {
+          return JSON.stringify(name);
+        }
+        return name;
+      }
+    }
+  });
+
+  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
   var n;
   var l;
   var u;
@@ -65,13 +460,13 @@
     P.__r = 0;
   }
   function $(n3, l7, u5, t4, i5, r4, o4, e4, f5, c4, s5) {
-    var a4, h4, y5, d5, w5, _6, g5 = t4 && t4.__k || v, m6 = l7.length;
-    for (f5 = I(u5, l7, g5, f5, m6), a4 = 0; a4 < m6; a4++) null != (y5 = u5.__k[a4]) && (h4 = -1 === y5.__i ? p : g5[y5.__i] || p, y5.__i = a4, _6 = j(n3, y5, h4, i5, r4, o4, e4, f5, c4, s5), d5 = y5.__e, y5.ref && h4.ref != y5.ref && (h4.ref && V(h4.ref, null, y5), s5.push(y5.ref, y5.__c || d5, y5)), null == w5 && null != d5 && (w5 = d5), 4 & y5.__u || h4.__k === y5.__k ? f5 = A(y5, f5, n3) : "function" == typeof y5.type && void 0 !== _6 ? f5 = _6 : d5 && (f5 = d5.nextSibling), y5.__u &= -7);
+    var a4, h5, y5, d5, w5, _6, g5 = t4 && t4.__k || v, m6 = l7.length;
+    for (f5 = I(u5, l7, g5, f5, m6), a4 = 0; a4 < m6; a4++) null != (y5 = u5.__k[a4]) && (h5 = -1 === y5.__i ? p : g5[y5.__i] || p, y5.__i = a4, _6 = j(n3, y5, h5, i5, r4, o4, e4, f5, c4, s5), d5 = y5.__e, y5.ref && h5.ref != y5.ref && (h5.ref && V(h5.ref, null, y5), s5.push(y5.ref, y5.__c || d5, y5)), null == w5 && null != d5 && (w5 = d5), 4 & y5.__u || h5.__k === y5.__k ? f5 = A(y5, f5, n3) : "function" == typeof y5.type && void 0 !== _6 ? f5 = _6 : d5 && (f5 = d5.nextSibling), y5.__u &= -7);
     return u5.__e = w5, f5;
   }
   function I(n3, l7, u5, t4, i5) {
-    var r4, o4, e4, f5, c4, s5 = u5.length, a4 = s5, h4 = 0;
-    for (n3.__k = new Array(i5), r4 = 0; r4 < i5; r4++) null != (o4 = l7[r4]) && "boolean" != typeof o4 && "function" != typeof o4 ? (f5 = r4 + h4, (o4 = n3.__k[r4] = "string" == typeof o4 || "number" == typeof o4 || "bigint" == typeof o4 || o4.constructor == String ? m(null, o4, null, null, null) : d(o4) ? m(k, { children: o4 }, null, null, null) : void 0 === o4.constructor && o4.__b > 0 ? m(o4.type, o4.props, o4.key, o4.ref ? o4.ref : null, o4.__v) : o4).__ = n3, o4.__b = n3.__b + 1, e4 = null, -1 !== (c4 = o4.__i = L(o4, u5, f5, a4)) && (a4--, (e4 = u5[c4]) && (e4.__u |= 2)), null == e4 || null === e4.__v ? (-1 == c4 && h4--, "function" != typeof o4.type && (o4.__u |= 4)) : c4 != f5 && (c4 == f5 - 1 ? h4-- : c4 == f5 + 1 ? h4++ : (c4 > f5 ? h4-- : h4++, o4.__u |= 4))) : n3.__k[r4] = null;
+    var r4, o4, e4, f5, c4, s5 = u5.length, a4 = s5, h5 = 0;
+    for (n3.__k = new Array(i5), r4 = 0; r4 < i5; r4++) null != (o4 = l7[r4]) && "boolean" != typeof o4 && "function" != typeof o4 ? (f5 = r4 + h5, (o4 = n3.__k[r4] = "string" == typeof o4 || "number" == typeof o4 || "bigint" == typeof o4 || o4.constructor == String ? m(null, o4, null, null, null) : d(o4) ? m(k, { children: o4 }, null, null, null) : void 0 === o4.constructor && o4.__b > 0 ? m(o4.type, o4.props, o4.key, o4.ref ? o4.ref : null, o4.__v) : o4).__ = n3, o4.__b = n3.__b + 1, e4 = null, -1 !== (c4 = o4.__i = L(o4, u5, f5, a4)) && (a4--, (e4 = u5[c4]) && (e4.__u |= 2)), null == e4 || null === e4.__v ? (-1 == c4 && h5--, "function" != typeof o4.type && (o4.__u |= 4)) : c4 != f5 && (c4 == f5 - 1 ? h5-- : c4 == f5 + 1 ? h5++ : (c4 > f5 ? h5-- : h5++, o4.__u |= 4))) : n3.__k[r4] = null;
     if (a4) for (r4 = 0; r4 < s5; r4++) null != (e4 = u5[r4]) && 0 == (2 & e4.__u) && (e4.__e == t4 && (t4 = C(e4)), q(e4, e4));
     return t4;
   }
@@ -134,30 +529,30 @@
     };
   }
   function j(n3, u5, t4, i5, r4, o4, e4, f5, c4, s5) {
-    var a4, h4, p4, v5, y5, g5, m6, b4, C3, S3, M3, P3, I3, A5, H2, L3, T4, F3 = u5.type;
+    var a4, h5, p4, v5, y5, g5, m6, b4, C3, S3, M3, P3, I3, A5, H2, L3, T4, F3 = u5.type;
     if (void 0 !== u5.constructor) return null;
     128 & t4.__u && (c4 = !!(32 & t4.__u), o4 = [f5 = u5.__e = t4.__e]), (a4 = l.__b) && a4(u5);
     n: if ("function" == typeof F3) try {
-      if (b4 = u5.props, C3 = "prototype" in F3 && F3.prototype.render, S3 = (a4 = F3.contextType) && i5[a4.__c], M3 = a4 ? S3 ? S3.props.value : a4.__ : i5, t4.__c ? m6 = (h4 = u5.__c = t4.__c).__ = h4.__E : (C3 ? u5.__c = h4 = new F3(b4, M3) : (u5.__c = h4 = new x(b4, M3), h4.constructor = F3, h4.render = B), S3 && S3.sub(h4), h4.props = b4, h4.state || (h4.state = {}), h4.context = M3, h4.__n = i5, p4 = h4.__d = true, h4.__h = [], h4._sb = []), C3 && null == h4.__s && (h4.__s = h4.state), C3 && null != F3.getDerivedStateFromProps && (h4.__s == h4.state && (h4.__s = w({}, h4.__s)), w(h4.__s, F3.getDerivedStateFromProps(b4, h4.__s))), v5 = h4.props, y5 = h4.state, h4.__v = u5, p4) C3 && null == F3.getDerivedStateFromProps && null != h4.componentWillMount && h4.componentWillMount(), C3 && null != h4.componentDidMount && h4.__h.push(h4.componentDidMount);
+      if (b4 = u5.props, C3 = "prototype" in F3 && F3.prototype.render, S3 = (a4 = F3.contextType) && i5[a4.__c], M3 = a4 ? S3 ? S3.props.value : a4.__ : i5, t4.__c ? m6 = (h5 = u5.__c = t4.__c).__ = h5.__E : (C3 ? u5.__c = h5 = new F3(b4, M3) : (u5.__c = h5 = new x(b4, M3), h5.constructor = F3, h5.render = B), S3 && S3.sub(h5), h5.props = b4, h5.state || (h5.state = {}), h5.context = M3, h5.__n = i5, p4 = h5.__d = true, h5.__h = [], h5._sb = []), C3 && null == h5.__s && (h5.__s = h5.state), C3 && null != F3.getDerivedStateFromProps && (h5.__s == h5.state && (h5.__s = w({}, h5.__s)), w(h5.__s, F3.getDerivedStateFromProps(b4, h5.__s))), v5 = h5.props, y5 = h5.state, h5.__v = u5, p4) C3 && null == F3.getDerivedStateFromProps && null != h5.componentWillMount && h5.componentWillMount(), C3 && null != h5.componentDidMount && h5.__h.push(h5.componentDidMount);
       else {
-        if (C3 && null == F3.getDerivedStateFromProps && b4 !== v5 && null != h4.componentWillReceiveProps && h4.componentWillReceiveProps(b4, M3), !h4.__e && (null != h4.shouldComponentUpdate && false === h4.shouldComponentUpdate(b4, h4.__s, M3) || u5.__v == t4.__v)) {
-          for (u5.__v != t4.__v && (h4.props = b4, h4.state = h4.__s, h4.__d = false), u5.__e = t4.__e, u5.__k = t4.__k, u5.__k.some(function(n4) {
+        if (C3 && null == F3.getDerivedStateFromProps && b4 !== v5 && null != h5.componentWillReceiveProps && h5.componentWillReceiveProps(b4, M3), !h5.__e && (null != h5.shouldComponentUpdate && false === h5.shouldComponentUpdate(b4, h5.__s, M3) || u5.__v == t4.__v)) {
+          for (u5.__v != t4.__v && (h5.props = b4, h5.state = h5.__s, h5.__d = false), u5.__e = t4.__e, u5.__k = t4.__k, u5.__k.some(function(n4) {
             n4 && (n4.__ = u5);
-          }), P3 = 0; P3 < h4._sb.length; P3++) h4.__h.push(h4._sb[P3]);
-          h4._sb = [], h4.__h.length && e4.push(h4);
+          }), P3 = 0; P3 < h5._sb.length; P3++) h5.__h.push(h5._sb[P3]);
+          h5._sb = [], h5.__h.length && e4.push(h5);
           break n;
         }
-        null != h4.componentWillUpdate && h4.componentWillUpdate(b4, h4.__s, M3), C3 && null != h4.componentDidUpdate && h4.__h.push(function() {
-          h4.componentDidUpdate(v5, y5, g5);
+        null != h5.componentWillUpdate && h5.componentWillUpdate(b4, h5.__s, M3), C3 && null != h5.componentDidUpdate && h5.__h.push(function() {
+          h5.componentDidUpdate(v5, y5, g5);
         });
       }
-      if (h4.context = M3, h4.props = b4, h4.__P = n3, h4.__e = false, I3 = l.__r, A5 = 0, C3) {
-        for (h4.state = h4.__s, h4.__d = false, I3 && I3(u5), a4 = h4.render(h4.props, h4.state, h4.context), H2 = 0; H2 < h4._sb.length; H2++) h4.__h.push(h4._sb[H2]);
-        h4._sb = [];
+      if (h5.context = M3, h5.props = b4, h5.__P = n3, h5.__e = false, I3 = l.__r, A5 = 0, C3) {
+        for (h5.state = h5.__s, h5.__d = false, I3 && I3(u5), a4 = h5.render(h5.props, h5.state, h5.context), H2 = 0; H2 < h5._sb.length; H2++) h5.__h.push(h5._sb[H2]);
+        h5._sb = [];
       } else do {
-        h4.__d = false, I3 && I3(u5), a4 = h4.render(h4.props, h4.state, h4.context), h4.state = h4.__s;
-      } while (h4.__d && ++A5 < 25);
-      h4.state = h4.__s, null != h4.getChildContext && (i5 = w(w({}, i5), h4.getChildContext())), C3 && !p4 && null != h4.getSnapshotBeforeUpdate && (g5 = h4.getSnapshotBeforeUpdate(v5, y5)), f5 = $(n3, d(L3 = null != a4 && a4.type === k && null == a4.key ? a4.props.children : a4) ? L3 : [L3], u5, t4, i5, r4, o4, e4, f5, c4, s5), h4.base = u5.__e, u5.__u &= -161, h4.__h.length && e4.push(h4), m6 && (h4.__E = h4.__ = null);
+        h5.__d = false, I3 && I3(u5), a4 = h5.render(h5.props, h5.state, h5.context), h5.state = h5.__s;
+      } while (h5.__d && ++A5 < 25);
+      h5.state = h5.__s, null != h5.getChildContext && (i5 = w(w({}, i5), h5.getChildContext())), C3 && !p4 && null != h5.getSnapshotBeforeUpdate && (g5 = h5.getSnapshotBeforeUpdate(v5, y5)), f5 = $(n3, d(L3 = null != a4 && a4.type === k && null == a4.key ? a4.props.children : a4) ? L3 : [L3], u5, t4, i5, r4, o4, e4, f5, c4, s5), h5.base = u5.__e, u5.__u &= -161, h5.__h.length && e4.push(h5), m6 && (h5.__E = h5.__ = null);
     } catch (n4) {
       if (u5.__v = null, c4 || null != o4) if (n4.then) {
         for (u5.__u |= c4 ? 160 : 128; f5 && 8 == f5.nodeType && f5.nextSibling; ) f5 = f5.nextSibling;
@@ -182,7 +577,7 @@
     });
   }
   function N(u5, t4, i5, r4, o4, e4, f5, c4, s5) {
-    var a4, h4, v5, y5, w5, g5, m6, b4 = i5.props, k4 = t4.props, x5 = t4.type;
+    var a4, h5, v5, y5, w5, g5, m6, b4 = i5.props, k4 = t4.props, x5 = t4.type;
     if ("svg" == x5 ? o4 = "http://www.w3.org/2000/svg" : "math" == x5 ? o4 = "http://www.w3.org/1998/Math/MathML" : o4 || (o4 = "http://www.w3.org/1999/xhtml"), null != e4) {
       for (a4 = 0; a4 < e4.length; a4++) if ((w5 = e4[a4]) && "setAttribute" in w5 == !!x5 && (x5 ? w5.localName == x5 : 3 == w5.nodeType)) {
         u5 = w5, e4[a4] = null;
@@ -202,8 +597,8 @@
         if ("value" == a4 && "defaultValue" in k4 || "checked" == a4 && "defaultChecked" in k4) continue;
         F(u5, a4, null, w5, o4);
       }
-      for (a4 in k4) w5 = k4[a4], "children" == a4 ? y5 = w5 : "dangerouslySetInnerHTML" == a4 ? h4 = w5 : "value" == a4 ? g5 = w5 : "checked" == a4 ? m6 = w5 : c4 && "function" != typeof w5 || b4[a4] === w5 || F(u5, a4, w5, b4[a4], o4);
-      if (h4) c4 || v5 && (h4.__html === v5.__html || h4.__html === u5.innerHTML) || (u5.innerHTML = h4.__html), t4.__k = [];
+      for (a4 in k4) w5 = k4[a4], "children" == a4 ? y5 = w5 : "dangerouslySetInnerHTML" == a4 ? h5 = w5 : "value" == a4 ? g5 = w5 : "checked" == a4 ? m6 = w5 : c4 && "function" != typeof w5 || b4[a4] === w5 || F(u5, a4, w5, b4[a4], o4);
+      if (h5) c4 || v5 && (h5.__html === v5.__html || h5.__html === u5.innerHTML) || (u5.innerHTML = h5.__html), t4.__k = [];
       else if (v5 && (u5.innerHTML = ""), $(u5, d(y5) ? y5 : [y5], t4, i5, r4, "foreignObject" == x5 ? "http://www.w3.org/1999/xhtml" : o4, e4, f5, e4 ? e4[0] : i5.__k && C(i5, 0), c4, s5), null != e4) for (a4 = e4.length; a4--; ) _(e4[a4]);
       c4 || (a4 = "value", "progress" == x5 && null == g5 ? u5.removeAttribute("value") : void 0 !== g5 && (g5 !== u5[a4] || "progress" == x5 && !g5 || "option" == x5 && g5 !== b4[a4]) && F(u5, a4, g5, b4[a4], o4), a4 = "checked", void 0 !== m6 && m6 !== u5[a4] && F(u5, a4, m6, b4[a4], o4));
     }
@@ -257,7 +652,7 @@
     return n3.__v.__b - l7.__v.__b;
   }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-  // node_modules/preact/hooks/dist/hooks.module.js
+  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
   var t2;
   var r2;
   var u2;
@@ -356,7 +751,7 @@
     });
   }
 
-  // node_modules/@preact/signals-core/dist/signals-core.module.js
+  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
   var i3 = Symbol.for("preact-signals");
   function t3() {
     if (!(s3 > 1)) {
@@ -747,7 +1142,7 @@
     return r4;
   }
 
-  // node_modules/@preact/signals/dist/signals.module.js
+  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
   var s4;
   var h3;
   var l4;
@@ -975,6 +1370,9 @@
   var UI_TIMESTAMP_PROTOCOL_VERSION = 16;
   var UI_PROTOCOL_HEADER = "X-NanoClaw-UI-Protocol";
 
+  // ../../shared/collection-patch.ts
+  var collectionPatchCheck = (entity, key) => shape({ upserts: array(entity), removeIds: array(key), order: optional(array(key)) });
+
   // ../../shared/oauth-app.ts
   function isOAuthScope(value) {
     return typeof value === "string" && value.length > 0 && [...value].every((character) => character >= "!" && character <= "~" && character !== '"' && character !== "\\");
@@ -1078,13 +1476,6 @@
     };
   }
 
-  // ../../shared/suggested-responses.ts
-  var MAX_SUGGESTED_RESPONSES = 6;
-  var MAX_SUGGESTED_RESPONSE_LENGTH = 240;
-  function isSuggestedResponses(value) {
-    return Array.isArray(value) && value.length > 0 && value.length <= MAX_SUGGESTED_RESPONSES && value.every((text2) => typeof text2 === "string" && !!text2.trim() && text2.length <= MAX_SUGGESTED_RESPONSE_LENGTH) && new Set(value).size === value.length;
-  }
-
   // ../../shared/conversation-protocol.ts
   var CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 1;
   var strings = array(id);
@@ -1111,7 +1502,6 @@
     direction: oneOf("in", "out", "event"),
     timestamp: isEpochMs,
     text,
-    suggestedResponses: optional(isSuggestedResponses),
     turnId: optional(id),
     timelinePosition: optional(integer),
     inputState: optional(
@@ -1226,6 +1616,9 @@
     resolvedAt: nullable(isEpochMs)
   });
   var interaction = (value) => approval(value) || account(value);
+  function isConversationApproval(value) {
+    return approval(value) || account(value);
+  }
   var tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: bool });
   var timelineRow = (v5) => shape({ kind: oneOf("message"), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v5) || shape({ kind: oneOf("interaction"), interactionId: id, trace: optional(tracePlacement) })(v5) || shape({ kind: oneOf("turn"), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v5);
   var connection = shape({ connected: bool, activeTurnId: nullable(id) });
@@ -1335,6 +1728,13 @@
   var pinnedContext = y2([]);
   var pendingApprovals = y2([]);
   var respondingInteractionIds = y2(/* @__PURE__ */ new Set());
+  var refs = {
+    chatGeneration: 0,
+    seenIds: /* @__PURE__ */ new Set(),
+    suppressHashCount: 0,
+    uploadDragDepth: 0,
+    newChatInFlight: false
+  };
   var UPLOAD_MAX_FILE_SIZE = 25 * 1024 * 1024;
   var UPLOAD_MAX_TOTAL_SIZE = 50 * 1024 * 1024;
   var MOBILE_MQ = window.matchMedia("(max-width: 720px)");
@@ -1378,8 +1778,8 @@
       ([, session]) => session.open && isCurrentConversation(session.gid, session.thread)
     );
   }
-  function isCurrentConversation(gid, thread) {
-    return groupId.value === gid && threadId.value === thread.threadId && channelType.value === (thread.channelType || "web") && messagingGroupId.value === (thread.messagingGroupId ?? null);
+  function isCurrentConversation(gid, thread2) {
+    return groupId.value === gid && threadId.value === thread2.threadId && channelType.value === (thread2.channelType || "web") && messagingGroupId.value === (thread2.messagingGroupId ?? null);
   }
 
   // src/pending-cancel.ts
@@ -1404,6 +1804,37 @@
   // src/activity-trace-state.ts
   var traceOpen = y2(/* @__PURE__ */ new Map());
   var metricsOpen = y2(/* @__PURE__ */ new Map());
+  var initialTracePending = true;
+  function toggle(panel, ownerId, follow) {
+    const next = new Map(panel.peek());
+    if (!next.delete(ownerId)) next.set(ownerId, follow ? "follow" : "open");
+    panel.value = next;
+  }
+  function move(panel, from, to) {
+    const next = new Map(panel.peek());
+    const mode = next.get(from);
+    next.delete(from);
+    next.set(to, mode);
+    panel.value = next;
+  }
+  function submissionTraceOwner(messageId) {
+    return `submission:${messageId}`;
+  }
+  function inheritActivityPanels(ownerId) {
+    for (const panel of [traceOpen, metricsOpen]) {
+      for (const [from, mode] of panel.peek()) if (mode === "follow" && from !== ownerId) move(panel, from, ownerId);
+    }
+    if (initialTracePending && appearance.peek().preferences.showTechnicalStatus) {
+      initialTracePending = false;
+      if (!traceOpen.peek().has(ownerId)) toggle(traceOpen, ownerId, true);
+    }
+  }
+
+  // src/web-submissions.ts
+  function withWebSendState(submission, state) {
+    const { status: _status, error: _error, ...packet } = submission;
+    return { ...packet, ...state };
+  }
 
   // src/conversation-state.ts
   var conversationState = y2(null);
@@ -1411,19 +1842,13 @@
   var chatTranscript = y2([]);
 
   // src/reply-suggestions.ts
-  function inlineReplyDraft(href) {
-    if (!/^reply:/i.test(href)) return null;
-    try {
-      const text2 = decodeURIComponent(href.slice("reply:".length));
-      const control = [...text2].some((character) => {
-        const code = character.charCodeAt(0);
-        return code < 32 && code !== 10 || code === 127;
-      });
-      return text2.trim() && text2.length <= MAX_SUGGESTED_RESPONSE_LENGTH && !control ? text2 : null;
-    } catch (error) {
-      if (error instanceof URIError) return null;
-      throw error;
-    }
+  var MAX_REPLY_LENGTH = 240;
+  var suggestedDrafts = /* @__PURE__ */ new WeakMap();
+  function isReplyLabel(text2) {
+    return !!text2.trim() && text2.length <= MAX_REPLY_LENGTH && ![...text2].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 && code !== 10 || code === 127;
+    });
   }
   function suggestionsActive(messageId, messages2, turns, sending) {
     if (sending || turns.some((turn4) => turn4.phase !== "settled")) return false;
@@ -1433,21 +1858,33 @@
     const turn3 = turns.find((candidate) => candidate.id === message2.turnId);
     return turn3?.phase === "settled" && turn3.outcome === "replied" && !messages2.slice(index + 1).some((next) => next.direction !== "event" && next.inputState?.status !== "cancelled");
   }
-  function fillSuggestedDraft(input, text2) {
+  function fillSuggestedDraft(input, text2, scope = "") {
     if (!input || input.disabled || input.readOnly)
       return { filled: false, error: "The composer is unavailable. Your draft has been kept." };
-    if (input.value.length)
-      return { filled: false, error: "Your draft has been kept. Clear it before choosing a suggested reply." };
+    let state = suggestedDrafts.get(input);
+    if (input.value.length && (!state || state.scope !== scope || state.text !== input.value))
+      return { filled: false, error: "Finish or clear your draft to try a suggestion." };
+    if (!state) {
+      const tracked = { scope, text: text2, filling: false };
+      suggestedDrafts.set(input, tracked);
+      input.addEventListener("input", () => {
+        if (!tracked.filling) tracked.text = null;
+      });
+      state = tracked;
+    }
+    state.scope = scope;
+    state.text = text2;
     input.value = text2;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    state.filling = true;
+    try {
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    } finally {
+      state.filling = false;
+    }
     input.focus();
     input.setSelectionRange(text2.length, text2.length);
     return { filled: true };
   }
-
-  // src/recorder.ts
-  var isRecording = y2(false);
-  var recordingDuration = y2(0);
 
   // ../../shared/voice.ts
   var VOICE_SAMPLE_RATE = 16e3;
@@ -1661,9 +2098,9 @@
         return;
       }
       for (let offset = 0; offset < chunk.byteLength; offset += VOICE_MAX_FRAME_BYTES) {
-        const frame = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
-        this.audioQueue.push(frame);
-        this.queuedBytes += frame.byteLength;
+        const frame2 = chunk.slice(offset, offset + VOICE_MAX_FRAME_BYTES);
+        this.audioQueue.push(frame2);
+        this.queuedBytes += frame2.byteLength;
       }
       if (this.diagnostics)
         this.diagnostics.peakQueuedBytes = Math.max(this.diagnostics.peakQueuedBytes, this.queuedBytes);
@@ -1682,15 +2119,15 @@
       this.allowanceAt = now;
       try {
         while (this.audioQueue.length) {
-          const frame = this.audioQueue[0];
-          if (frame.byteLength > this.uploadAllowance || socket.bufferedAmount + frame.byteLength > VOICE_MAX_BUFFER_BYTES) {
+          const frame2 = this.audioQueue[0];
+          if (frame2.byteLength > this.uploadAllowance || socket.bufferedAmount + frame2.byteLength > VOICE_MAX_BUFFER_BYTES) {
             this.drainTimer = setTimeout(() => this.drainAudio(generation), 25);
             return;
           }
-          socket.send(frame);
-          this.uploadAllowance -= frame.byteLength;
+          socket.send(frame2);
+          this.uploadAllowance -= frame2.byteLength;
           this.audioQueue.shift();
-          this.queuedBytes -= frame.byteLength;
+          this.queuedBytes -= frame2.byteLength;
         }
         if (this.captureFlushed) {
           socket.send(JSON.stringify({ type: "finish" }));
@@ -1916,9 +2353,9 @@
       throw error;
     }
   }
-  async function reportVoiceDiagnostic(groupId2, diagnostic) {
+  async function reportVoiceDiagnostic(groupId3, diagnostic) {
     try {
-      const response2 = await protocolFetch(`/ui/chat/api/groups/${encodeURIComponent(groupId2)}/voice/diagnostics`, {
+      const response2 = await protocolFetch(`/ui/chat/api/groups/${encodeURIComponent(groupId3)}/voice/diagnostics`, {
         method: "POST",
         credentials: "same-origin",
         keepalive: true,
@@ -1945,112 +2382,17 @@
     window.addEventListener("pagehide", () => voice.interrupt());
   }
 
-  // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
-  var f4 = 0;
-  var i4 = Array.isArray;
-  function u4(e4, t4, n3, o4, i5, u5) {
-    t4 || (t4 = {});
-    var a4, c4, p4 = t4;
-    if ("ref" in p4) for (c4 in p4 = {}, t4) "ref" == c4 ? a4 = t4[c4] : p4[c4] = t4[c4];
-    var l7 = { type: e4, props: p4, key: n3, ref: a4, __k: null, __: null, __b: 0, __e: null, __c: null, constructor: void 0, __v: --f4, __i: -1, __u: 0, __source: i5, __self: u5 };
-    if ("function" == typeof e4 && (a4 = e4.defaultProps)) for (c4 in a4) void 0 === p4[c4] && (p4[c4] = a4[c4]);
-    return l.vnode && l.vnode(l7), l7;
-  }
+  // src/recorder.ts
+  var isRecording = y2(false);
+  var recordingDuration = y2(0);
 
-  // src/components/Toast.tsx
-  var nextId = 1;
-  var hideTimer = null;
-  var pending2 = [];
-  function displayToast(message2, ms) {
-    if (hideTimer) {
-      clearTimeout(hideTimer);
-      hideTimer = null;
-    }
-    toastMessage.value = message2;
-    if (message2.kind === "err" || message2.action) return;
-    hideTimer = setTimeout(() => {
-      hideTimer = null;
-      if (toastMessage.value?.id === message2.id) dismissToast();
-    }, ms);
-  }
-  function enqueueToast(message2, ms = 1800) {
-    const current = toastMessage.value;
-    if (message2.action && message2.action === current?.action && message2.actionLabel === current.actionLabel) {
-      displayToast(message2, ms);
-    } else if (current?.kind === "err" || current?.actionLabel) {
-      pending2.push({ message: message2, ms });
-    } else {
-      displayToast(message2, ms);
-    }
-  }
-  function showToast(text2, kind = "ok", ms = 1800) {
-    const id2 = nextId++;
-    enqueueToast({ id: id2, text: text2, kind }, ms);
-    return id2;
-  }
-  function dismissToast() {
-    if (hideTimer) {
-      clearTimeout(hideTimer);
-      hideTimer = null;
-    }
-    const next = pending2.shift();
-    if (next) displayToast(next.message, next.ms);
-    else toastMessage.value = null;
-  }
+  // src/approval-messages.ts
+  var approvalMessageDrafts = y2({});
 
-  // src/components/SuggestedResponses.tsx
-  function suggestionState(messageId) {
-    const conversation2 = conversationState.value?.conversation;
-    const sending = pendingWebSends.value.some(
-      (send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed"
-    );
-    const active = canSend.value && !!conversation2 && suggestionsActive(messageId, conversation2.messages, conversation2.turns, sending);
-    const busy = composerSendInFlight.value || !!currentPendingEditor() || isRecording.value || !["idle", "error"].includes(voice.state.value.phase);
-    return { active, disabled: busy };
-  }
-  function location2() {
-    return JSON.stringify([groupId.value, threadId.value, channelType.value, messagingGroupId.value]);
-  }
-  function replySuggestionControls(messageId) {
-    const target = location2();
-    return {
-      ...suggestionState(messageId),
-      choose(text2) {
-        const current = suggestionState(messageId);
-        if (target !== location2() || !current.active || current.disabled) return;
-        const input = document.getElementById("chat-input");
-        const result = fillSuggestedDraft(input instanceof HTMLTextAreaElement ? input : null, text2);
-        if (!result.filled) showToast(result.error, "err");
-      }
-    };
-  }
-  function bindInlineReplyControls(root2, controls) {
-    for (const button of root2.querySelectorAll("button.inline-reply-suggestion[data-reply-draft]")) {
-      button.disabled = controls.disabled;
-      button.addEventListener("click", () => {
-        const draft2 = button.dataset.replyDraft;
-        if (draft2) controls.choose(draft2);
-      });
-    }
-  }
-  function SuggestedResponses({ message: message2 }) {
-    const controls = replySuggestionControls(message2.id);
-    if (!controls.active) return null;
-    return /* @__PURE__ */ u4("div", { class: "reply-suggestions", "aria-label": "Suggested replies", children: message2.suggestedResponses?.map((text2) => /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        class: "message-action-btn",
-        title: `Draft reply: ${text2}`,
-        disabled: controls.disabled,
-        onClick: () => controls.choose(text2),
-        children: text2
-      },
-      text2
-    )) });
-  }
+  // src/hash.ts
+  var import_path_to_regexp = __toESM(require_dist(), 1);
 
-  // node_modules/marked/lib/marked.esm.js
+  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
   function M2() {
     return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
   }
@@ -2286,19 +2628,19 @@ ${c4}` : c4, r4 = r4 ? `${r4}
 ${p4}` : p4;
           let k4 = this.lexer.state.top;
           if (this.lexer.state.top = true, this.lexer.blockTokens(p4, i5, true), this.lexer.state.top = k4, n3.length === 0) break;
-          let h4 = i5.at(-1);
-          if (h4?.type === "code") break;
-          if (h4?.type === "blockquote") {
-            let R = h4, f5 = R.raw + `
+          let h5 = i5.at(-1);
+          if (h5?.type === "code") break;
+          if (h5?.type === "blockquote") {
+            let R = h5, f5 = R.raw + `
 ` + n3.join(`
 `), S3 = this.blockquote(f5);
             i5[i5.length - 1] = S3, s5 = s5.substring(0, s5.length - R.raw.length) + S3.raw, r4 = r4.substring(0, r4.length - R.text.length) + S3.text;
             break;
-          } else if (h4?.type === "list") {
-            let R = h4, f5 = R.raw + `
+          } else if (h5?.type === "list") {
+            let R = h5, f5 = R.raw + `
 ` + n3.join(`
 `), S3 = this.list(f5);
-            i5[i5.length - 1] = S3, s5 = s5.substring(0, s5.length - h4.raw.length) + S3.raw, r4 = r4.substring(0, r4.length - R.raw.length) + S3.raw, n3 = f5.substring(i5.at(-1).raw.length).split(`
+            i5[i5.length - 1] = S3, s5 = s5.substring(0, s5.length - h5.raw.length) + S3.raw, r4 = r4.substring(0, r4.length - R.raw.length) + S3.raw, n3 = f5.substring(i5.at(-1).raw.length).split(`
 `);
             continue;
           }
@@ -2317,23 +2659,23 @@ ${p4}` : p4;
           if (!(t4 = i5.exec(e4)) || this.rules.block.hr.test(e4)) break;
           c4 = t4[0], e4 = e4.substring(c4.length);
           let k4 = me2(t4[2].split(`
-`, 1)[0], t4[1].length), h4 = e4.split(`
+`, 1)[0], t4[1].length), h5 = e4.split(`
 `, 1)[0], R = !k4.trim(), f5 = 0;
-          if (this.options.pedantic ? (f5 = 2, p4 = k4.trimStart()) : R ? f5 = t4[1].length + 1 : (f5 = k4.search(this.rules.other.nonSpaceChar), f5 = f5 > 4 ? 1 : f5, p4 = k4.slice(f5), f5 += t4[1].length), R && this.rules.other.blankLine.test(h4) && (c4 += h4 + `
-`, e4 = e4.substring(h4.length + 1), a4 = true), !a4) {
+          if (this.options.pedantic ? (f5 = 2, p4 = k4.trimStart()) : R ? f5 = t4[1].length + 1 : (f5 = k4.search(this.rules.other.nonSpaceChar), f5 = f5 > 4 ? 1 : f5, p4 = k4.slice(f5), f5 += t4[1].length), R && this.rules.other.blankLine.test(h5) && (c4 += h5 + `
+`, e4 = e4.substring(h5.length + 1), a4 = true), !a4) {
             let S3 = this.rules.other.nextBulletRegex(f5), te = this.rules.other.hrRegex(f5), ne = this.rules.other.fencesBeginRegex(f5), re = this.rules.other.headingBeginRegex(f5), be = this.rules.other.htmlBeginRegex(f5), Re = this.rules.other.blockquoteBeginRegex(f5);
             for (; e4; ) {
               let G = e4.split(`
 `, 1)[0], C3;
-              if (h4 = G, this.options.pedantic ? (h4 = h4.replace(this.rules.other.listReplaceNesting, "  "), C3 = h4) : C3 = h4.replace(this.rules.other.tabCharGlobal, "    "), ne.test(h4) || re.test(h4) || be.test(h4) || Re.test(h4) || S3.test(h4) || te.test(h4)) break;
-              if (C3.search(this.rules.other.nonSpaceChar) >= f5 || !h4.trim()) p4 += `
+              if (h5 = G, this.options.pedantic ? (h5 = h5.replace(this.rules.other.listReplaceNesting, "  "), C3 = h5) : C3 = h5.replace(this.rules.other.tabCharGlobal, "    "), ne.test(h5) || re.test(h5) || be.test(h5) || Re.test(h5) || S3.test(h5) || te.test(h5)) break;
+              if (C3.search(this.rules.other.nonSpaceChar) >= f5 || !h5.trim()) p4 += `
 ` + C3.slice(f5);
               else {
                 if (R || k4.replace(this.rules.other.tabCharGlobal, "    ").search(this.rules.other.nonSpaceChar) >= 4 || ne.test(k4) || re.test(k4) || te.test(k4)) break;
                 p4 += `
-` + h4;
+` + h5;
               }
-              R = !h4.trim(), c4 += G + `
+              R = !h5.trim(), c4 += G + `
 `, e4 = e4.substring(G.length + 1), k4 = C3.slice(f5);
             }
           }
@@ -2359,7 +2701,7 @@ ${p4}` : p4;
             }
           } else a4.task && (a4.task = false);
           if (!r4.loose) {
-            let p4 = a4.tokens.filter((h4) => h4.type === "space"), k4 = p4.length > 0 && p4.some((h4) => this.rules.other.anyLine.test(h4.raw));
+            let p4 = a4.tokens.filter((h5) => h5.type === "space"), k4 = p4.length > 0 && p4.some((h5) => this.rules.other.anyLine.test(h5.raw));
             r4.loose = k4;
           }
         }
@@ -2477,13 +2819,13 @@ ${p4}` : p4;
           }
           if (a4 -= u5, a4 > 0) continue;
           u5 = Math.min(u5, u5 + a4 + c4);
-          let k4 = [...s5[0]][0].length, h4 = e4.slice(0, i5 + s5.index + k4 + u5);
+          let k4 = [...s5[0]][0].length, h5 = e4.slice(0, i5 + s5.index + k4 + u5);
           if (Math.min(i5, u5) % 2) {
-            let f5 = h4.slice(1, -1);
-            return { type: "em", raw: h4, text: f5, tokens: this.lexer.inlineTokens(f5) };
+            let f5 = h5.slice(1, -1);
+            return { type: "em", raw: h5, text: f5, tokens: this.lexer.inlineTokens(f5) };
           }
-          let R = h4.slice(2, -2);
-          return { type: "strong", raw: h4, text: R, tokens: this.lexer.inlineTokens(R) };
+          let R = h5.slice(2, -2);
+          return { type: "strong", raw: h5, text: R, tokens: this.lexer.inlineTokens(R) };
         }
       }
     }
@@ -2511,8 +2853,8 @@ ${p4}` : p4;
           }
           if (a4 -= u5, a4 > 0) continue;
           u5 = Math.min(u5, u5 + a4);
-          let p4 = [...s5[0]][0].length, k4 = e4.slice(0, i5 + s5.index + p4 + u5), h4 = k4.slice(i5, -i5);
-          return { type: "del", raw: k4, text: h4, tokens: this.lexer.inlineTokens(h4) };
+          let p4 = [...s5[0]][0].length, k4 = e4.slice(0, i5 + s5.index + p4 + u5), h5 = k4.slice(i5, -i5);
+          return { type: "del", raw: k4, text: h5, tokens: this.lexer.inlineTokens(h5) };
         }
       }
     }
@@ -2742,9 +3084,9 @@ ${p4}` : p4;
         }
         let c4 = e4;
         if (this.options.extensions?.startInline) {
-          let p4 = 1 / 0, k4 = e4.slice(1), h4;
+          let p4 = 1 / 0, k4 = e4.slice(1), h5;
           this.options.extensions.startInline.forEach((R) => {
-            h4 = R.call({ lexer: this }, k4), typeof h4 == "number" && h4 >= 0 && (p4 = Math.min(p4, h4));
+            h5 = R.call({ lexer: this }, k4), typeof h5 == "number" && h5 >= 0 && (p4 = Math.min(p4, h5));
           }), p4 < 1 / 0 && p4 >= 0 && (c4 = e4.substring(0, p4 + 1));
         }
         if (a4 = this.tokenizer.inlineText(c4)) {
@@ -3230,8 +3572,8 @@ ${e4}</tr>
         if (i5.hooks && (i5.hooks.options = i5, i5.hooks.block = e4), i5.async) return (async () => {
           let u5 = i5.hooks ? await i5.hooks.preprocess(n3) : n3, c4 = await (i5.hooks ? await i5.hooks.provideLexer(e4) : e4 ? x4.lex : x4.lexInline)(u5, i5), p4 = i5.hooks ? await i5.hooks.processAllTokens(c4) : c4;
           i5.walkTokens && await Promise.all(this.walkTokens(p4, i5.walkTokens));
-          let h4 = await (i5.hooks ? await i5.hooks.provideParser(e4) : e4 ? b3.parse : b3.parseInline)(p4, i5);
-          return i5.hooks ? await i5.hooks.postprocess(h4) : h4;
+          let h5 = await (i5.hooks ? await i5.hooks.provideParser(e4) : e4 ? b3.parse : b3.parseInline)(p4, i5);
+          return i5.hooks ? await i5.hooks.postprocess(h5) : h5;
         })().catch(o4);
         try {
           i5.hooks && (n3 = i5.hooks.preprocess(n3));
@@ -3295,10 +3637,7 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
     renderer.link = function({ href, title, tokens }) {
       const text2 = this.parser.parseInline(tokens);
       if (/^reply:/i.test(href)) {
-        const draft2 = inlineReplyDraft(href);
-        if (!inlineReplies || draft2 === null) return text2;
-        const value = draft2.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&#39;");
-        return `<button type="button" class="inline-reply-suggestion" data-reply-draft="${value}" title="Draft reply: ${value}" aria-description="Draft reply: ${value}">${text2}<span aria-hidden="true"> \u21B5</span></button>`;
+        return inlineReplies ? `<span class="inline-reply-slot">${text2}</span>` : text2;
       }
       const isAbs = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//");
       const titleAttr = title ? ` title="${title.replace(/"/g, "&quot;")}"` : "";
@@ -3336,12 +3675,12 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
   });
   function normalizeFileLinks(text2) {
     const re = /\[([^\]\n]+)\]\(([^<>\n()]*(?:\([^()\n]*\)[^<>\n()]*)*)\)/g;
-    return text2.replace(re, (match, label, dest) => {
+    return text2.replace(re, (match2, label, dest) => {
       const d5 = dest.trim();
-      if (!d5) return match;
-      if (/^[a-z][a-z0-9+.-]*:/i.test(d5)) return match;
-      if (d5.startsWith("#") || d5.startsWith("//") || d5.startsWith("mailto:")) return match;
-      if (!/[ ()]/.test(d5)) return match;
+      if (!d5) return match2;
+      if (/^[a-z][a-z0-9+.-]*:/i.test(d5)) return match2;
+      if (d5.startsWith("#") || d5.startsWith("//") || d5.startsWith("mailto:")) return match2;
+      if (!/[ ()]/.test(d5)) return match2;
       return `[${label}](<${d5}>)`;
     });
   }
@@ -3357,31 +3696,508 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
   function normalizeFileRef(ref) {
     return String(ref || "").replace(/^\.?\/+/, "").replace(/^workspace\/+/, "");
   }
-  function toGroupFileUrl(groupId2, rel) {
-    const gid = encodeURIComponent(groupId2);
+  function toGroupFileUrl(groupId3, rel) {
+    const gid = encodeURIComponent(groupId3);
     const segs = rel.split("/").filter(Boolean).map(encodeURIComponent);
     return `api/groups/${gid}/files/${segs.join("/")}`;
   }
-  function renderMarkdown(text2, groupId2, inlineReplies = false) {
+  function renderMarkdown(text2, groupId3, inlineReplies = false) {
     try {
       const html = g4.parse(normalizeFileLinks(text2 || ""), {
         breaks: true,
         gfm: true,
         renderer: markdownRenderer(inlineReplies)
       });
-      if (!groupId2 || typeof document === "undefined") return html;
+      if (!groupId3 || typeof document === "undefined") return html;
       const template = document.createElement("template");
       template.innerHTML = html;
       template.content.querySelectorAll("img[src]").forEach((img) => {
         const src = img.getAttribute("src") || "";
         if (!src || isExternalFileRef(src) || isGroupFileRef(src)) return;
         const rel = normalizeFileRef(decodeFileRef(src));
-        if (rel) img.setAttribute("src", toGroupFileUrl(groupId2, rel));
+        if (rel) img.setAttribute("src", toGroupFileUrl(groupId3, rel));
       });
       return template.innerHTML;
     } catch {
       return null;
     }
+  }
+
+  // src/hash.ts
+  var PATTERNS = ["/g/:gid/t/:tid/:kind/*filepath", "/g/:gid/t/:tid", "/g/:gid/:kind/*filepath", "/g/:gid"];
+  var matchers = PATTERNS.map((p4) => (0, import_path_to_regexp.match)(p4));
+  var builders = Object.fromEntries(
+    PATTERNS.map((p4) => [p4, (0, import_path_to_regexp.compile)(p4)])
+  );
+
+  // src/chat-protocol.ts
+  function publicWebMessageId(clientMessageId) {
+    return `web-${clientMessageId}`;
+  }
+
+  // ../../shared/attention.ts
+  function isAttentionTargets(value) {
+    if (!Array.isArray(value)) return false;
+    const ids = /* @__PURE__ */ new Set();
+    const text2 = (v5) => typeof v5 === "string" && v5.length > 0;
+    return value.every((target) => {
+      if (!target || typeof target !== "object" || !("id" in target) || !text2(target.id) || ids.has(target.id))
+        return false;
+      ids.add(target.id);
+      if (!("origin" in target)) return false;
+      const origin = target.origin;
+      return !!origin && typeof origin === "object" && "agentGroupId" in origin && text2(origin.agentGroupId) && "threadId" in origin && text2(origin.threadId) && "channelType" in origin && text2(origin.channelType) && "messagingGroupId" in origin && text2(origin.messagingGroupId);
+    });
+  }
+
+  // ../../shared/sync.ts
+  var SYNC_PROTOCOL_VERSION = CONVERSATION_PROTOCOL_VERSION;
+  var thread = shape({
+    threadId: id,
+    sessionId: id,
+    channelType: id,
+    messagingGroupId: id,
+    platformId: text,
+    title: text,
+    lastActivityAt: nullable(isEpochMs),
+    sessionMode: oneOf("per-thread", "shared", "agent-shared"),
+    messageCount: integer,
+    activity: oneOf("idle", "running"),
+    waiting: optional(bool),
+    activityStale: optional(bool),
+    unread: optional(bool),
+    canSend: optional(bool),
+    kind: optional(oneOf("thread", "dm")),
+    counterparty: optional(text),
+    totalCost: optional(number),
+    totalTokens: optional(number),
+    turnCount: optional(number),
+    liveTasks: optional(
+      array(
+        shape({
+          seriesId: id,
+          nextRunAt: nullable(isEpochMs),
+          recurrence: nullable(text),
+          summary: text,
+          paused: bool
+        })
+      )
+    ),
+    forkedFrom: optional(
+      shape({
+        threadId: id,
+        messageId: id,
+        title: nullable(text),
+        fidelity: oneOf("native", "transcript"),
+        deleted: bool
+      })
+    ),
+    forkChildren: optional(array(shape({ threadId: id, messageId: id, title: text })))
+  });
+  var groupId2 = (value) => text(value) && value.length > 0 && value.length <= 512;
+  var cursor2 = shape({ streamId: id, revision: integer });
+  var voiceInput2 = shape({ backend: oneOf("disabled", "elevenlabs"), ready: bool, reason: optional(text) });
+  var groupState = shape({ threads: array(thread), voiceInput: voiceInput2 });
+  var agentActivity2 = shape({
+    id,
+    activity: oneOf("idle", "running"),
+    waiting: optional(bool),
+    activityStale: optional(bool),
+    threadCount: optional(integer),
+    unreadThreadCount: optional(integer)
+  });
+  var globalState = shape({
+    approvals: array(isConversationApproval),
+    attention: isAttentionTargets,
+    agentActivity: array(agentActivity2),
+    group: nullable(groupState)
+  });
+  var groupChanges = (value) => shape({ kind: oneOf("replace"), value: nullable(groupState) })(value) || shape({
+    kind: oneOf("update"),
+    threads: optional(collectionPatchCheck(thread, id)),
+    voiceInput: optional(voiceInput2)
+  })(value);
+  var globalFrame = (value) => cursor2(value) && (shape({ kind: oneOf("snapshot"), data: globalState })(value) || object(value) && integer(value.baseRevision) && value.revision === Number(value.baseRevision) + 1 && shape({
+    kind: oneOf("update"),
+    changes: shape({
+      approvals: optional(collectionPatchCheck(isConversationApproval, id)),
+      attention: optional(collectionPatchCheck((item) => isAttentionTargets([item]), id)),
+      agentActivity: optional(collectionPatchCheck(agentActivity2, id)),
+      group: optional(groupChanges)
+    })
+  })(value));
+  var subscription = shape({
+    kind: oneOf("subscribe"),
+    protocolVersion: (value) => value === SYNC_PROTOCOL_VERSION,
+    subscriptionId: integer,
+    groupId: nullable(groupId2),
+    conversation: nullable(
+      shape({
+        threadId: groupId2,
+        channelType: groupId2,
+        messagingGroupId: nullable(groupId2)
+      })
+    ),
+    globalCursor: nullable(cursor2)
+  });
+  var frame = shape({
+    kind: oneOf("sync"),
+    subscriptionId: integer,
+    groupId: nullable(groupId2),
+    global: optional(globalFrame)
+  });
+
+  // src/attention-state.ts
+  var attentionTargets = y2(null);
+  var attentionError = y2(null);
+  var attentionSelection = y2(null);
+
+  // src/credentials-navigation.ts
+  var credentialsIntent = y2(null);
+  var accessApprovalId = y2(
+    typeof location === "undefined" ? null : new URLSearchParams(location.search).get("access_request")
+  );
+
+  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+  var f4 = 0;
+  var i4 = Array.isArray;
+  function u4(e4, t4, n3, o4, i5, u5) {
+    t4 || (t4 = {});
+    var a4, c4, p4 = t4;
+    if ("ref" in p4) for (c4 in p4 = {}, t4) "ref" == c4 ? a4 = t4[c4] : p4[c4] = t4[c4];
+    var l7 = { type: e4, props: p4, key: n3, ref: a4, __k: null, __: null, __b: 0, __e: null, __c: null, constructor: void 0, __v: --f4, __i: -1, __u: 0, __source: i5, __self: u5 };
+    if ("function" == typeof e4 && (a4 = e4.defaultProps)) for (c4 in a4) void 0 === p4[c4] && (p4[c4] = a4[c4]);
+    return l.vnode && l.vnode(l7), l7;
+  }
+
+  // src/components/Toast.tsx
+  var nextId = 1;
+  var hideTimer = null;
+  var pending2 = [];
+  function displayToast(message2, ms) {
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+    toastMessage.value = message2;
+    if (message2.kind === "err" || message2.action) return;
+    hideTimer = setTimeout(() => {
+      hideTimer = null;
+      if (toastMessage.value?.id === message2.id) dismissToast();
+    }, ms);
+  }
+  function enqueueToast(message2, ms = 1800) {
+    const current = toastMessage.value;
+    if (message2.action && message2.action === current?.action && message2.actionLabel === current.actionLabel) {
+      displayToast(message2, ms);
+    } else if (current?.kind === "err" || current?.actionLabel) {
+      pending2.push({ message: message2, ms });
+    } else {
+      displayToast(message2, ms);
+    }
+  }
+  function showToast(text2, kind = "ok", ms = 1800) {
+    const id2 = nextId++;
+    enqueueToast({ id: id2, text: text2, kind }, ms);
+    return id2;
+  }
+  function dismissToast() {
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+    const next = pending2.shift();
+    if (next) displayToast(next.message, next.ms);
+    else toastMessage.value = null;
+  }
+
+  // src/components/PromptModal.tsx
+  var promptRequest = y2(null);
+  var confirmRequest = y2(null);
+  var choiceRequest = y2(null);
+  function requestChoice(opts) {
+    return new Promise((resolve) => {
+      choiceRequest.value = { ...opts, resolve };
+    });
+  }
+
+  // src/actions.ts
+  function requestScrollToBottom() {
+    scrollToBottomTick.value++;
+  }
+  var syncConnection = null;
+  async function runSync() {
+    const gid = groupId.value;
+    const connection2 = syncConnection;
+    if (!connection2) throw new Error("Global synchronization must be started before refreshing.");
+    try {
+      const data = await connection2.refresh(gid);
+      return connection2 === syncConnection && gid === groupId.value && data.group !== null;
+    } catch (error) {
+      if (connection2 === syncConnection && gid === groupId.value) console.error("Global sync refresh failed", error);
+      return false;
+    }
+  }
+  function captureChatSendContext() {
+    const gid = groupId.value;
+    const tid = threadId.value;
+    if (!gid || !tid) return null;
+    const generation = refs.chatGeneration;
+    const ct = channelType.value;
+    const mg = messagingGroupId.value;
+    const isWeb = !ct || ct === "web";
+    const contextCurrent = () => generation === refs.chatGeneration && groupId.value === gid && threadId.value === tid && channelType.value === ct && messagingGroupId.value === mg;
+    let url = `api/groups/${encodeURIComponent(gid)}/chat/${encodeURIComponent(tid)}/send`;
+    if (!isWeb && mg) url += `?channel=${encodeURIComponent(ct)}&mg=${encodeURIComponent(mg)}`;
+    return {
+      gid,
+      tid,
+      isWeb,
+      url,
+      contextCurrent,
+      canSubmit: () => contextCurrent() && canSend.value && (!isWeb || chatReady.value)
+    };
+  }
+  function updateWebSend(gid, tid, messageId, update) {
+    pendingWebSends.value = pendingWebSends.peek().map(
+      (send) => send.groupId === gid && send.threadId === tid && send.messageId === messageId ? update(send) : send
+    );
+  }
+  function confirmedWebSend(gid, tid, messageId) {
+    const view = conversationState.peek()?.conversation;
+    return pendingWebSends.peek().some(
+      (send) => send.groupId === gid && send.threadId === tid && send.messageId === messageId && send.status === "accepted"
+    ) || groupId.value === gid && threadId.value === tid && !!view && view.threadId === tid && view.messages.some((message2) => message2.direction === "in" && message2.id === messageId);
+  }
+  async function sendChat(text2, files, options = {}) {
+    const context = captureChatSendContext();
+    if (!context?.canSubmit()) return false;
+    let inputHandling;
+    const turn3 = activeTurn.value;
+    if (context.isWeb && turnConnected.value && turn3?.status === "running" && turn3.supportsSteering === true) {
+      const choice = await requestChoice({
+        title: "Send while the agent is working",
+        message: "Steer the current turn with this message, or queue it for later.",
+        options: [
+          { value: "cancel", label: "Cancel" },
+          { value: "queue", label: "Queue for later" },
+          { value: "steer", label: "Steer current turn", tone: "primary" }
+        ]
+      });
+      if (choice !== "steer" && choice !== "queue") return false;
+      inputHandling = { mode: choice, turnId: turn3.id };
+    }
+    return submitChatPacket(
+      {
+        clientMessageId: crypto.randomUUID(),
+        text: text2,
+        files: files?.slice() ?? [],
+        timestamp: Date.now(),
+        inputHandling,
+        startsResponse: !turn3
+      },
+      context,
+      options.onSubmitted
+    );
+  }
+  async function submitChatPacket({ clientMessageId, text: text2, files, timestamp, inputHandling, startsResponse }, { gid, tid, isWeb, url, contextCurrent, canSubmit }, onSubmitted) {
+    if (!canSubmit()) return false;
+    const messageId = publicWebMessageId(clientMessageId);
+    n2(() => {
+      highlightMessageId.value = null;
+      requestScrollToBottom();
+    });
+    if (isWeb) {
+      const submission = {
+        groupId: gid,
+        threadId: tid,
+        messageId,
+        clientMessageId,
+        text: text2,
+        files,
+        timestamp,
+        inputHandling,
+        startsResponse,
+        status: "sending"
+      };
+      pendingWebSends.value = pendingWebSends.peek().filter((send) => send.groupId !== gid || send.threadId !== tid || send.messageId !== messageId).concat(submission);
+      if (startsResponse) inheritActivityPanels(submissionTraceOwner(messageId));
+    }
+    try {
+      if (isWeb) onSubmitted?.();
+      let res;
+      if (files.length) {
+        const fd = new FormData();
+        fd.append("text", text2 || "");
+        fd.append("clientMessageId", clientMessageId);
+        if (inputHandling) fd.append("inputHandling", JSON.stringify(inputHandling));
+        for (const f5 of files) {
+          if (f5.file) fd.append("file", f5.file, f5.name);
+        }
+        res = await protocolFetch(url, { method: "POST", credentials: "same-origin", body: fd });
+      } else {
+        res = await protocolFetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text2, clientMessageId, ...inputHandling ? { inputHandling } : {} })
+        });
+      }
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const j5 = await res.json();
+          if (j5 && j5.error) detail = j5.error + (j5.detail ? ` (${j5.detail})` : "");
+        } catch {
+        }
+        if (isWeb && confirmedWebSend(gid, tid, messageId)) {
+          console.warn("Send request failed after authoritative confirmation", { messageId, detail });
+          return contextCurrent();
+        }
+        if (contextCurrent()) showToast(`Send failed: ${detail}`, "err");
+        updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "failed", error: detail }));
+        return false;
+      } else if (!isWeb) {
+        if (!contextCurrent()) return false;
+        try {
+          await runSync();
+        } catch {
+        }
+      }
+      updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "accepted" }));
+      return contextCurrent();
+    } catch (err) {
+      console.error("send failed", err);
+      if (isWeb && confirmedWebSend(gid, tid, messageId)) {
+        console.warn("Send transport failed after authoritative confirmation", { messageId });
+        return contextCurrent();
+      }
+      const m6 = err instanceof Error ? err.message : "network error";
+      updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "failed", error: m6 }));
+      if (contextCurrent()) showToast(`Send failed: ${m6}`, "err");
+      return false;
+    }
+  }
+
+  // src/components/ActionIcons.tsx
+  function EditIcon() {
+    return /* @__PURE__ */ u4("svg", { class: "msg-action-icon", viewBox: "0 0 16 16", "aria-hidden": "true", children: [
+      /* @__PURE__ */ u4("path", { d: "M10.5 2.5l3 3-8 8h-3v-3z" }),
+      /* @__PURE__ */ u4("path", { d: "M9 4l3 3" })
+    ] });
+  }
+
+  // src/components/ReplySuggestion.tsx
+  function ReplySuggestion({ label, labelHtml, disabled, sendDisabled, onChoose, onSend }) {
+    return /* @__PURE__ */ u4("span", { class: "reply-suggestion", children: [
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "reply-suggestion-label",
+          "aria-label": `Send suggestion: ${label}`,
+          "aria-description": "Send this reply immediately",
+          disabled: sendDisabled,
+          onClick: (event) => {
+            event.stopPropagation();
+            if (!sendDisabled) onSend(label);
+          },
+          ...labelHtml === void 0 ? { children: label } : { dangerouslySetInnerHTML: { __html: labelHtml } }
+        }
+      ),
+      /* @__PURE__ */ u4(
+        "button",
+        {
+          type: "button",
+          class: "msg-action-btn reply-suggestion-edit",
+          title: "Edit suggestion",
+          "aria-label": `Edit suggestion: ${label}`,
+          "aria-description": "Fill the composer with this reply without sending",
+          disabled,
+          onClick: (event) => {
+            event.stopPropagation();
+            if (!disabled) onChoose(label);
+          },
+          children: /* @__PURE__ */ u4(EditIcon, {})
+        }
+      )
+    ] });
+  }
+
+  // src/components/SuggestedResponses.tsx
+  var sendingSuggestions = y2(/* @__PURE__ */ new Set());
+  function suggestionState(messageId) {
+    const conversation2 = conversationState.value?.conversation;
+    const sending = pendingWebSends.value.some(
+      (send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed"
+    );
+    const active = canSend.value && !!conversation2 && suggestionsActive(messageId, conversation2.messages, conversation2.turns, sending);
+    const busy = composerSendInFlight.value || sendingSuggestions.value.has(location2()) || !!currentPendingEditor() || isRecording.value || !["idle", "error"].includes(voice.state.value.phase);
+    const isWeb = !channelType.value || channelType.value === "web";
+    return { active, disabled: busy, sendDisabled: busy || isWeb && !chatReady.value };
+  }
+  function location2() {
+    return JSON.stringify([groupId.value, threadId.value, channelType.value, messagingGroupId.value]);
+  }
+  function replySuggestionControls(messageId) {
+    const target = location2();
+    return {
+      ...suggestionState(messageId),
+      choose(text2) {
+        const current = suggestionState(messageId);
+        if (target !== location2() || !current.active || current.disabled) return;
+        const input = document.getElementById("chat-input");
+        const result = fillSuggestedDraft(input instanceof HTMLTextAreaElement ? input : null, text2, target);
+        if (!result.filled) showToast(result.error);
+      },
+      async send(text2) {
+        const current = suggestionState(messageId);
+        if (target !== location2() || !current.active || current.sendDisabled) return false;
+        sendingSuggestions.value = new Set(sendingSuggestions.value).add(target);
+        try {
+          return await sendChat(text2, []);
+        } catch (error) {
+          console.error("Failed to send suggested reply", error);
+          if (target === location2()) showToast("Could not send this suggestion. Your draft is unchanged.", "err");
+          return false;
+        } finally {
+          const remaining = new Set(sendingSuggestions.value);
+          remaining.delete(target);
+          sendingSuggestions.value = remaining;
+        }
+      }
+    };
+  }
+  function mountInlineReplySuggestions(root2, controls) {
+    const mounted = [];
+    if (controls.active) {
+      for (const slot of root2.querySelectorAll("span.inline-reply-slot")) {
+        const label = slot.textContent || "";
+        if (!isReplyLabel(label)) continue;
+        const labelHtml = slot.innerHTML;
+        slot.replaceChildren();
+        D(
+          /* @__PURE__ */ u4(
+            ReplySuggestion,
+            {
+              label,
+              labelHtml,
+              disabled: controls.disabled,
+              sendDisabled: controls.sendDisabled,
+              onChoose: controls.choose,
+              onSend: (text2) => {
+                void controls.send(text2);
+              }
+            }
+          ),
+          slot
+        );
+        mounted.push(slot);
+      }
+    }
+    return () => {
+      for (const slot of mounted) D(null, slot);
+    };
   }
 
   // src/reply-suggestions-demo.tsx
@@ -3406,8 +4222,7 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
     timestamp: 2,
     turnId: turn2.id,
     deliveryOrigin: "response",
-    text: "I found three ways to reduce your budget. Start with [subscriptions](reply:Please%20review%20my%20subscriptions%20and%20identify%20unnecessary%20costs.) or [dining out](reply:Please%20suggest%20a%20realistic%20plan%20to%20reduce%20dining-out%20spending.).",
-    suggestedResponses: ["Show all three approaches", "Help me set a savings target"]
+    text: "# [Review subscriptions](reply:)\n\nStart with [**Reduce dining out**](reply:).\n\n### [Set a savings target](reply:)\n\nOther choices:\n- [Show all three approaches](reply:)\n- [Help me set a savings target](reply:)"
   };
   function sync() {
     const conversation2 = {
@@ -3439,20 +4254,37 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
   groupId.value = "demo-group";
   threadId.value = "demo-thread";
   canSend.value = true;
+  chatReady.value = true;
   sync();
   function DemoMessage({ message: message2 }) {
     const ref = A2(null);
-    const controls = replySuggestionControls(message2.id);
+    const controls = {
+      ...replySuggestionControls(message2.id),
+      async send(text2) {
+        if (!replySuggestionControls(message2.id).active) return false;
+        appendMessage(text2);
+        return true;
+      }
+    };
     const html = renderMarkdown(message2.text, null, controls.active);
     _2(() => {
       if (!ref.current) return;
       ref.current.innerHTML = html;
-      if (controls.active) bindInlineReplyControls(ref.current, controls);
-    }, [html, controls.active, controls.disabled]);
-    return /* @__PURE__ */ u4("article", { class: `msg ${message2.direction}`, children: [
-      /* @__PURE__ */ u4("div", { ref, dangerouslySetInnerHTML: { __html: html } }),
-      message2.suggestedResponses ? /* @__PURE__ */ u4(SuggestedResponses, { message: message2 }) : null
-    ] });
+      if (controls.active) return mountInlineReplySuggestions(ref.current, controls);
+    }, [html, controls.active, controls.disabled, controls.sendDisabled]);
+    return /* @__PURE__ */ u4("article", { class: `msg ${message2.direction}`, children: /* @__PURE__ */ u4("div", { ref, dangerouslySetInnerHTML: { __html: html } }) });
+  }
+  function appendMessage(text2) {
+    messages.value = [
+      ...messages.value,
+      {
+        id: `demo-input-${messages.value.length}`,
+        direction: "in",
+        timestamp: Date.now(),
+        text: text2
+      }
+    ];
+    sync();
   }
   function Demo() {
     return /* @__PURE__ */ u4("main", { class: "prototype", children: [
@@ -3487,18 +4319,9 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
             event.preventDefault();
             const input = document.getElementById("chat-input");
             if (!(input instanceof HTMLTextAreaElement) || !input.value.trim()) return;
-            messages.value = [
-              ...messages.value,
-              {
-                id: `demo-input-${messages.value.length}`,
-                direction: "in",
-                timestamp: Date.now(),
-                text: input.value
-              }
-            ];
+            appendMessage(input.value);
             input.value = "";
             draft.value = "";
-            sync();
           },
           children: [
             /* @__PURE__ */ u4("label", { for: "chat-input", children: "Your message" }),
@@ -3514,7 +4337,7 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
               }
             ),
             /* @__PURE__ */ u4("button", { type: "submit", disabled: !draft.value.trim(), children: "Send in simulation" }),
-            /* @__PURE__ */ u4("p", { children: "Choosing a button fills this draft. Edit it before sending, or ignore the buttons." })
+            /* @__PURE__ */ u4("p", { children: "Choose the bordered text to send now, or use the gray pencil to edit first. Direct sends keep your draft." })
           ]
         }
       ),

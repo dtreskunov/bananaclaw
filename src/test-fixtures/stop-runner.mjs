@@ -3,7 +3,6 @@ import readline from 'node:readline';
 import { initTestSessionDb, getInboundDb, getOutboundDb } from '../../container/agent-runner/src/db/connection.ts';
 import { listPendingRunnerEvents } from '../../container/agent-runner/src/db/runner-state.ts';
 import { getPendingMessages } from '../../container/agent-runner/src/db/messages-in.ts';
-import { suggestResponses } from '../../container/agent-runner/src/mcp-tools/interactive.ts';
 import { writeMessageOut } from '../../container/agent-runner/src/db/messages-out.ts';
 import { runPollLoop } from '../../container/agent-runner/src/poll-loop.ts';
 import { startSessionSignalClient, drainSessionJournal } from '../../container/agent-runner/src/session-link.ts';
@@ -74,12 +73,11 @@ const provider = {
           return;
         }
         yield { type: 'init', continuation: 'cross-runtime-history' };
-        const result = await suggestResponses.handler({ responses: ['Continue operation', 'Show alternatives'] });
         writeMessageOut({
           id: 'progress', kind: 'chat', channel_type: 'web', platform_id: 'group:agent', thread_id: 'thread-1',
           content: JSON.stringify({ text: 'Working on operation.', delivery_origin: 'send_message' }),
         });
-        report({ kind: 'suggestions', result });
+        report({ kind: 'progress' });
         yield {
           type: 'usage_call',
           data: { model: 'fixture-model', input_tokens: 11, output_tokens: 2,

@@ -1,47 +1,45 @@
 import { describe, expect, it } from 'vitest';
 import { renderMarkdown } from './utils';
 
-describe('inline reply markdown', () => {
-  const markdown = 'Start with [Fix references](reply:Please%20fix%20the%20dangling%20references%20first.).';
+describe('label-only reply Markdown', () => {
+  const markdown = 'Start with [Take the food](reply:).';
 
-  it('keeps the short label and full editable draft separate', () => {
+  it('marks the visible label for rendering without a separate payload or navigation', () => {
     const html = renderMarkdown(markdown, null, true)!;
-    expect(html).toContain('class="inline-reply-suggestion"');
-    expect(html).toContain('type="button"');
-    expect(html).toContain('data-reply-draft="Please fix the dangling references first."');
-    expect(html).toContain('title="Draft reply: Please fix the dangling references first."');
-    expect(html).toContain('aria-description="Draft reply: Please fix the dangling references first."');
-    expect(html).toContain('>Fix references<span aria-hidden="true">');
+    expect(html).toBe('<p>Start with <span class="inline-reply-slot">Take the food</span>.</p>\n');
+    expect(html).not.toContain('data-reply-draft');
     expect(html).not.toContain('href=');
     expect(html).not.toContain('target=');
   });
 
-  it('renders inactive, reader, file-preview and inbound links as ordinary label text by default', () => {
-    const html = renderMarkdown(markdown)!;
-    expect(html).toBe('<p>Start with Fix references.</p>\n');
-    expect(renderMarkdown(markdown, null, false)).toBe(html);
+  it('keeps old destination contents inert, using only the label', () => {
+    for (const destination of ['reply:', 'reply:Hidden%20draft', 'reply:%ZZ', 'reply:%00'])
+      expect(renderMarkdown(`[Take the food](${destination})`, null, true)).toBe(
+        '<p><span class="inline-reply-slot">Take the food</span></p>\n',
+      );
   });
 
-  it('escapes the full draft instead of injecting URL content into attributes or navigation', () => {
-    const draft = 'Discuss "<input autofocus>" & its meaning';
-    const html = renderMarkdown(`[Discuss markup](reply:${encodeURIComponent(draft)})`, null, true)!;
-    expect(html).toContain('data-reply-draft="Discuss &quot;&lt;input autofocus&gt;&quot; &amp; its meaning"');
-    expect(html).not.toContain('<input');
-    expect(html).not.toContain('href=');
-    expect(renderMarkdown('[Literal text](reply:javascript%3Aalert%281%29)', null, true)).toContain(
-      'data-reply-draft="javascript:alert(1)"',
-    );
+  it('renders inactive, reader, file-preview and inbound links as plain labels', () => {
+    expect(renderMarkdown(markdown)).toBe('<p>Start with Take the food.</p>\n');
+    expect(renderMarkdown(markdown, null, false)).toBe(renderMarkdown(markdown));
   });
 
-  it.each(['reply:', 'reply:%20', 'reply:%ZZ', 'reply:%00', `reply:${'x'.repeat(241)}`])(
-    'keeps invalid %s suggestions inert without breaking the message',
-    (href) => {
-      expect(renderMarkdown(`[Label](${href})`, null, true)).toBe('<p>Label</p>\n');
-    },
-  );
+  it.each(['#', '###'])('preserves %s heading typography and rich label markup', (heading) => {
+    const html = renderMarkdown(`${heading} [**Fix** references](reply:)`, null, true)!;
+    const level = heading.length;
+    expect(html).toMatch(new RegExp(`^<h${level}[^>]*><span class="inline-reply-slot"`));
+    expect(html).toContain('<strong>Fix</strong> references</span>');
+    expect(html).toContain(`</h${level}>`);
+  });
 
-  it('leaves code examples inert and preserves ordinary links and message references', () => {
-    expect(renderMarkdown('`[Fix](reply:Please%20fix)`', null, true)).not.toContain('inline-reply-suggestion');
+  it('handles punctuation and entities in labels without encoding a message', () => {
+    const html = renderMarkdown('[Use **A &amp; B** (50%) and `C`](reply:)', null, true)!;
+    expect(html).toContain('<strong>A &amp; B</strong> (50%) and <code>C</code>');
+    expect(html).not.toContain('data-reply-draft');
+  });
+
+  it('never activates code examples and preserves ordinary links and message references', () => {
+    expect(renderMarkdown('`[Take food](reply:)`', null, true)).not.toContain('inline-reply-slot');
     expect(renderMarkdown('[Site](https://example.test)', null, true)).toContain(
       'href="https://example.test" target="_blank" rel="noopener noreferrer"',
     );

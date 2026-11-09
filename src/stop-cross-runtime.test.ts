@@ -61,7 +61,7 @@ afterEach(async () => {
 });
 
 it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
-  'stops only the active turn across Node/Bun while discarding suggestions and preserving queued follow-ups',
+  'stops only the active turn across Node/Bun while preserving queued follow-ups',
   async () => {
     runMigrations(initTestDb());
     const now = new Date().toISOString();
@@ -129,7 +129,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     };
     await wait(() => expect(getSessionActiveTurn(session!.id).turn?.status).toBe('running'));
     const turnId = getSessionActiveTurn(session.id).turn!.id;
-    await wait(() => expect(events.some((event) => event.kind === 'suggestions')).toBe(true));
+    await wait(() => expect(events.some((event) => event.kind === 'progress')).toBe(true));
     let original: { id: string; seq: number; content: string } | undefined;
     await wait(() => {
       original = outDb!
@@ -197,7 +197,6 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     resumeAcks();
     await wait(() => expect(events.some((event) => event.kind === 'next')).toBe(true));
     expect(nullObservations).toContainEqual({ held: 0 });
-    expect(outDb.prepare("SELECT 1 FROM session_state WHERE key LIKE 'response-suggestions:%'").get()).toBeUndefined();
     const next = events.find((event) => event.kind === 'next')!;
     expect(next.prompt).toContain('queued follow-up');
     expect(next.prompt).not.toContain('initial request');

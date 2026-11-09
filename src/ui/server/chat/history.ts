@@ -1,6 +1,5 @@
 import path from 'path';
 import type Database from 'better-sqlite3';
-import { parseSuggestedResponses } from '../../shared/suggested-responses.js';
 import type { ConversationMessage } from '../../shared/conversation.js';
 import type { TaskAttemptDto } from '../../shared/thread.js';
 import { isSessionTurnId } from '../../../session-link.js';
@@ -241,9 +240,7 @@ export function readConversationHistory(
       try {
         const rows = outDb
           .prepare(
-            `SELECT message.id, message.timestamp, message.kind, message.content, message.turn_id,
-             suggestions.value AS suggested_responses FROM messages_out message
-         LEFT JOIN session_state suggestions ON suggestions.key = 'response-suggestions:' || message.id
+            `SELECT message.id, message.timestamp, message.kind, message.content, message.turn_id FROM messages_out message
          WHERE message.channel_type = ? AND message.thread_id IS ?
            AND message.platform_id IN (${context.platformIds.map(() => '?').join(',')})
          ORDER BY message.seq`,
@@ -254,7 +251,6 @@ export function readConversationHistory(
           kind: string;
           content: string;
           turn_id: string | null;
-          suggested_responses: string | null;
         }>;
 
         // Reactions are `chat` rows with `operation:'reaction'` targeting a
@@ -311,7 +307,6 @@ export function readConversationHistory(
             id: r.id,
             timestamp: r.timestamp,
             ...(r.turn_id ? { turnId: r.turn_id } : {}),
-            ...(r.suggested_responses ? { suggestedResponses: parseSuggestedResponses(r.suggested_responses) } : {}),
           });
         }
 

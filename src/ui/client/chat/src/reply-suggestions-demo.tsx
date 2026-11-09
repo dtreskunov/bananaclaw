@@ -4,8 +4,8 @@ import { useLayoutEffect, useRef } from 'preact/hooks';
 import type { Conversation, ConversationMessage, ConversationTurn } from '../../../shared/conversation';
 import { conversationState } from './conversation-state';
 import { CONVERSATION_PROTOCOL_VERSION } from '../../../shared/conversation-protocol';
-import { canSend, groupId, threadId } from './state';
-import { bindInlineReplyControls, replySuggestionControls, SuggestedResponses } from './components/SuggestedResponses';
+import { canSend, chatReady, groupId, threadId } from './state';
+import { mountInlineReplySuggestions, replySuggestionControls } from './components/SuggestedResponses';
 import { renderMarkdown } from './utils';
 import { toastMessage } from './state';
 import './reply-suggestions-demo.css';
@@ -31,8 +31,7 @@ const response: ConversationMessage = {
   timestamp: 2,
   turnId: turn.id,
   deliveryOrigin: 'response',
-  text: 'I found three ways to reduce your budget. Start with [subscriptions](reply:Please%20review%20my%20subscriptions%20and%20identify%20unnecessary%20costs.) or [dining out](reply:Please%20suggest%20a%20realistic%20plan%20to%20reduce%20dining-out%20spending.).',
-  suggestedResponses: ['Show all three approaches', 'Help me set a savings target'],
+  text: '# [Review subscriptions](reply:)\n\nStart with [**Reduce dining out**](reply:).\n\n### [Set a savings target](reply:)\n\nOther choices:\n- [Show all three approaches](reply:)\n- [Help me set a savings target](reply:)',
 };
 function sync(): void {
   const conversation: Conversation = {
@@ -64,23 +63,43 @@ function reset(): void {
 groupId.value = 'demo-group';
 threadId.value = 'demo-thread';
 canSend.value = true;
+chatReady.value = true;
 sync();
 
 function DemoMessage({ message }: { message: ConversationMessage }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const controls = replySuggestionControls(message.id);
+  const controls = {
+    ...replySuggestionControls(message.id),
+    async send(text: string): Promise<boolean> {
+      if (!replySuggestionControls(message.id).active) return false;
+      appendMessage(text);
+      return true;
+    },
+  };
   const html = renderMarkdown(message.text, null, controls.active)!;
   useLayoutEffect(() => {
     if (!ref.current) return;
     ref.current.innerHTML = html;
-    if (controls.active) bindInlineReplyControls(ref.current, controls);
-  }, [html, controls.active, controls.disabled]);
+    if (controls.active) return mountInlineReplySuggestions(ref.current, controls);
+  }, [html, controls.active, controls.disabled, controls.sendDisabled]);
   return (
     <article class={`msg ${message.direction}`}>
       <div ref={ref} dangerouslySetInnerHTML={{ __html: html }} />
-      {message.suggestedResponses ? <SuggestedResponses message={message} /> : null}
     </article>
   );
+}
+
+function appendMessage(text: string): void {
+  messages.value = [
+    ...messages.value,
+    {
+      id: `demo-input-${messages.value.length}`,
+      direction: 'in',
+      timestamp: Date.now(),
+      text,
+    },
+  ];
+  sync();
 }
 
 function Demo() {
@@ -121,18 +140,9 @@ function Demo() {
           event.preventDefault();
           const input = document.getElementById('chat-input');
           if (!(input instanceof HTMLTextAreaElement) || !input.value.trim()) return;
-          messages.value = [
-            ...messages.value,
-            {
-              id: `demo-input-${messages.value.length}`,
-              direction: 'in',
-              timestamp: Date.now(),
-              text: input.value,
-            },
-          ];
+          appendMessage(input.value);
           input.value = '';
           draft.value = '';
-          sync();
         }}
       >
         <label for="chat-input">Your message</label>
@@ -147,7 +157,7 @@ function Demo() {
         <button type="submit" disabled={!draft.value.trim()}>
           Send in simulation
         </button>
-        <p>Choosing a button fills this draft. Edit it before sending, or ignore the buttons.</p>
+        <p>Choose the bordered text to send now, or use the gray pencil to edit first. Direct sends keep your draft.</p>
       </form>
       {toastMessage.value ? (
         <p class="demo-error" role="alert">

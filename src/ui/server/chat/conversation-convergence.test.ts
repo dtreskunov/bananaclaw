@@ -97,31 +97,19 @@ const read = (thread = 'thread') => readConversation(user, group, thread, route)
 const json = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 65));
 
-it('projects durable reply drafts only after settlement and preserves them on reload', () => {
+it('projects Markdown reply links only after settlement and preserves them on reload', () => {
   apply('turn.upsert', turn('suggestions-turn'));
-  apply('message.upsert', output('reply', 'suggestions-turn', 1));
-  const staged = apply('state.upsert', {
-    key: 'response-suggestions:reply',
-    updated_at: formatTimestamp(now),
-    value: JSON.stringify(['Explore costs', 'Show alternatives']),
+  const text = 'Next: [Explore costs](reply:Please%20explore%20costs).';
+  const reply = apply('message.upsert', {
+    ...output('reply', 'suggestions-turn', 1),
+    content: JSON.stringify({ text, delivery_origin: 'response' }),
   });
   expect(read()?.messages).toEqual([]);
-  applyDurableRunnerEvent(group, session, staged);
+  applyDurableRunnerEvent(group, session, reply);
   settle('suggestions-turn', { outcome: 'replied' });
   const initial = read()!;
-  expect(initial.messages).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ id: 'reply', suggestedResponses: ['Explore costs', 'Show alternatives'] }),
-    ]),
-  );
+  expect(initial.messages).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'reply', text })]));
   expect(read()).toEqual(initial);
-  expect(() =>
-    apply('state.upsert', {
-      key: 'response-suggestions:reply',
-      updated_at: formatTimestamp(now),
-      value: JSON.stringify(['Different draft']),
-    }),
-  ).toThrow('immutable');
 });
 async function connect(turnId: string) {
   await startSessionSignalServer(session, group);

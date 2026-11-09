@@ -1,0 +1,42 @@
+.reply-suggestion {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  max-width: 100%;
+  gap: 0.15em;
+  padding: 2px 3px 2px 6px;
+  border: 1px solid var(--border-control, currentColor);
+  border-radius: var(--radius-md, 6px);
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+.reply-suggestion > .reply-suggestion-label {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.reply-suggestion > .reply-suggestion-edit {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+}
+.reply-suggestion-label:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.reply-suggestion-label:disabled {
+  opacity: 0.7;
+  cursor: default;
+}

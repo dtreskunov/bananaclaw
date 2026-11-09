@@ -719,25 +719,38 @@ describe('theme CSS contract', () => {
   );
 
   it('uses solid surface text for reply drafts, including hover and keyboard focus', () => {
-    const css = read('./components/ChatMain.css');
-    const suggestions = css.match(/\.chat-main \.reply-suggestions \{([^}]+)\}/)?.[1];
-    expect(suggestions).toContain('flex-wrap: wrap');
-    const choice = css.match(/\.chat-main \.reply-suggestions \.message-action-btn \{([^}]+)\}/)?.[1];
-    expect(choice).toContain('color: var(--surface-fg)');
-    expect(choice).toContain('background: var(--surface)');
-    expect(choice).toContain('border: 1px solid currentColor');
-    const hover = css.match(
-      /\.chat-main \.reply-suggestions \.message-action-btn:hover:not\(:disabled\) \{([^}]+)\}/,
-    )?.[1];
-    expect(hover).toContain('background: var(--wash-strong)');
-    expect(hover).toContain('color: var(--surface-fg)');
-    const focus = css.match(/\.chat-main \.reply-suggestions \.message-action-btn:focus-visible \{([^}]+)\}/)?.[1];
+    const css = read('./components/ReplySuggestion.css');
+    const label = css.match(/\.reply-suggestion > \.reply-suggestion-label \{([^}]+)\}/)?.[1];
+    expect(label).toContain('color: inherit');
+    expect(label).toContain('background: transparent');
+    expect(label).toContain('border: 0');
+    expect(css).toContain('border: 1px solid var(--border-control, currentColor)');
+    expect(css).toContain('background: var(--surface, #fff)');
+    const focus = css.match(/\.reply-suggestion-label:focus-visible \{([^}]+)\}/)?.[1];
     expect(focus).toContain('outline: 2px solid currentColor');
     expect(focus).toContain('outline-offset: 2px');
-    const disabled = css.match(/\.chat-main \.reply-suggestions \.message-action-btn:disabled \{([^}]+)\}/)?.[1];
+    const disabled = css.match(/\.reply-suggestion-label:disabled \{([^}]+)\}/)?.[1];
     expect(disabled).toContain('opacity: 0.7');
   });
 
+  it('keeps label hover plain and reuses the conventional compact pencil button styling', () => {
+    const css = read('./components/ReplySuggestion.css');
+    expect(css).toContain('display: inline-flex');
+    expect(css).toContain('font: inherit');
+    expect(css).toContain('line-height: inherit');
+    expect(css).toContain('padding: 2px 3px 2px 6px');
+    expect(css).toContain('border-radius: var(--radius-md, 6px)');
+    expect(css).toContain('gap: 0.15em');
+    expect(css).toContain('width: 18px');
+    const icons = read('./components/ActionIcons.css');
+    expect(icons).toContain('.msg-action-btn:hover');
+    expect(icons).toContain('.msg-action-btn:focus-visible');
+    const component = read('./components/ReplySuggestion.tsx');
+    expect(component).toContain('class="msg-action-btn reply-suggestion-edit"');
+    expect(css).not.toContain('position: absolute');
+    expect(css).not.toContain(':hover');
+    expect(css).not.toContain('reply-suggestion-send');
+  });
   it.each(THEMES.flatMap((theme) => ['light', 'dark'].map((mode) => [theme.id, mode])))(
     '%s / %s reply drafts meet 4.5:1 in normal, hover and disabled states',
     (theme, mode) => {

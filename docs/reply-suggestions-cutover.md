@@ -3,8 +3,9 @@
 ## Current contract
 
 Conversational questions have been replaced by optional editable reply drafts.
-`suggest_responses` attaches drafts to a completed assistant output; inline
-`[label](reply:URI-encoded%20draft)` links need no separate interaction record.
+`[label](reply:URI-encoded%20draft)` links in final Markdown need no tool call
+or separate state record. Lists at the end of the message serve as follow-up
+choices too. The former suggestion tool and metadata pipeline are removed.
 Approvals remain explicit, separately authorized workflows.
 
 Central, host-session and runner-state stores require `PRAGMA user_version=2`.
@@ -65,3 +66,27 @@ every runner and restoring the complete matching inventory and old runtime
 source/images, not just the central DB or one side of a session journal.
 Restoring an old snapshot discards newer traffic; preserve the current files
 separately before attempting recovery.
+
+## Retiring tool-generated suggestions
+
+The later Markdown-only simplification removes the redundant suggestion tool
+and response metadata without changing storage versions. Before deploying to
+an installation that used it:
+
+1. With host and affected runners stopped, back up each affected `outbound.db`
+   and `runner-state.db`. Require settled turns, drained runner journals, no
+   `runner:suggested-responses:*` rows, and matching `response-suggestions:*`
+   values and associated output content in both projections.
+2. Append each saved reply as a normal `[escaped label](reply:URI-encoded%20draft)`
+   list item to its associated message. Preserve IDs, sequences, timestamps,
+   routes, turn references and all other JSON fields.
+3. Remove the converted metadata rows in both stores. This is offline
+   normalization, not runner activity: prevent journal triggers from generating
+   replay events during the transaction, then restore the triggers unchanged.
+4. Verify SQLite integrity, matching message content, no remaining suggestion
+   metadata and unchanged receipts/read positions. Refresh the affected thread
+   summaries/search, deploy matching host/UI code, and recycle idle runners to
+   refresh tool catalogs. Do not interrupt an active turn.
+
+No normal read path translates old metadata. Historical tool trace entries and
+provider history remain inert records. Retain the paired backups for rollback.

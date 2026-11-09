@@ -25,7 +25,6 @@ export interface ConversationMessage {
   direction: 'in' | 'out' | 'event';
   timestamp: EpochMs;
   text: string;
-  suggestedResponses?: string[];
   turnId?: string;
   timelinePosition?: number;
   inputState?: InputState;

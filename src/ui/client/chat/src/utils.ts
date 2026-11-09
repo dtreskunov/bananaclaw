@@ -1,7 +1,6 @@
 // Format helpers + markdown rendering. Returns plain strings/HTML —
 // components handle escaping via JSX prop interpolation when possible.
 import { marked, Renderer } from 'marked';
-import { inlineReplyDraft } from './reply-suggestions';
 import type { EpochMs } from '../../../shared/time';
 import type { Group } from './types';
 
@@ -13,15 +12,7 @@ function markdownRenderer(inlineReplies: boolean): Renderer {
   renderer.link = function ({ href, title, tokens }) {
     const text = this.parser.parseInline(tokens);
     if (/^reply:/i.test(href)) {
-      const draft = inlineReplyDraft(href);
-      if (!inlineReplies || draft === null) return text;
-      const value = draft
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/'/g, '&#39;');
-      return `<button type="button" class="inline-reply-suggestion" data-reply-draft="${value}" title="Draft reply: ${value}" aria-description="Draft reply: ${value}">${text}<span aria-hidden="true"> \u21b5</span></button>`;
+      return inlineReplies ? `<span class="inline-reply-slot">${text}</span>` : text;
     }
     const isAbs = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
     const titleAttr = title ? ` title="${title.replace(/"/g, '&quot;')}"` : '';
@@ -187,7 +178,7 @@ export function highlightTextNodes(root: HTMLElement, query: string): void {
   if (!query) return;
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`(${escaped})`, 'gi');
-  const skip = new Set(['CODE', 'PRE', 'A', 'MARK', 'SCRIPT', 'STYLE']);
+  const skip = new Set(['CODE', 'PRE', 'A', 'BUTTON', 'MARK', 'SCRIPT', 'STYLE']);
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {

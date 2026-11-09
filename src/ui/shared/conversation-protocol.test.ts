@@ -92,20 +92,6 @@ describe('conversation protocol', () => {
   it.each([2, 3])('requires protocol %s clients to reload', (protocolVersion) => {
     expect(() => parseConversationFrame({ ...snapshot, protocolVersion })).toThrow('Chat protocol changed');
   });
-  it.each(['in', 'out'] as const)('rejects %s suggestions without a settled final response', (direction) => {
-    const invalid: Conversation = {
-      ...next,
-      messages: [
-        {
-          ...next.messages[0],
-          direction,
-          suggestedResponses: ['Explore costs'],
-        },
-      ],
-      timeline: [{ kind: 'message', messageId: 'one' }],
-    };
-    expect(() => reduceConversation(null, { ...snapshot, conversation: invalid })).toThrow('invalid_frame');
-  });
   it('produces identical initial and incremental state', () => {
     const incremental = reduceConversation(snapshot, parseConversationFrame(JSON.parse(JSON.stringify(update))));
     expect(incremental.conversation).toEqual(next);

@@ -643,8 +643,7 @@ Submitting a message scrolls to the transcript bottom and clears any previous
 search-result highlight so the authoritative input echo cannot pull the viewer
 back into history. Cancelling a steering/queue choice preserves the draft,
 highlight and scroll position. A rejected send retains the draft and attachments.
-Reply-suggestion activity comes only from the recorded `nanoclaw.suggest_responses`
-tool call; buttons do not synthesize a second action in the trace.
+Reply links are message content, not tool calls, and add no activity trace entry.
 Current tool captions remain in the status line instead of duplicating recorded
 entries as standalone rows after their chapters.
 Every trace opens with one display-only start row whose label follows the turn's
@@ -1454,31 +1453,49 @@ bound to the actual active response, even when the newest bubble is your input.
 Steering accepted but not yet applied is preserved as a follow-up after Stop.
 When the next queued response starts, Stop targets that new turn instead.
 
-Optional reply drafts do not affect Stop, input queueing, attachments or dictation.
-The agent registers a set with `suggest_responses`, then finishes its response.
-At successful settlement the set is associated with the final originating-route
-output by its ID. Draft metadata arrives before the durable settlement barrier,
-so buttons cannot appear before their response. No separate question event exists.
+Optional reply links do not affect Stop, input queueing, attachments or dictation.
+Agents write `[Take food](reply:)` in their final Markdown.
+For choices below the explanation, use an ordinary list of these links at the
+end of the message. There is no separate suggestion tool, metadata field or
+state lifecycle. Links appear with the completed response's settlement barrier.
 
-Buttons appear below the response in the transcript and fill the ordinary
-composer. They never submit, replace an existing draft, or become approval
+Clicking bordered suggestion text sends the associated message immediately
+through normal chat submission, without changing draft text, attachments or
+pinned context. A subtle gray pencil fills the composer for editing instead.
+There is no separate send-now button or label hover highlight. The compact
+pencil reuses the standard icon-button hover/focus behavior. All reply links
+use the same two-action component, with no nested buttons.
+Inline labels preserve their original Markdown formatting and inherit their
+surrounding typography. The shared control uses the standard rounded button
+border and standard surface background, compact padding tightened on the
+pencil side, no fixed height, and an 18px gray pencil control inside.
+The padded control may expand its line box; the label's font and line height
+remain inherited.
+Neither action replaces user-authored or edited drafts or becomes approval
 decisions. Users can edit the draft, type something else, or ignore all buttons.
-Up to six distinct nonblank drafts of at most 240 characters are supported;
-the separate button label is the draft text. Agents may also place inline reply
-controls in their final Markdown using `[Short label](reply:URI-encoded%20draft)`.
-The visible label may differ from the full editable draft; hover/focus previews
-the draft. Decoded inline drafts share the 240-character limit. The scheme is
-never navigated, and malformed, blank, oversized or control-character payloads
-remain plain label text. Code examples are not activated. Occupied or unavailable input produces
-an explicit error without changing the draft. Editing pending input, recording,
+The rendered label is the exact message used for both sending and editing.
+Markdown emphasis and code styling are retained, but markup is not sent.
+There is no hidden draft, URL encoding or destination decoding; any content
+after `reply:` is ignored. Nonblank labels support at most 240 characters;
+oversized or control-character labels remain inert. The scheme is never
+navigated. Code examples are not activated. An unedited suggestion
+can be replaced by another suggestion. Ownership is tracked
+per composer and conversation in a weak map, not inferred by matching all
+available suggestions; the first input edit clears it, including an edit later
+undone. No draft text is persisted by this tracking. An occupied or unavailable
+input produces a brief, neutral, auto-dismissing notice without changing the
+draft. Editing pending input, recording,
 and active voice capture disable these controls.
 
-Suggestions persist on reload but controls show only on the latest completed
-successful reply. After a follow-up, separate buttons disappear and inline labels
-remain ordinary text. Running responses, inbound messages, read-only views, file
+Reply links persist as ordinary message text on reload; controls show only on
+the latest completed successful reply. After a follow-up, labels remain ordinary
+text. Running responses, inbound messages, read-only views, file
 previews and full-screen reading mode do not activate inline reply links.
-Silent, failed, stopped and abandoned turns discard
-unattached drafts. They never contribute to waiting attention, and the composer
+Direct sends recheck the selected conversation and latest-response eligibility,
+disable duplicate sends while in flight, and use existing delivery/retry errors.
+Disconnected clients may still use the edit control, but clicking the suggestion
+text cannot send.
+Reply links never contribute to waiting attention, and the composer
 is not hidden or disabled by their presence. Channel apps receive ordinary
 response text; draft buttons are a browser-transcript affordance.
 

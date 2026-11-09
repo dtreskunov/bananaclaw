@@ -268,17 +268,17 @@ describe('forkThread', () => {
     }
   });
 
-  it('inherits only included reply drafts in both projections, never pending tool state', () => {
+  it('inherits reply links as ordinary message content in both projections', () => {
     seedTurnHistory();
     const source = new Database(outboundDbPath(AG, PARENT_SESSION));
     try {
-      source.exec(`UPDATE messages_out SET content=json_set(content,'$.delivery_origin','response')`);
       for (const id of ['a1', 'a2']) {
-        source.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,?)')
-          .run(`response-suggestions:${id}`, JSON.stringify([`Continue from ${id}`]), parseTimestamp(ts(4)));
+        source.prepare('UPDATE messages_out SET content=? WHERE id=?')
+          .run(JSON.stringify({
+            text: `Next: [Continue ${id}](reply:Continue%20from%20${id})`,
+            delivery_origin: 'response',
+          }), id);
       }
-      source.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,?)')
-        .run('runner:suggested-responses:unrelated', '["Unfinished draft"]', parseTimestamp(ts(4)));
     } finally {
       source.close();
     }
@@ -286,8 +286,9 @@ describe('forkThread', () => {
     for (const filename of [outboundDbPath(AG, result.sessionId), runnerStateDbPath(AG, result.sessionId)]) {
       const db = new Database(filename);
       try {
-        expect(db.prepare("SELECT key,value FROM session_state WHERE key LIKE '%suggestions:%' OR key LIKE '%suggested-responses:%'").all())
-          .toEqual([{ key: 'response-suggestions:a1', value: '["Continue from a1"]' }]);
+        const outputs = db.prepare('SELECT id,content FROM messages_out').all() as { id: string; content: string }[];
+        expect(outputs.map((row) => row.id)).toEqual(['a1']);
+        expect(JSON.parse(outputs[0].content).text).toBe('Next: [Continue a1](reply:Continue%20from%20a1)');
       } finally {
         db.close();
       }

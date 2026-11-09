@@ -4,16 +4,21 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
-- **[BREAKING] Optional reply drafts replace conversational question
-  requests.** `suggest_responses` attaches editable drafts to a completed reply;
-  inline `[label](reply:URI-encoded%20draft)` controls can use a short label
-  independently of their full draft. Both forms fill the ordinary composer
-  without sending, preserve existing drafts, and appear only on the latest
+- **[BREAKING] Markdown reply links replace conversational question
+  requests.** `[label](reply:)` controls send exactly their visible label.
+  No separate payload or URL encoding is needed. Clicking sends the message;
+  the pencil edits first. Links preserve existing drafts and appear only on the latest
   completed reply. The composer never becomes an answer-required dock. Approvals use
   their own payloads and indexed callbacks. Host/session/runner storage is v2,
   archives are v4, and browser conversations use protocol 17. Older installations
   must follow [the archived cutover guide](docs/reply-suggestions-cutover.md)
   before deploying; startup never converts old state.
+
+- **Markdown-only suggestions.** Removed the redundant `suggest_responses`
+  tool, separate suggestion metadata and persistence. Agents use reply links
+  in prose or a normal end-of-message list. Existing tool-generated suggestions
+  must be converted into links on their associated messages before deployment;
+  see [the transition procedure](docs/reply-suggestions-cutover.md#retiring-tool-generated-suggestions).
 
 - **Completed reply-suggestions cutover cleanup.** The one-time converter,
   database helpers and conversion fixtures are archived at `faca92d40` and

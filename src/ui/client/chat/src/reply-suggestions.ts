@@ -1,19 +1,29 @@
 import type { ConversationMessage, ConversationTurn } from '../../../shared/conversation';
-import { MAX_SUGGESTED_RESPONSE_LENGTH } from '../../../shared/suggested-responses';
 
-export function inlineReplyDraft(href: string): string | null {
-  if (!/^reply:/i.test(href)) return null;
-  try {
-    const text = decodeURIComponent(href.slice('reply:'.length));
-    const control = [...text].some((character) => {
+const MAX_REPLY_LENGTH = 240;
+
+type DraftInput = Pick<
+  HTMLTextAreaElement,
+  'value' | 'disabled' | 'readOnly' | 'dispatchEvent' | 'focus' | 'setSelectionRange'
+> & { addEventListener(type: 'input', listener: () => void): void };
+
+interface SuggestedDraft {
+  scope: string;
+  text: string | null;
+  filling: boolean;
+}
+
+const suggestedDrafts = new WeakMap<DraftInput, SuggestedDraft>();
+
+export function isReplyLabel(text: string): boolean {
+  return (
+    !!text.trim() &&
+    text.length <= MAX_REPLY_LENGTH &&
+    ![...text].some((character) => {
       const code = character.charCodeAt(0);
       return (code < 32 && code !== 10) || code === 127;
-    });
-    return text.trim() && text.length <= MAX_SUGGESTED_RESPONSE_LENGTH && !control ? text : null;
-  } catch (error) {
-    if (error instanceof URIError) return null;
-    throw error;
-  }
+    })
+  );
 }
 
 export function suggestionsActive(
@@ -35,18 +45,32 @@ export function suggestionsActive(
 }
 
 export function fillSuggestedDraft(
-  input: Pick<
-    HTMLTextAreaElement,
-    'value' | 'disabled' | 'readOnly' | 'dispatchEvent' | 'focus' | 'setSelectionRange'
-  > | null,
+  input: DraftInput | null,
   text: string,
+  scope = '',
 ): { filled: true } | { filled: false; error: string } {
   if (!input || input.disabled || input.readOnly)
     return { filled: false, error: 'The composer is unavailable. Your draft has been kept.' };
-  if (input.value.length)
-    return { filled: false, error: 'Your draft has been kept. Clear it before choosing a suggested reply.' };
+  let state = suggestedDrafts.get(input);
+  if (input.value.length && (!state || state.scope !== scope || state.text !== input.value))
+    return { filled: false, error: 'Finish or clear your draft to try a suggestion.' };
+  if (!state) {
+    const tracked: SuggestedDraft = { scope, text, filling: false };
+    suggestedDrafts.set(input, tracked);
+    input.addEventListener('input', () => {
+      if (!tracked.filling) tracked.text = null;
+    });
+    state = tracked;
+  }
+  state.scope = scope;
+  state.text = text;
   input.value = text;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
+  state.filling = true;
+  try {
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  } finally {
+    state.filling = false;
+  }
   input.focus();
   input.setSelectionRange(text.length, text.length);
   return { filled: true };

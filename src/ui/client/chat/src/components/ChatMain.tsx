@@ -58,7 +58,7 @@ import { findEditBranchAnchorId } from '../edit-message';
 import { BRANCH_ACTION_EXPLANATION, editBranchActionExplanation } from '../transcript-action-copy';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
-import { SuggestedResponses, bindInlineReplyControls, replySuggestionControls } from './SuggestedResponses';
+import { mountInlineReplySuggestions, replySuggestionControls } from './SuggestedResponses';
 import { AttentionFocus } from './AttentionFocus';
 import { isApprovalThread } from '../approval-origin';
 import { ApprovalBubble } from './ApprovalBubble';
@@ -695,10 +695,11 @@ function MessageText({ text, md, onNavigate, preview = false, children, replyCon
   const gid = groupId.value;
   const navigate = (action: () => void): void => { if (navigationRef.current) navigationRef.current(action); else action(); };
   useLayoutEffect(() => {
+    let clearInline: (() => void) | undefined;
     // Reset markdown DOM before re-processing (handles search query changes).
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
     if (mdRef.current && replyControls?.active && !preview) {
-      bindInlineReplyControls(mdRef.current, replyControls);
+      clearInline = mountInlineReplySuggestions(mdRef.current, replyControls);
     }
     if (md != null && mdRef.current && gid) {
       rewriteFileLinks(mdRef.current, gid, (entry) => navigate(() => { void navFile(entry).catch(console.error); }));
@@ -739,7 +740,8 @@ function MessageText({ text, md, onNavigate, preview = false, children, replyCon
     }
     // Highlight search query terms in the rendered message.
     if (q && mdRef.current) highlightTextNodes(mdRef.current, q);
-  }, [text, md, q, gid, preview, replyControls?.active, replyControls?.disabled]);
+    return clearInline;
+  }, [text, md, q, gid, preview, replyControls?.active, replyControls?.disabled, replyControls?.sendDisabled]);
   if (preview) return <MarkdownPreview text={text} html={md} className="reader-message" contentRef={mdRef}>{children}</MarkdownPreview>;
   return md != null
     ? <div class="transcript-copy-content" ref={inlineRef} dangerouslySetInnerHTML={{ __html: md }} />
@@ -865,7 +867,6 @@ function Message(
       {systemNotice && /\bHTTP (?:401|403)\b/.test(m.text)
         ? <button type="button" class="ga-cred-link" onClick={() => openCredentials()}>Credentials</button> : null}
       {attachments}
-      {m.suggestedResponses?.length ? <SuggestedResponses message={m} /> : null}
       {showContinue
         ? (
           <div class="message-actions">

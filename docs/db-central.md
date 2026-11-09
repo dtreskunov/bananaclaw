@@ -312,9 +312,8 @@ Request IDs, input/response JSON, actor/timing fields, outcomes and route
 provenance retain authorization and audit context. IDs are globally unique.
 
 Conversational reply drafts are not interactions and create no pending-answer
-or waiting state. Separate drafts are stored in runner/host `session_state`
-under `response-suggestions:<outputId>` before the turn settlement barrier.
-Inline drafts live in final message Markdown. Sending either form is ordinary
+or waiting state. Suggested replies live only in final message Markdown;
+there is no separate state or protocol field. Sending a suggestion is ordinary
 chat input. Historical questions were converted by the
 [archived offline cutover](reply-suggestions-cutover.md).
 
