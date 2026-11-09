@@ -36,17 +36,52 @@ afterEach(() => {
   closeSessionDb();
 });
 
-function insertMessage(id: string, content: object, opts?: { platformId?: string; channelType?: string; threadId?: string }) {
+function insertMessage(id: string, content: object, opts?: { platformId?: string; channelType?: string; threadId?: string; trigger?: 0 | 1 }) {
   getInboundDb()
     .prepare(
-      `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content)
-       VALUES (?, 'chat', (unixepoch('now')*1000), 'pending', ?, ?, ?, ?)`,
+      `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content, trigger)
+       VALUES (?, 'chat', (unixepoch('now')*1000), 'pending', ?, ?, ?, ?, ?)`,
     )
-    .run(id, opts?.platformId ?? null, opts?.channelType ?? null, opts?.threadId ?? null, JSON.stringify(content));
+    .run(id, opts?.platformId ?? null, opts?.channelType ?? null, opts?.threadId ?? null, JSON.stringify(content), opts?.trigger ?? 1);
   emitHostEventForTesting();
 }
 
 describe('poll loop integration', () => {
+  it.each([false, true])('does not answer passive peer notices in a warm=%s runner', async (warm) => {
+    const prompts: string[] = [];
+    const provider = new MockProvider({}, (prompt) => {
+      prompts.push(prompt);
+      return '<message to="discord-test">Received the real request.</message>';
+    });
+    const controller = new AbortController();
+    if (warm) insertMessage('first-human', { text: 'Start a warm conversation' }, {
+      channelType: 'discord', platformId: 'chan-1',
+    });
+    const loop = runPollLoopWithTimeout(provider, controller.signal, 3000);
+    try {
+      if (warm) await waitFor(() => getUndeliveredMessages().length === 1, 1000);
+      insertMessage('passive-error', { text: 'Provider quota exhausted', system_generated: true }, {
+        channelType: 'agent', platformId: 'peer', trigger: 0,
+      });
+      await sleep(100);
+      expect(prompts).toHaveLength(Number(warm));
+      expect(getPendingMessages().map((message) => message.id)).toContain('passive-error');
+      insertMessage('next-human', { text: 'A new real request' }, {
+        channelType: 'discord', platformId: 'chan-1',
+      });
+      await waitFor(() => prompts.length === Number(warm) + 1, 1000);
+      expect(prompts.at(-1)).toContain('Provider quota exhausted');
+      expect(prompts.at(-1)).toContain('A new real request');
+      await waitFor(() => getUndeliveredMessages().length === Number(warm) + 1, 1000);
+      expect(getUndeliveredMessages().at(-1)?.in_reply_to).toBe('next-human');
+    } finally {
+      controller.abort();
+      await loop.catch((error: unknown) => {
+        if (!(error instanceof Error) || error.message !== 'aborted') throw error;
+      });
+    }
+  });
+
   it('keeps correction attempts on one turn and makes warm successors distinct', async () => {
     const seen: Array<{ turnId: string; inReplyTo: string | null }> = [];
     const provider = new MockProvider({}, () => {

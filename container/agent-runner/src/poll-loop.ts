@@ -1022,7 +1022,7 @@ export async function processQuery(
       steering.offer(activeTurnRouting, turnId);
       return;
     }
-    if (newMessages.length === 0) return;
+    if (!newMessages.some((message) => message.trigger === 1)) return;
 
     // A user can answer as soon as the card is delivered, before the
     // provider has emitted the result that safely closes the asking turn.

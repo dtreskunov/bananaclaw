@@ -253,6 +253,13 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
 
   const targetSession = resolveTargetSession(msg, session, targetAgentGroupId);
   const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const content: unknown = JSON.parse(msg.content);
+  const passive =
+    targetAgentGroupId !== session.agent_group_id &&
+    content !== null &&
+    typeof content === 'object' &&
+    'system_generated' in content &&
+    content.system_generated === true;
 
   // If the source message references files (via `send_file`), forward the
   // bytes from the source's outbox into the target's inbox so the target
@@ -270,6 +277,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     threadId: null,
     content: forwardedContent,
     sourceSessionId: session.id,
+    trigger: passive ? 0 : 1,
   });
   log.info('Agent message routed', {
     from: session.agent_group_id,
@@ -277,7 +285,9 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     targetSession: targetSession.id,
     a2aMsgId,
     forwardedFileCount: countForwardedFiles(forwardedContent),
+    passive,
   });
+  if (passive) return;
   const fresh = getSession(targetSession.id);
   if (fresh) await wakeContainer(fresh);
 }

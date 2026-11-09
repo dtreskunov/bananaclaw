@@ -44,8 +44,8 @@ export function beginTurn(routing: RoutingContext, ids: string[], consumed = tru
     settled: false,
   };
   context.usageId = `tu-${context.turnId}`;
-  const origin = ids.length
-    ? getInboundDb().prepare('SELECT source_session_id FROM messages_in WHERE id = ?').get(ids[ids.length - 1]) as
+  const origin = routing.inReplyTo
+    ? getInboundDb().prepare('SELECT source_session_id FROM messages_in WHERE id = ?').get(routing.inReplyTo) as
       { source_session_id: string | null } | undefined
     : undefined;
   getOutboundDb().transaction(() => {

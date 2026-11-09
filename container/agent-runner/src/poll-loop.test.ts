@@ -197,6 +197,22 @@ describe('formatter', () => {
 });
 
 describe('accumulate gate (trigger column)', () => {
+  it('routes replies to the latest triggering input, not a later passive peer notice', () => {
+    insertMessage('human', 'chat', { text: 'Real request' });
+    insertMessage('passive', 'chat', { text: 'Provider failed', system_generated: true }, { trigger: 0 });
+    getInboundDb().prepare("UPDATE messages_in SET channel_type='web',platform_id='room',thread_id='thread' WHERE id='human'").run();
+    getInboundDb().prepare("UPDATE messages_in SET channel_type='agent',platform_id='peer',source_session_id='peer-session' WHERE id='passive'").run();
+    const messages = getPendingMessages();
+    const human = messages.find((message) => message.id === 'human')!;
+    const passive = messages.find((message) => message.id === 'passive')!;
+    expect(extractRouting([human, passive])).toEqual({
+      channelType: 'web', platformId: 'room', threadId: 'thread', inReplyTo: 'human',
+    });
+    expect(extractRouting([passive])).toMatchObject({ channelType: 'agent', inReplyTo: 'passive' });
+    const turn = beginTurn(extractRouting([human, passive]), ['human', 'passive']);
+    expect(getOutboundDb().prepare('SELECT origin_source_session_id FROM turns WHERE id=?').get(turn.turnId))
+      .toEqual({ origin_source_session_id: null });
+  });
   it('getPendingMessages returns both trigger=0 and trigger=1 rows', () => {
     // trigger=0 rides along as context, trigger=1 is the wake-eligible row.
     // The poll loop's gate depends on this data contract.

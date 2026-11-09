@@ -106,13 +106,11 @@ export interface RoutingContext {
 /**
  * Extract routing context from a batch of messages.
  *
- * Uses the LAST message's routing fields — replies thread under the most
- * recent message in the batch, matching how chat UIs render conversations.
- * Using `first` here let earlier messages in a multi-message batch "claim"
- * the reply, leaving the newer ones looking unanswered.
+ * The latest wake-eligible input owns the reply; passive context cannot
+ * redirect it. All-context callers retain the last message as a fallback.
  */
 export function extractRouting(messages: MessageInRow[]): RoutingContext {
-  const last = messages[messages.length - 1];
+  const last = messages.filter((message) => message.trigger === 1).at(-1) ?? messages.at(-1);
   return {
     platformId: last?.platform_id ?? null,
     channelType: last?.channel_type ?? null,

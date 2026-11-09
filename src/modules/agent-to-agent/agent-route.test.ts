@@ -9,6 +9,8 @@ import { initTestDb, closeDb, runMigrations, createAgentGroup } from '../../db/i
 import { createSession, updateSession } from '../../db/sessions.js';
 import { initSessionFolder, inboundDbPath, sessionDir, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
+import { wakeContainer } from '../../container-runner.js';
+import { countDueMessages } from '../../db/session-db.js';
 
 vi.mock('../../container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(undefined),
@@ -31,13 +33,14 @@ function now(): number {
 function readInbound(agentGroupId: string, sessionId: string) {
   const db = new Database(inboundDbPath(agentGroupId, sessionId), { readonly: true });
   const rows = db
-    .prepare('SELECT id, platform_id, channel_type, content, source_session_id FROM messages_in ORDER BY seq')
+    .prepare('SELECT id, platform_id, channel_type, content, source_session_id, trigger FROM messages_in ORDER BY seq')
     .all() as Array<{
     id: string;
     platform_id: string | null;
     channel_type: string | null;
     content: string;
     source_session_id: string | null;
+    trigger: number;
   }>;
   db.close();
   return rows;
@@ -183,6 +186,52 @@ describe('routeAgentMessage return-path', () => {
     expect(bRows).toHaveLength(1);
     expect(bRows[0].platform_id).toBe(A);
     expect(bRows[0].source_session_id).toBe(S1.id); // <- the return address
+  });
+
+  it('records terminal peer notices as context without waking either cold or warm runners', async () => {
+    vi.mocked(wakeContainer).mockClear();
+    for (const timelinePosition of [100, 200])
+      await routeAgentMessage(
+        {
+          id: `error-${timelinePosition}`,
+          platform_id: B,
+          in_reply_to: null,
+          content: JSON.stringify({
+            text: 'Provider quota exhausted',
+            delivery_origin: 'response',
+            system_generated: true,
+            timelinePosition,
+          }),
+        },
+        S1,
+      );
+    const rows = readInbound(B, SB.id);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.trigger === 0)).toBe(true);
+    expect(rows.every((row) => row.source_session_id === S1.id)).toBe(true);
+    expect(JSON.parse(rows[0].content)).toMatchObject({ text: 'Provider quota exhausted', system_generated: true });
+    expect(wakeContainer).not.toHaveBeenCalled();
+    const targetDb = new Database(inboundDbPath(B, SB.id), { readonly: true });
+    try {
+      expect(countDueMessages(targetDb)).toBe(0);
+    } finally {
+      targetDb.close();
+    }
+  });
+
+  it('still wakes for ordinary peer requests, even if they mention a provider error', async () => {
+    vi.mocked(wakeContainer).mockClear();
+    await routeAgentMessage(
+      {
+        id: 'real-request',
+        platform_id: B,
+        in_reply_to: null,
+        content: JSON.stringify({ text: 'Please investigate this provider error', system_generated: false }),
+      },
+      S1,
+    );
+    expect(readInbound(B, SB.id)[0].trigger).toBe(1);
+    expect(wakeContainer).toHaveBeenCalledOnce();
   });
 
   it('reply direction: routes back to the originating session, not the newest', async () => {

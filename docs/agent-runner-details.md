@@ -945,6 +945,15 @@ as one-way. A per-batch routing hint forbids inventing a reply address or
 substituting the session's human channel. This does not grant reverse access.
 Host-origin system messages retain their existing no-`from` formatting.
 
+Runner-generated terminal notices (`system_generated: true`), including provider
+errors and stopped-turn notices, are passive when forwarded to another agent.
+The host journals them as `trigger=0` and does not wake the recipient. They remain
+visible in both transcripts and join the context of a later real request, but
+cannot start a model turn on their own, including in an already-warm query.
+This prevents provider failures from bouncing indefinitely between peers.
+The latest `trigger=1` input owns reply routing, so a later passive notice cannot
+redirect a human reply back to a peer.
+
 **Final-response recovery:** Bare final text remains scratchpad, not an
 automatic channel delivery. If a tool sent content elsewhere but the final
 confirmation is unwrapped (or was stripped as reasoning), the runner requests
