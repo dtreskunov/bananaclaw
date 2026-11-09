@@ -154,6 +154,15 @@ export function connectionMatchesAccess(connection: AccessConnection, request: A
   }
   if (!hint || oauthHint) return true;
   return services.some((service) => {
+    if (service.auth.type === 'custom' && (hint.type === 'api-key' || hint.type === 'bearer')) {
+      if (hint.type === 'api-key' && hint.location === 'query') return false;
+      const header = hint.type === 'bearer' ? 'authorization' : hint.header?.toLowerCase();
+      const template = Object.entries(service.auth.headers ?? {}).find(([name]) => name.toLowerCase() === header)?.[1];
+      if (!template) return false;
+      const prefix = hint.type === 'bearer' ? /^Bearer +/i.exec(template)?.[0] : hint.prefix;
+      if (prefix === undefined) return hint.type === 'api-key';
+      return template.startsWith(prefix) && /^\{\{\s*[\w.-]+\s*\}\}$/.test(template.slice(prefix.length));
+    }
     if (service.auth.type !== hint.type) return false;
     if (hint.type === 'api-key') {
       if ((service.auth.location ?? 'header') !== (hint.location ?? 'header')) return false;

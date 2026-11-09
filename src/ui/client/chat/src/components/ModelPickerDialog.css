@@ -49,6 +49,17 @@
 }
 .mpd-filter-option input[type="checkbox"] { margin: 0; flex: none; }
 .mpd-filter-option label { cursor: pointer; user-select: none; }
+.mpd-provider-label { display: block; }
+.mpd-provider {
+  display: block; width: 100%; max-width: 240px; margin-top: 6px;
+  padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface); color: inherit; font: inherit;
+  text-transform: none; letter-spacing: normal;
+}
+.mpd-provider-error {
+  max-width: 240px; white-space: normal; color: var(--muted);
+  font-size: var(--font-xs);
+}
 
 /* Main list area */
 .mpd-main {
@@ -88,6 +99,11 @@
 .mpd-empty {
   padding: 24px 14px; text-align: center; color: var(--muted);
   font-size: var(--font-base);
+}
+.mpd-retry {
+  display: block; margin: 10px auto 0; padding: 6px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
 }
 
 .mpd-freeform {

@@ -108,6 +108,97 @@ describe('access request authentication compatibility', () => {
       connectionMatchesAccess(custom, { resource_url: url, authentication: { type: 'custom', headers: ['X-Other'] } }),
     ).toBe(false);
   });
+  it('matches custom API-key headers case-insensitively without requiring a storage type match', () => {
+    const connection = {
+      kind: 'static' as const,
+      status: 'ready',
+      services: [
+        {
+          host: 'gmailmcp.example.com',
+          auth: { type: 'custom', headers: { 'X-Api-Key': '{{ KEY }}', Authorization: 'Bearer {{ TOKEN }}' } },
+        },
+      ],
+    };
+    const request = { resource_url: url, authentication: { type: 'api-key' as const, header: 'x-api-key' } };
+    expect(connectionMatchesAccess(connection, request)).toBe(true);
+    expect(
+      connectionMatchesAccess(connection, { ...request, authentication: { ...request.authentication, prefix: '' } }),
+    ).toBe(true);
+    expect(
+      connectionMatchesAccess(connection, {
+        ...request,
+        authentication: { ...request.authentication, header: 'x-other' },
+      }),
+    ).toBe(false);
+    expect(
+      connectionMatchesAccess({ ...connection, services: [{ ...connection.services[0], enabled: false }] }, request),
+    ).toBe(false);
+    expect(connectionMatchesAccess(connection, { ...request, resource_url: 'https://other.example.com/mcp/v1' })).toBe(
+      false,
+    );
+    expect(connectionMatchesAccess(connection, { ...request, scopes: ['read'] })).toBe(false);
+  });
+
+  it.each([
+    ['Token {{ KEY }}', 'Token ', true],
+    ['Token {{ KEY }}', '', false],
+    ['{{ KEY }}', 'Token ', false],
+    ['Token wrong{{ KEY }}', 'Token ', false],
+    ['Token {{ KEY }}suffix', 'Token ', false],
+    ['Token {{ FIRST }}:{{ SECOND }}', 'Token ', false],
+  ])('checks explicit API-key prefixes on custom templates: %s / %s', (template, prefix, expected) => {
+    const connection = {
+      kind: 'static' as const,
+      status: 'ready',
+      services: [{ host: 'gmailmcp.example.com', auth: { type: 'custom', headers: { 'X-Key': template } } }],
+    };
+    expect(
+      connectionMatchesAccess(connection, {
+        resource_url: url,
+        authentication: { type: 'api-key', header: 'x-key', prefix },
+      }),
+    ).toBe(expected);
+  });
+
+  it.each([
+    ['Bearer {{ TOKEN }}', true],
+    ['bEaReR {{ TOKEN }}', true],
+    ['Bearer  {{ TOKEN }}', true],
+    ['Basic {{ TOKEN }}', false],
+    ['{{ TOKEN }}', false],
+    ['Bearer {{ TOKEN }}suffix', false],
+    ['', false],
+  ])('checks the bearer scheme on custom Authorization templates: %s', (template, expected) => {
+    const connection = {
+      kind: 'static' as const,
+      status: 'ready',
+      services: [{ host: 'gmailmcp.example.com', auth: { type: 'custom', headers: { AUTHORIZATION: template } } }],
+    };
+    expect(connectionMatchesAccess(connection, { resource_url: url, authentication: { type: 'bearer' } })).toBe(
+      expected,
+    );
+  });
+
+  it('does not treat custom headers as query keys or infer Basic authentication from Authorization', () => {
+    const connection = {
+      kind: 'static' as const,
+      status: 'ready',
+      services: [
+        {
+          host: 'gmailmcp.example.com',
+          auth: { type: 'custom', headers: { Authorization: 'Basic {{ KEY }}', api_key: '{{ KEY }}' } },
+        },
+      ],
+    };
+    expect(
+      connectionMatchesAccess(connection, {
+        resource_url: url,
+        authentication: { type: 'api-key', location: 'query', parameter: 'api_key' },
+      }),
+    ).toBe(false);
+    expect(connectionMatchesAccess(connection, { resource_url: url, authentication: { type: 'basic' } })).toBe(false);
+  });
+
   it('matches exact query placement and parameter names, not an API-key header', () => {
     const authentication = parseAccessAuthentication({ type: 'api-key', location: 'query', parameter: 'api_key' })!;
     expect(authentication).toEqual({ type: 'api-key', location: 'query', parameter: 'api_key' });

@@ -144,30 +144,38 @@ function formatDetailLine(m: ModelSuggestion): string {
 
 interface CacheEntry {
   fetchedAt: number;
-  promise: Promise<{ ok: boolean; data: ModelsResponse }>;
+  promise: Promise<CatalogResult>;
 }
+
+type CatalogResult = { ok: true; data: ModelsResponse } | { ok: false; error: string };
 
 const catalogCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-function fetchModels(url: string): Promise<{ ok: boolean; data: ModelsResponse }> {
+function fetchModels(url: string): Promise<CatalogResult> {
   const now = Date.now();
   const cached = catalogCache.get(url);
   if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.promise;
   }
-  const promise = (async () => {
+  const promise = (async (): Promise<CatalogResult> => {
     try {
       const res = await protocolFetch(url, { credentials: 'same-origin' });
-      const data = await res.json();
-      return { ok: res.ok, data: data as ModelsResponse };
-    } catch {
-      // Don't cache failures
-      catalogCache.delete(url);
-      return { ok: false, data: {} as ModelsResponse };
+      if (!res.ok) throw new Error(`Model catalog request failed (HTTP ${res.status}).`);
+      const data = (await res.json()) as ModelsResponse;
+      if (!data || !Array.isArray(data.models) || !['models.dev', 'openrouter', 'unavailable'].includes(data.source))
+        throw new Error('The model catalog returned an invalid response.');
+      if (data.source === 'unavailable') throw new Error('Model catalog unavailable. Please try again.');
+      return { ok: true, data };
+    } catch (error: unknown) {
+      return { ok: false, error: errorMessage(error) };
     }
   })();
-  catalogCache.set(url, { fetchedAt: now, promise });
+  const entry = { fetchedAt: now, promise };
+  catalogCache.set(url, entry);
+  void promise.then((result) => {
+    if (!result.ok && catalogCache.get(url) === entry) catalogCache.delete(url);
+  });
   return promise;
 }
 
@@ -186,11 +194,17 @@ export function ModelPickerDialog({
   onChange,
 }: ModelPickerDialogProps): JSX.Element {
   const [open, setOpen] = useState(false);
-  const [models, setModels] = useState<ModelSuggestion[]>([]);
-  const [source, setSource] = useState<ModelsResponse['source']>('unavailable');
+  const [{ models, source, error: catalogError }, setCatalog] = useState<ModelsResponse & { error?: string }>({
+    models: [],
+    source: 'unavailable',
+    upstream: null,
+  });
   const [loading, setLoading] = useState(false);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [connection, setConnection] = useState<AccessRequirements | null>(null);
   const [editingConnection, setEditingConnection] = useState<AccessRequirements | null>(null);
+  const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
+  const [providerError, setProviderError] = useState('');
   const effectiveModel = value || fallbackValue;
 
   useEffect(() => {
@@ -210,6 +224,7 @@ export function ModelPickerDialog({
 
   // Filters
   const [search, setSearch] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState('');
   const [selectedInputMods, setSelectedInputMods] = useState<Set<string>>(new Set());
   const [selectedOutputMods, setSelectedOutputMods] = useState<Set<string>>(new Set());
   const [selectedCostTiers, setSelectedCostTiers] = useState<Set<CostTier>>(new Set());
@@ -230,24 +245,46 @@ export function ModelPickerDialog({
     return `${apiBasePath}/models?${params.toString()}`;
   }, [provider, apiBasePath, inputModality, outputModality, upstream]);
 
+  useEffect(() => {
+    setSelectedProvider('');
+  }, [catalogUrl]);
+
+  useEffect(() => {
+    if (!open || editingConnection || (provider !== 'native' && provider !== 'opencode')) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ provider });
+    if (upstream) params.set('upstream', upstream);
+    if (inputModality) params.set('inputModality', inputModality);
+    if (outputModality) params.set('outputModality', outputModality);
+    setConfiguredProviders(new Set());
+    setProviderError('');
+    void credentialRequest<{ configuredProviders: string[] }>(
+      `${apiBasePath}/configured-model-providers?${params}`,
+      'GET',
+      undefined,
+      controller.signal,
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setConfiguredProviders(new Set(result.configuredProviders));
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setProviderError(`Could not load configured providers: ${errorMessage(error)}`);
+      });
+    return () => controller.abort();
+  }, [open, provider, apiBasePath, upstream, inputModality, outputModality, editingConnection]);
+
   // Eagerly fetch models when provider is set (even while dialog is closed)
   // so the trigger can show the detail line for the current value.
   // Uses a module-level cache so multiple pickers with the same URL share one request.
   useEffect(() => {
     if (!catalogUrl) {
-      setModels([]);
+      setCatalog((current) => ({ ...current, models: [] }));
       return;
     }
     let cancelled = false;
     fetchModels(catalogUrl).then((r) => {
       if (cancelled) return;
-      if (r.ok) {
-        setModels(r.data.models ?? []);
-        setSource(r.data.source ?? 'unavailable');
-      } else {
-        setModels([]);
-        setSource('unavailable');
-      }
+      setCatalog(r.ok ? r.data : { models: [], source: 'unavailable', upstream: null, error: r.error });
     });
     return () => {
       cancelled = true;
@@ -261,19 +298,13 @@ export function ModelPickerDialog({
     setLoading(true);
     fetchModels(catalogUrl).then((r) => {
       if (cancelled) return;
-      if (r.ok) {
-        setModels(r.data.models ?? []);
-        setSource(r.data.source ?? 'unavailable');
-      } else {
-        setModels([]);
-        setSource('unavailable');
-      }
+      setCatalog(r.ok ? r.data : { models: [], source: 'unavailable', upstream: null, error: r.error });
       setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, catalogUrl]);
+  }, [open, catalogUrl, catalogAttempt]);
 
   // Focus search on open
   useEffect(() => {
@@ -283,8 +314,21 @@ export function ModelPickerDialog({
   }, [open]);
 
   // Apply filters
+  const providers = useMemo(() => {
+    const choices = new Map<string, string>();
+    for (const model of models) {
+      if (model.upstream) choices.set(model.upstream, model.upstreamLabel || model.upstream);
+    }
+    return [...choices].sort(
+      ([a, aLabel], [b, bLabel]) =>
+        Number(configuredProviders.has(b)) - Number(configuredProviders.has(a)) || aLabel.localeCompare(bLabel),
+    );
+  }, [models, configuredProviders]);
+
   const filtered = useMemo(() => {
     let result = models;
+
+    if (selectedProvider) result = result.filter((model) => model.upstream === selectedProvider);
 
     // Text search
     if (search.trim()) {
@@ -317,7 +361,7 @@ export function ModelPickerDialog({
     }
 
     return result;
-  }, [models, search, selectedInputMods, selectedOutputMods, selectedCostTiers, selectedCtxTier]);
+  }, [models, selectedProvider, search, selectedInputMods, selectedOutputMods, selectedCostTiers, selectedCtxTier]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -368,6 +412,7 @@ export function ModelPickerDialog({
         onClick={() => {
           setOpen(true);
           setSearch('');
+          setSelectedProvider('');
         }}
       >
         <span class="mpd-trigger-label">
@@ -382,13 +427,23 @@ export function ModelPickerDialog({
         </span>
         <span class="mpd-trigger-icon">▾</span>
       </button>
-      {connection ? <p class="group-admin-help">
-        API: <span title={connection.resource_url}>{new URL(connection.resource_url).host}</span>
-        {' · '}<button type="button" class="ga-cred-link" disabled={disabled}
-          onClick={() => setEditingConnection(connection)}>Credentials</button>
-      </p> : null}
-      {editingConnection ? <CredentialsContent
-        initialRequest={editingConnection} onClose={() => setEditingConnection(null)} /> : null}
+      {connection ? (
+        <p class="group-admin-help">
+          API: <span title={connection.resource_url}>{new URL(connection.resource_url).host}</span>
+          {' · '}
+          <button
+            type="button"
+            class="ga-cred-link"
+            disabled={disabled}
+            onClick={() => setEditingConnection(connection)}
+          >
+            Credentials
+          </button>
+        </p>
+      ) : null}
+      {editingConnection ? (
+        <CredentialsContent initialRequest={editingConnection} onClose={() => setEditingConnection(null)} />
+      ) : null}
 
       {/* Dialog */}
       {open && (
@@ -411,6 +466,33 @@ export function ModelPickerDialog({
           <div class="mpd-content">
             {/* Sidebar filters */}
             <div class="mpd-sidebar">
+              {providers.length > 0 && (provider === 'native' || provider === 'opencode') ? (
+                <div class="mpd-filter-group">
+                  <label class="mpd-filter-group-title mpd-provider-label">
+                    Provider
+                    <select
+                      class="mpd-provider"
+                      aria-label="Provider"
+                      value={selectedProvider}
+                      title="Credential configured means a matching credential in your account, not permission for this agent."
+                      onChange={(event) => setSelectedProvider(event.currentTarget.value)}
+                    >
+                      <option value="">All providers</option>
+                      {providers.map(([id, label]) => (
+                        <option key={id} value={id}>
+                          {label}
+                          {configuredProviders.has(id) ? ' — Credential configured' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {providerError ? (
+                    <p class="mpd-provider-error" role="alert">
+                      {providerError}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <div class="mpd-filter-group">
                 <div class="mpd-filter-group-title">Input</div>
                 {ALL_INPUT_MODALITIES.map((mod) => (
@@ -486,7 +568,14 @@ export function ModelPickerDialog({
 
               <div class="mpd-list">
                 {loading && <div class="mpd-empty">Loading…</div>}
-                {!loading && source === 'unavailable' && <div class="mpd-empty">Model catalog unavailable.</div>}
+                {!loading && source === 'unavailable' && (
+                  <div class="mpd-empty" role="alert">
+                    {catalogError || 'Model catalog unavailable.'}
+                    <button type="button" class="mpd-retry" onClick={() => setCatalogAttempt((attempt) => attempt + 1)}>
+                      Retry
+                    </button>
+                  </div>
+                )}
                 {!loading && source !== 'unavailable' && filtered.length === 0 && (
                   <div class="mpd-empty">No models match filters.</div>
                 )}

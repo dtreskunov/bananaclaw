@@ -76,6 +76,7 @@ import { listImages } from './image-catalog.js';
 import { bareIdForResponse, dbValueFromBareId, getModelDetails, listModelsForProvider } from './models-catalog.js';
 import { resolveUpstreamForWireId } from './models-dev-catalog.js';
 import { getModelConnection } from './model-connection.js';
+import { listConfiguredModelProviders } from './configured-model-providers.js';
 import { listAvailableSkills, type AvailableSkill } from './skill-catalog.js';
 import { groupSkillRoots } from '../../../skills/registry.js';
 import { McpAuthenticationError, parseMcpAuthentication } from '../../shared/mcp-authentication.js';
@@ -220,6 +221,24 @@ async function dispatch(
   }
 
   if (rest === '/models' && method === 'GET') return handleListModels(req, res);
+  if (rest === '/configured-model-providers' && method === 'GET') {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const params = new URL(req.url || '/', 'http://localhost').searchParams;
+    const provider = params.get('provider');
+    if (provider !== 'native' && provider !== 'opencode') throw new BadRequest('provider must be native or opencode');
+    const configuredProviders = await listConfiguredModelProviders(
+      actorUserId,
+      provider,
+      {
+        upstream: params.get('upstream') || undefined,
+        inputModality: params.get('inputModality') || undefined,
+        outputModality: params.get('outputModality') || undefined,
+      },
+      getContainerConfig(gid)?.upstream_provider,
+    );
+    writeJson(res, 200, { configuredProviders });
+    return;
+  }
   if (rest === '/model-connection' && method === 'GET') {
     const params = new URL(req.url || '/', 'http://localhost').searchParams;
     const provider = params.get('provider') || '';

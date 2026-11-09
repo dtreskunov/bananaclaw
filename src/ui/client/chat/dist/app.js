@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
+// node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
+  "node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
+// node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
+  "node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
+// node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
+// node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
+// node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
+// node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
+// node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
+// node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
+// node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
+// node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
+// node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
+// node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
+// node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
+// node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
+// node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
+// node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
+// node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
+// node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
+// node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
+// node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
+// node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
+// node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
+// node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
+// node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
+// node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
+// node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
+// node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
+// node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
+// node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
+// node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
+// node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
+// node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
+// node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
+// node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
+// node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
+// node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
+// node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
+// node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
+// node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
+  "node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
+// node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
+// node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
+// node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
+// node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -16652,7 +16652,7 @@ function clearApprovalMessage(approvalId) {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
+// node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -18898,6 +18898,15 @@ function connectionMatchesAccess(connection2, request) {
   }
   if (!hint || oauthHint) return true;
   return services.some((service) => {
+    if (service.auth.type === "custom" && (hint.type === "api-key" || hint.type === "bearer")) {
+      if (hint.type === "api-key" && hint.location === "query") return false;
+      const header = hint.type === "bearer" ? "authorization" : hint.header?.toLowerCase();
+      const template = Object.entries(service.auth.headers ?? {}).find(([name]) => name.toLowerCase() === header)?.[1];
+      if (!template) return false;
+      const prefix = hint.type === "bearer" ? /^Bearer +/i.exec(template)?.[0] : hint.prefix;
+      if (prefix === void 0) return hint.type === "api-key";
+      return template.startsWith(prefix) && /^\{\{\s*[\w.-]+\s*\}\}$/.test(template.slice(prefix.length));
+    }
     if (service.auth.type !== hint.type) return false;
     if (hint.type === "api-key") {
       if ((service.auth.location ?? "header") !== (hint.location ?? "header")) return false;
@@ -20382,7 +20391,7 @@ function openChat() {
   if (location.hash === "#credentials") location.hash = "";
 }
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -23319,7 +23328,7 @@ function ThreadsRail() {
   );
 }
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
+// node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -30534,7 +30543,7 @@ function PrivateWebView({ groupId: groupId3, path, title, fragment }) {
   ) });
 }
 
-// ../../../../../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
+// node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 
@@ -33108,14 +33117,21 @@ function fetchModels(url) {
   const promise = (async () => {
     try {
       const res = await protocolFetch(url, { credentials: "same-origin" });
+      if (!res.ok) throw new Error(`Model catalog request failed (HTTP ${res.status}).`);
       const data = await res.json();
-      return { ok: res.ok, data };
-    } catch {
-      catalogCache.delete(url);
-      return { ok: false, data: {} };
+      if (!data || !Array.isArray(data.models) || !["models.dev", "openrouter", "unavailable"].includes(data.source))
+        throw new Error("The model catalog returned an invalid response.");
+      if (data.source === "unavailable") throw new Error("Model catalog unavailable. Please try again.");
+      return { ok: true, data };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   })();
-  catalogCache.set(url, { fetchedAt: now, promise });
+  const entry = { fetchedAt: now, promise };
+  catalogCache.set(url, entry);
+  void promise.then((result) => {
+    if (!result.ok && catalogCache.get(url) === entry) catalogCache.delete(url);
+  });
   return promise;
 }
 function ModelPickerDialog({
@@ -33131,11 +33147,17 @@ function ModelPickerDialog({
   onChange
 }) {
   const [open, setOpen] = h2(false);
-  const [models, setModels] = h2([]);
-  const [source, setSource] = h2("unavailable");
+  const [{ models, source, error: catalogError }, setCatalog] = h2({
+    models: [],
+    source: "unavailable",
+    upstream: null
+  });
   const [loading, setLoading] = h2(false);
+  const [catalogAttempt, setCatalogAttempt] = h2(0);
   const [connection2, setConnection] = h2(null);
   const [editingConnection, setEditingConnection] = h2(null);
+  const [configuredProviders, setConfiguredProviders] = h2(/* @__PURE__ */ new Set());
+  const [providerError, setProviderError] = h2("");
   const effectiveModel = value || fallbackValue;
   y2(() => {
     setConnection(null);
@@ -33155,6 +33177,7 @@ function ModelPickerDialog({
     return () => controller.abort();
   }, [provider, effectiveModel, apiBasePath]);
   const [search, setSearch] = h2("");
+  const [selectedProvider, setSelectedProvider] = h2("");
   const [selectedInputMods, setSelectedInputMods] = h2(/* @__PURE__ */ new Set());
   const [selectedOutputMods, setSelectedOutputMods] = h2(/* @__PURE__ */ new Set());
   const [selectedCostTiers, setSelectedCostTiers] = h2(/* @__PURE__ */ new Set());
@@ -33170,20 +33193,38 @@ function ModelPickerDialog({
     return `${apiBasePath}/models?${params.toString()}`;
   }, [provider, apiBasePath, inputModality, outputModality, upstream]);
   y2(() => {
+    setSelectedProvider("");
+  }, [catalogUrl]);
+  y2(() => {
+    if (!open || editingConnection || provider !== "native" && provider !== "opencode") return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ provider });
+    if (upstream) params.set("upstream", upstream);
+    if (inputModality) params.set("inputModality", inputModality);
+    if (outputModality) params.set("outputModality", outputModality);
+    setConfiguredProviders(/* @__PURE__ */ new Set());
+    setProviderError("");
+    void credentialRequest(
+      `${apiBasePath}/configured-model-providers?${params}`,
+      "GET",
+      void 0,
+      controller.signal
+    ).then((result) => {
+      if (!controller.signal.aborted) setConfiguredProviders(new Set(result.configuredProviders));
+    }).catch((error) => {
+      if (!controller.signal.aborted) setProviderError(`Could not load configured providers: ${errorMessage(error)}`);
+    });
+    return () => controller.abort();
+  }, [open, provider, apiBasePath, upstream, inputModality, outputModality, editingConnection]);
+  y2(() => {
     if (!catalogUrl) {
-      setModels([]);
+      setCatalog((current) => ({ ...current, models: [] }));
       return;
     }
     let cancelled = false;
     fetchModels(catalogUrl).then((r4) => {
       if (cancelled) return;
-      if (r4.ok) {
-        setModels(r4.data.models ?? []);
-        setSource(r4.data.source ?? "unavailable");
-      } else {
-        setModels([]);
-        setSource("unavailable");
-      }
+      setCatalog(r4.ok ? r4.data : { models: [], source: "unavailable", upstream: null, error: r4.error });
     });
     return () => {
       cancelled = true;
@@ -33195,26 +33236,30 @@ function ModelPickerDialog({
     setLoading(true);
     fetchModels(catalogUrl).then((r4) => {
       if (cancelled) return;
-      if (r4.ok) {
-        setModels(r4.data.models ?? []);
-        setSource(r4.data.source ?? "unavailable");
-      } else {
-        setModels([]);
-        setSource("unavailable");
-      }
+      setCatalog(r4.ok ? r4.data : { models: [], source: "unavailable", upstream: null, error: r4.error });
       setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, catalogUrl]);
+  }, [open, catalogUrl, catalogAttempt]);
   y2(() => {
     if (open) {
       setTimeout(() => searchRef.current?.focus(), 50);
     }
   }, [open]);
+  const providers = T2(() => {
+    const choices = /* @__PURE__ */ new Map();
+    for (const model of models) {
+      if (model.upstream) choices.set(model.upstream, model.upstreamLabel || model.upstream);
+    }
+    return [...choices].sort(
+      ([a4, aLabel], [b5, bLabel]) => Number(configuredProviders.has(b5)) - Number(configuredProviders.has(a4)) || aLabel.localeCompare(bLabel)
+    );
+  }, [models, configuredProviders]);
   const filtered = T2(() => {
     let result = models;
+    if (selectedProvider) result = result.filter((model) => model.upstream === selectedProvider);
     if (search.trim()) {
       const q5 = search.trim().toLowerCase();
       result = result.filter((m6) => m6.id.toLowerCase().includes(q5) || m6.label.toLowerCase().includes(q5));
@@ -33236,7 +33281,7 @@ function ModelPickerDialog({
       }
     }
     return result;
-  }, [models, search, selectedInputMods, selectedOutputMods, selectedCostTiers, selectedCtxTier]);
+  }, [models, selectedProvider, search, selectedInputMods, selectedOutputMods, selectedCostTiers, selectedCtxTier]);
   const handleSelect = q2(
     (id2) => {
       onChange(id2);
@@ -33278,6 +33323,7 @@ function ModelPickerDialog({
         onClick: () => {
           setOpen(true);
           setSearch("");
+          setSelectedProvider("");
         },
         children: [
           /* @__PURE__ */ u4("span", { class: "mpd-trigger-label", children: value ? /* @__PURE__ */ u4(k, { children: [
@@ -33303,13 +33349,7 @@ function ModelPickerDialog({
         }
       )
     ] }) : null,
-    editingConnection ? /* @__PURE__ */ u4(
-      CredentialsContent,
-      {
-        initialRequest: editingConnection,
-        onClose: () => setEditingConnection(null)
-      }
-    ) : null,
+    editingConnection ? /* @__PURE__ */ u4(CredentialsContent, { initialRequest: editingConnection, onClose: () => setEditingConnection(null) }) : null,
     open && /* @__PURE__ */ u4(
       MobileDialog,
       {
@@ -33326,6 +33366,29 @@ function ModelPickerDialog({
         ] }) : null,
         children: /* @__PURE__ */ u4("div", { class: "mpd-content", children: [
           /* @__PURE__ */ u4("div", { class: "mpd-sidebar", children: [
+            providers.length > 0 && (provider === "native" || provider === "opencode") ? /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
+              /* @__PURE__ */ u4("label", { class: "mpd-filter-group-title mpd-provider-label", children: [
+                "Provider",
+                /* @__PURE__ */ u4(
+                  "select",
+                  {
+                    class: "mpd-provider",
+                    "aria-label": "Provider",
+                    value: selectedProvider,
+                    title: "Credential configured means a matching credential in your account, not permission for this agent.",
+                    onChange: (event) => setSelectedProvider(event.currentTarget.value),
+                    children: [
+                      /* @__PURE__ */ u4("option", { value: "", children: "All providers" }),
+                      providers.map(([id2, label]) => /* @__PURE__ */ u4("option", { value: id2, children: [
+                        label,
+                        configuredProviders.has(id2) ? " \u2014 Credential configured" : ""
+                      ] }, id2))
+                    ]
+                  }
+                )
+              ] }),
+              providerError ? /* @__PURE__ */ u4("p", { class: "mpd-provider-error", role: "alert", children: providerError }) : null
+            ] }) : null,
             /* @__PURE__ */ u4("div", { class: "mpd-filter-group", children: [
               /* @__PURE__ */ u4("div", { class: "mpd-filter-group-title", children: "Input" }),
               ALL_INPUT_MODALITIES.map((mod) => /* @__PURE__ */ u4("div", { class: "mpd-filter-option", children: [
@@ -33400,7 +33463,10 @@ function ModelPickerDialog({
             ) }),
             /* @__PURE__ */ u4("div", { class: "mpd-list", children: [
               loading && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "Loading\u2026" }),
-              !loading && source === "unavailable" && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "Model catalog unavailable." }),
+              !loading && source === "unavailable" && /* @__PURE__ */ u4("div", { class: "mpd-empty", role: "alert", children: [
+                catalogError || "Model catalog unavailable.",
+                /* @__PURE__ */ u4("button", { type: "button", class: "mpd-retry", onClick: () => setCatalogAttempt((attempt) => attempt + 1), children: "Retry" })
+              ] }),
               !loading && source !== "unavailable" && filtered.length === 0 && /* @__PURE__ */ u4("div", { class: "mpd-empty", children: "No models match filters." }),
               !loading && filtered.slice(0, MAX_RENDERED).map((m6) => /* @__PURE__ */ u4(
                 "button",

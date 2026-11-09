@@ -37,6 +37,7 @@ vi.mock('../../../container-runner.js', () => ({
   buildAgentGroupImage: vi.fn().mockResolvedValue(undefined),
   runMcpProbeContainer: vi.fn(),
 }));
+vi.mock('./configured-model-providers.js', () => ({ listConfiguredModelProviders: vi.fn() }));
 
 let mockUserId: string | null = null;
 vi.mock('../auth.js', () => ({
@@ -60,6 +61,7 @@ import {
   listProviderContainerConfigNames,
 } from '../../../providers/provider-container-registry.js';
 import { handle } from './routes.js';
+import { listConfiguredModelProviders } from './configured-model-providers.js';
 
 const NOW = () => Date.now();
 
@@ -166,6 +168,58 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
+});
+
+describe('GET /api/groups/:gid/admin/configured-model-providers', () => {
+  beforeEach(() => {
+    seedUser('web:owner');
+    grantRole({ user_id: 'web:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: NOW() });
+    seedGroup('ag-models', 'models-group');
+    mockUserId = 'web:owner';
+    vi.mocked(listConfiguredModelProviders).mockReset().mockResolvedValue(['groq']);
+  });
+
+  it('returns private caller-scoped provider IDs and forwards picker restrictions', async () => {
+    const response = await call(
+      'GET',
+      '/ui/chat/api/groups/ag-models/admin/configured-model-providers?provider=native&upstream=groq&inputModality=text&outputModality=text',
+    );
+    expect(response.status()).toBe(200);
+    expect(response.body()).toEqual({ configuredProviders: ['groq'] });
+    expect(response.res.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
+    expect(listConfiguredModelProviders).toHaveBeenCalledExactlyOnceWith(
+      'web:owner',
+      'native',
+      { upstream: 'groq', inputModality: 'text', outputModality: 'text' },
+      null,
+    );
+  });
+
+  it.each([null, 'web:stranger'])('rejects unauthorized callers: %s', async (user) => {
+    mockUserId = user;
+    const response = await call(
+      'GET',
+      '/ui/chat/api/groups/ag-models/admin/configured-model-providers?provider=native',
+    );
+    expect(response.status()).toBe(user ? 403 : 401);
+    expect(listConfiguredModelProviders).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported runtimes before reading credentials', async () => {
+    const response = await call('GET', '/ui/chat/api/groups/ag-models/admin/configured-model-providers?provider=mock');
+    expect(response.status()).toBe(400);
+    expect(listConfiguredModelProviders).not.toHaveBeenCalled();
+  });
+
+  it('surfaces lookup failures', async () => {
+    vi.mocked(listConfiguredModelProviders).mockRejectedValue(new Error('Credential gateway unavailable'));
+    const response = await call(
+      'GET',
+      '/ui/chat/api/groups/ag-models/admin/configured-model-providers?provider=native',
+    );
+    expect(response.status()).toBe(500);
+    expect(response.body()).toEqual({ error: 'internal_error' });
+  });
 });
 
 describe('POST /api/groups/:gid/admin/restart', () => {

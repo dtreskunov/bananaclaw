@@ -72,6 +72,24 @@ only from that compatible set. Setup, creation, apply and retry share credential
 operation busy/error handling; stale preview/request revisions still disable
 approval. Decline keeps its separate interaction-response error behavior.
 
+### Model provider filter
+
+The Native and OpenCode model pickers have a single Provider dropdown, defaulting
+to All providers. It combines with the existing search and facet filters without
+changing the saved model or overriding a picker's upstream restriction.
+Providers with a ready, enabled, compatible personal credential appear first,
+marked **Credential configured**. Matching uses the effective API destination and
+authentication, including endpoint overrides; it does not check provider quotas
+or imply that this agent has a credential grant. Credential metadata is fetched
+privately on opening the picker and after closing its existing Credentials flow.
+Lookup failures are shown explicitly and do not prevent filtering.
+Custom-header credentials can satisfy API-key header or Bearer requirements
+when their header names and specified prefixes match. Query-key placement,
+destination, enabled-service, and OAuth scope checks remain unchanged.
+Model catalog failures, including HTTP 200 responses marked unavailable, are
+never retained in the browser's five-minute catalog cache. An unavailable
+picker offers Retry; reopening also makes a fresh request after a failure.
+
 > Per-agent-group **public static websites** (served by `Host` on the same
 > listener) are documented separately in [pages.md](pages.md).
 
