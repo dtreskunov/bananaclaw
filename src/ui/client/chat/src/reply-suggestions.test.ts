@@ -14,6 +14,21 @@ const response: ConversationMessage = {
 const turn = { ...testTurn, phase: 'settled' as const, outcome: 'replied' as const, outputIds: [response.id] };
 
 describe('reply draft suggestions', () => {
+  it('does not turn a response sent to another agent into reply suggestions for the human', () => {
+    expect(
+      suggestionsActive(
+        'reply',
+        [
+          {
+            ...response,
+            recipient: { agentGroupId: 'peer', displayName: 'Peer' },
+          },
+        ],
+        [turn],
+        false,
+      ),
+    ).toBe(false);
+  });
   it('validates rendered labels without URL decoding', () => {
     for (const label of ['Take food', 'Use A & B (not C)', 'Keep %20 literal', 'Discuss 日本', 'x'.repeat(240)])
       expect(isReplyLabel(label)).toBe(true);

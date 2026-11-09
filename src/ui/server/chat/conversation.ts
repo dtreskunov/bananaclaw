@@ -14,7 +14,7 @@ import type {
   ConversationUsage,
 } from '../../shared/conversation.js';
 import { publicInboundMessageId, readConversationHistory } from './history.js';
-import { routeMatches, type TurnContext } from './conversation-context.js';
+import { routeMatches, transcriptRouteMatches, type TurnContext } from './conversation-context.js';
 import { renderedReadCursor } from './read-state.js';
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
@@ -102,7 +102,7 @@ export function projectConversation(
     if (message.turnId && !byId.has(message.turnId)) throw new Error('Missing conversation turn association');
   }
   const owns = (turn: TurnRow) =>
-    routeMatches(context, turn.origin_channel_type, turn.origin_platform_id, turn.origin_thread_id);
+    transcriptRouteMatches(context, turn.origin_channel_type, turn.origin_platform_id, turn.origin_thread_id);
   const unknown = (turn: TurnRow) =>
     turn.provenance !== 'native' && turn.origin_channel_type === null && turn.origin_platform_id === null;
   const messages: ConversationMessage[] = history
@@ -217,11 +217,15 @@ export function projectConversation(
     live &&
     turnIds.has(live.id) &&
     byId.get(live.id)?.phase !== 'settled' &&
-    routeMatches(context, live.channelType, live.platformId, live.threadId)
+    transcriptRouteMatches(context, live.channelType, live.platformId, live.threadId)
       ? live
       : null;
   const connected = signals.active.connected;
-  const actionable = context.canSend && connected && !!active;
+  const actionable =
+    context.canSend &&
+    connected &&
+    !!active &&
+    routeMatches(context, active.channelType, active.platformId, active.threadId);
   const view = {
     threadId,
     messages,

@@ -35,7 +35,8 @@ export function suggestionsActive(
   if (sending || turns.some((turn) => turn.phase !== 'settled')) return false;
   const index = messages.findIndex((message) => message.id === messageId);
   const message = messages[index];
-  if (!message || message.direction !== 'out' || message.deliveryOrigin !== 'response') return false;
+  if (!message || message.direction !== 'out' || message.recipient || message.deliveryOrigin !== 'response')
+    return false;
   const turn = turns.find((candidate) => candidate.id === message.turnId);
   return (
     turn?.phase === 'settled' &&

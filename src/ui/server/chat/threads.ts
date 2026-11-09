@@ -20,7 +20,7 @@ import {
   isElevated,
   platformIdFor,
   resolveTurnContext,
-  routeMatches,
+  transcriptRouteMatches,
   viewerHandlesForChannel,
 } from './conversation-context.js';
 import { conversationUnread } from './read-state.js';
@@ -61,7 +61,6 @@ interface UserMessagingContext {
  */
 export function viewerHasContent(userId: string, agentGroupId: string): boolean {
   const ctxs = listUserMessagingContexts(userId, agentGroupId);
-  if (ctxs.length === 0) return false;
   // Web contexts always count — the user can start a new thread even
   // without existing sessions. Non-web contexts require a session to
   // exist (we can't know if ANY thread belongs to the viewer without
@@ -76,6 +75,7 @@ export function viewerHasContent(userId: string, agentGroupId: string): boolean 
   // Agent-shared session (no mg link) is shared by everyone with a
   // messaging context, so it also counts.
   if (
+    ctxs.length > 0 &&
     getDb()
       .prepare(
         'SELECT 1 FROM sessions WHERE agent_group_id = ? AND messaging_group_id IS NULL AND thread_id IS NULL LIMIT 1',
@@ -83,7 +83,9 @@ export function viewerHasContent(userId: string, agentGroupId: string): boolean 
       .get(agentGroupId)
   )
     return true;
-  return false;
+  return getSessionsByAgentGroup(agentGroupId).some(
+    (session) => !!readSessionThreadSummary({ agentGroupId, sessionId: session.id }).peerMessages,
+  );
 }
 
 function listUserMessagingContexts(userId: string, agentGroupId: string): UserMessagingContext[] {
@@ -212,15 +214,17 @@ function withExecutionActivity(userId: string, agentGroupId: string, threads: Th
     const unread = conversationUnread(userId, agentGroupId, context);
     const state = live.get(thread.sessionId)!;
     const current =
-      state.turn && routeMatches(context, state.turn.channelType, state.turn.platformId, state.turn.threadId)
+      state.turn && transcriptRouteMatches(context, state.turn.channelType, state.turn.platformId, state.turn.threadId)
         ? state.turn
         : null;
     const durable = saved
       .get(thread.sessionId)
-      ?.find((turn) => routeMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null));
+      ?.find((turn) => transcriptRouteMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null));
     const pending = queued
       .get(thread.sessionId)
-      ?.some((route) => routeMatches(context, route.channel_type, route.platform_id, route.thread_id || null));
+      ?.some((route) =>
+        transcriptRouteMatches(context, route.channel_type, route.platform_id, route.thread_id || null),
+      );
     const running =
       pending ||
       (current && !(durable?.id === current.id && durable.phase === 'settled')) ||
@@ -422,6 +426,38 @@ function collectThreadsForContexts(
     });
   }
   out.push(...dmSummaries, ...agentSummaries);
+  for (const session of sessions) {
+    const cached = plans.findIndex((plan) => plan.session.id === session.id);
+    const scan = cached >= 0 ? summaries[cached] : readSessionThreadSummary({ agentGroupId, sessionId: session.id });
+    if (!scan.peerMessages) continue;
+    const { messageCount, lastActivityAt } = scan.peerMessages;
+    const primary = out.find(
+      (thread) =>
+        thread.sessionId === session.id &&
+        thread.threadId === session.thread_id &&
+        thread.messagingGroupId === session.messaging_group_id,
+    );
+    if (primary) {
+      primary.messageCount += messageCount;
+      primary.lastActivityAt =
+        lastActivityAt === null
+          ? primary.lastActivityAt
+          : Math.max(primary.lastActivityAt ?? lastActivityAt, lastActivityAt);
+    } else {
+      out.push({
+        threadId: `__agent:${session.id}`,
+        sessionId: session.id,
+        channelType: 'agent',
+        messagingGroupId: session.id,
+        platformId: agentGroupId,
+        sessionMode: 'agent-shared',
+        title: 'Agent messages',
+        lastActivityAt,
+        messageCount,
+        activity: 'idle',
+      });
+    }
+  }
 
   // Stamp canSend by channel — true iff the adapter is registered and
   // connected. Web is always sendable (handled by submitWebInbound).

@@ -6,6 +6,7 @@ import { isSessionTurnId } from '../../../session-link.js';
 import { openInboundDb, openOutboundDb, sessionDir } from '../../../session-manager.js';
 import { summarizeTaskPrompt } from '../../../thread-summaries.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
+import { getAgentGroup } from '../../../db/agent-groups.js';
 import { chatSdkHistoryContent } from '../../shared/readable-output.js';
 export { chatSdkHistoryContent } from '../../shared/readable-output.js';
 import { shortcodeToEmoji } from './emoji.js';
@@ -149,6 +150,17 @@ export function readConversationHistory(
   if (isDm && !elevated && viewerHandles.length === 0) return { context, messages: [] };
 
   const messages: ConversationMessage[] = [];
+  const peerName = (id: string) => ({ agentGroupId: id, displayName: getAgentGroup(id)?.name?.trim() || id });
+  const route = `(channel_type = @channel AND thread_id IS @thread
+    AND platform_id IN (SELECT value FROM json_each(@platforms)))
+    OR (@peers = 1 AND channel_type = 'agent' AND platform_id != @groupId AND thread_id IS NULL)`;
+  const scope = {
+    channel: context.channelType,
+    thread: context.threadId,
+    platforms: JSON.stringify(context.platformIds),
+    peers: Number(context.peerMessagesFor === groupId),
+    groupId,
+  };
   const inDb = openInboundDb(groupId, sessionId);
   try {
     const outDb = openOutboundDb(groupId, sessionId);
@@ -156,17 +168,18 @@ export function readConversationHistory(
       try {
         const rows = inDb
           .prepare(
-            `SELECT id, kind, timestamp, content, status, sender_user_id FROM messages_in
-         WHERE channel_type = ? AND thread_id IS ?
-           AND platform_id IN (${context.platformIds.map(() => '?').join(',')}) ORDER BY seq`,
+            `SELECT id, kind, timestamp, content, status, sender_user_id, channel_type, platform_id FROM messages_in
+         WHERE ${route} ORDER BY seq`,
           )
-          .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
+          .all(scope) as Array<{
           id: string;
           kind: string;
           timestamp: number;
           content: string;
           status: string;
           sender_user_id: string | null;
+          channel_type: string;
+          platform_id: string;
         }>;
         const { states: inputStates, positions: inputPositions } = readVisibleInputStates(
           groupId,
@@ -181,6 +194,7 @@ export function readConversationHistory(
         // mismatches and the user's own message paints twice on visibility
         // resume. Strip the suffix here so history matches the send id.
         for (const r of rows) {
+          if (r.channel_type === 'agent' && r.kind !== 'chat' && r.kind !== 'text') continue;
           if (
             options.hideApprovalOutcomes &&
             r.sender_user_id === null &&
@@ -205,7 +219,7 @@ export function readConversationHistory(
             r.content,
             groupId,
             threadId,
-            context.channelType === WEB_CHANNEL_TYPE,
+            context.channelType === WEB_CHANNEL_TYPE || r.channel_type === 'agent',
             sessionId,
           );
           if (parsed != null) {
@@ -214,9 +228,12 @@ export function readConversationHistory(
             // show only the user's actual query in the UI.
             const text = context.channelType === HA_CHANNEL_TYPE ? extractDisplayQuery(parsed.text) : parsed.text;
             const sender = r.sender_user_id ? getUser(r.sender_user_id) : undefined;
-            const author = r.sender_user_id
-              ? { userId: r.sender_user_id, displayName: sender?.display_name?.trim() || r.sender_user_id }
-              : undefined;
+            const author =
+              r.channel_type === 'agent'
+                ? peerName(r.platform_id)
+                : r.sender_user_id
+                  ? { userId: r.sender_user_id, displayName: sender?.display_name?.trim() || r.sender_user_id }
+                  : undefined;
             messages.push({
               direction: 'in',
               id,
@@ -225,7 +242,7 @@ export function readConversationHistory(
               files: parsed.files,
               author,
               canEditPending:
-                context.channelType === WEB_CHANNEL_TYPE &&
+                r.channel_type === WEB_CHANNEL_TYPE &&
                 r.sender_user_id === userId &&
                 ['queued', 'steering'].includes(inputStates.get(r.id)?.status ?? ''),
               ...(inputStates.has(r.id) ? { inputState: inputStates.get(r.id) } : {}),
@@ -240,17 +257,19 @@ export function readConversationHistory(
       try {
         const rows = outDb
           .prepare(
-            `SELECT message.id, message.timestamp, message.kind, message.content, message.turn_id FROM messages_out message
-         WHERE message.channel_type = ? AND message.thread_id IS ?
-           AND message.platform_id IN (${context.platformIds.map(() => '?').join(',')})
+            `SELECT message.id, message.timestamp, message.kind, message.content, message.turn_id,
+             message.channel_type, message.platform_id FROM messages_out message
+         WHERE ${route}
          ORDER BY message.seq`,
           )
-          .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
+          .all(scope) as Array<{
           id: string;
           timestamp: number;
           kind: string;
           content: string;
           turn_id: string | null;
+          channel_type: string;
+          platform_id: string;
         }>;
 
         // Reactions are `chat` rows with `operation:'reaction'` targeting a
@@ -269,6 +288,7 @@ export function readConversationHistory(
                 id: r.id,
                 ...(r.turn_id ? { turnId: r.turn_id } : {}),
                 timestamp: r.timestamp,
+                ...(r.channel_type === 'agent' ? { recipient: peerName(r.platform_id) } : {}),
               });
             }
             continue;
@@ -307,6 +327,7 @@ export function readConversationHistory(
             id: r.id,
             timestamp: r.timestamp,
             ...(r.turn_id ? { turnId: r.turn_id } : {}),
+            ...(r.channel_type === 'agent' ? { recipient: peerName(r.platform_id) } : {}),
           });
         }
 
@@ -422,12 +443,15 @@ function taskWasAutoPaused(content: string): boolean {
   }
 }
 
-function encodedAttachmentUrl(groupId: string, threadId: string, localPath: string): string {
+export function encodedAttachmentUrl(groupId: string, threadId: string, localPath: string): string {
   const encodedPath = localPath
     .split('/')
     .map((part) => encodeURIComponent(part))
     .join('/');
-  return `api/groups/${encodeURIComponent(groupId)}/chat/${encodeURIComponent(threadId)}/attachments/${encodedPath}`;
+  const query = threadId.startsWith('__agent:')
+    ? `?${new URLSearchParams({ channel: 'agent', mg: threadId.slice('__agent:'.length) })}`
+    : '';
+  return `api/groups/${encodeURIComponent(groupId)}/chat/${encodeURIComponent(threadId)}/attachments/${encodedPath}${query}`;
 }
 
 function parseInboundContent(

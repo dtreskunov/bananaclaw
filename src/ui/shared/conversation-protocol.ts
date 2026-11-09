@@ -35,7 +35,7 @@ import {
   type Check,
 } from './validation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 1;
+export const CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 2;
 export type EntityChanges<T> = CollectionPatch<T>;
 export type ConversationTurnFields = Omit<ConversationTurn, 'activity'>;
 export interface ConversationActivityPatch {
@@ -116,7 +116,14 @@ const message = shape({
     }),
   ),
   canEditPending: optional(bool),
-  author: optional(shape({ userId: id, displayName: text })),
+  author: optional(
+    (value) =>
+      object(value) &&
+      text(value.displayName) &&
+      ((id(value.userId) && value.agentGroupId === undefined) ||
+        (id(value.agentGroupId) && value.userId === undefined)),
+  ),
+  recipient: optional(shape({ agentGroupId: id, displayName: text })),
   deliveryOrigin: optional(oneOf('send_message', 'send_file', 'response')),
   systemGenerated: optional(bool),
   suggestedAction: optional(oneOf('continue', 'retry', 'report')),

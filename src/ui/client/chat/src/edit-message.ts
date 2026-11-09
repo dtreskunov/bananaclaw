@@ -11,7 +11,12 @@ export function findEditBranchAnchorId(messages: ChatMessage[], targetMessageId:
   const { transcript } = splitQueuedFollowups(messages);
   for (const message of transcript) {
     if (message.id === targetMessageId) return previousId;
-    if ((message.direction === 'in' || message.direction === 'out') && message.id) {
+    if (
+      (message.direction === 'in' || message.direction === 'out') &&
+      message.id &&
+      !message.recipient &&
+      !(message.author && 'agentGroupId' in message.author)
+    ) {
       previousId = message.id;
     }
   }

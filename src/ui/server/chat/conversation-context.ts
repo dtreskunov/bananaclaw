@@ -4,7 +4,7 @@ import {
   getMessagingGroupAgentByPair,
   getMessagingGroupByPlatform,
 } from '../../../db/messaging-groups.js';
-import { findSessionForAgent } from '../../../db/sessions.js';
+import { findSessionForAgent, getSession } from '../../../db/sessions.js';
 import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import { getIdentitiesForUser } from '../../../modules/permissions/db/identities.js';
 import { isGlobalAdmin, isOwner } from '../../../modules/permissions/db/user-roles.js';
@@ -113,6 +113,23 @@ export interface TurnContext {
   platformIds: string[];
   threadId: string | null;
   canSend: boolean;
+  peerMessagesFor?: string;
+}
+
+export function transcriptRouteMatches(
+  context: TurnContext,
+  channel: string | null,
+  platform: string | null,
+  thread: string | null,
+): boolean {
+  return (
+    routeMatches(context, channel, platform, thread) ||
+    (!!context.peerMessagesFor &&
+      channel === 'agent' &&
+      platform !== null &&
+      platform !== context.peerMessagesFor &&
+      thread === null)
+  );
 }
 
 export function routeMatches(
@@ -136,6 +153,25 @@ export function resolveTurnContext(
   override?: { channelType: string; messagingGroupId: string },
 ): TurnContext | null {
   if (!canAccessAgentGroup(userId, groupId).allowed) return null;
+  if (threadId.startsWith('__agent:')) {
+    const sessionId = threadId.slice('__agent:'.length);
+    const session = getSession(sessionId);
+    if (
+      !session ||
+      session.agent_group_id !== groupId ||
+      override?.channelType !== 'agent' ||
+      override.messagingGroupId !== sessionId
+    )
+      return null;
+    return {
+      sessionId,
+      channelType: 'agent',
+      platformIds: [],
+      threadId: null,
+      canSend: false,
+      peerMessagesFor: groupId,
+    };
+  }
   const target = resolveTargetMessagingGroup(userId, groupId, override, isElevated(userId));
   if (!target) return null;
   const mg = getMessagingGroup(target.messagingGroupId);
@@ -143,14 +179,20 @@ export function resolveTurnContext(
   const isDm = threadId.startsWith('__dm:');
   if (isDm && threadId !== `__dm:${mg.id}`) return null;
   const session = resolveSessionForMode(groupId, mg.id, target.sessionMode, isDm ? '' : threadId);
+  const storedSession = session ? getSession(session.id) : undefined;
+  const includePeers = storedSession?.messaging_group_id === mg.id && storedSession.thread_id === threadId;
   if (session && !isDm && target.channelType !== WEB_CHANNEL_TYPE && !isElevated(userId)) {
-    const stored = getDb().prepare('SELECT thread_id FROM sessions WHERE id=?').get(session.id) as { thread_id: string | null };
+    const stored = getDb().prepare('SELECT thread_id FROM sessions WHERE id=?').get(session.id) as {
+      thread_id: string | null;
+    };
     if (stored.thread_id !== null) {
       const summary = readSessionThreadSummary({
-        agentGroupId: groupId, sessionId: session.id,
+        agentGroupId: groupId,
+        sessionId: session.id,
         thread: { channelType: target.channelType, platformId: mg.platform_id, threadId },
       });
-      if (!viewerHandlesForChannel(userId, target.channelType).some(handle => summary.owners.includes(handle))) return null;
+      if (!viewerHandlesForChannel(userId, target.channelType).some((handle) => summary.owners.includes(handle)))
+        return null;
     }
   }
   const owned = userOwnsMessagingGroup(userId, groupId, target.channelType, mg.id);
@@ -164,6 +206,7 @@ export function resolveTurnContext(
         : [mg.platform_id],
     threadId: isDm ? null : threadId,
     canSend: owned && (target.channelType === WEB_CHANNEL_TYPE || !!adapter?.isConnected()),
+    ...(includePeers ? { peerMessagesFor: groupId } : {}),
   };
 }
 

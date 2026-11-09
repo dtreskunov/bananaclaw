@@ -51,6 +51,25 @@ const update: ConversationUpdate = {
   changes: diffConversation(empty, next),
 };
 describe('conversation protocol', () => {
+  it('rejects ambiguous or malformed sender and recipient identities', () => {
+    const frame = (fields: object) => ({
+      ...snapshot,
+      conversation: {
+        ...empty,
+        messages: [{ ...next.messages[0], ...fields }],
+        timeline: [{ kind: 'message', messageId: 'one' }],
+      },
+    });
+    for (const author of [
+      { displayName: 'Missing identity' },
+      { userId: 'user', agentGroupId: 'agent', displayName: 'Ambiguous' },
+      { agentGroupId: '', displayName: 'Empty' },
+    ])
+      expect(() => parseConversationFrame(frame({ author }))).toThrow('invalid_frame');
+    expect(() => parseConversationFrame(frame({ recipient: { displayName: 'Missing identity' } }))).toThrow(
+      'invalid_frame',
+    );
+  });
   it('accepts epoch zero and rejects string or imprecise timestamps before reducing snapshots', () => {
     const frame = {
       ...snapshot,

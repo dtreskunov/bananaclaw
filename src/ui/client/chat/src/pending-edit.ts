@@ -101,7 +101,13 @@ export function canEditPendingMessage(
 }
 
 export function canEditMessageInBranch(message: ChatMessage): boolean {
-  return message.direction === 'in' && !!message.id && !!message.text.trim() && !message.inputState;
+  return (
+    message.direction === 'in' &&
+    !(message.author && 'agentGroupId' in message.author) &&
+    !!message.id &&
+    !!message.text.trim() &&
+    !message.inputState
+  );
 }
 
 export interface PendingEditBody {

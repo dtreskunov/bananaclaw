@@ -80,6 +80,7 @@ export interface SessionThreadSummary {
   totalCost: number;
   totalTokens: number;
   turnCount: number;
+  peerMessages?: { messageCount: number; lastActivityAt: number | null };
 }
 
 function parsedContent(content: string): unknown {
@@ -447,6 +448,13 @@ export function readSessionThreadSummary(spec: ThreadSummarySpec): SessionThread
     ...(usage
       ? (JSON.parse(usage.value) as Pick<SessionThreadSummary, 'totalCost' | 'totalTokens' | 'turnCount'>)
       : { totalCost: 0, totalTokens: 0, turnCount: 0 }),
+  };
+  const peers = [...inbound, ...outbound].filter((row) =>
+    row.channel_type === 'agent' && row.platform_id !== spec.agentGroupId && !row.thread_id);
+  const peerCount = peers.reduce((count, row) => count + row.data.count, 0);
+  if (peerCount) result.peerMessages = {
+    messageCount: peerCount,
+    lastActivityAt: latest(peers.map((row) => row.data.last)),
   };
   const replies = (channel: string, thread: string) =>
     outbound.filter((row) => row.channel_type === channel && row.thread_id === thread);

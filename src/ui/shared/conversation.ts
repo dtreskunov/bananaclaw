@@ -20,6 +20,31 @@ export interface ConversationUsage {
   duration_api_ms?: number;
 }
 
+export type ConversationAuthor =
+  | { userId: string; displayName: string }
+  | { agentGroupId: string; displayName: string };
+
+export function otherAuthorName(
+  author: ConversationAuthor | null | undefined,
+  userId: string | null,
+  agentGroupId: string | null,
+): string | undefined {
+  if (!author) return undefined;
+  const own = 'userId' in author ? author.userId === userId : author.agentGroupId === agentGroupId;
+  return own ? undefined : author.displayName;
+}
+
+export function messageAttribution(
+  message: Pick<ConversationMessage, 'author' | 'recipient'>,
+  userId: string | null,
+  agentGroupId: string | null,
+): string | undefined {
+  return (
+    otherAuthorName(message.author, userId, agentGroupId) ??
+    (message.recipient ? `To ${message.recipient.displayName}` : undefined)
+  );
+}
+
 export interface ConversationMessage {
   id: string;
   direction: 'in' | 'out' | 'event';
@@ -29,7 +54,8 @@ export interface ConversationMessage {
   timelinePosition?: number;
   inputState?: InputState;
   canEditPending?: boolean;
-  author?: { userId: string; displayName: string };
+  author?: ConversationAuthor;
+  recipient?: { agentGroupId: string; displayName: string };
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
   systemGenerated?: boolean;
   suggestedAction?: 'continue' | 'retry' | 'report';

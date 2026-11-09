@@ -8,6 +8,15 @@ function message(id: string, direction: ChatMessage['direction']): ChatMessage {
 }
 
 describe('findEditBranchAnchorId', () => {
+  it('does not use peer exchanges as anchors for editing human messages', () => {
+    const messages = [
+      message('response', 'out'),
+      { ...message('peer-in', 'in'), author: { agentGroupId: 'peer', displayName: 'Peer' } },
+      { ...message('peer-out', 'out'), recipient: { agentGroupId: 'peer', displayName: 'Peer' } },
+      message('human', 'in'),
+    ];
+    expect(findEditBranchAnchorId(messages, 'human')).toBe('response');
+  });
   it('anchors a completed follow-up after the prior response, not its original send-time predecessor', () => {
     const base = Date.parse('2026-01-01T00:00:00.000Z') * 1000;
     const messages = [

@@ -160,6 +160,7 @@ export const COMPLETION_SOUND_KEY = 'nanoclaw:sound:completion:muted';
 
 export const CHANNEL_META: Record<string, ChannelMetaEntry> = {
   web: { label: 'Web', icon: '\uD83D\uDCAC' },
+  agent: { label: 'Agents', icon: '\uD83E\uDD16' },
   resend: { label: 'Email', icon: '\uD83D\uDCE7' },
   discord: { label: 'Discord', icon: '\uD83D\uDC7E' },
   telegram: { label: 'Telegram', icon: '\u2708\uFE0F' },

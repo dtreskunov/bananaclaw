@@ -878,6 +878,19 @@ members can list, read, and send messages in every web thread; only owners and
 admins (global or scoped to the group) can delete a thread. Human messages keep
 their sender attribution in both history and live updates.
 
+Peer-agent messages use the same sender labels as other users. Received messages
+name the sending agent; sent messages show **To &lt;agent name&gt;**. Identity comes
+from the journal's routing fields, never from names supplied in message text.
+Dedicated per-thread sessions include both sides of their peer exchanges in the
+original transcript. Shared or channel-less sessions instead expose a read-only
+**Agent messages** thread (`__agent:<sessionId>`, with channel `agent` and the
+session ID as its synthetic messaging context). Each agent's Threads view reads
+only that agent's own session journals. Peer threads exclude human-channel
+traffic, and shared-session peer exchanges are not copied into unrelated human
+threads. Peer messages support the normal attachment and reading controls, but
+are not editable human inputs or branch anchors. User and agent attribution,
+including approval bubbles, shares the same current-identity suppression rule.
+
 Historical normal human message bubbles include an icon-only **Edit** action for starting a new
 branch with that message copied into the composer. It is not restricted to the
 original author, so another participant with access to the agent group may use

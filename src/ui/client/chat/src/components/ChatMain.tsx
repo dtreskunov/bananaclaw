@@ -34,7 +34,7 @@ import { canEditMessageInBranch, composerSendInFlight, currentPendingEditor } fr
 import { usePendingComposer } from '../pending-composer';
 import { splitPendingInputs } from '../queued-followups';
 import { isSystemNotice, showsMidTurnLabel } from '../chat-protocol';
-import type { ConversationTurn } from '../../../../shared/conversation';
+import { messageAttribution, type ConversationTurn } from '../../../../shared/conversation';
 import { isTurnStartStep, QUEUED_TEXT, turnRequestedAt } from '../../../../shared/conversation-activity';
 import { activityTimestamp, executionTime } from '../../../../shared/activity-timing';
 import {
@@ -560,7 +560,7 @@ function canFork(t: Thread | undefined): boolean {
  * A message still streaming has no id yet, so there is nothing to anchor to.
  */
 function canForkMessage(m: ChatMessage): boolean {
-  return m.direction === 'out' && !!m.id && canFork(activeThread());
+  return m.direction === 'out' && !m.recipient && !!m.id && canFork(activeThread());
 }
 
 function ForkButton({ m, isLatest }: { m: ChatMessage; isLatest: boolean }) {
@@ -851,7 +851,7 @@ function Message(
     <MessageBubble
       class={cls} data-msg-id={m.id} elementRef={ref}
       read={!systemNotice && (!!m.text.trim() || !!m.files?.length) ? { kind: 'message', id: m.id } : undefined}
-      from={m.direction === 'in' && m.author && m.author.userId !== currentUserId.value ? m.author.displayName : undefined}
+      from={messageAttribution(m, currentUserId.value, groupId.value)}
       timestamp={m.timestamp} metadata={metadata}
       reveal={highlightMessageId.value === m.id ? searchQuery.value : undefined}
     >
@@ -957,6 +957,7 @@ function DisplayCardMessage({ message, card, reading = false }: { message: ChatM
   return reading ? <MarkdownPreview html="" className="reader-message">{content.props.children}</MarkdownPreview> : (
     <MessageBubble class="msg out display-card agent-action" data-msg-id={message.id}
       read={{ kind: 'message', id: message.id }}
+      from={messageAttribution(message, currentUserId.value, groupId.value)}
       timestamp={message.timestamp} metadata={<AgentActionLabel label="card" title="Sent with send_card" />}
       reveal={highlightMessageId.value === message.id ? searchQuery.value : undefined}>{content.props.children}</MessageBubble>
   );

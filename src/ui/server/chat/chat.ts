@@ -17,7 +17,7 @@ import {
   resolveTurnContext,
   viewerHandlesForChannel,
 } from './conversation-context.js';
-import { parseInputHandling } from './history.js';
+import { encodedAttachmentUrl, parseInputHandling, readChatHistory } from './history.js';
 import crypto from 'crypto';
 import http from 'http';
 import { isEpochMs } from '../../shared/time.js';
@@ -708,7 +708,7 @@ export async function handleChatRequest(
   }
 
   if (m.kind === 'attachment') {
-    serveInboundAttachment(req, res, m.groupId, m.threadId, m.attachmentPath);
+    serveInboundAttachment(req, res, userId, m.groupId, m.threadId, m.attachmentPath, override);
     return true;
   }
 
@@ -1166,62 +1166,43 @@ export function inboundAttachmentSecurityHeaders(contentType: string, filename =
 function serveInboundAttachment(
   req: http.IncomingMessage,
   res: http.ServerResponse,
+  userId: string,
   groupId: string,
   threadId: string,
   requestedPath: string,
+  override?: { channelType: string; messagingGroupId: string },
 ): void {
   const normalizedPath = path.posix.normalize(requestedPath);
   if (normalizedPath.startsWith('../') || normalizedPath === '..' || path.posix.isAbsolute(normalizedPath)) {
     writeJson(res, 400, { error: 'bad_attachment_path' });
     return;
   }
-  const mg = getMessagingGroupByPlatform(WEB_CHANNEL_TYPE, platformIdFor(groupId));
-  if (!mg) {
-    writeJson(res, 404, { error: 'not_found' });
-    return;
-  }
-  const session = resolveSessionForMode(groupId, mg.id, 'per-thread', threadId);
-  if (!session) {
+  const context = resolveTurnContext(userId, groupId, threadId, override);
+  if (!context?.sessionId) {
     writeJson(res, 404, { error: 'not_found' });
     return;
   }
 
   let found: { filename: string; contentType: string } | null = null;
   try {
-    const inDb = openInboundDb(groupId, session.id);
-    try {
-      const rows = inDb
-        .prepare('SELECT content FROM messages_in WHERE channel_type = ? AND thread_id = ? ORDER BY seq')
-        .all(WEB_CHANNEL_TYPE, threadId) as { content: string }[];
-      for (const row of rows) {
-        let parsed: { attachments?: unknown };
-        try {
-          parsed = JSON.parse(row.content) as { attachments?: unknown };
-        } catch {
-          continue;
-        }
-        if (!Array.isArray(parsed.attachments)) continue;
-        for (const att of parsed.attachments as Array<Record<string, unknown>>) {
-          if (att.localPath !== normalizedPath) continue;
-          const filename = String(att.name ?? att.filename ?? path.posix.basename(normalizedPath));
-          const contentType = typeof att.mimeType === 'string' ? att.mimeType : mimeFromFilename(filename);
-          found = { filename, contentType };
-          break;
-        }
-        if (found) break;
-      }
-    } finally {
-      inDb.close();
+    const url = encodedAttachmentUrl(groupId, threadId, normalizedPath);
+    for (const message of readChatHistory(userId, groupId, threadId, override)) {
+      const file = message.files?.find((file) => file.url === url);
+      if (!file) continue;
+      found = { filename: file.filename, contentType: file.contentType ?? mimeFromFilename(file.filename) };
+      break;
     }
-  } catch {
-    // inbound DB may not exist
+  } catch (err) {
+    log.warn('web chat attachment lookup failed', { userId, groupId, threadId, err });
+    writeJson(res, 500, { error: 'attachment_lookup_failed' });
+    return;
   }
   if (!found) {
     writeJson(res, 404, { error: 'not_found' });
     return;
   }
 
-  const sessionRoot = sessionDir(groupId, session.id);
+  const sessionRoot = sessionDir(groupId, context.sessionId);
   const abs = path.join(sessionRoot, normalizedPath);
   let realAbs: string;
   let stat: fs.Stats;

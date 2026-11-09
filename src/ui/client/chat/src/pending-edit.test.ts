@@ -56,6 +56,15 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('pending edit eligibility', () => {
+  it('does not offer to edit received peer messages as human messages', () => {
+    expect(
+      canEditMessageInBranch({
+        ...message,
+        inputState: undefined,
+        author: { agentGroupId: 'peer', displayName: 'Peer' },
+      }),
+    ).toBe(false);
+  });
   it.each(['queued', 'steering'] as const)('edits owned %s web inputs, never branches them', (status) => {
     const input = { ...message, inputState: { ...message.inputState!, status } };
     expect(canEditPendingMessage(input, thread, activeTurn.value, true)).toBe(true);
