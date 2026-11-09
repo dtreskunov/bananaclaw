@@ -6,7 +6,7 @@ Access layer: `src/db/`. Authoritative fresh-store schema:
 `src/db/central-schema.ts`. `src/db/migrations/index.ts` initializes it directly
 and applies future named migrations.
 Maintained time instants below are INTEGER UTC epoch milliseconds, retained as
-numbers by the DB access layer, host domain records and UI protocol 16.
+numbers by the DB access layer, host domain records and UI protocol 17.
 Nullable instants remain `null`; epoch zero is a valid recorded instant.
 Exported mutation APIs validate supplied instants as safe integer milliseconds
 within the JavaScript Date range before binding SQLite, so invalid numbers
@@ -15,7 +15,8 @@ The admin CLI formats public record dates as ISO strings at its response boundar
 and parses user-supplied date arguments once. Archive rows contain numeric dates;
 restore accepts only the current numeric archive format.
 `archived_at` remains ISO archive metadata. No additional central schema migration
-is required for numeric host records. `PRAGMA user_version=1` is required; existing
+is required for numeric host records. `PRAGMA user_version=2` is required after the
+[reply-suggestions cutover](reply-suggestions-cutover.md); existing
 stores retain their data and historical migration ledger. Populated version-0
 stores and future storage versions are refused; older stores need the
 [offline cutover](db-storage-cutover.md), never startup conversion.
@@ -288,8 +289,7 @@ CREATE INDEX idx_sessions_lookup     ON sessions(messaging_group_id, thread_id);
 
 - **Resolved by:** `resolveSession()` in `src/session-manager.ts`.
 - Creating a session also provisions the session folder and both session DBs via `initSessionFolder()` — see [db-session.md](db-session.md).
-- Deleting a session removes its durable questions in the same transaction.
-  Session-bound approval requests require explicit cancellation consent: the chat
+- Session-bound approval requests require explicit cancellation consent: the chat
   delete dialogs explain this, and `DELETE /api/groups/:id/chat/:threadId` requires
   `cancelApprovals=1` when such requests exist (otherwise `409
 approval_cancellation_required`, with no deletion side effects). Cascading
@@ -303,28 +303,20 @@ approval_cancellation_required`, with no deletion side effects). Cascading
 approval_in_progress` until processing finishes, even with cancellation consent.
   The guard releases on success or failure and adds no persistent status or schema.
 
-### 1.9 `interactions` — questions
+### 1.9 `interactions` — explicit approval workflows
 
-The baseline defines the current-state table for all four
-interaction kinds. `src/db/interactions.ts` owns canonical serialization;
-`src/db/sessions.ts` specializes question creation and first-response-wins CAS.
-`Question` in `src/types.ts` distinguishes answered records with a required
-`QuestionResponse` and response time from unanswered records with a null response.
-The immutable `QuestionInput` is complete, including optional placeholder and
-multiline hints. The original host-owned outbound row still supplies turn/timeline
-provenance. Multiple pending questions may coexist in one session; IDs remain
-globally unique across all interaction kinds.
+The current-state table admits three kinds: `confirmation`, `account_setup`
+and `access_grant`. `src/db/interactions.ts` owns canonical serialization;
+`src/db/approvals.ts` specializes creation and revision-checked status changes.
+Request IDs, input/response JSON, actor/timing fields, outcomes and route
+provenance retain authorization and audit context. IDs are globally unique.
 
-The original question remains stored after resolution. Answers and
-skips arrive in the session input journal as `interactive_response` events
-linked by `questionId`; they never relocate the original question output.
-
-A skip is a resolved response (`status = 'answered'`,
-`response_json = '{"responseType":"skipped"}'`), not cancellation or a fabricated
-answer. Literal text matching an option remains text. `responded_by` and
-`responded_at` record the actor and time for either response. The conditional
-pending-to-answered update makes the first response win; journal retries use the
-same `question-response:<questionId>` identity and saved outcome.
+Conversational reply drafts are not interactions and create no pending-answer
+or waiting state. Separate drafts are stored in runner/host `session_state`
+under `response-suggestions:<outputId>` before the turn settlement barrier.
+Inline drafts live in final message Markdown. Sending either form is ordinary
+chat input. Historical questions were converted by the
+[archived offline cutover](reply-suggestions-cutover.md).
 
 ### 1.10 `agent_destinations`
 
@@ -499,8 +491,8 @@ Runner: `runMigrations()` in `src/db/migrations/index.ts`.
 2. For an empty version-0 store only, creates `CENTRAL_SCHEMA_SQL`, seeds the
    installation identity and readiness row, records the 49 covered historical
    migration names plus `central-baseline-v1`, and
-   sets `PRAGMA user_version=1` in one transaction.
-3. Reads applied migration **names**. Existing version-1 stores keep all historical
+   sets `PRAGMA user_version=2` in one transaction.
+3. Reads applied migration **names**. Existing version-2 stores keep all historical
    names and applied-order numbers; they do not need a baseline ledger row.
 4. For each unapplied future name in the `migrations` array, executes `up(db)`
    transactionally and appends an applied-order `schema_version` row with an

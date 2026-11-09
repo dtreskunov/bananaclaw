@@ -11,9 +11,14 @@ All notable changes to NanoClaw will be documented in this file.
   without sending, preserve existing drafts, and appear only on the latest
   completed reply. The composer never becomes an answer-required dock. Approvals use
   their own payloads and indexed callbacks. Host/session/runner storage is v2,
-  archives are v4, and browser conversations use protocol 17. Prepare private
-  offline candidates using [the cutover guide](docs/reply-suggestions-cutover.md);
-  the converter never installs candidates or mutates live data.
+  archives are v4, and browser conversations use protocol 17. Older installations
+  must follow [the archived cutover guide](docs/reply-suggestions-cutover.md)
+  before deploying; startup never converts old state.
+
+- **Completed reply-suggestions cutover cleanup.** The one-time converter,
+  database helpers and conversion fixtures are archived at `faca92d40` and
+  removed from the current tree. Version checks, runtime tests and private
+  rollback backups remain. See [recovery and rollback](docs/reply-suggestions-cutover.md).
 
 - **[BREAKING] Numeric-only host metadata.** Pairing, skill-catalog and startup
   breaker files no longer import ISO dates during normal reads. Run the

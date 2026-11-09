@@ -7,9 +7,11 @@ Schemas live in `src/db/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA`
 
 All maintained SQL instants are INTEGER UTC epoch milliseconds (including due
 times and activity `ts`); public records retain ISO strings and activity frames
-retain decimal epoch strings. Every host/runner/native store requires
-`PRAGMA user_version=1`. Existing stores are refused until the
-[offline cutover](db-storage-cutover.md); `IF NOT EXISTS` is not an upgrade path.
+retain decimal epoch strings. Host and runner stores require
+`PRAGMA user_version=2`; native-provider stores remain version 1.
+Older stores are refused until the
+[offline reply-suggestions cutover](reply-suggestions-cutover.md);
+`IF NOT EXISTS` is not an upgrade path.
 
 ---
 
