@@ -26,8 +26,7 @@ import {
 } from '../../ui/shared/approval-message.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
-  if (payload.responseType === 'skipped') return false;
-  const approval = getApproval(payload.questionId);
+  const approval = getApproval(payload.approvalId);
   if (!approval) return false;
 
   if (!isAuthorizedApprovalClick(approval, payload)) {
@@ -41,6 +40,13 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
   }
   if (approval.status !== 'pending') {
     log.info('Ignoring response to an approval that is no longer pending', { approvalId: approval.id });
+    return true;
+  }
+  const supportedDecision = approval.input.options.length
+    ? approval.input.options.some((option) => option.value === payload.value)
+    : payload.value === 'approve' || payload.value === 'reject';
+  if (!supportedDecision) {
+    log.warn('Ignoring unsupported approval decision', { approvalId: approval.id, value: payload.value });
     return true;
   }
   const message = parseApprovalMessage(payload.message);

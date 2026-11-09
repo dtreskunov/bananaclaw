@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./config.js')>()),
-  DATA_DIR: path.resolve('.test-approval-routing'),
+  DATA_DIR: path.resolve('.apr'),
 }));
 vi.mock('./container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(true),
@@ -49,7 +49,7 @@ afterEach(async () => {
   await stopAllSessionSignalServers();
   outbound?.close();
   closeDb();
-  fs.rmSync(path.resolve('.test-approval-routing'), { recursive: true, force: true });
+  fs.rmSync(path.resolve('.apr'), { recursive: true, force: true });
 });
 
 it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).each(['approval', 'settings'] as const)(
@@ -129,7 +129,7 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0).eac
         },
       });
       await handleApprovalsResponse({
-        questionId: 'approval',
+        approvalId: 'approval',
         value: 'approve',
         message: 'Keep existing labels and finish this report.',
         userId: 'owner',

@@ -28,15 +28,7 @@ vi.mock('./config.js', async () => {
 
 const TEST_DIR = process.cwd() + '/.test-tmp/delivery';
 
-import {
-  initTestDb,
-  closeDb,
-  runMigrations,
-  createAgentGroup,
-  createMessagingGroup,
-  createMessagingGroupAgent,
-  getQuestion,
-} from './db/index.js';
+import { initTestDb, closeDb, runMigrations, createAgentGroup, createMessagingGroup, createMessagingGroupAgent } from './db/index.js';
 import { getDeliveredIds, markDelivered } from './db/session-db.js';
 import { resolveSession, outboundDbPath, openInboundDb } from './session-manager.js';
 import { deliverSessionMessages, registerDeliveryAction, setDeliveryAdapter } from './delivery.js';
@@ -128,36 +120,6 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     expect(action).toHaveBeenCalledWith({ action: 'approval-origin-test' }, session, expect.anything(), {
       originMessageId: 'original-input',
     });
-  });
-
-  it('stores the complete immutable question input without copying its delivery envelope', async () => {
-    seedAgentAndChannel();
-    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
-    const input = {
-      question: 'Choose or explain',
-      responseMode: 'choice_or_text',
-      options: [{ label: 'Yes', selectedLabel: 'Agreed', value: 'yes' }],
-      placeholder: 'Explain your choice',
-      multiline: true,
-    };
-    const out = new Database(outboundDbPath('ag-1', session.id));
-    out
-      .prepare(
-        `INSERT INTO messages_out(id,timestamp,kind,platform_id,channel_type,content)
-      VALUES('question-output',(unixepoch('now')*1000),'chat-sdk','telegram:123','telegram',?)`,
-      )
-      .run(JSON.stringify({ type: 'ask_question', questionId: 'question', ...input, timelinePosition: 100 }));
-    out.close();
-    setDeliveryAdapter({ deliver: vi.fn().mockResolvedValue('receipt') });
-    await deliverSessionMessages(session);
-    expect(getQuestion('question')).toMatchObject({
-      id: 'question',
-      session_id: session.id,
-      message_out_id: 'question-output',
-      status: 'pending',
-      response: null,
-    });
-    expect(getQuestion('question')?.input).toEqual(input);
   });
 
   it('resolves stable outbound edit targets to platform delivery receipts', async () => {

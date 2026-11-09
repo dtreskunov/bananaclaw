@@ -209,7 +209,7 @@ describe('ncl groups archive ↔ restore round trip', () => {
     const dumpText = fs.readFileSync(path.join(TEST_GROUPS_DIR, 'audit~', 'archive.json'), 'utf8');
     expect(dumpText).not.toContain('must-not-be-archived');
     expect(JSON.parse(dumpText)).toMatchObject({
-      version: 3,
+      version: 4,
       interactions: expect.arrayContaining([
         expect.objectContaining({ id: 'pending', status: 'cancelled' }),
         expect.objectContaining({ id: 'failed', status: 'failed' }),

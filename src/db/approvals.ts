@@ -22,8 +22,7 @@ export function createApproval(
 }
 
 export function getApproval(id: string): Approval | undefined {
-  const record = getInteraction(id);
-  return record?.kind === 'question' ? undefined : record;
+  return getInteraction(id);
 }
 
 export function updateApprovalStatus(
@@ -43,7 +42,7 @@ export function updateApprovalStatus(
        responded_at=CASE WHEN @status='pending' THEN NULL WHEN @hasResponse THEN @now ELSE responded_at END,
        outcome_message=CASE WHEN @status='pending' THEN NULL ELSE COALESCE(@outcome,outcome_message) END,
        resolved_at=CASE WHEN @status IN ('pending','applying') THEN NULL ELSE @now END
-       WHERE id=@id AND kind!='question' AND (@revision IS NULL OR revision=@revision)`,
+       WHERE id=@id AND (@revision IS NULL OR revision=@revision)`,
       )
       .run({
         id,

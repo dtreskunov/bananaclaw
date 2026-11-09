@@ -15,7 +15,7 @@ const MAX_OUTPUT_BYTES = Number.parseInt(process.env.NANOCLAW_MAX_OUTPUT_BYTES |
 const MAX_CONTENT_ARRAY_ITEMS = 100;
 const MAX_CONTENT_DEPTH = 16;
 const MAX_OUTBOUND_FILES = 32;
-const MAX_QUESTION_OPTIONS = 50;
+const MAX_ACTION_OPTIONS = 50;
 
 function validateStructuredContent(value: unknown, depth = 0): boolean {
   if (depth > MAX_CONTENT_DEPTH) return false;
@@ -60,8 +60,8 @@ function validateMessageContent(raw: string): void {
   ) {
     throw new Error('invalid outbound file paths');
   }
-  if (content.options !== undefined && (!Array.isArray(content.options) || content.options.length > MAX_QUESTION_OPTIONS)) {
-    throw new Error('invalid question options');
+  if (content.options !== undefined && (!Array.isArray(content.options) || content.options.length > MAX_ACTION_OPTIONS)) {
+    throw new Error('invalid action options');
   }
 }
 

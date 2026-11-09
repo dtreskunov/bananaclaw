@@ -314,7 +314,7 @@ it('assigns a new ID to a warm follow-up and rejects the prior completed turn ID
   }
 });
 
-it('persists Stop without changing an existing question card', async () => {
+it('persists Stop without changing an intermediate message', async () => {
   const states: Array<link.ActiveTurn | null> = [];
   const publish = spyOn(link, 'signalTurnState').mockImplementation((state) => states.push(state));
   const controller = new AbortController();
@@ -331,17 +331,15 @@ it('persists Stop without changing an existing question card', async () => {
         end() {},
         abort: settle,
         events: (async function* (): AsyncGenerator<ProviderEvent> {
-          yield { type: 'init', continuation: 'question-session' };
+          yield { type: 'init', continuation: 'progress-session' };
           writeMessageOut({
-            id: 'question-row',
-            kind: 'chat-sdk',
+            id: 'progress-row',
+            kind: 'chat',
             channel_type: 'web',
             platform_id: 'chat-1',
             content: JSON.stringify({
-              type: 'ask_question',
-              questionId: 'question-id',
-              responseMode: 'text',
-              question: 'Which?',
+              text: 'Working on your request.',
+              delivery_origin: 'send_message',
             }),
           });
           await waiting;
@@ -350,9 +348,9 @@ it('persists Stop without changing an existing question card', async () => {
     },
   };
   insert('asking-turn');
-  const loop = runPollLoop({ provider, providerName: 'questions-stop', cwd: process.cwd(), signal: controller.signal });
+  const loop = runPollLoop({ provider, providerName: 'progress-stop', cwd: process.cwd(), signal: controller.signal });
   try {
-    await until(() => !!getOutboundDb().prepare("SELECT id FROM messages_out WHERE id = 'question-row'").get());
+    await until(() => !!getOutboundDb().prepare("SELECT id FROM messages_out WHERE id = 'progress-row'").get());
     link.requestTurnStop(states.find((state) => state?.status === 'running')!.id);
     await until(
       () => (getOutboundDb().prepare('SELECT COUNT(*) AS n FROM messages_out').get() as { n: number }).n === 2,
@@ -366,7 +364,7 @@ it('persists Stop without changing an existing question card', async () => {
     const originalContent = JSON.parse(original.content);
     const stoppedContent = JSON.parse(stopped.content);
     const activeTurnId = states.find((state) => state?.status === 'running')!.id;
-    expect(original.id).toBe('question-row');
+    expect(original.id).toBe('progress-row');
     expect(originalContent.cancelled).toBeUndefined();
     expect(originalContent.turn_id).toBeUndefined();
     expect(stoppedContent.turn_id).toBe(activeTurnId);
@@ -377,7 +375,6 @@ it('persists Stop without changing an existing question card', async () => {
       stopped: true,
       system_generated: true,
     });
-    expect(stoppedContent.cancelled_question_ids).toBeUndefined();
   } finally {
     settle();
     controller.abort();

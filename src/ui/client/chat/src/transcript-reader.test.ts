@@ -2,24 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { alignReaderMessage, readerKey, readerPages } from './transcript-reader';
 import { conversationPresentation } from './conversation-state';
 import { testAccountInteraction, testSnapshot } from './conversation-test-fixtures';
-import type { ChatMessage, PendingQuestionDto, TranscriptRow } from './types';
+import type { ChatMessage, TranscriptRow } from './types';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 afterEach(() => vi.unstubAllGlobals());
 
-const question: PendingQuestionDto = {
-  kind: 'question',
-  id: 'question',
-  question: 'Choose?',
-  responseMode: 'choice_or_text',
-  options: [{ value: 'first', label: 'First', selectedLabel: 'Chosen first' }],
-  agentGroupId: 'group',
-  threadId: 'thread',
-  createdAt: 1791219600000,
-  status: 'pending',
-  response: null,
-  answeredAt: null,
-};
 const message: ChatMessage = { id: 'message', direction: 'out', text: 'A readable reply', timestamp: 1791219601000 };
 
 describe('reader timeline', () => {
@@ -28,9 +15,8 @@ describe('reader timeline', () => {
       { kind: 'message', message },
       { kind: 'message', message: { ...message, id: 'file', text: '', files: [{ filename: 'note.txt', size: 10 }] } },
       {
-        kind: 'question-answer',
-        question,
-        answer: { ...message, id: 'answer', direction: 'in', questionId: question.id },
+        kind: 'message',
+        message: { ...message, id: 'answer', direction: 'in' },
       },
       { kind: 'message', message: { ...message, id: 'event', direction: 'event' } },
       { kind: 'message', message: { ...message, id: 'notice', systemGenerated: true } },
@@ -48,57 +34,38 @@ describe('reader timeline', () => {
     expect(readerPages(rows).map((page) => page.key)).toEqual([
       'message:message',
       'message:file',
-      'question:question',
+      'message:answer',
       'message:card',
     ]);
   });
 
-  it('adds a question-answer page only when the actual answer event is available', () => {
-    const before = conversationPresentation(
-      testSnapshot({ interactions: [question], messages: [message] }).conversation,
-    ).transcript;
+  it('adds an ordinary follow-up without changing the preceding reader page', () => {
+    const before = conversationPresentation(testSnapshot({ messages: [message] }).conversation).transcript;
     expect(before).toEqual([{ kind: 'message', message }]);
-    const submitted = {
-      ...question,
-      status: 'answered' as const,
-      response: { responseType: 'choice' as const, value: 'first' },
-    };
-    const awaiting = conversationPresentation(
-      testSnapshot({ interactions: [submitted], messages: [message] }).conversation,
-    ).transcript;
-    expect(awaiting).toEqual(before);
     const answer: ChatMessage = {
       ...message,
       id: 'answer',
       direction: 'in',
-      questionId: question.id,
-      questionResponseType: 'choice',
       text: 'first',
     };
-    const after = conversationPresentation(
-      testSnapshot({ interactions: [submitted], messages: [message, answer] }).conversation,
-    ).transcript;
-    const page = readerPages(after).find((page) => page.key === readerKey({ kind: 'question', id: question.id }));
+    const after = conversationPresentation(testSnapshot({ messages: [message, answer] }).conversation).transcript;
+    const page = readerPages(after).find((page) => page.key === readerKey({ kind: 'message', id: answer.id }));
     expect(page).toMatchObject({
-      key: 'question:question',
+      key: 'message:answer',
       anchorId: 'answer',
-      row: { kind: 'question-answer', answer },
+      row: { kind: 'message', message: answer },
     });
     expect(readerPages(after).length).toBe(readerPages(before).length + 1);
     expect(readerPages(after)[0].key).toBe(readerPages(before)[0].key);
   });
 
-  it('omits cancelled questions and cancelled response inputs from the reader', () => {
-    const cancelled = { ...question, status: 'cancelled' as const };
+  it('omits cancelled inputs from the reader', () => {
     const answer: ChatMessage = {
       ...message,
       direction: 'in',
-      questionId: question.id,
       inputState: { messageId: message.id, status: 'cancelled' },
     };
-    const rows = conversationPresentation(
-      testSnapshot({ interactions: [cancelled], messages: [answer] }).conversation,
-    ).transcript;
+    const rows = conversationPresentation(testSnapshot({ messages: [answer] }).conversation).transcript;
     expect(rows).toEqual([]);
     expect(readerPages(rows)).toEqual([]);
   });

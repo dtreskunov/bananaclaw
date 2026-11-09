@@ -21,7 +21,7 @@
  * exposing just user-roles/user-dms) is more churn than it's worth. Revisit
  * if either module becomes genuinely optional (see REFACTOR_PLAN open q #3).
  */
-import { normalizeOptions, type RawOption } from '../../channels/ask-question.js';
+import { normalizeOptions, type RawOption } from '../../channels/approval-request.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getSession } from '../../db/sessions.js';
 import { createApproval } from '../../db/approvals.js';
@@ -236,11 +236,10 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
         null,
         'chat-sdk',
         JSON.stringify({
-          type: 'ask_question',
-          questionId: approvalId,
+          type: 'approval_request',
+          approvalId,
           title,
-          question,
-          responseMode: 'choice',
+          body: question,
           options: normalizedOptions,
         }),
       );

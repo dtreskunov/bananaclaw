@@ -9,13 +9,12 @@
  */
 import type Database from 'better-sqlite3';
 
-import { getActiveSessions, createQuestion, getSession } from './db/sessions.js';
+import { getActiveSessions, getSession } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
 import { getDueOutboundMessages, markDelivered, markDeliveryFailed } from './db/session-db.js';
 import { log } from './log.js';
-import { isQuestionInput } from './ui/shared/conversation-protocol.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
 import { extractOutboundText, indexMessage } from './search-index.js';
 import { setTypingAdapter } from './modules/typing/index.js';
@@ -418,32 +417,6 @@ async function deliverMessage(
       }
     }
     deliverInstance = mg.instance;
-  }
-
-  if (content.type === 'ask_question') {
-    const questionId = content.questionId;
-    if (typeof questionId !== 'string' || !questionId || !isQuestionInput(content))
-      throw new Error('Invalid outbound question input');
-    const inserted = createQuestion({
-      id: questionId,
-      session_id: session.id,
-      message_out_id: msg.id,
-      in_reply_to: msg.in_reply_to,
-      platform_id: msg.platform_id,
-      channel_type: msg.channel_type,
-      thread_id: msg.thread_id,
-      created_at: Date.now(),
-      input: {
-        question: content.question,
-        responseMode: content.responseMode,
-        options: content.options,
-        placeholder: content.placeholder,
-        multiline: content.multiline,
-      },
-    });
-    if (inserted) {
-      log.info('Pending question created', { questionId, sessionId: session.id });
-    }
   }
 
   // Channel delivery

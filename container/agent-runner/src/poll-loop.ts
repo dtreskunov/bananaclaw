@@ -60,10 +60,6 @@ import { DeliveryRecovery, type SuggestedAction } from './query/recovery.js';
 import { RunawayGuard } from './query/runaway-guard.js';
 import { SteeringSession } from './query/steering.js';
 
-export function shouldDeferInteractiveResponse(messages: MessageInRow[], turnActive: boolean): boolean {
-  return turnActive && messages.some((message) => message.kind === 'interactive_response');
-}
-
 function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
 }
@@ -183,7 +179,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     }
     const hostGeneration = getHostEventGeneration();
     processPendingInputEdits(config.provider, getContinuation(config.providerName));
-    // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
+    // System tool responses are handled separately from chat input.
     let messages = getPendingMessages(isFirstPoll, {
       wakeThroughSeq: process.env.NANOCLAW_BOOT_INBOUND_SEQ === undefined ? undefined : bootInboundSeq,
     }).filter((m) => m.kind !== 'system');
@@ -1032,7 +1028,6 @@ export async function processQuery(
     // provider has emitted the result that safely closes the asking turn.
     // Persist the answer immediately, but do not push it into that active
     // turn. The next poll after the result resumes it as a distinct turn.
-    if (shouldDeferInteractiveResponse(newMessages, turnActive)) return;
 
     // All providers wait for the prior result boundary; push acceptance
     // alone must never promote input while the preceding turn is active.

@@ -1,11 +1,8 @@
 /**
- * Interactive MCP tools: ask_user_question, send_card.
- *
- * ask_user_question writes a durable question card and returns immediately.
- * The answer arrives as a future interactive_response provider turn.
+ * Response suggestions and display cards.
  */
-import { getCurrentInReplyTo } from '../current-batch.js';
-import { getInboundDb, getOutboundDb } from '../db/connection.js';
+import { getTurnContext } from '../current-batch.js';
+import { isSuggestedResponses, stageSuggestedResponses } from '../suggested-responses.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
 import { registerTools } from './tool-registry.js';
@@ -31,110 +28,39 @@ function err(text: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${text}` }], isError: true };
 }
 
-function hasOutstandingQuestion(): boolean {
-  const response = getInboundDb().prepare("SELECT 1 FROM messages_in WHERE id=? AND kind='interactive_response'");
-  const questions = getOutboundDb().prepare(
-    "SELECT id FROM messages_out WHERE kind='chat-sdk' AND json_extract(content,'$.type')='ask_question'",
-  ).all() as { id: string }[];
-  return questions.some(question => !response.get(`question-response:${question.id}`));
-}
-
-export const askUserQuestion: McpToolDefinition = {
+export const suggestResponses: McpToolDefinition = {
   tool: {
-    name: 'ask_user_question',
+    name: 'suggest_responses',
     description:
-      'Ask the user a durable question. The tool returns immediately; the answer arrives in a later turn. Supports choice, text, and choice_or_text responses.',
+      "Suggest optional reply drafts beneath your final response in BananaClaw's browser transcript. For inline placement, use [label](reply:<URI-encoded draft>) in your final Markdown instead; the label may differ from the draft and no tool call is needed. Other channel apps receive your normal response without draft buttons. Finish explaining in your response; this tool sends no separate message and never waits for input. Clicking a suggestion fills the normal composer for editing, not sending. Users may ignore every suggestion. A later call replaces this turn's suggestions. Suggestions are discarded if the turn has no successful final reply. Never use this for authorization.",
     inputSchema: {
       type: 'object' as const,
       properties: {
-        question: { type: 'string', description: 'The question to ask' },
-        responseMode: {
-          type: 'string',
-          enum: ['choice', 'text', 'choice_or_text'],
-          description: 'How the user may answer',
-        },
-        options: {
+        responses: {
           type: 'array',
-          items: {
-            oneOf: [
-              { type: 'string' },
-              {
-                type: 'object',
-                properties: {
-                  label: { type: 'string' },
-                  selectedLabel: { type: 'string' },
-                  value: { type: 'string' },
-                },
-                required: ['label'],
-              },
-            ],
-          },
-          description: 'Options for choice and choice_or_text questions',
+          minItems: 1,
+          maxItems: 6,
+          uniqueItems: true,
+          items: { type: 'string', minLength: 1, maxLength: 240 },
+          description: 'Up to six distinct suggested user messages; button text is exactly the editable draft text.',
         },
-        placeholder: { type: 'string', description: 'Placeholder for text input' },
-        multiline: { type: 'boolean', description: 'Whether text input should allow multiple lines' },
       },
-      required: ['question', 'responseMode'],
+      required: ['responses'],
     },
   },
   async handler(args) {
-    const question = args.question as string;
-    const responseMode = args.responseMode as 'choice' | 'text' | 'choice_or_text';
-    const rawOptions = (args.options as unknown[] | undefined) ?? [];
-    if (!question || !['choice', 'text', 'choice_or_text'].includes(responseMode)) {
-      return err('question and responseMode are required');
-    }
-    if (
-      (args.placeholder !== undefined && typeof args.placeholder !== 'string') ||
-      (args.multiline !== undefined && typeof args.multiline !== 'boolean')
-    ) {
-      return err('placeholder must be text and multiline must be a boolean');
-    }
-    if (responseMode !== 'text' && rawOptions.length === 0) {
-      return err('options are required for choice questions');
-    }
-    if (hasOutstandingQuestion()) {
-      return err('A question is already awaiting the user response');
-    }
-
-    const options = rawOptions.map((o) => {
-      if (typeof o === 'string') return { label: o, selectedLabel: o, value: o };
-      const obj = o as { label: string; selectedLabel?: string; value?: string };
-      return {
-        label: obj.label,
-        selectedLabel: obj.selectedLabel ?? obj.label,
-        value: obj.value ?? obj.label,
-      };
-    });
-
-    const questionId = generateId();
-    const r = routing();
-
-    // Write question card to outbound.db
-    writeMessageOut({
-      id: questionId,
-      in_reply_to: getCurrentInReplyTo(),
-      kind: 'chat-sdk',
-      platform_id: r.platform_id,
-      channel_type: r.channel_type,
-      thread_id: r.thread_id,
-      content: JSON.stringify({
-        type: 'ask_question',
-        questionId,
-        question,
-        responseMode,
-        options,
-        placeholder: (args.placeholder as string) || undefined,
-        multiline: args.multiline === true,
+    if (!isSuggestedResponses(args.responses))
+      return err('responses must contain 1–6 distinct nonblank messages, each at most 240 characters');
+    const context = getTurnContext();
+    if (!context) return err('suggest_responses requires an active response turn');
+    stageSuggestedResponses(context, args.responses);
+    log(`suggest_responses: ${context.turnId}`);
+    return ok(
+      JSON.stringify({
+        status: 'registered',
+        message: 'Finish your response. Optional reply drafts will appear beneath its final message.',
       }),
-    });
-
-    log(`ask_user_question: ${questionId} → "${question}"`);
-    return ok(JSON.stringify({
-      status: 'awaiting_user',
-      questionId,
-      message: 'The question was queued. Its answer will arrive in a later turn.',
-    }));
+    );
   },
 };
 
@@ -206,4 +132,4 @@ export const sendCard: McpToolDefinition = {
   },
 };
 
-registerTools([askUserQuestion, sendCard]);
+registerTools([suggestResponses, sendCard]);

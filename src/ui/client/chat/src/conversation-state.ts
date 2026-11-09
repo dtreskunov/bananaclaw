@@ -1,6 +1,5 @@
 import { batch, signal } from '@preact/signals';
 import type { Conversation, ConversationTrace, ConversationTurn } from '../../../shared/conversation';
-import { isQuestionInteraction } from '../../../shared/conversation';
 import { conversationActivity, turnModelTime, withModelTime } from '../../../shared/conversation-activity';
 import {
   ConversationProtocolError,
@@ -16,7 +15,6 @@ import {
   chatReady,
   chatReloadRequired,
   chatStatus,
-  pendingQuestions,
   pendingWebSends,
   groupId,
   threadId,
@@ -41,14 +39,22 @@ export const chatTranscript = signal<TranscriptRow[]>([]);
 export function withPendingActivity(status: ActivityStatus, gid: string | null, thread?: Thread): ActivityStatus {
   const matches = (tid: string) => !thread || ((thread.channelType || 'web') === 'web' && thread.threadId === tid);
   const current = gid === groupId.value && channelType.value === 'web';
-  const local = pendingWebSends.value.some(send =>
-    send.groupId === gid && send.status !== 'failed' && matches(send.threadId) &&
-    (send.status === 'sending' || (current && send.threadId === threadId.value)),
+  const local = pendingWebSends.value.some(
+    (send) =>
+      send.groupId === gid &&
+      send.status !== 'failed' &&
+      matches(send.threadId) &&
+      (send.status === 'sending' || (current && send.threadId === threadId.value)),
   );
   const selected = conversationState.value?.conversation;
-  const view = current && selected?.threadId === threadId.value && matches(selected.threadId) &&
-    (!thread?.messagingGroupId || thread.messagingGroupId === messagingGroupId.value) ? selected : null;
-  const busy = local || view?.turns.some(turn => turn.phase !== 'settled');
+  const view =
+    current &&
+    selected?.threadId === threadId.value &&
+    matches(selected.threadId) &&
+    (!thread?.messagingGroupId || thread.messagingGroupId === messagingGroupId.value)
+      ? selected
+      : null;
+  const busy = local || view?.turns.some((turn) => turn.phase !== 'settled');
   return busy ? { ...status, activity: 'running', activityStale: undefined } : status;
 }
 
@@ -124,18 +130,12 @@ export function conversationPresentation(view: Conversation): { messages: ChatMe
       const source = byId.get(row.messageId);
       if (!source) throw new ConversationProtocolError('invalid_frame');
       const message = presentMessage(source, row);
-      if (message.questionId) {
-        const question = interactions.get(message.questionId);
-        if (question?.kind !== 'question' || message.direction !== 'in')
-          throw new ConversationProtocolError('invalid_frame');
-        return [{ kind: 'question-answer', question, answer: message }];
-      }
       return [{ kind: 'message', message }];
     }
     if (row.kind === 'interaction') {
       const interaction = interactions.get(row.interactionId);
       if (!interaction) throw new ConversationProtocolError('invalid_frame');
-      return interaction.kind === 'question' ? [] : [{ kind: 'interaction', interaction }];
+      return [{ kind: 'interaction', interaction }];
     }
     if (!turn || turn.id !== row.turnId) throw new ConversationProtocolError('invalid_frame');
     return [
@@ -181,7 +181,6 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
     }
-    pendingQuestions.value = view.interactions.filter(isQuestionInteraction);
     pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, view, groupId.value);
     refs.seenIds = new Set(view.messages.map((m) => `${m.direction}:${m.id}`));
     canSend.value = caps.canSend;

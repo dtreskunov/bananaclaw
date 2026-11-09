@@ -30,7 +30,7 @@ export interface ArchiveResult {
 }
 
 export interface ArchiveDump {
-  version: 3;
+  version: 4;
   archived_at: string;
   archived_by: { user_id: string; display_name?: string | null };
   agent_group: Record<string, unknown>;
@@ -198,7 +198,7 @@ export function archiveAgentGroup(
       )
       .run(archivedAt, archivedAt, groupId, groupId);
     const dump: ArchiveDump = {
-      version: 3,
+      version: 4,
       archived_at: formatTimestamp(archivedAt),
       archived_by: actor,
       ...dumpRows(groupId),

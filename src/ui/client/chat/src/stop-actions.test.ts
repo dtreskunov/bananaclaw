@@ -9,7 +9,6 @@ import {
   canSend,
   chatReady,
   groupId,
-  pendingQuestions,
   pendingWebSends,
   stopRequest,
   threadId,
@@ -112,40 +111,5 @@ describe('Stop integration with chat actions', () => {
     );
     expect(activeTurn.value).toBeNull();
     expect(turnConnected.value).toBe(false);
-  });
-
-  it('leaves pending question cards actionable after stopping a turn', async () => {
-    groupId.value = 'group';
-    threadId.value = 'thread';
-    canSend.value = true;
-    applyTurnState({ id: 'turn-1', status: 'running' }, true);
-    const question = {
-      kind: 'question' as const,
-      id: 'question',
-      question: 'Continue?',
-      responseMode: 'text' as const,
-      options: [],
-      status: 'pending' as const,
-      answeredAt: null,
-      threadId: 'thread',
-      agentGroupId: 'group',
-      createdAt: 1790294400000,
-      response: null,
-    };
-    pendingQuestions.value = [question];
-    sync.read.mockResolvedValue({ attention: [], approvals: [] });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        headers: uiHeaders,
-        ok: true,
-        json: async () => ({ accepted: true }),
-      }),
-    );
-    await stopActiveTurn('turn-1');
-    applyTurnState(null, true);
-    expect(pendingQuestions.value).toEqual([question]);
-    await runSync();
-    expect(pendingQuestions.value).toEqual([question]);
   });
 });

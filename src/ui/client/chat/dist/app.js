@@ -15772,7 +15772,6 @@ var nowTick = y3(Date.now());
 var pinnedContext = y3([]);
 var pendingApprovals = y3([]);
 var respondingInteractionIds = y3(/* @__PURE__ */ new Set());
-var pendingQuestions = y3([]);
 var refs = {
   chatGeneration: 0,
   seenIds: /* @__PURE__ */ new Set(),
@@ -17891,18 +17890,66 @@ var Xt = g5.parseInline;
 var Vt = b3.parse;
 var Yt = x4.lex;
 
-// src/utils.ts
-g5.use({
-  renderer: {
-    link({ href, title, tokens }) {
-      const text2 = this.parser.parseInline(tokens);
-      const isAbs = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//");
-      const titleAttr = title ? ` title="${title.replace(/"/g, "&quot;")}"` : "";
-      const targetAttr = isAbs ? ' target="_blank" rel="noopener noreferrer"' : "";
-      return `<a href="${href}"${titleAttr}${targetAttr}>${text2}</a>`;
-    }
+// ../../shared/suggested-responses.ts
+var MAX_SUGGESTED_RESPONSES = 6;
+var MAX_SUGGESTED_RESPONSE_LENGTH = 240;
+function isSuggestedResponses(value) {
+  return Array.isArray(value) && value.length > 0 && value.length <= MAX_SUGGESTED_RESPONSES && value.every((text2) => typeof text2 === "string" && !!text2.trim() && text2.length <= MAX_SUGGESTED_RESPONSE_LENGTH) && new Set(value).size === value.length;
+}
+
+// src/reply-suggestions.ts
+function inlineReplyDraft(href) {
+  if (!/^reply:/i.test(href)) return null;
+  try {
+    const text2 = decodeURIComponent(href.slice("reply:".length));
+    const control = [...text2].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 && code !== 10 || code === 127;
+    });
+    return text2.trim() && text2.length <= MAX_SUGGESTED_RESPONSE_LENGTH && !control ? text2 : null;
+  } catch (error) {
+    if (error instanceof URIError) return null;
+    throw error;
   }
-});
+}
+function suggestionsActive(messageId, messages, turns, sending) {
+  if (sending || turns.some((turn3) => turn3.phase !== "settled")) return false;
+  const index = messages.findIndex((message3) => message3.id === messageId);
+  const message2 = messages[index];
+  if (!message2 || message2.direction !== "out" || message2.deliveryOrigin !== "response") return false;
+  const turn2 = turns.find((candidate) => candidate.id === message2.turnId);
+  return turn2?.phase === "settled" && turn2.outcome === "replied" && !messages.slice(index + 1).some((next) => next.direction !== "event" && next.inputState?.status !== "cancelled");
+}
+function fillSuggestedDraft(input, text2) {
+  if (!input || input.disabled || input.readOnly)
+    return { filled: false, error: "The composer is unavailable. Your draft has been kept." };
+  if (input.value.length)
+    return { filled: false, error: "Your draft has been kept. Clear it before choosing a suggested reply." };
+  input.value = text2;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.focus();
+  input.setSelectionRange(text2.length, text2.length);
+  return { filled: true };
+}
+
+// src/utils.ts
+function markdownRenderer(inlineReplies) {
+  const renderer = new y4();
+  renderer.link = function({ href, title, tokens }) {
+    const text2 = this.parser.parseInline(tokens);
+    if (/^reply:/i.test(href)) {
+      const draft = inlineReplyDraft(href);
+      if (!inlineReplies || draft === null) return text2;
+      const value = draft.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&#39;");
+      return `<button type="button" class="inline-reply-suggestion" data-reply-draft="${value}" title="Draft reply: ${value}" aria-description="Draft reply: ${value}">${text2}<span aria-hidden="true"> \u21B5</span></button>`;
+    }
+    const isAbs = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//");
+    const titleAttr = title ? ` title="${title.replace(/"/g, "&quot;")}"` : "";
+    const targetAttr = isAbs ? ' target="_blank" rel="noopener noreferrer"' : "";
+    return `<a href="${href}"${titleAttr}${targetAttr}>${text2}</a>`;
+  };
+  return renderer;
+}
 g5.use({
   extensions: [
     {
@@ -17998,9 +18045,13 @@ function toGroupFileUrl(groupId3, rel) {
   const segs = rel.split("/").filter(Boolean).map(encodeURIComponent);
   return `api/groups/${gid}/files/${segs.join("/")}`;
 }
-function renderMarkdown(text2, groupId3) {
+function renderMarkdown(text2, groupId3, inlineReplies = false) {
   try {
-    const html = g5.parse(normalizeFileLinks(text2 || ""), { breaks: true, gfm: true });
+    const html = g5.parse(normalizeFileLinks(text2 || ""), {
+      breaks: true,
+      gfm: true,
+      renderer: markdownRenderer(inlineReplies)
+    });
     if (!groupId3 || typeof document === "undefined") return html;
     const template = document.createElement("template");
     template.innerHTML = html;
@@ -18249,11 +18300,6 @@ function publicWebMessageId(clientMessageId) {
   return `web-${clientMessageId}`;
 }
 
-// ../../shared/conversation.ts
-function isQuestionInteraction(item) {
-  return item.kind === "question";
-}
-
 // ../../shared/activity-presentation.ts
 var TRACE_STATUS_LABELS = {
   queued: "Pending",
@@ -18353,7 +18399,7 @@ var BUILTIN_TOOL_PRESENTATIONS = /* @__PURE__ */ new Map([
   ["edit_message", ["Editing message", "Edited message", "edit message", "Message edit"]],
   ["add_reaction", ["Reacting", "Reacted", "react", "Reaction", "with"]],
   ["send_email", ["Emailing", "Emailed", "email", "Email"]],
-  ["ask_user_question", ["Requesting an answer", "Requested an answer", "request an answer", "Question request", "to"]],
+  ["suggest_responses", ["Suggesting replies", "Suggested replies", "suggest replies", "Reply suggestions", "for"]],
   ["send_card", ["Sending card", "Sent card", "send card", "Card send"]],
   ["schedule_task", ["Scheduling task", "Scheduled task", "schedule task", "Task scheduling", "for"]],
   ["list_tasks", ["Listing tasks", "Listed tasks", "list tasks", "Task listing", "with status"]],
@@ -18959,7 +19005,7 @@ function accessRequestInput(raw) {
 }
 
 // ../../shared/conversation-protocol.ts
-var CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION;
+var CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 1;
 var ConversationProtocolError = class extends Error {
   constructor(code) {
     super(
@@ -18969,25 +19015,6 @@ var ConversationProtocolError = class extends Error {
   }
 };
 var strings = array(id);
-var questionInput = shape({
-  question: text,
-  responseMode: oneOf("choice", "text", "choice_or_text"),
-  options: array(shape({ label: text, selectedLabel: text, value: text })),
-  placeholder: optional(text),
-  multiline: optional(bool)
-});
-var questionAnswer = shape({
-  responseType: oneOf("choice", "text"),
-  value: (v5) => typeof v5 === "string" && !!v5.trim()
-});
-var questionSkip = shape({ responseType: oneOf("skipped"), value: (v5) => v5 === void 0 });
-function isQuestionInput(value) {
-  return questionInput(value);
-}
-function isQuestionResponse(value) {
-  return questionAnswer(value) || questionSkip(value);
-}
-var trace = shape({ ts: isEpochMs, text });
 var usageFields = {
   cost_usd: number,
   input_tokens: number,
@@ -19011,8 +19038,7 @@ var message = shape({
   direction: oneOf("in", "out", "event"),
   timestamp: isEpochMs,
   text,
-  questionId: optional(id),
-  questionResponseType: optional(oneOf("choice", "text", "skipped")),
+  suggestedResponses: optional(isSuggestedResponses),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -19081,20 +19107,6 @@ var turnFields = {
   })
 };
 var turn = shape({ ...turnFields, activity: array(activityLine) });
-var question = (value) => isQuestionInput(value) && shape({
-  kind: oneOf("question"),
-  id,
-  status: oneOf("pending", "answered", "cancelled"),
-  response: nullable(isQuestionResponse),
-  answeredAt: nullable(isEpochMs),
-  activity: optional(array(trace)),
-  turnId: optional(id),
-  threadId: nullable(text),
-  agentGroupId: id,
-  createdAt: isEpochMs,
-  messageId: optional(id),
-  timelinePosition: optional(integer)
-})(value);
 var consentContext = {
   id,
   agentGroupId: nullable(text),
@@ -19140,7 +19152,7 @@ var account = shape({
   outcomeMessage: nullable(text),
   resolvedAt: nullable(isEpochMs)
 });
-var interaction = (value) => question(value) || approval(value) || account(value);
+var interaction = (value) => approval(value) || account(value);
 function isConversationApproval(value) {
   return approval(value) || account(value);
 }
@@ -19187,16 +19199,15 @@ function parseConversationFrame(value) {
 var activityOrdinal = (line) => line.ordinal;
 var timelineKey = (row) => row.kind === "message" ? JSON.stringify([row.kind, row.messageId]) : row.kind === "interaction" ? JSON.stringify([row.kind, row.interactionId]) : JSON.stringify([row.kind, row.turnId, row.afterId]);
 function validateTimeline(view) {
-  const questionIds = new Set(view.interactions.filter(isQuestionInteraction).map((item) => item.id));
-  if (view.messages.some(
-    (message2) => message2.questionId !== void 0 && (message2.direction !== "in" || !questionIds.has(message2.questionId))
-  ))
-    throw new ConversationProtocolError("invalid_frame");
   const messages = new Set(
     view.messages.filter((message2) => message2.inputState?.status !== "cancelled").map((message2) => message2.id)
   );
   const interactions = new Set(view.interactions.map((item) => item.id));
   const turns = new Map(view.turns.map((turn2) => [turn2.id, turn2]));
+  for (const message2 of view.messages) {
+    if (message2.suggestedResponses && (message2.direction !== "out" || message2.deliveryOrigin !== "response" || !message2.turnId || turns.get(message2.turnId)?.phase !== "settled"))
+      throw new ConversationProtocolError("invalid_frame");
+  }
   for (const turn2 of view.turns) uniqueKeys(turn2.activity, activityOrdinal);
   const seenRows = /* @__PURE__ */ new Set();
   const seenActivity = /* @__PURE__ */ new Set();
@@ -19896,17 +19907,17 @@ function conversationPresentation(view) {
     if (!times) modelTimes.set(turn2.id, times = turnModelTime(turn2));
     return times;
   };
-  const traceLines = (trace2) => {
-    const turn2 = turns.get(trace2.turnId);
+  const traceLines = (trace) => {
+    const turn2 = turns.get(trace.turnId);
     if (!turn2) throw new ConversationProtocolError("invalid_frame");
-    const ordinals = new Set(trace2.ordinals);
+    const ordinals = new Set(trace.ordinals);
     const activity = turn2.activity.filter((line) => ordinals.has(line.ordinal));
     const first = turn2.activity.reduce(
       (earliest, line) => !earliest || line.timelinePosition < earliest.timelinePosition ? line : earliest,
       null
     );
-    const hostsStart = first ? ordinals.has(first.ordinal) : trace2.ownsTurn && turn2.phase !== "settled";
-    const lines = trace2.ownsTurn ? conversationActivity(turn2, activity) : activity;
+    const hostsStart = first ? ordinals.has(first.ordinal) : trace.ownsTurn && turn2.phase !== "settled";
+    const lines = trace.ownsTurn ? conversationActivity(turn2, activity) : activity;
     return withModelTime(turn2, lines, modelTime(turn2), hostsStart);
   };
   const presentMessage = (source, row) => {
@@ -19934,18 +19945,12 @@ function conversationPresentation(view) {
       const source = byId.get(row.messageId);
       if (!source) throw new ConversationProtocolError("invalid_frame");
       const message2 = presentMessage(source, row);
-      if (message2.questionId) {
-        const question2 = interactions.get(message2.questionId);
-        if (question2?.kind !== "question" || message2.direction !== "in")
-          throw new ConversationProtocolError("invalid_frame");
-        return [{ kind: "question-answer", question: question2, answer: message2 }];
-      }
       return [{ kind: "message", message: message2 }];
     }
     if (row.kind === "interaction") {
       const interaction2 = interactions.get(row.interactionId);
       if (!interaction2) throw new ConversationProtocolError("invalid_frame");
-      return interaction2.kind === "question" ? [] : [{ kind: "interaction", interaction: interaction2 }];
+      return [{ kind: "interaction", interaction: interaction2 }];
     }
     if (!turn2 || turn2.id !== row.turnId) throw new ConversationProtocolError("invalid_frame");
     return [
@@ -19990,7 +19995,6 @@ function applyConversationFrame(raw, expectedThreadId) {
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
     }
-    pendingQuestions.value = view.interactions.filter(isQuestionInteraction);
     pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, view, groupId.value);
     refs.seenIds = new Set(view.messages.map((m6) => `${m6.direction}:${m6.id}`));
     canSend.value = caps.canSend;
@@ -20368,15 +20372,15 @@ function selectAttention(id2, navigate = false) {
   if (!navigate && attentionSelection.value?.id === id2) return;
   attentionSelection.value = { id: id2, navigation: navigate ? ++navigationSequence : 0 };
 }
-function matchesAttentionLocation(target, location2) {
+function matchesAttentionLocation(target, location3) {
   const origin = target.origin;
-  return origin.agentGroupId === location2.agentGroupId && origin.threadId === location2.threadId && origin.channelType === (location2.channelType || "web") && (origin.messagingGroupId === location2.messagingGroupId || origin.channelType === "web" && location2.messagingGroupId === null);
+  return origin.agentGroupId === location3.agentGroupId && origin.threadId === location3.threadId && origin.channelType === (location3.channelType || "web") && (origin.messagingGroupId === location3.messagingGroupId || origin.channelType === "web" && location3.messagingGroupId === null);
 }
 function groupAttentionCount(groupId3) {
   return attentionTargets.value?.filter((target) => target.origin.agentGroupId === groupId3).length ?? 0;
 }
-function threadAttentionCount(location2) {
-  return attentionTargets.value?.filter((target) => matchesAttentionLocation(target, location2)).length ?? 0;
+function threadAttentionCount(location3) {
+  return attentionTargets.value?.filter((target) => matchesAttentionLocation(target, location3)).length ?? 0;
 }
 
 // src/credentials-navigation.ts
@@ -21318,7 +21322,6 @@ function startSync() {
           resetTurnState();
           voice.detach();
           cancelRecording();
-          pendingQuestions.value = [];
           chatMessages.value = [];
           canSend.value = false;
           chatReady.value = false;
@@ -21452,7 +21455,6 @@ async function openChat2(gid, resumeTid, opts, options = {}) {
     channelType.value = ct;
     messagingGroupId.value = mg;
     canSend.value = ct === "web" ? false : cs;
-    pendingQuestions.value = [];
     if (resumeTid) {
       chatLoading.value = true;
       chatStatus.value = ct === "web" ? "connecting\u2026" : "loading history\u2026";
@@ -22967,13 +22969,13 @@ function ThreadTitle({ title, unread }) {
   ] }) });
 }
 function ThreadAttention({ thread: thread2, onNavigate }) {
-  const location2 = {
+  const location3 = {
     agentGroupId: groupId.value,
     threadId: thread2.threadId,
     channelType: thread2.channelType || "web",
     messagingGroupId: thread2.messagingGroupId ?? null
   };
-  const count = threadAttentionCount(location2);
+  const count = threadAttentionCount(location3);
   const status = withPendingActivity(thread2, groupId.value, thread2);
   const { actionable, description } = activityDetails(status, count, thread2.title);
   const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status, description, unread: thread2.unread });
@@ -22989,7 +22991,7 @@ function ThreadAttention({ thread: thread2, onNavigate }) {
         event.stopPropagation();
         if (actionable) {
           const navigate = () => {
-            void navigateAttention(location2);
+            void navigateAttention(location3);
           };
           if (onNavigate) onNavigate(navigate);
           else navigate();
@@ -23908,11 +23910,6 @@ function usePendingComposer(inputRef, autosize) {
 function parseTimelinePosition(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
 }
-function timelineSortKey(timestamp, timelinePosition) {
-  const position2 = parseTimelinePosition(timelinePosition);
-  if (position2 !== void 0) return position2;
-  return timestamp * 1e3;
-}
 
 // src/queued-followups.ts
 function isQueuedFollowup(message2) {
@@ -24362,193 +24359,56 @@ function QuickCapture({ onCapture, onClose }) {
   );
 }
 
-// src/components/QuestionPrompt.tsx
-function QuestionPrompt({ question: q5 }) {
-  const [answer, setAnswer] = h2("");
-  const [accepted, setAccepted] = h2(null);
-  const [error, setError] = h2("");
-  const answerRef = A2("");
-  const textareaRef = A2(null);
-  const submitting = A2(false);
-  const gid = groupId.value;
-  const tid = threadId.value;
-  const channel = channelType.value;
-  const mg = messagingGroupId.value;
-  const target = `${gid}:${tid}:question:${q5.id}`;
-  const voiceState = voice.state.value;
-  const active = voiceState.target === target;
-  const busy = respondingInteractionIds.value.has(q5.id);
-  const waiting = !!accepted || q5.status === "answered";
-  const skipped = accepted === "skipped" || q5.response?.responseType === "skipped";
-  const disconnected = (!channel || channel === "web") && !chatReady.value;
-  const disabled = busy || waiting || disconnected;
-  const skipDisabled = busy || !!accepted || disconnected || q5.status === "cancelled" || waiting && !skipped;
-  const current = A2(false);
-  current.current = q5.status === "pending" && !disabled;
-  const voiceLocked = active && (voiceState.phase !== "error" || voiceState.sending);
-  const unavailable = voiceBrowserReason() || (!voiceInput.value.ready ? voiceInput.value.reason || "Live voice input is not configured." : "");
-  const canType = q5.responseMode !== "choice";
-  const { autosize, multiLine } = useComposerTextarea(textareaRef, answer, null);
-  const submit = async (value = answerRef.current.trim(), responseType = "text") => {
-    if (!value.trim() || submitting.current || !current.current || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg)
-      return false;
-    submitting.current = true;
-    setError("");
-    try {
-      const sent = await respondInteraction(q5.id, { responseType, value });
-      if (sent) setAccepted("answer");
-      else setError("Could not submit your answer. Please retry.");
-      return sent;
-    } finally {
-      submitting.current = false;
-    }
-  };
-  const skip = async () => {
-    if (submitting.current || skipDisabled || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg)
-      return;
-    submitting.current = true;
-    setError("");
-    if (voice.state.value.target === target) voice.detach();
-    try {
-      const sent = await respondInteraction(q5.id, { responseType: "skipped" });
-      if (sent) setAccepted("skipped");
-      else setError("Could not skip this question. Please retry.");
-    } finally {
-      submitting.current = false;
-    }
-  };
-  const startVoice = () => {
-    if (!gid || !tid || unavailable || !current.current || isRecording.value) return;
-    voice.start(
-      {
-        key: target,
-        groupId: gid,
-        threadId: tid,
-        channelType: channel,
-        messagingGroupId: mg,
-        getText: () => answerRef.current,
-        setText: (text2, selection) => {
-          setVoiceTextareaText(textareaRef.current, text2, selection);
-          answerRef.current = text2;
-          setAnswer(text2);
-        },
-        isCurrent: () => groupId.value === gid && threadId.value === tid && channelType.value === channel && messagingGroupId.value === mg && current.current,
-        send: submit
-      },
-      textareaRef.current?.selectionStart ?? answerRef.current.length,
-      textareaRef.current?.selectionEnd ?? answerRef.current.length
-    );
-  };
-  y2(() => {
-    if ((waiting || q5.status !== "pending") && voice.state.value.target === target) voice.detach();
-  }, [waiting, q5.status, target]);
-  y2(
-    () => () => {
-      if (voice.state.value.target === target) voice.detach();
-    },
-    [target, channel, mg]
+// src/components/SuggestedResponses.tsx
+function suggestionState(messageId) {
+  const conversation2 = conversationState.value?.conversation;
+  const sending = pendingWebSends.value.some(
+    (send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed"
   );
-  return /* @__PURE__ */ u4(
-    "section",
+  const active = canSend.value && !!conversation2 && suggestionsActive(messageId, conversation2.messages, conversation2.turns, sending);
+  const busy = composerSendInFlight.value || !!currentPendingEditor() || isRecording.value || !["idle", "error"].includes(voice.state.value.phase);
+  return { active, disabled: busy };
+}
+function location2() {
+  return JSON.stringify([groupId.value, threadId.value, channelType.value, messagingGroupId.value]);
+}
+function replySuggestionControls(messageId) {
+  const target = location2();
+  return {
+    ...suggestionState(messageId),
+    choose(text2) {
+      const current = suggestionState(messageId);
+      if (target !== location2() || !current.active || current.disabled) return;
+      const input = document.getElementById("chat-input");
+      const result = fillSuggestedDraft(input instanceof HTMLTextAreaElement ? input : null, text2);
+      if (!result.filled) showToast(result.error, "err");
+    }
+  };
+}
+function bindInlineReplyControls(root, controls) {
+  for (const button of root.querySelectorAll("button.inline-reply-suggestion[data-reply-draft]")) {
+    button.disabled = controls.disabled;
+    button.addEventListener("click", () => {
+      const draft = button.dataset.replyDraft;
+      if (draft) controls.choose(draft);
+    });
+  }
+}
+function SuggestedResponses({ message: message2 }) {
+  const controls = replySuggestionControls(message2.id);
+  if (!controls.active) return null;
+  return /* @__PURE__ */ u4("div", { class: "reply-suggestions", "aria-label": "Suggested replies", children: message2.suggestedResponses?.map((text2) => /* @__PURE__ */ u4(
+    "button",
     {
-      class: "question-prompt",
-      id: `attention-${q5.id}`,
-      "data-attention-target": q5.id,
-      tabIndex: -1,
-      onFocus: () => selectAttention(q5.id),
-      "data-question-id": q5.id,
-      "aria-label": q5.question || "Question",
-      "aria-busy": busy || waiting,
-      children: [
-        /* @__PURE__ */ u4("div", { class: "question-prompt-header", children: [
-          /* @__PURE__ */ u4("div", { class: "question-prompt-text", children: q5.question }),
-          /* @__PURE__ */ u4(
-            "button",
-            {
-              type: "button",
-              class: "question-skip-btn",
-              "aria-label": "Skip question and notify agent",
-              title: "Skip this question and tell the agent",
-              disabled: skipDisabled,
-              onClick: () => void skip(),
-              children: q5.response?.responseType === "skipped" && !accepted ? "Retry skip" : "Skip"
-            }
-          )
-        ] }),
-        !!q5.options.length && /* @__PURE__ */ u4("div", { class: "question-card-actions", children: q5.options.map((option) => /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            class: "question-card-btn",
-            disabled,
-            onClick: () => {
-              if (voice.state.value.target === target) voice.detach();
-              void submit(option.value, "choice");
-            },
-            children: option.label
-          },
-          option.value
-        )) }),
-        canType && /* @__PURE__ */ u4(
-          "form",
-          {
-            class: "question-card-text-form",
-            onSubmit: (event) => {
-              event.preventDefault();
-              if (disabled) return;
-              if (active) voice.send();
-              else void submit();
-            },
-            children: /* @__PURE__ */ u4(
-              ComposerInput,
-              {
-                inputRef: textareaRef,
-                multiLine: q5.multiline || multiLine,
-                rows: q5.multiline ? 3 : 1,
-                listening: active && voiceState.phase === "listening",
-                className: "question-response-input-wrap",
-                textarea: {
-                  class: "question-card-input",
-                  value: answer,
-                  disabled,
-                  readOnly: voiceLocked,
-                  "aria-label": "Your answer",
-                  placeholder: q5.placeholder ?? "Type your answer\u2026",
-                  onInput: (event) => {
-                    answerRef.current = event.currentTarget.value;
-                    setAnswer(answerRef.current);
-                    autosize();
-                  }
-                },
-                voice: {
-                  target,
-                  controller: voice,
-                  onStart: startVoice,
-                  className: "question-response-mic",
-                  configured: voiceInput.value.ready,
-                  unavailable,
-                  disabled: disabled || isRecording.value
-                },
-                send: {
-                  className: "question-response-send",
-                  label: "Send answer",
-                  title: active && voiceState.phase === "listening" ? "Finalize and send answer" : "Send answer",
-                  disabled: disabled || active && (voiceState.sending || !["listening", "error"].includes(voiceState.phase)) || !answer.trim() && !active
-                }
-              }
-            )
-          }
-        ),
-        (busy || waiting || disconnected) && /* @__PURE__ */ u4("div", { class: "question-prompt-status", role: "status", children: disconnected ? "Reconnecting\u2026" : busy ? "Submitting response\u2026" : skipped ? "Waiting for skip confirmation\u2026" : "Waiting for answer confirmation\u2026" }),
-        error && /* @__PURE__ */ u4("p", { class: "inline-error voice-error", role: "alert", children: error }),
-        active && voiceState.error && /* @__PURE__ */ u4("p", { class: "inline-error voice-error", role: "alert", children: /* @__PURE__ */ u4("span", { class: "inline-error-copy", children: [
-          /* @__PURE__ */ u4("strong", { children: "Dictation stopped" }),
-          /* @__PURE__ */ u4("span", { children: voiceState.error }),
-          /* @__PURE__ */ u4("span", { class: "inline-error-guidance", children: "Your answer was not sent. Review it before sending." })
-        ] }) })
-      ]
-    }
-  );
+      type: "button",
+      class: "message-action-btn",
+      title: `Draft reply: ${text2}`,
+      disabled: controls.disabled,
+      onClick: () => controls.choose(text2),
+      children: text2
+    },
+    text2
+  )) });
 }
 
 // src/components/AttentionFocus.tsx
@@ -24556,7 +24416,7 @@ function AttentionFocus() {
   const targets = attentionTargets.value;
   const selection = attentionSelection.value;
   const handled = A2(null);
-  const location2 = {
+  const location3 = {
     agentGroupId: groupId.value,
     threadId: threadId.value,
     channelType: channelType.value,
@@ -24565,7 +24425,7 @@ function AttentionFocus() {
   const selected = targets?.find((target) => target.id === selection?.id);
   const snapshot = conversationState.value;
   y2(() => {
-    if (!selection?.navigation || !selected || handled.current === selection.navigation || !matchesAttentionLocation(selected, location2))
+    if (!selection?.navigation || !selected || handled.current === selection.navigation || !matchesAttentionLocation(selected, location3))
       return;
     const frame2 = requestAnimationFrame(() => {
       const target = document.getElementById(`attention-${selection.id}`);
@@ -24578,10 +24438,10 @@ function AttentionFocus() {
   }, [
     selection,
     selected,
-    location2.agentGroupId,
-    location2.threadId,
-    location2.channelType,
-    location2.messagingGroupId,
+    location3.agentGroupId,
+    location3.threadId,
+    location3.channelType,
+    location3.messagingGroupId,
     snapshot
   ]);
   return null;
@@ -24630,7 +24490,7 @@ function ApprovalMessageInput({ approvalId, disabled }) {
 
 // src/components/ApprovalCard.tsx
 function ApprovalCardFrame({ approvalId, title, children }) {
-  return /* @__PURE__ */ u4("section", { class: "approval-bubble question-prompt", "data-approval-id": approvalId, "aria-label": title, children: [
+  return /* @__PURE__ */ u4("section", { class: "approval-bubble", "data-approval-id": approvalId, "aria-label": title, children: [
     /* @__PURE__ */ u4("div", { class: "approval-title", children: title }),
     children
   ] });
@@ -24668,7 +24528,7 @@ function ApprovalCard({ approval: a4, busy, onRespond }) {
         }
       ) : null
     ] }),
-    here && pending4 ? /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: !a4.options.length ? /* @__PURE__ */ u4("span", { class: "approval-disabled", children: "no options" }) : a4.options.map((option) => /* @__PURE__ */ u4(
+    here && pending4 ? /* @__PURE__ */ u4("div", { class: "approval-actions", children: !a4.options.length ? /* @__PURE__ */ u4("span", { class: "approval-disabled", children: "no options" }) : a4.options.map((option) => /* @__PURE__ */ u4(
       "button",
       {
         type: "button",
@@ -24709,9 +24569,6 @@ function readerPages(rows) {
         return [];
       id2 = { kind: "message", id: message2.id };
       anchorId = message2.id;
-    } else if (row.kind === "question-answer") {
-      id2 = { kind: "question", id: row.question.id };
-      anchorId = row.answer.id;
     } else return [];
     const key = readerKey(id2);
     if (seen.has(key)) return [];
@@ -25715,7 +25572,7 @@ function AccessRequestReview({
                 "input",
                 {
                   type: "text",
-                  class: "question-card-input",
+                  class: "approval-text-input",
                   "aria-label": "Account name shown to agent",
                   value: accountAlias,
                   maxLength: 80,
@@ -25796,7 +25653,7 @@ function AccessRequestReview({
         configureMcp ? ` ${mcpServer || "The selected"} tools will also use this account.` : ""
       ] }) : null,
       !signingIn && (!setup || compatible.length) ? /* @__PURE__ */ u4(ApprovalMessageInput, { approvalId: id2, disabled: blocked }) : null,
-      /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: [
+      /* @__PURE__ */ u4("div", { class: "approval-actions", children: [
         /* @__PURE__ */ u4("button", { type: "button", class: "approval-btn approval-reject", disabled: blocked, onClick: () => void reject(), children: "Decline" }),
         !compatible.length && !reconnect.length && !signingIn ? /* @__PURE__ */ u4(
           "button",
@@ -26220,16 +26077,16 @@ function CredentialAuthenticationForm({ auth, keys, busy, preferredKey, savedLab
           value: auth.location ?? "header",
           disabled: busy,
           onChange: (event) => {
-            const location2 = event.currentTarget.value;
-            if (location2 !== "header" && location2 !== "query") {
+            const location3 = event.currentTarget.value;
+            if (location3 !== "header" && location3 !== "query") {
               showToast("Choose header or query placement.", "err");
               return;
             }
             onChange({
               ...auth,
-              location: location2,
-              header: location2 === "header" ? "X-Api-Key" : void 0,
-              parameter: location2 === "query" ? "" : void 0,
+              location: location3,
+              header: location3 === "header" ? "X-Api-Key" : void 0,
+              parameter: location3 === "query" ? "" : void 0,
               prefix: void 0
             });
           },
@@ -27401,7 +27258,7 @@ function AccessRequestCard({ request, disabled }) {
         onManage: (account2, request2) => setDialog({ kind: "manage", connection: account2, request: request2 }),
         onSaved: saved,
         signInMessage: signIn.waiting ? /* @__PURE__ */ u4("div", { class: "access-sign-in", role: "status", children: [
-          /* @__PURE__ */ u4("div", { class: "question-card-actions approval-actions", children: [
+          /* @__PURE__ */ u4("div", { class: "approval-actions", children: [
             /* @__PURE__ */ u4(
               "a",
               {
@@ -27480,50 +27337,6 @@ function ApprovalBubble({ approval: approval2, busy, onRespond, reference }) {
       timestamp: approval2.resolvedAt ?? approval2.createdAt,
       children: approval2.kind === "confirmation" ? /* @__PURE__ */ u4(ApprovalCard, { approval: approval2, busy, onRespond }) : access ? /* @__PURE__ */ u4(AccessRequestCard, { request: approval2, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(AccountRequestSummary, { request: approval2 })
     }
-  );
-}
-
-// ../../../channels/ask-question.ts
-function formatQuestionResponse(question2, response) {
-  const quote = question2.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
-  return `${quote}
-
-${response}`;
-}
-
-// src/question-presentation.ts
-function questionAnswerText(question2, answer) {
-  const response = answer.questionResponseType === "skipped" ? "Question skipped" : answer.questionResponseType === "choice" ? question2.options.find((option) => option.value === answer.text)?.selectedLabel ?? answer.text : answer.text;
-  return formatQuestionResponse(question2.question, response);
-}
-
-// src/components/QuestionAnswerBubble.tsx
-function QuestionAnswerBubble({ question: question2, answer }) {
-  const text2 = questionAnswerText(question2, answer);
-  const md = renderMarkdown(text2, groupId.value);
-  return /* @__PURE__ */ u4(
-    MessageBubble,
-    {
-      class: `msg in${md != null ? " markdown" : ""}`,
-      "data-msg-id": answer.id,
-      read: { kind: "question", id: question2.id },
-      from: answer.author && answer.author.userId !== currentUserId.value ? answer.author.displayName : void 0,
-      timestamp: answer.timestamp,
-      reveal: highlightMessageId.value === answer.id ? searchQuery.value : void 0,
-      children: md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", children: text2 })
-    }
-  );
-}
-
-// src/question-dock.ts
-function dockQuestions(questions, messages, groupId3, threadId2) {
-  const answered = new Set(
-    messages.filter((message2) => message2.direction === "in" && message2.inputState?.status !== "cancelled").map((message2) => message2.questionId)
-  );
-  return questions.filter(
-    (question2) => question2.kind === "question" && question2.agentGroupId === groupId3 && (!question2.threadId || question2.threadId === threadId2) && question2.status !== "cancelled" && !answered.has(question2.id)
-  ).sort(
-    (a4, b5) => timelineSortKey(a4.createdAt, a4.timelinePosition) - timelineSortKey(b5.createdAt, b5.timelinePosition)
   );
 }
 
@@ -27643,9 +27456,9 @@ function TranscriptReader({ rows, onNavigate, renderMessage }) {
   const positions = A2(/* @__PURE__ */ new Map());
   const pendingAction = A2(null);
   const selection = readerSelection.value;
-  const location2 = readerLocation();
+  const location3 = readerLocation();
   const pages = readerPages(rows);
-  const sameLocation = selection?.location === location2;
+  const sameLocation = selection?.location === location3;
   const index = sameLocation ? pages.findIndex((page2) => page2.key === selection.key) : -1;
   const page = pages[index];
   const expanded = !!page;
@@ -27668,7 +27481,7 @@ function TranscriptReader({ rows, onNavigate, renderMessage }) {
     const next = pages[index + delta];
     if (!selection || !next) return;
     if (viewport.current && page) positions.current.set(page.key, viewport.current.scrollTop);
-    readerSelection.value = { location: location2, key: next.key };
+    readerSelection.value = { location: location3, key: next.key };
   };
   const onKeyDown = (event) => {
     if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -27700,14 +27513,12 @@ function TranscriptReader({ rows, onNavigate, renderMessage }) {
     pendingAction.current = null;
     return () => {
       pendingAction.current = null;
-      if (readerSelection.peek()?.location === location2) readerSelection.value = null;
+      if (readerSelection.peek()?.location === location3) readerSelection.value = null;
     };
-  }, [location2]);
+  }, [location3]);
   let content = null;
   if (page?.row.kind === "message") {
     content = renderMessage(page.row.message, handoff);
-  } else if (page?.row.kind === "question-answer") {
-    content = renderMessage({ ...page.row.answer, text: questionAnswerText(page.row.question, page.row.answer) }, handoff);
   }
   return /* @__PURE__ */ u4(
     FilePreviewDialog,
@@ -28648,7 +28459,7 @@ function openThreadAt(targetThreadId, messageId) {
   highlightMessageId.value = messageId;
   openChat2(groupId.value, targetThreadId, null).catch(console.error);
 }
-function MessageText({ text: text2, md, onNavigate, preview = false, children }) {
+function MessageText({ text: text2, md, onNavigate, preview = false, children, replyControls }) {
   const inlineRef = A2(null);
   const previewRef = A2(null);
   const mdRef = preview ? previewRef : inlineRef;
@@ -28662,6 +28473,9 @@ function MessageText({ text: text2, md, onNavigate, preview = false, children })
   };
   _2(() => {
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
+    if (mdRef.current && replyControls?.active && !preview) {
+      bindInlineReplyControls(mdRef.current, replyControls);
+    }
     if (md != null && mdRef.current && gid) {
       rewriteFileLinks(mdRef.current, gid, (entry) => navigate(() => {
         void navFile(entry).catch(console.error);
@@ -28705,7 +28519,7 @@ function MessageText({ text: text2, md, onNavigate, preview = false, children })
       }
     }
     if (q5 && mdRef.current) highlightTextNodes(mdRef.current, q5);
-  }, [text2, md, q5, gid, preview]);
+  }, [text2, md, q5, gid, preview, replyControls?.active, replyControls?.disabled]);
   if (preview) return /* @__PURE__ */ u4(MarkdownPreview, { text: text2, html: md, className: "reader-message", contentRef: mdRef, children });
   return md != null ? /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: inlineRef, dangerouslySetInnerHTML: { __html: md } }) : /* @__PURE__ */ u4("div", { class: "transcript-copy-content", ref: inlineRef, children: text2 || "" });
 }
@@ -28774,7 +28588,8 @@ function Message({ m: m6, allowContinue = false, isLatest = false, reading = fal
     );
   }
   if (m6.card) return /* @__PURE__ */ u4(DisplayCardMessage, { message: m6, card: m6.card, reading });
-  const md = renderMarkdown(m6.text, groupId.value);
+  const replyControls = !reading && isLatest && m6.direction === "out" && /reply:/i.test(m6.text) ? replySuggestionControls(m6.id) : void 0;
+  const md = renderMarkdown(m6.text, groupId.value, replyControls?.active);
   const attachments = /* @__PURE__ */ u4(MessageAttachments, { message: m6, onNavigate });
   if (reading) return /* @__PURE__ */ u4(MessageText, { text: m6.text, md, preview: true, onNavigate, children: attachments });
   const traceOwner = activityTraceOwner(m6);
@@ -28825,9 +28640,10 @@ function Message({ m: m6, allowContinue = false, isLatest = false, reading = fal
             live: m6.turnTraceLive
           }
         ) : null,
-        /* @__PURE__ */ u4(MessageText, { text: m6.text, md, onNavigate }),
+        /* @__PURE__ */ u4(MessageText, { text: m6.text, md, onNavigate, replyControls }),
         systemNotice && /\bHTTP (?:401|403)\b/.test(m6.text) ? /* @__PURE__ */ u4("button", { type: "button", class: "ga-cred-link", onClick: () => openCredentials(), children: "Credentials" }) : null,
         attachments,
+        m6.suggestedResponses?.length ? /* @__PURE__ */ u4(SuggestedResponses, { message: m6 }) : null,
         showContinue ? /* @__PURE__ */ u4("div", { class: "message-actions", children: /* @__PURE__ */ u4(
           "button",
           {
@@ -28869,7 +28685,6 @@ function Message({ m: m6, allowContinue = false, isLatest = false, reading = fal
   );
 }
 var MessageRow = M3(Message);
-var QuestionAnswer = M3(QuestionAnswerBubble);
 function DisplayCardMessage({ message: message2, card, reading = false }) {
   const traceOwner = activityTraceOwner(message2);
   const activity = message2.activity ?? [];
@@ -28936,14 +28751,12 @@ function groupKey(group, responseTurnId) {
   if (group.kind === "starting" || group.kind === "turn" && group.row.status && group.row.turn.phase !== "settled" && group.row.turn.id === responseTurnId)
     return "response:active";
   if (group.kind === "turn") return `turn:${group.row.turn.id}`;
-  if (group.kind === "question-answer") return `question-answer:${group.row.answer.id}`;
   if (group.kind === "interaction") return `interaction:${group.row.interaction.id}`;
   if (group.kind === "events") return `events:${group.events[0].id}`;
   return `single:${group.m.id}`;
 }
 function groupContains(group, messageId) {
   if (group.kind === "turn" || group.kind === "starting") return false;
-  if (group.kind === "question-answer") return group.row.answer.id === messageId;
   if (group.kind === "interaction") return group.row.interaction.id === messageId;
   if (group.kind === "events") return group.events.some((e4) => e4.id === messageId);
   return group.m.id === messageId;
@@ -28963,7 +28776,6 @@ function groupMessages(list) {
       if (row.kind === "starting") out.push({ kind: "starting", row });
       else if (row.kind === "turn") out.push({ kind: "turn", row });
       else if (row.kind === "interaction") out.push({ kind: "interaction", row });
-      else out.push({ kind: "question-answer", row });
       continue;
     }
     const m6 = row.message;
@@ -29515,7 +29327,7 @@ function MessageLog({ dockRef }) {
     /* @__PURE__ */ u4("div", { class: "log", id: "chat-log", ref, tabIndex: -1, onClick: onLogClick, onScroll: onLogScroll, onLoadCapture: measureScroll, children: [
       chatLoading.value ? null : !threadId.value ? /* @__PURE__ */ u4("div", { class: "empty", children: "Pick or start a chat." }) : list.length === 0 && queued.length === 0 ? /* @__PURE__ */ u4("div", { class: "empty", children: "No messages yet." }) : groups2.map((g8) => {
         const key = `${threadId.value}:${groupKey(g8, responseTurnId)}`;
-        const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "question-answer" ? /* @__PURE__ */ u4(QuestionAnswer, { question: g8.row.question, answer: g8.row.answer }, key) : g8.kind === "interaction" ? /* @__PURE__ */ u4(ApprovalRow, { approval: g8.row.interaction }, key) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
+        const body = g8.kind === "starting" || g8.kind === "turn" ? /* @__PURE__ */ u4(ResponseStatusRow, { source: g8.row }, key) : g8.kind === "interaction" ? /* @__PURE__ */ u4(ApprovalRow, { approval: g8.row.interaction }, key) : g8.kind === "events" ? /* @__PURE__ */ u4(EventsGroup, { events: g8.events }, key) : /* @__PURE__ */ u4(
           MessageRow,
           {
             m: g8.m,
@@ -29568,9 +29380,6 @@ function PendingTray() {
     /* @__PURE__ */ u4("button", { type: "button", title: "Remove", onClick: () => removePending(i5), children: "\xD7" })
   ] }, i5)) });
 }
-function currentDockQuestions() {
-  return dockQuestions(pendingQuestions.value, conversationState.value?.conversation.messages ?? [], groupId.value, threadId.value);
-}
 function Composer() {
   const inputRef = A2(null);
   const fileRef = A2(null);
@@ -29578,8 +29387,7 @@ function Composer() {
   const isWeb = !channelType.value || channelType.value === "web";
   const showComposer = canSend.value;
   const wsDown = isWeb && !chatReady.value;
-  const hasQuestion = currentDockQuestions().length > 0;
-  const composerDisabled = wsDown || hasQuestion;
+  const composerDisabled = wsDown;
   const gid = groupId.value;
   const groupName = groups.value.find((group) => group.id === gid)?.name || "the agent";
   const tid = threadId.value;
@@ -29595,7 +29403,6 @@ function Composer() {
   const edit = usePendingComposer(inputRef, autosize);
   const onSubmit = (ev) => {
     ev.preventDefault();
-    if (hasQuestion) return;
     if (edit.editing) {
       void edit.save();
       return;
@@ -29605,7 +29412,7 @@ function Composer() {
     else doSubmit().catch(console.error);
   };
   const doSubmit = async () => {
-    if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg || isWeb && !chatReady.value || currentDockQuestions().length) return false;
+    if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg || isWeb && !chatReady.value) return false;
     const text2 = (inputRef.current?.value || "").trim();
     const files = pending.value.slice();
     if (!text2 && files.length === 0) return false;
@@ -29707,15 +29514,15 @@ function Composer() {
     };
   }, [target, channel, mg]);
   y2(() => {
-    if ((hasQuestion || !showComposer) && voice.state.value.target === target) voice.interrupt("Composer is no longer available. Current text has been kept.");
-  }, [hasQuestion, showComposer, target]);
+    if (!showComposer && voice.state.value.target === target) voice.interrupt("Composer is no longer available. Current text has been kept.");
+  }, [showComposer, target]);
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(
       "form",
       {
         id: "chat-form",
         onSubmit,
-        style: !hasQuestion && (showComposer || edit.editing) ? "" : "display:none",
+        style: showComposer || edit.editing ? "" : "display:none",
         class: composerDisabled ? "ws-down" : "",
         children: [
           edit.editing && /* @__PURE__ */ u4("div", { class: "composer-edit-header", children: [
@@ -29756,7 +29563,6 @@ function Composer() {
                 },
                 onPaste,
                 autocomplete: "off",
-                disabled: !edit.editing && hasQuestion,
                 readOnly: voiceLocked || !!edit.state?.busy || !!edit.state?.unresolved
               },
               controls: /* @__PURE__ */ u4(
@@ -29802,7 +29608,7 @@ function Composer() {
       /* @__PURE__ */ u4("span", { children: voiceState.error }),
       /* @__PURE__ */ u4("span", { class: "inline-error-guidance", children: "Your draft was not sent. Review it before sending." })
     ] }) }),
-    quickCapture && !hasQuestion ? /* @__PURE__ */ u4(
+    quickCapture ? /* @__PURE__ */ u4(
       QuickCapture,
       {
         onCapture: (file) => {
@@ -29897,22 +29703,12 @@ function ChatMain() {
   ] });
 }
 function InputDock() {
-  const questions = currentDockQuestions();
-  return /* @__PURE__ */ u4("div", { class: "input-dock", children: [
-    /* @__PURE__ */ u4("div", { class: "message-composer", hidden: questions.length > 0, children: [
-      /* @__PURE__ */ u4(ContextChip, {}),
-      /* @__PURE__ */ u4(PendingTray, {}),
-      /* @__PURE__ */ u4(Subnotice, {}),
-      /* @__PURE__ */ u4(Composer, {})
-    ] }),
-    questions.length > 0 && /* @__PURE__ */ u4("div", { class: "question-dock", children: questions.map((question2) => /* @__PURE__ */ u4(
-      QuestionPrompt,
-      {
-        question: question2
-      },
-      `${groupId.value}:${threadId.value}:${channelType.value}:${messagingGroupId.value}:${question2.id}`
-    )) })
-  ] });
+  return /* @__PURE__ */ u4("div", { class: "input-dock", children: /* @__PURE__ */ u4("div", { class: "message-composer", children: [
+    /* @__PURE__ */ u4(ContextChip, {}),
+    /* @__PURE__ */ u4(PendingTray, {}),
+    /* @__PURE__ */ u4(Subnotice, {}),
+    /* @__PURE__ */ u4(Composer, {})
+  ] }) });
 }
 
 // src/uploads.ts

@@ -1,9 +1,6 @@
 import type Database from 'better-sqlite3';
 import { reduceConversationActivity } from '../../../activity.js';
-import type { Question } from '../../../types.js';
 import type { ConversationApproval } from '../../shared/approval.js';
-import { queryInteractions } from '../../../db/interactions.js';
-import { outboundTimelinePosition } from '../../../input-timeline.js';
 import { conversationTimeline } from './conversation-timeline.js';
 import { approvalTranscript } from './approval-transcript.js';
 import type { TurnInputRow, TurnRow } from '../../../db/turns.js';
@@ -13,7 +10,6 @@ import { openOutboundDb } from '../../../session-manager.js';
 import type {
   Conversation,
   ConversationMessage,
-  ConversationQuestion,
   ConversationTurn,
   ConversationUsage,
 } from '../../shared/conversation.js';
@@ -97,7 +93,6 @@ export function projectConversation(
   threadId: string,
   groupId: string,
   history: ConversationMessage[],
-  questions: Question[],
   signals: Signals,
   approvals: ConversationApproval[] = [],
 ): Conversation {
@@ -110,24 +105,8 @@ export function projectConversation(
     routeMatches(context, turn.origin_channel_type, turn.origin_platform_id, turn.origin_thread_id);
   const unknown = (turn: TurnRow) =>
     turn.provenance !== 'native' && turn.origin_channel_type === null && turn.origin_platform_id === null;
-  const visibleQuestions = questions.filter((q) => routeMatches(context, q.channel_type, q.platform_id, q.thread_id));
-  const visibleQuestionIds = new Set(visibleQuestions.map((q) => q.id));
-  const anchors = outDb
-    ? (outDb
-        .prepare(
-          'SELECT message.* FROM json_each(?) visible JOIN messages_out message ON message.id=visible.value ORDER BY visible.key',
-        )
-        .all(JSON.stringify(visibleQuestions.map((q) => q.message_out_id))) as Array<{
-        id: string;
-        turn_id: string | null;
-        content: string;
-        timestamp: number;
-      }>)
-    : [];
-  const questionAnchors = new Map(anchors.map((anchor) => [anchor.id, anchor]));
   const messages: ConversationMessage[] = history
     .filter((message) => {
-      if (message.questionId && !visibleQuestionIds.has(message.questionId)) return false;
       const turn = message.turnId ? byId.get(message.turnId) : undefined;
       return !(turn && turn.phase !== 'settled' && message.deliveryOrigin === 'response');
     })
@@ -148,12 +127,6 @@ export function projectConversation(
       inputTimes.set(message.id, Math.min(inputTimes.get(message.id) ?? Infinity, message.timestamp));
     } else if (message.turnId) {
       append(outputsByTurn, message.turnId, message.id);
-    }
-  }
-  for (const question of visibleQuestions) visibleOutputIds.add(question.message_out_id);
-  for (const [id, anchor] of questionAnchors) {
-    if (anchor.turn_id) {
-      append(outputsByTurn, anchor.turn_id, id);
     }
   }
   const visibleTurns = records
@@ -239,26 +212,6 @@ export function projectConversation(
     });
   }
   const turnIds = new Set(turns.map((turn) => turn.id));
-  const scopedQuestions: ConversationQuestion[] = visibleQuestions.map((q) => {
-    const anchor = questionAnchors.get(q.message_out_id);
-    if (!anchor?.turn_id || !byId.has(anchor.turn_id))
-      throw new Error('Missing conversation question turn association');
-    const timelinePosition = outboundTimelinePosition(anchor.content);
-    return {
-      kind: 'question',
-      id: q.id,
-      ...q.input,
-      status: q.status,
-      response: q.response,
-      answeredAt: q.responded_at,
-      threadId: q.thread_id,
-      agentGroupId: groupId,
-      createdAt: anchor.timestamp,
-      messageId: q.message_out_id,
-      ...(timelinePosition !== undefined ? { timelinePosition } : {}),
-      ...(turnIds.has(anchor.turn_id) ? { turnId: anchor.turn_id } : {}),
-    };
-  });
   const live = signals.active.turn;
   const active =
     live &&
@@ -273,7 +226,7 @@ export function projectConversation(
     threadId,
     messages,
     turns,
-    interactions: [...scopedQuestions, ...approvals],
+    interactions: approvals,
     connection: { connected, activeTurnId: active?.id ?? null },
     capabilities: {
       canSend: context.canSend,
@@ -299,19 +252,12 @@ export function readConversation(
   });
   const outDb = context.sessionId ? openOutboundDb(groupId, context.sessionId) : null;
   try {
-    const questions = context.sessionId
-      ? queryInteractions<Question>(
-          "SELECT * FROM interactions WHERE session_id = ? AND kind='question' ORDER BY created_at, id",
-          context.sessionId,
-        )
-      : [];
     const view = projectConversation(
       outDb,
       context,
       threadId,
       groupId,
       history,
-      questions,
       getSessionTurnSignals(context.sessionId ?? ''),
       approvalTranscript(userId, groupId, context),
     );

@@ -3,14 +3,12 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { effect } from '@preact/signals';
 import { isValidElement } from 'preact';
 import { ActivityTraceList as PreparedActivityTraceList, Composer, ChatMain, InputDock } from './ChatMain';
-import { QuestionPrompt } from './QuestionPrompt';
 import { MarkdownPreview } from './MarkdownPreview';
 import { formatStopwatch } from '../duration-format';
 import { ComposerInput } from './ComposerInput';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
 import { TurnStopButton } from './TurnStopButton';
 import { ToolStopButton } from './ToolStopButton';
-import { QuestionAnswerBubble } from './QuestionAnswerBubble';
 import { PendingMessageActions } from './PendingMessageActions';
 import {
   activeTurn,
@@ -28,7 +26,6 @@ import {
   chatReady,
   chatReloadRequired,
   isMobile,
-  pendingQuestions,
   pinnedContext,
   voiceInput,
   scrollToBottomTick,
@@ -46,7 +43,7 @@ import {
   sendChat,
   warmChat,
 } from '../actions';
-import type { ActivityLine, ChatMessage, PendingQuestionDto } from '../types';
+import type { ActivityLine, ChatMessage } from '../types';
 import { testThread } from '../conversation-test-fixtures';
 import type { ConversationMessage, ConversationTurn } from '../../../../shared/conversation';
 import { applyConversationFrame, completedResponse, conversationState, resetConversation } from '../conversation-state';
@@ -263,7 +260,6 @@ beforeEach(() => {
   canSend.value = true;
   chatReady.value = true;
   isMobile.value = false;
-  pendingQuestions.value = [];
   pendingWebSends.value = [];
   pinnedContext.value = ['keep/context.txt'];
   pending.value = [{ name: 'unsent.txt', size: 1 }];
@@ -769,40 +765,6 @@ describe('main composer pending edits', () => {
     expect(input.value).toBe('Unsent composer draft');
     expect(pending.value[0].name).toBe('unsent.txt');
   });
-  it('suspends composition for a dock question without replacing its draft, attachments or context', () => {
-    const draft = input.value;
-    const files = pending.value;
-    const pins = pinnedContext.value;
-    pendingQuestions.value = [dockQuestion];
-    render();
-    expect(find(tree, 'form').props.style).toBe('display:none');
-    find(tree, 'form').props.onSubmit({ preventDefault() {} });
-    expect(sendChat).not.toHaveBeenCalled();
-    expect(input.value).toBe(draft);
-    expect(pending.value).toBe(files);
-    expect(pinnedContext.value).toBe(pins);
-    const dock = InputDock();
-    expect(find(dock, 'div').props.children[0].props.hidden).toBe(true);
-    expect(findComponent(dock, 'QuestionPrompt').props.question).toBe(dockQuestion);
-    pendingQuestions.value = [];
-    render();
-    expect(find(tree, 'form').props.style).toBe('');
-    expect(input.value).toBe(draft);
-    expect(pending.value).toBe(files);
-  });
-  it('renders pending questions only in the bottom dock, not the transcript or reader', () => {
-    applyConversationFrame(testSnapshot({ interactions: [dockQuestion] }), 'thread');
-    resetMount();
-    const component = findComponent(ChatMain(), 'MessageLog');
-    resetMount();
-    const log = component.type(component.props);
-    expect(findComponent(log, 'QuestionPrompt')).toBeUndefined();
-    expect(findComponent(log, 'MessageBubble')).toBeUndefined();
-    expect(findComponent(log, 'TranscriptReader').props.rows).toEqual([]);
-    const dock = InputDock();
-    expect(findComponent(dock, 'QuestionPrompt').props.question).toBe(dockQuestion);
-    expect(find(dock, 'div').props.children[1].props.class).toBe('question-dock');
-  });
   it('renders reader message bodies without technical details, metadata or submit actions', () => {
     resetMount();
     const component = findComponent(ChatMain(), 'MessageLog');
@@ -909,54 +871,6 @@ describe('main composer pending edits', () => {
       expect(previewAttachment).toHaveBeenCalledWith(file);
     });
   });
-  it.each(['text', 'skipped'] as const)(
-    'keeps the %s prompt docked until its actual response arrives',
-    (responseType) => {
-      const response = responseType === 'text' ? { responseType, value: 'Answered elsewhere' } : { responseType };
-      const question: PendingQuestionDto = { ...dockQuestion, status: 'answered', response };
-      applyConversationFrame(testSnapshot({ interactions: [question] }, 'accepted'), 'thread');
-      expect(findComponent(InputDock(), 'QuestionPrompt').props.question).toBe(question);
-      expect(find(InputDock(), 'div').props.children[0].props.hidden).toBe(true);
-      applyConversationFrame(
-        testSnapshot(
-          {
-            interactions: [question],
-            messages: [
-              {
-                id: 'answer',
-                direction: 'in',
-                questionId: question.id,
-                questionResponseType: responseType,
-                text: responseType === 'skipped' ? 'Question skipped' : 'Answered elsewhere',
-                timestamp: question.createdAt + 1,
-              },
-            ],
-          },
-          'answered',
-        ),
-        'thread',
-      );
-      expect(findComponent(InputDock(), 'QuestionPrompt')).toBeUndefined();
-      expect(find(InputDock(), 'div').props.children[0].props.hidden).toBe(false);
-      resetMount();
-      const component = findComponent(ChatMain(), 'MessageLog');
-      resetMount();
-      const log = component.type(component.props);
-      expect(findComponent(log, 'QuestionAnswerBubble')).toBeDefined();
-      expect(findComponent(log, 'TranscriptReader').props.rows).toMatchObject([
-        { kind: 'question-answer', question: { id: question.id }, answer: { id: 'answer' } },
-      ]);
-    },
-  );
-  it('removes cancelled dock questions without creating a transcript or reader page', () => {
-    applyConversationFrame(testSnapshot({ interactions: [{ ...dockQuestion, status: 'cancelled' }] }), 'thread');
-    expect(findComponent(InputDock(), 'QuestionPrompt')).toBeUndefined();
-    expect(find(InputDock(), 'div').props.children[0].props.hidden).toBe(false);
-    resetMount();
-    const component = findComponent(ChatMain(), 'MessageLog');
-    resetMount();
-    expect(findComponent(component.type(component.props), 'TranscriptReader').props.rows).toEqual([]);
-  });
   it('autosizes an existing draft on a density change without replacing it', () => {
     const draft = input.value;
     const files = pending.value;
@@ -976,281 +890,6 @@ describe('main composer pending edits', () => {
     type('Long ordinary message');
     expect(input.style.height).toBe('200px');
     expect(input.style.overflowY).toBe('auto');
-  });
-
-  const dockQuestion: PendingQuestionDto = {
-    kind: 'question',
-    id: 'q',
-    question: 'Choose?',
-    responseMode: 'choice_or_text',
-    options: [{ label: 'First', selectedLabel: 'Chosen first', value: 'first' }],
-    status: 'pending',
-    answeredAt: null,
-    threadId: 'thread',
-    agentGroupId: 'group',
-    createdAt: 1791219600000,
-    response: null,
-  };
-
-  describe('question dock controls', () => {
-    const mount = (question = dockQuestion) => {
-      hooks.cursor = 0;
-      tree = QuestionPrompt({ question });
-      const textarea = find(tree, 'textarea');
-      if (textarea) {
-        textarea.ref.current = input;
-        input.value = textarea.props.value;
-      }
-      hooks.effects.splice(0).forEach((effect) => effect());
-      return tree;
-    };
-    beforeEach(() => {
-      resetMount('');
-      vi.mocked(respondInteraction).mockReset().mockResolvedValue(true);
-    });
-    it('shows the question beside Skip without a separate title', () => {
-      mount();
-      const prompt = find(tree, 'section');
-      expect(prompt.props['aria-label']).toBe(dockQuestion.question);
-      const header = prompt.props.children[0];
-      expect(header.props.children[0].props.children).toBe(dockQuestion.question);
-      expect(header.props.children[1].props['aria-label']).toBe('Skip question and notify agent');
-    });
-    it('uses the stored placeholder and multiline request without changing composition controls', () => {
-      mount({ ...dockQuestion, placeholder: 'Describe the result', multiline: true });
-      const textarea = find(tree, 'textarea');
-      expect(textarea.props.placeholder).toBe('Describe the result');
-      expect(textarea.props.rows).toBe(3);
-      expect(findComponent(tree, 'ComposerPlusMenu')).toBeUndefined();
-    });
-    it('shares the ordinary composer input while omitting its attachment controls', () => {
-      const ordinary = findComponent(tree, 'ComposerInput');
-      mount();
-      const answer = findComponent(tree, 'ComposerInput');
-      expect(answer.type).toBe(ordinary.type);
-      expect(answer.type).toBe(ComposerInput);
-      expect(findComponent(tree, 'ComposerPlusMenu')).toBeUndefined();
-      expect(find(tree, 'input')).toBeUndefined();
-      expect(pending.value[0].name).toBe('unsent.txt');
-      expect(pinnedContext.value).toEqual(['keep/context.txt']);
-    });
-    it.each([
-      { name: 'desktop Enter', mobile: false, shiftKey: false, isComposing: false, submits: true },
-      { name: 'Shift+Enter', mobile: false, shiftKey: true, isComposing: false, submits: false },
-      { name: 'mobile Enter', mobile: true, shiftKey: false, isComposing: false, submits: false },
-      { name: 'IME Enter', mobile: false, shiftKey: false, isComposing: true, submits: false },
-    ])('shares $name handling with ordinary composition', ({ mobile, shiftKey, isComposing, submits }) => {
-      const ordinary = find(tree, 'textarea').props.onKeyDown;
-      mount();
-      const answer = find(tree, 'textarea').props.onKeyDown;
-      expect(answer).toBe(ordinary);
-      isMobile.value = mobile;
-      const requestSubmit = vi.fn();
-      const preventDefault = vi.fn();
-      for (const onKeyDown of [ordinary, answer]) {
-        onKeyDown({
-          key: 'Enter',
-          shiftKey,
-          isComposing,
-          preventDefault,
-          currentTarget: { form: { requestSubmit } },
-        });
-      }
-      expect(requestSubmit).toHaveBeenCalledTimes(submits ? 2 : 0);
-      expect(preventDefault).toHaveBeenCalledTimes(submits ? 2 : 0);
-    });
-    it('grows an answer beyond the ordinary cap so only the outer dock scrolls', () => {
-      mount();
-      input.value = 'An answer with several lines';
-      find(tree, 'textarea').props.onInput({ currentTarget: input });
-      mount();
-      const files = pending.value;
-      input.scrollHeight = 96;
-      appearance.value = {
-        ...appearance.value,
-        preferences: { ...DEFAULT_APPEARANCE, density: 'comfortable' },
-      };
-      mount();
-      expect(input.style.height).toBe('96px');
-      expect(input.style.overflowY).toBe('hidden');
-      expect(input.value).toBe('An answer with several lines');
-      expect(pending.value).toBe(files);
-      input.scrollHeight = 300;
-      find(tree, 'textarea').props.onInput({ currentTarget: input });
-      mount();
-      expect(input.style.height).toBe('300px');
-      expect(input.style.overflowY).toBe('hidden');
-      const shared = findComponent(tree, 'ComposerInput');
-      expect(ComposerInput(shared.props).props.class).toContain('multi-line');
-      input.value = '';
-      find(tree, 'textarea').props.onInput({ currentTarget: input });
-      mount();
-      expect(input.style.height).toBe('');
-      expect(input.style.overflowY).toBe('hidden');
-    });
-    it('observes answer width changes using the shared composer sizing logic', () => {
-      let resize!: () => void;
-      const observe = vi.fn();
-      const disconnect = vi.fn();
-      vi.stubGlobal(
-        'ResizeObserver',
-        class {
-          constructor(callback: () => void) {
-            resize = callback;
-          }
-          observe = observe;
-          disconnect = disconnect;
-        },
-      );
-      try {
-        hooks.capturePassive = true;
-        mount();
-        const dispose = hooks.passiveEffects.shift()?.();
-        expect(observe).toHaveBeenCalledWith(input);
-        input.value = 'Wrapped answer';
-        find(tree, 'textarea').props.onInput({ currentTarget: input });
-        input.scrollHeight = 116;
-        resize();
-        expect(input.style.height).toBe('116px');
-        expect(input.style.overflowY).toBe('hidden');
-        dispose?.();
-        expect(disconnect).toHaveBeenCalledOnce();
-      } finally {
-        hooks.capturePassive = false;
-        hooks.passiveEffects = [];
-        vi.unstubAllGlobals();
-        vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
-      }
-    });
-    it('skips once, blocks an answer race and waits for the actual response event', async () => {
-      mount();
-      const click = find(tree, 'button', 'Skip question and notify agent').props.onClick;
-      click();
-      click();
-      find(tree, 'button', 'First').props.onClick();
-      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledOnce());
-      mount();
-      expect(respondInteraction).toHaveBeenCalledWith('q', { responseType: 'skipped' });
-      expect(sendChat).not.toHaveBeenCalled();
-      expect(find(tree, 'button', 'First').props.disabled).toBe(true);
-      expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
-      expect(find(tree, 'div', 'Waiting for skip confirmation…')).toBeDefined();
-    });
-    it('retains typed text and offers a retry when skipping fails after the outcome is saved', async () => {
-      vi.mocked(respondInteraction).mockResolvedValueOnce(false);
-      mount();
-      find(tree, 'textarea').props.onInput({ currentTarget: { value: 'Unsaved answer' } });
-      mount();
-      find(tree, 'button', 'Skip question and notify agent').props.onClick();
-      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledOnce());
-      mount({ ...dockQuestion, status: 'answered', response: { responseType: 'skipped' } });
-      expect(find(tree, 'textarea').props.value).toBe('Unsaved answer');
-      expect(find(tree, 'p').props.role).toBe('alert');
-      const retry = find(tree, 'button', 'Skip question and notify agent');
-      expect(retry.props.children).toBe('Retry skip');
-      expect(retry.props.disabled).toBe(false);
-      retry.props.onClick();
-      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledTimes(2));
-    });
-    it('renders the skip event without interpreting it as a selected option', () => {
-      const bubble = QuestionAnswerBubble({
-        question: {
-          ...dockQuestion,
-          options: [{ label: 'Fake', selectedLabel: 'Not a skip', value: 'Question skipped' }],
-        },
-        answer: {
-          id: 'question-response:q',
-          direction: 'in',
-          questionResponseType: 'skipped',
-          text: 'Question skipped',
-          timestamp: 1791219660000,
-        },
-      });
-      expect(bubble.props.children.props.dangerouslySetInnerHTML.__html).toBe(
-        '<blockquote>\n<p>Choose?</p>\n</blockquote>\n<p>Question skipped</p>\n',
-      );
-      expect(bubble.props['data-msg-id']).toBe('question-response:q');
-    });
-    it('sends a choice once and waits for the authoritative answer event before restoring composition', async () => {
-      mount();
-      const click = find(tree, 'button', 'First').props.onClick;
-      click();
-      click();
-      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledOnce());
-      mount();
-      expect(respondInteraction).toHaveBeenCalledWith('q', { responseType: 'choice', value: 'first' });
-      expect(find(tree, 'button', 'First').props.disabled).toBe(true);
-      expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
-      expect(find(tree, 'section').props['aria-busy']).toBe(true);
-      expect(find(tree, 'div', 'Waiting for answer confirmation…')).toBeDefined();
-    });
-    it('keeps a failed text answer for retry, without using the ordinary send path', async () => {
-      vi.mocked(respondInteraction).mockResolvedValueOnce(false);
-      mount();
-      find(tree, 'textarea').props.onInput({ currentTarget: { value: '  My answer  ' } });
-      mount();
-      find(tree, 'form').props.onSubmit({ preventDefault() {} });
-      await vi.waitFor(() =>
-        expect(respondInteraction).toHaveBeenCalledWith('q', { responseType: 'text', value: 'My answer' }),
-      );
-      mount();
-      expect(find(tree, 'textarea').props.value).toBe('  My answer  ');
-      expect(find(tree, 'p').props.role).toBe('alert');
-      expect(find(tree, 'button', 'Send answer').props.disabled).toBe(false);
-      expect(sendChat).not.toHaveBeenCalled();
-      find(tree, 'form').props.onSubmit({ preventDefault() {} });
-      await vi.waitFor(() => expect(respondInteraction).toHaveBeenCalledTimes(2));
-    });
-    it('locks a metadata-only answered prompt and disables sends while disconnected', () => {
-      mount({ ...dockQuestion, status: 'answered' });
-      expect(find(tree, 'button', 'First').props.disabled).toBe(true);
-      expect(find(tree, 'div', 'Waiting for answer confirmation…')).toBeDefined();
-      resetMount('');
-      chatReady.value = false;
-      mount();
-      expect(find(tree, 'button', 'Send answer').props.disabled).toBe(true);
-      expect(find(tree, 'button', 'Skip question and notify agent').props.disabled).toBe(true);
-      expect(find(tree, 'div', 'Reconnecting…')).toBeDefined();
-    });
-    it.each(['choice', 'text', 'choice_or_text'] as const)(
-      'renders %s input using the existing voice control',
-      (responseMode) => {
-        mount({ ...dockQuestion, responseMode, options: responseMode === 'text' ? [] : dockQuestion.options });
-        expect(!!find(tree, 'textarea')).toBe(responseMode !== 'choice');
-        expect(!!findComponent(tree, 'VoiceButton')).toBe(responseMode !== 'choice');
-        expect(!!find(tree, 'button', 'First')).toBe(responseMode !== 'text');
-      },
-    );
-    it('routes dictation into the question answer, not the preserved composer draft', async () => {
-      vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn() } });
-      vi.stubGlobal('AudioContext', vi.fn());
-      vi.stubGlobal('AudioWorkletNode', vi.fn());
-      const config = voiceInput.value;
-      voiceInput.value = { ...config, ready: true };
-      const start = vi.spyOn(voice, 'start').mockImplementation(() => {});
-      try {
-        mount();
-        input.selectionStart = 0;
-        input.selectionEnd = 4;
-        findComponent(tree, 'VoiceButton').props.onStart();
-        const target = start.mock.calls[0][0];
-        expect(target.key).toBe('group:thread:question:q');
-        expect(start.mock.calls[0].slice(1)).toEqual([0, 4]);
-        target.setText('Dictated answer', { start: 14, end: 14 });
-        expect(input.value).toBe('Dictated answer');
-        expect(input.setSelectionRange).toHaveBeenCalledWith(14, 14);
-        mount();
-        expect(find(tree, 'textarea').props.value).toBe('Dictated answer');
-        expect(await target.send()).toBe(true);
-        expect(respondInteraction).toHaveBeenCalledWith('q', { responseType: 'text', value: 'Dictated answer' });
-        expect(sendChat).not.toHaveBeenCalled();
-      } finally {
-        start.mockRestore();
-        voiceInput.value = config;
-        vi.unstubAllGlobals();
-        vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
-      }
-    });
   });
 
   it('uses the existing textarea and a checkmark, preserving the ordinary draft and attachments on save', async () => {

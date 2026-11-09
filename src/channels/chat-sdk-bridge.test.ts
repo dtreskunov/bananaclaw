@@ -236,8 +236,9 @@ describe('createChatSdkBridge.setup — webhook route and state namespace', () =
   });
 });
 
-describe('createChatSdkBridge.deliver — questions', () => {
-  it.each([undefined, 'Approval required'])('delivers a question with optional approval title %s', async (title) => {
+describe('createChatSdkBridge.deliver — approvals', () => {
+  it('delivers an approval with canonical indexed buttons', async () => {
+    const title = 'Approval required';
     const { calls, postMessage } = makePostCapture();
     const bridge = createChatSdkBridge({
       adapter: stubAdapter({ postMessage }),
@@ -246,20 +247,20 @@ describe('createChatSdkBridge.deliver — questions', () => {
     const id = await bridge.deliver('telegram:42', null, {
       kind: 'chat-sdk',
       content: {
-        type: 'ask_question',
-        questionId: 'q',
-        question: 'Which day?',
-        responseMode: 'choice',
+        type: 'approval_request',
+        approvalId: 'approval',
+        body: 'Allow this action?',
         options: ['Monday'],
-        ...(title ? { title } : {}),
+        title,
       },
     });
     expect(id).toBe('msg-stub');
     expect(calls).toHaveLength(1);
     expect(calls[0].message).toMatchObject({
       card: { title },
-      fallbackText: `${title ? `${title}\n\n` : ''}Which day?\nOptions: Monday`,
+      fallbackText: `${title}\n\nAllow this action?\nOptions: Monday`,
     });
+    expect(JSON.stringify(calls[0].message)).toContain('nca:approval:0');
   });
 });
 

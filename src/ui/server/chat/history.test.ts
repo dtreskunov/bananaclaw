@@ -125,12 +125,12 @@ describe('parseOutboundContent', () => {
 });
 
 describe('chatSdkHistoryContent', () => {
-  it('omits durable questions because /sync renders their lifecycle card', () => {
+  it('does not turn approval requests into display cards', () => {
     expect(
       chatSdkHistoryContent(
         JSON.stringify({
-          type: 'ask_question',
-          question: 'What should the release note say?',
+          type: 'approval_request',
+          body: 'Approve this operation?',
         }),
       ),
     ).toBeNull();

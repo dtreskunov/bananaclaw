@@ -90,10 +90,8 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
   const archivedDir = resolveArchivedFolder(folderArg);
   const archiveJsonPath = path.join(archivedDir, 'archive.json');
   const dump = JSON.parse(fs.readFileSync(archiveJsonPath, 'utf-8')) as ArchiveDump;
-  if (dump.version !== 3 || !Array.isArray(dump.interactions)) {
-    throw new Error(
-      'Unsupported archive storage. Restore with its original host offline, then follow docs/user-requests-refactor-plan.md.',
-    );
+  if (dump.version !== 4 || !Array.isArray(dump.interactions)) {
+    throw new Error('Unsupported archive storage. Prepare it offline using docs/reply-suggestions-cutover.md.');
   }
   const group = dump.agent_group as { id: string; folder: string; name: string };
 

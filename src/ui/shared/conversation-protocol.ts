@@ -6,7 +6,6 @@ import type {
   ConversationActivity,
   ConversationTimelineRow,
 } from './conversation.js';
-import { isQuestionInteraction } from './conversation.js';
 import { isReadCursor } from './read-state.js';
 import { isEpochMs, UI_TIMESTAMP_PROTOCOL_VERSION } from './time.js';
 import {
@@ -20,7 +19,7 @@ import {
   type CollectionPatch,
 } from './collection-patch.js';
 import { accessRequestInput, ConnectionInputError } from './connection-input.js';
-import type { QuestionInput, QuestionResponse } from './question.js';
+import { isSuggestedResponses } from './suggested-responses.js';
 import {
   object,
   text,
@@ -37,7 +36,7 @@ import {
   type Check,
 } from './validation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION;
+export const CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 1;
 export type EntityChanges<T> = CollectionPatch<T>;
 export type ConversationTurnFields = Omit<ConversationTurn, 'activity'>;
 export interface ConversationActivityPatch {
@@ -82,25 +81,6 @@ export class ConversationProtocolError extends Error {
 }
 
 const strings = array(id);
-const questionInput = shape({
-  question: text,
-  responseMode: oneOf('choice', 'text', 'choice_or_text'),
-  options: array(shape({ label: text, selectedLabel: text, value: text })),
-  placeholder: optional(text),
-  multiline: optional(bool),
-});
-const questionAnswer = shape({
-  responseType: oneOf('choice', 'text'),
-  value: (v) => typeof v === 'string' && !!v.trim(),
-});
-const questionSkip = shape({ responseType: oneOf('skipped'), value: (v) => v === undefined });
-export function isQuestionInput(value: unknown): value is QuestionInput {
-  return questionInput(value);
-}
-export function isQuestionResponse(value: unknown): value is QuestionResponse {
-  return questionAnswer(value) || questionSkip(value);
-}
-const trace = shape({ ts: isEpochMs, text });
 const usageFields = {
   cost_usd: number,
   input_tokens: number,
@@ -124,8 +104,7 @@ const message = shape({
   direction: oneOf('in', 'out', 'event'),
   timestamp: isEpochMs,
   text,
-  questionId: optional(id),
-  questionResponseType: optional(oneOf('choice', 'text', 'skipped')),
+  suggestedResponses: optional(isSuggestedResponses),
   turnId: optional(id),
   timelinePosition: optional(integer),
   inputState: optional(
@@ -194,22 +173,6 @@ const turnFields = {
   }),
 };
 const turn = shape({ ...turnFields, activity: array(activityLine) });
-const question: Check = (value) =>
-  isQuestionInput(value) &&
-  shape({
-    kind: oneOf('question'),
-    id,
-    status: oneOf('pending', 'answered', 'cancelled'),
-    response: nullable(isQuestionResponse),
-    answeredAt: nullable(isEpochMs),
-    activity: optional(array(trace)),
-    turnId: optional(id),
-    threadId: nullable(text),
-    agentGroupId: id,
-    createdAt: isEpochMs,
-    messageId: optional(id),
-    timelinePosition: optional(integer),
-  })(value);
 const consentContext = {
   id,
   agentGroupId: nullable(text),
@@ -255,7 +218,7 @@ const account = shape({
   outcomeMessage: nullable(text),
   resolvedAt: nullable(isEpochMs),
 });
-const interaction: Check = (value) => question(value) || approval(value) || account(value);
+const interaction: Check = (value) => approval(value) || account(value);
 export function isConversationApproval(value: unknown): value is import('./approval.js').ConversationApproval {
   return approval(value) || account(value);
 }
@@ -318,19 +281,21 @@ const timelineKey = (row: ConversationTimelineRow): string =>
       ? JSON.stringify([row.kind, row.interactionId])
       : JSON.stringify([row.kind, row.turnId, row.afterId]);
 function validateTimeline(view: Conversation): void {
-  const questionIds = new Set(view.interactions.filter(isQuestionInteraction).map((item) => item.id));
-  if (
-    view.messages.some(
-      (message) =>
-        message.questionId !== undefined && (message.direction !== 'in' || !questionIds.has(message.questionId)),
-    )
-  )
-    throw new ConversationProtocolError('invalid_frame');
   const messages = new Set(
     view.messages.filter((message) => message.inputState?.status !== 'cancelled').map((message) => message.id),
   );
   const interactions = new Set(view.interactions.map((item) => item.id));
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
+  for (const message of view.messages) {
+    if (
+      message.suggestedResponses &&
+      (message.direction !== 'out' ||
+        message.deliveryOrigin !== 'response' ||
+        !message.turnId ||
+        turns.get(message.turnId)?.phase !== 'settled')
+    )
+      throw new ConversationProtocolError('invalid_frame');
+  }
   for (const turn of view.turns) uniqueKeys(turn.activity, activityOrdinal);
   const seenRows = new Set<string>();
   const seenActivity = new Set<string>();

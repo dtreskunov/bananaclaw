@@ -1,13 +1,12 @@
 import path from 'path';
 import type Database from 'better-sqlite3';
-import { isQuestionResponse } from '../../shared/conversation-protocol.js';
+import { parseSuggestedResponses } from '../../shared/suggested-responses.js';
 import type { ConversationMessage } from '../../shared/conversation.js';
 import type { TaskAttemptDto } from '../../shared/thread.js';
 import { isSessionTurnId } from '../../../session-link.js';
 import { openInboundDb, openOutboundDb, sessionDir } from '../../../session-manager.js';
 import { summarizeTaskPrompt } from '../../../thread-summaries.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
-import { log } from '../../../log.js';
 import { chatSdkHistoryContent } from '../../shared/readable-output.js';
 export { chatSdkHistoryContent } from '../../shared/readable-output.js';
 import { shortcodeToEmoji } from './emoji.js';
@@ -209,7 +208,6 @@ export function readConversationHistory(
             threadId,
             context.channelType === WEB_CHANNEL_TYPE,
             sessionId,
-            r.kind === 'interactive_response',
           );
           if (parsed != null) {
             const id = publicInboundMessageId(r.id, groupId);
@@ -225,8 +223,6 @@ export function readConversationHistory(
               id,
               timestamp: r.timestamp,
               text,
-              ...(parsed.questionId ? { questionId: parsed.questionId } : {}),
-              ...(parsed.questionResponseType ? { questionResponseType: parsed.questionResponseType } : {}),
               files: parsed.files,
               author,
               canEditPending:
@@ -245,10 +241,12 @@ export function readConversationHistory(
       try {
         const rows = outDb
           .prepare(
-            `SELECT id, timestamp, kind, content, turn_id FROM messages_out
-         WHERE channel_type = ? AND thread_id IS ?
-           AND platform_id IN (${context.platformIds.map(() => '?').join(',')})
-         ORDER BY seq`,
+            `SELECT message.id, message.timestamp, message.kind, message.content, message.turn_id,
+             suggestions.value AS suggested_responses FROM messages_out message
+         LEFT JOIN session_state suggestions ON suggestions.key = 'response-suggestions:' || message.id
+         WHERE message.channel_type = ? AND message.thread_id IS ?
+           AND message.platform_id IN (${context.platformIds.map(() => '?').join(',')})
+         ORDER BY message.seq`,
           )
           .all(context.channelType, context.threadId, ...context.platformIds) as Array<{
           id: string;
@@ -256,6 +254,7 @@ export function readConversationHistory(
           kind: string;
           content: string;
           turn_id: string | null;
+          suggested_responses: string | null;
         }>;
 
         // Reactions are `chat` rows with `operation:'reaction'` targeting a
@@ -266,9 +265,6 @@ export function readConversationHistory(
 
         for (const r of rows) {
           if (r.kind === 'chat-sdk') {
-            // Durable ask_question rows render through the question lifecycle
-            // returned by /sync. Adding a history bubble here duplicates the
-            // card after reload. Fire-and-forget cards still need their fallback.
             const content = chatSdkHistoryContent(r.content);
             if (content) {
               messages.push({
@@ -315,6 +311,7 @@ export function readConversationHistory(
             id: r.id,
             timestamp: r.timestamp,
             ...(r.turn_id ? { turnId: r.turn_id } : {}),
+            ...(r.suggested_responses ? { suggestedResponses: parseSuggestedResponses(r.suggested_responses) } : {}),
           });
         }
 
@@ -444,9 +441,8 @@ function parseInboundContent(
   threadId?: string,
   includeAttachmentUrls = false,
   sessionId?: string,
-  includeQuestionResponses = false,
 ):
-  | (Pick<ConversationMessage, 'text' | 'questionId' | 'questionResponseType' | 'files'> & {
+  | (Pick<ConversationMessage, 'text' | 'files'> & {
       viaWeb?: boolean;
     })
   | null {
@@ -454,16 +450,6 @@ function parseInboundContent(
     const o = JSON.parse(content);
     if (o?.cancelled === true) return null;
     if (typeof o === 'string') return { text: o };
-    if (includeQuestionResponses && o?.type === 'question_response') {
-      const questionId = o.questionId;
-      if (typeof questionId !== 'string' || !questionId || !isQuestionResponse(o)) {
-        log.warn('Invalid question response in chat history');
-        return null;
-      }
-      if (o.responseType === 'skipped')
-        return { text: 'Question skipped', questionId, questionResponseType: 'skipped' };
-      return { text: o.value, questionId, questionResponseType: o.responseType };
-    }
     if (typeof o?.text === 'string' || Array.isArray(o?.attachments) || Array.isArray(o?.files)) {
       const text = typeof o?.text === 'string' ? o.text : '';
       // `attachments` for native inbound (base64 + name/mimeType); `files`

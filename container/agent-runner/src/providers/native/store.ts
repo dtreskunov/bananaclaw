@@ -3,7 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ModelMessage } from 'ai';
-import { assertStorageVersion, STORAGE_VERSION } from '../../db/storage-lifecycle.js';
+import { assertStorageVersion } from '../../db/storage-lifecycle.js';
+
+const NATIVE_STORAGE_VERSION = 1;
 
 const DEFAULT_PATH = '/workspace/native-state/native-state.db';
 
@@ -34,7 +36,7 @@ export class NativeStore {
     this.directory = path.dirname(filename);
     this.db = new Database(filename, { create: true });
     try {
-      assertStorageVersion(this.db, 'native-provider');
+      assertStorageVersion(this.db, 'native-provider', NATIVE_STORAGE_VERSION);
     } catch (error) {
       this.db.close();
       throw error;
@@ -88,7 +90,7 @@ export class NativeStore {
         content_json TEXT NOT NULL
       );
     `);
-    this.db.exec(`PRAGMA user_version=${STORAGE_VERSION}`);
+    this.db.exec(`PRAGMA user_version=${NATIVE_STORAGE_VERSION}`);
     try {
       if (this.db.query('PRAGMA foreign_key_check').get()) {
         throw new Error('Native state has foreign-key violations; repair it offline before reopening');

@@ -33,9 +33,6 @@ export {
   getRunningSessions,
   updateSession,
   deleteSession,
-  createQuestion,
-  getQuestion,
-  answerQuestion,
 } from './sessions.js';
 export { createApproval, getApproval, updateApprovalStatus } from './approvals.js';
 export {

@@ -236,46 +236,6 @@ describe('explicit host trace placement', () => {
     },
   );
 
-  it('keeps questions in conversation order without splitting or hosting the turn trace', () => {
-    const view = present([message('ask', 'in', 100)], {
-      ...turn,
-      outputIds: ['question-output'],
-      activity: [activity(0, 150)],
-    });
-    view.interactions = [
-      {
-        kind: 'question',
-        id: 'question',
-        messageId: 'question-output',
-        timelinePosition: 200,
-        turnId: turn.id,
-        question: 'Choose?',
-        responseMode: 'text',
-        options: [],
-        status: 'pending',
-        answeredAt: null,
-        threadId: 'thread',
-        agentGroupId: 'group',
-        createdAt: 0,
-        response: null,
-      },
-    ];
-    view.timeline = conversationTimeline(view);
-    expect(view.timeline[1]).toEqual({
-      kind: 'interaction',
-      interactionId: 'question',
-    });
-    expect(view.timeline[2]).toEqual({
-      kind: 'turn',
-      turnId: 'turn',
-      afterId: 'question-output',
-      status: true,
-      trace: { turnId: 'turn', ordinals: [0], ownsTurn: true },
-    });
-    expect(view.messages.map((item) => item.id)).toEqual(['ask']);
-    validate(view);
-  });
-
   it.each(['silent', 'stopped', 'failed', 'interrupted', 'unknown'] as const)(
     'uses a synthetic bubble for %s turns with no final response, even after intermediate output',
     (outcome) => {

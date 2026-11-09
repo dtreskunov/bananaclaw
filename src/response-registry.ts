@@ -16,7 +16,7 @@ import { log } from './log.js';
 import type { InteractionResponse } from './ui/shared/conversation.js';
 
 export type ResponsePayload = InteractionResponse & {
-  questionId: string;
+  approvalId: string;
   userId: string | null;
   channelType: string;
   platformId: string;
@@ -53,9 +53,9 @@ export async function dispatchResponse(payload: ResponsePayload): Promise<boolea
     try {
       if (await handler(payload)) return true;
     } catch (err) {
-      log.error('Response handler threw', { questionId: payload.questionId, err });
+      log.error('Response handler threw', { approvalId: payload.approvalId, err });
     }
   }
-  log.warn('Unclaimed response', { questionId: payload.questionId, value: payload.value });
+  log.warn('Unclaimed response', { approvalId: payload.approvalId, value: payload.value });
   return false;
 }

@@ -9,7 +9,7 @@ const examples: Array<[string, Record<string, unknown>, { detail: string; descri
   ['edit_message', { messageId: 'message-1', text: 'private body' }, { detail: 'message-1' }],
   ['add_reaction', { messageId: 'message-1', emoji: ':heart:' }, { detail: ':heart:', description: 'Message: message-1' }],
   ['send_email', { to: 'alice@example.test', subject: ' \nReport <literal>\n ', body: 'private body', files: ['a.pdf'] }, { detail: 'alice@example.test', description: 'Subject:  \nReport <literal>\n \nAttachments: a.pdf' }],
-  ['ask_user_question', { question: 'Which?\n<literal>', title: 'Choose', responseMode: 'choice', options: [{ label: 'First', value: 'private value' }] }, { detail: 'Which?\n<literal>', description: 'Title: Choose\nResponse mode: choice\nOptions: First' }],
+  ['suggest_responses', { responses: ['Explore costs', 'Show alternatives'] }, { detail: 'Explore costs, Show alternatives' }],
   ['send_card', { card: { title: 'Review', actions: [{ label: 'Approve', url: 'private URL' }], body: 'private body' } }, { detail: 'Review', description: 'Actions: Approve' }],
   ['schedule_task', { processAfter: '2026-10-06T12:00:00Z', prompt: 'Check updates', recurrence: '0 12 * * *', script: 'private code' }, { detail: '2026-10-06T12:00:00Z', description: 'Prompt: Check updates\nRecurrence: 0 12 * * *' }],
   ['list_tasks', { status: 'pending' }, { detail: 'pending' }],

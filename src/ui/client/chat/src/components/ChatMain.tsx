@@ -8,7 +8,6 @@ import { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'preact/ho
 import {
   chatMessages, chatStatus, chatLoading, chatReady, chatReloadRequired, threadId, channelType, canSend, pending,
   threads, groups, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingInteractionIds,
-  pendingQuestions,
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
   revealedMobileMessageActionsId,
@@ -59,12 +58,10 @@ import { findEditBranchAnchorId } from '../edit-message';
 import { BRANCH_ACTION_EXPLANATION, editBranchActionExplanation } from '../transcript-action-copy';
 import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
-import { QuestionPrompt } from './QuestionPrompt';
+import { SuggestedResponses, bindInlineReplyControls, replySuggestionControls } from './SuggestedResponses';
 import { AttentionFocus } from './AttentionFocus';
 import { isApprovalThread } from '../approval-origin';
 import { ApprovalBubble } from './ApprovalBubble';
-import { QuestionAnswerBubble } from './QuestionAnswerBubble';
-import { dockQuestions } from '../question-dock';
 import { readerLocation, readerSelection, alignReaderMessage, type ReaderNavigate } from '../transcript-reader';
 import { TranscriptReader } from './TranscriptReader';
 import { MarkdownPreview } from './MarkdownPreview';
@@ -685,8 +682,9 @@ function openThreadAt(targetThreadId: string, messageId: string): void {
   openChat(groupId.value, targetThreadId, null).catch(console.error);
 }
 
-function MessageText({ text, md, onNavigate, preview = false, children }: {
+function MessageText({ text, md, onNavigate, preview = false, children, replyControls }: {
   text: string; md: string | null; onNavigate?: ReaderNavigate; preview?: boolean; children?: ComponentChildren;
+  replyControls?: ReturnType<typeof replySuggestionControls>;
 }) {
   const inlineRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLElement | null>(null);
@@ -699,6 +697,9 @@ function MessageText({ text, md, onNavigate, preview = false, children }: {
   useLayoutEffect(() => {
     // Reset markdown DOM before re-processing (handles search query changes).
     if (md != null && mdRef.current) mdRef.current.innerHTML = md;
+    if (mdRef.current && replyControls?.active && !preview) {
+      bindInlineReplyControls(mdRef.current, replyControls);
+    }
     if (md != null && mdRef.current && gid) {
       rewriteFileLinks(mdRef.current, gid, (entry) => navigate(() => { void navFile(entry).catch(console.error); }));
       for (const img of mdRef.current.querySelectorAll<HTMLImageElement>('img[src]')) {
@@ -738,7 +739,7 @@ function MessageText({ text, md, onNavigate, preview = false, children }: {
     }
     // Highlight search query terms in the rendered message.
     if (q && mdRef.current) highlightTextNodes(mdRef.current, q);
-  }, [text, md, q, gid, preview]);
+  }, [text, md, q, gid, preview, replyControls?.active, replyControls?.disabled]);
   if (preview) return <MarkdownPreview text={text} html={md} className="reader-message" contentRef={mdRef}>{children}</MarkdownPreview>;
   return md != null
     ? <div class="transcript-copy-content" ref={inlineRef} dangerouslySetInnerHTML={{ __html: md }} />
@@ -799,7 +800,9 @@ function Message(
     );
   }
   if (m.card) return <DisplayCardMessage message={m} card={m.card} reading={reading} />;
-  const md = renderMarkdown(m.text, groupId.value);
+  const replyControls = !reading && isLatest && m.direction === 'out' && /reply:/i.test(m.text)
+    ? replySuggestionControls(m.id) : undefined;
+  const md = renderMarkdown(m.text, groupId.value, replyControls?.active);
   const attachments = <MessageAttachments message={m} onNavigate={onNavigate} />;
   if (reading) return <MessageText text={m.text} md={md} preview onNavigate={onNavigate}>{attachments}</MessageText>;
   const traceOwner = activityTraceOwner(m);
@@ -858,10 +861,11 @@ function Message(
             live={m.turnTraceLive}
           />
         : null}
-      <MessageText text={m.text} md={md} onNavigate={onNavigate} />
+      <MessageText text={m.text} md={md} onNavigate={onNavigate} replyControls={replyControls} />
       {systemNotice && /\bHTTP (?:401|403)\b/.test(m.text)
         ? <button type="button" class="ga-cred-link" onClick={() => openCredentials()}>Credentials</button> : null}
       {attachments}
+      {m.suggestedResponses?.length ? <SuggestedResponses message={m} /> : null}
       {showContinue
         ? (
           <div class="message-actions">
@@ -909,7 +913,6 @@ function Message(
 
 /** Unchanged messages keep their object identity across frames, so only changed rows render. */
 const MessageRow = memo(Message);
-const QuestionAnswer = memo(QuestionAnswerBubble);
 
 function DisplayCardMessage({ message, card, reading = false }: { message: ChatMessage; card: DisplayCard; reading?: boolean }) {
   const traceOwner = activityTraceOwner(message);
@@ -969,15 +972,13 @@ interface EventsGroup { kind: 'events'; events: ChatMessage[] }
 type MsgGroup = SingleGroup | EventsGroup
   | { kind: 'starting'; row: Extract<TranscriptRow, { kind: 'starting' }> }
   | { kind: 'turn'; row: Extract<TranscriptRow, { kind: 'turn' }> }
-  | { kind: 'interaction'; row: Extract<TranscriptRow, { kind: 'interaction' }> }
-  | { kind: 'question-answer'; row: Extract<TranscriptRow, { kind: 'question-answer' }> };
+  | { kind: 'interaction'; row: Extract<TranscriptRow, { kind: 'interaction' }> };
 
 function groupKey(group: MsgGroup, responseTurnId: string | null): string {
   if (group.kind === 'starting' || (group.kind === 'turn' && group.row.status &&
     group.row.turn.phase !== 'settled' && group.row.turn.id === responseTurnId))
     return 'response:active';
   if (group.kind === 'turn') return `turn:${group.row.turn.id}`;
-  if (group.kind === 'question-answer') return `question-answer:${group.row.answer.id}`;
   if (group.kind === 'interaction') return `interaction:${group.row.interaction.id}`;
   if (group.kind === 'events') return `events:${group.events[0]!.id}`;
   return `single:${group.m.id}`;
@@ -985,7 +986,6 @@ function groupKey(group: MsgGroup, responseTurnId: string | null): string {
 
 function groupContains(group: MsgGroup, messageId: string): boolean {
   if (group.kind === 'turn' || group.kind === 'starting') return false;
-  if (group.kind === 'question-answer') return group.row.answer.id === messageId;
   if (group.kind === 'interaction') return group.row.interaction.id === messageId;
   if (group.kind === 'events') return group.events.some((e) => e.id === messageId);
   return group.m.id === messageId;
@@ -1009,7 +1009,6 @@ function groupMessages(list: TranscriptRow[]): MsgGroup[] {
       if (row.kind === 'starting') out.push({ kind: 'starting', row });
       else if (row.kind === 'turn') out.push({ kind: 'turn', row });
       else if (row.kind === 'interaction') out.push({ kind: 'interaction', row });
-      else out.push({ kind: 'question-answer', row });
       continue;
     }
     const m = row.message;
@@ -1587,8 +1586,6 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                   const key = `${threadId.value}:${groupKey(g, responseTurnId)}`;
                   const body = g.kind === 'starting' || g.kind === 'turn'
                     ? <ResponseStatusRow key={key} source={g.row} />
-                    : g.kind === 'question-answer'
-                      ? <QuestionAnswer key={key} question={g.row.question} answer={g.row.answer} />
                     : g.kind === 'interaction'
                       ? <ApprovalRow key={key} approval={g.row.interaction} />
                     : g.kind === 'events'
@@ -1651,10 +1648,6 @@ function PendingTray() {
   );
 }
 
-function currentDockQuestions() {
-  return dockQuestions(pendingQuestions.value, conversationState.value?.conversation.messages ?? [], groupId.value, threadId.value);
-}
-
 export function Composer() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -1665,8 +1658,7 @@ export function Composer() {
   // synchronized socket handshake so the accepted inbound echo cannot race
   // ahead of the active subscription. Non-web sends do not require a socket.
   const wsDown = isWeb && !chatReady.value;
-  const hasQuestion = currentDockQuestions().length > 0;
-  const composerDisabled = wsDown || hasQuestion;
+  const composerDisabled = wsDown;
   const gid = groupId.value;
   const groupName = groups.value.find((group) => group.id === gid)?.name || 'the agent';
   const tid = threadId.value;
@@ -1682,7 +1674,6 @@ export function Composer() {
   const edit = usePendingComposer(inputRef, autosize);
   const onSubmit = (ev: JSX.TargetedEvent<HTMLFormElement>): void => {
     ev.preventDefault();
-    if (hasQuestion) return;
     if (edit.editing) {
       void edit.save();
       return;
@@ -1694,8 +1685,7 @@ export function Composer() {
   const doSubmit = async (): Promise<boolean> => {
     if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid
       || channelType.value !== channel || messagingGroupId.value !== mg
-      || (isWeb && !chatReady.value)
-      || currentDockQuestions().length) return false;
+      || (isWeb && !chatReady.value)) return false;
     const text = (inputRef.current?.value || '').trim();
     const files = pending.value.slice();
     if (!text && files.length === 0) return false;
@@ -1793,15 +1783,15 @@ export function Composer() {
     };
   }, [target, channel, mg]);
   useEffect(() => {
-    if ((hasQuestion || !showComposer) && voice.state.value.target === target) voice.interrupt('Composer is no longer available. Current text has been kept.');
-  }, [hasQuestion, showComposer, target]);
+    if (!showComposer && voice.state.value.target === target) voice.interrupt('Composer is no longer available. Current text has been kept.');
+  }, [showComposer, target]);
 
   return (
     <>
     <form
       id="chat-form"
       onSubmit={onSubmit}
-      style={!hasQuestion && (showComposer || edit.editing) ? '' : 'display:none'}
+      style={showComposer || edit.editing ? '' : 'display:none'}
       class={composerDisabled ? 'ws-down' : ''}
     >
       {edit.editing && <div class="composer-edit-header">
@@ -1838,7 +1828,6 @@ export function Composer() {
             },
             onPaste,
             autocomplete: 'off',
-            disabled: !edit.editing && hasQuestion,
             readOnly: voiceLocked || !!edit.state?.busy || !!edit.state?.unresolved,
           }}
           controls={<ComposerPlusMenu
@@ -1876,7 +1865,7 @@ export function Composer() {
         <span class="inline-error-guidance">Your draft was not sent. Review it before sending.</span>
       </span>
     </p>}
-    {quickCapture && !hasQuestion ? (
+    {quickCapture ? (
       <QuickCapture
         onCapture={(file) => { setQuickCapture(false); addFiles([file]); }}
         onClose={() => setQuickCapture(false)}
@@ -1955,18 +1944,12 @@ export function ChatMain() {
 }
 
 export function InputDock() {
-  const questions = currentDockQuestions();
   return <div class="input-dock">
-    <div class="message-composer" hidden={questions.length > 0}>
+    <div class="message-composer">
       <ContextChip />
       <PendingTray />
       <Subnotice />
       <Composer />
     </div>
-    {questions.length > 0 && <div class="question-dock">
-      {questions.map((question) => <QuestionPrompt
-        key={`${groupId.value}:${threadId.value}:${channelType.value}:${messagingGroupId.value}:${question.id}`}
-        question={question} />)}
-    </div>}
   </div>;
 }

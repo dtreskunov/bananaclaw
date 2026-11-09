@@ -24,6 +24,7 @@ vi.mock('../webhook-server.js', () => ({
 import { closeDb, initTestDb, runMigrations } from '../db/index.js';
 import type { ChannelSetup } from './adapter.js';
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
+import { createApproval } from '../db/approvals.js';
 
 interface CapturedEdit {
   threadId: string;
@@ -36,13 +37,18 @@ function makeAdapter(edits: CapturedEdit[]): Adapter {
     name: 'stub',
     initialize: async () => {},
     channelIdFromThreadId: (threadId: string) => `stub:${threadId}`,
+    postMessage: async () => ({ id: 'unsupported-feedback', raw: {} }),
     editMessage: async (threadId: string, messageId: string, content: { markdown: string }) => {
       edits.push({ threadId, messageId, markdown: content.markdown });
     },
   } as unknown as Adapter;
 }
 
-async function fireAction(user: Record<string, unknown>): Promise<{ edits: CapturedEdit[]; actions: string[] }> {
+async function fireAction(
+  user: Record<string, unknown>,
+  actionId = 'nca:approval-1:0',
+  value = 'approve',
+): Promise<{ edits: CapturedEdit[]; actions: string[] }> {
   const edits: CapturedEdit[] = [];
   const actions: string[] = [];
   const adapter = makeAdapter(edits);
@@ -52,8 +58,8 @@ async function fireAction(user: Record<string, unknown>): Promise<{ edits: Captu
     onInbound: async () => {},
     onInboundEvent: async () => {},
     onMetadata: () => {},
-    onAction: (questionId: string, selectedOption: string, userId: string) => {
-      actions.push(`${questionId}:${selectedOption}:${userId}`);
+    onAction: (approvalId: string, selectedOption: string, userId: string) => {
+      actions.push(`${approvalId}:${selectedOption}:${userId}`);
     },
   } as ChannelSetup);
 
@@ -61,13 +67,13 @@ async function fireAction(user: Record<string, unknown>): Promise<{ edits: Captu
   expect(chat).toBeTruthy();
   await chat.processAction(
     {
-      actionId: 'ncq:q-1:approve',
+      actionId,
       adapter,
       messageId: 'msg-1',
       raw: {},
       threadId: 'T-1',
       user: user as never,
-      value: 'approve',
+      value,
     },
     undefined,
   );
@@ -78,6 +84,17 @@ beforeEach(() => {
   captured.chat = null;
   const db = initTestDb();
   runMigrations(db);
+  createApproval({
+    id: 'approval-1',
+    request_id: 'approval-1',
+    created_at: Date.now(),
+    input: {
+      action: 'test',
+      payload: {},
+      title: 'Approval required',
+      options: [{ label: 'Approve', selectedLabel: 'approve', value: 'approve' }],
+    },
+  });
 });
 
 afterEach(() => {
@@ -92,7 +109,7 @@ describe('chat-sdk-bridge approval-card byline', () => {
     expect(edits[0].threadId).toBe('T-1');
     expect(edits[0].messageId).toBe('msg-1');
     expect(edits[0].markdown).toContain('approve — gavriel');
-    expect(actions).toEqual(['q-1:approve:U1']);
+    expect(actions).toEqual(['approval-1:approve:U1']);
   });
 
   it('falls back to fullName when userName is missing', async () => {
@@ -109,4 +126,18 @@ describe('chat-sdk-bridge approval-card byline', () => {
     expect(edits[0].markdown).not.toContain('—');
     expect(edits[0].markdown).toContain('approve');
   });
+
+  it('uses the persisted indexed value rather than an event-provided value', async () => {
+    const { actions } = await fireAction({ userId: 'U1' }, 'nca:approval-1:0', 'reject');
+    expect(actions).toEqual(['approval-1:approve:U1']);
+  });
+
+  it.each(['ncq:approval-1:0', 'nca:approval-1:approve', 'nca:approval-1:3', 'nca:missing:0'])(
+    'does not edit or dispatch unsupported callback %s',
+    async (actionId) => {
+      const { edits, actions } = await fireAction({ userId: 'U1' }, actionId);
+      expect(edits).toEqual([]);
+      expect(actions).toEqual([]);
+    },
+  );
 });

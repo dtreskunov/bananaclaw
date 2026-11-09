@@ -71,7 +71,6 @@ import {
   writeSessionMessage,
   writeOutboundDirect,
 } from '../../../session-manager.js';
-import { createQuestion, answerQuestion } from '../../../db/sessions.js';
 import { applyDurableRunnerEvent } from '../../../session-link-durable.js';
 import { formatTimestamp } from '../../../time.js';
 import { createWebAdapter } from '../../../channels/web.js';
@@ -319,69 +318,6 @@ describe('tool-scoped Stop endpoint', () => {
 });
 
 describe('native steering submissions', () => {
-  it.each(['text', 'skipped'] as const)(
-    'reads a %s question response as a separate routed input with its own timestamp and recorded position',
-    (responseType) => {
-      const id = 'question-response:q';
-      const content = JSON.stringify({
-        type: 'question_response',
-        questionId: 'q',
-        responseType,
-        ...(responseType === 'text' ? { value: 'Yes' } : {}),
-      });
-      writeSessionMessage('agent', 'session-1', {
-        id,
-        kind: 'interactive_response',
-        timestamp: NOW,
-        platformId: 'group:agent',
-        channelType: 'web',
-        threadId: 'thread-1',
-        content,
-      });
-      writeSessionMessage('agent', 'session-1', {
-        id: 'off-route-answer',
-        kind: 'interactive_response',
-        timestamp: NOW,
-        platformId: 'private',
-        channelType: 'web',
-        threadId: 'thread-1',
-        content,
-      });
-      writeSessionMessage('agent', 'session-1', {
-        id: 'not-an-answer',
-        kind: 'chat',
-        timestamp: NOW,
-        platformId: 'group:agent',
-        channelType: 'web',
-        threadId: 'thread-1',
-        content,
-      });
-      const db = openOutboundDbRw('agent', 'session-1');
-      const key = `input:${createHash('sha256').update(id).digest('hex')}`;
-      db.prepare('INSERT INTO session_state (key, value, updated_at) VALUES (?, ?, ?)').run(
-        key,
-        JSON.stringify({
-          messageId: id,
-          status: 'applied',
-          turnId: 'turn-1',
-          timelinePosition: 300,
-        }),
-        NOW,
-      );
-      db.close();
-      expect(readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE)).toEqual([
-        expect.objectContaining({
-          id,
-          direction: 'in',
-          questionId: 'q',
-          text: responseType === 'skipped' ? 'Question skipped' : 'Yes',
-          ...(responseType === 'skipped' ? { questionResponseType: 'skipped' } : {}),
-          timestamp: NOW,
-          timelinePosition: 300,
-        }),
-      ]);
-    },
-  );
   const handling = { mode: 'steer', turnId: TURN.id };
   const send = (inputHandling: unknown = handling, options: Parameters<typeof stop>[0] = {}) =>
     stop({
@@ -1142,105 +1078,6 @@ describe('chat stop authorization', () => {
 });
 
 describe('chat turn snapshots and events', () => {
-  it('publishes committed host inputs, outputs, reactions and questions without adapter callbacks', async () => {
-    const frames: Record<string, unknown>[] = [];
-    const ws = connectConversation(frames);
-    try {
-      writeSessionMessage('agent', 'session-1', {
-        id: 'commit-input:agent',
-        kind: 'chat',
-        timestamp: NOW,
-        platformId: 'group:agent',
-        channelType: 'web',
-        threadId: 'thread-1',
-        content: '{"text":"Committed input"}',
-      });
-      writeOutboundDirect('agent', 'session-1', {
-        id: 'host-output',
-        kind: 'chat',
-        platformId: 'group:agent',
-        channelType: 'web',
-        threadId: 'thread-1',
-        content: '{"text":"Committed host response"}',
-      });
-      await vi.waitFor(() =>
-        expect(socketView(frames).messages.map((m) => m.id)).toEqual(['commit-input', 'host-output']),
-      );
-      writeOutboundDirect('agent', 'session-1', {
-        id: 'reaction',
-        kind: 'chat',
-        platformId: 'group:agent',
-        channelType: 'web',
-        threadId: 'thread-1',
-        content: JSON.stringify({ operation: 'reaction', messageId: 'commit-input:agent', emoji: '👍' }),
-      });
-      await vi.waitFor(() => expect(socketView(frames).messages[0].reactions?.[0].emoji).toBe('👍'));
-      const questionDb = openOutboundDbRw('agent', 'session-1');
-      questionDb
-        .prepare(
-          'INSERT INTO messages_out (id, kind, timestamp, content, turn_id, platform_id, channel_type, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        )
-        .run(
-          'question-output',
-          'chat-sdk',
-          NOW,
-          '{"type":"ask_question","questionId":"q","question":"Continue?","responseMode":"text","options":[]}',
-          'turn-1',
-          'group:agent',
-          'web',
-          'thread-1',
-        );
-      questionDb.close();
-      createQuestion({
-        id: 'q',
-        session_id: 'session-1',
-        message_out_id: 'question-output',
-        in_reply_to: null,
-        channel_type: 'web',
-        platform_id: 'group:agent',
-        thread_id: 'thread-1',
-        created_at: NOW,
-        input: { question: 'Continue?', responseMode: 'text', options: [] },
-      });
-      await vi.waitFor(() => expect(socketView(frames).interactions[0]?.status).toBe('pending'));
-      answerQuestion('q', { value: 'yes', responseType: 'text', userId: null, answeredAt: NOW });
-      await vi.waitFor(() =>
-        expect(socketView(frames).interactions[0]).toMatchObject({ response: { responseType: 'text', value: 'yes' } }),
-      );
-      writeSessionMessage('agent', 'session-1', {
-        id: 'question-response:q',
-        kind: 'interactive_response',
-        timestamp: NOW,
-        platformId: 'group:agent',
-        channelType: 'web',
-        threadId: 'thread-1',
-        content: '{"type":"question_response","questionId":"q","value":"yes","responseType":"text"}',
-      });
-      await vi.waitFor(() =>
-        expect(socketView(frames).messages.find((message) => message.questionId === 'q')).toMatchObject({
-          id: 'question-response:q',
-          direction: 'in',
-          timestamp: NOW,
-          text: 'yes',
-        }),
-      );
-      const count = frames.length;
-      getDb().prepare("DELETE FROM agent_group_members WHERE user_id = 'web:member'").run();
-      writeOutboundDirect('agent', 'session-1', {
-        id: 'after-revocation',
-        kind: 'chat',
-        platformId: 'group:agent',
-        channelType: 'web',
-        threadId: 'thread-1',
-        content: '{"text":"No longer visible"}',
-      });
-      await vi.waitFor(() => expect(ws.cleared).toHaveBeenCalledOnce());
-      expect(ws.close).not.toHaveBeenCalled();
-      expect(frames).toHaveLength(count);
-    } finally {
-      ws.emit('close');
-    }
-  });
   it('does not send web conversation state through sidebar polling', async () => {
     const req = Readable.from([]) as unknown as http.IncomingMessage;
     req.method = 'GET';

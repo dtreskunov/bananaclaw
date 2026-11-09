@@ -3,6 +3,7 @@ import { queryInteractions } from '../../db/interactions.js';
 import type { Approval } from '../../types.js';
 import { registerResource } from '../crud.js';
 import { parseTimestamp } from '../../time.js';
+import { resendSenderApproval } from '../../modules/permissions/sender-approval.js';
 
 const filters = ['id', 'session_id', 'request_id', 'agent_group_id', 'kind', 'status', 'created_at'];
 registerResource({
@@ -14,6 +15,14 @@ registerResource({
   columns: filters.map((name) => ({ name, type: 'string', description: name })),
   operations: {},
   customOperations: {
+    resend: {
+      access: 'host',
+      description: 'Reissue an existing unknown-sender approval to its recorded authorized approver.',
+      handler: async (args) => {
+        if (typeof args.id !== 'string' || !args.id) throw new Error('--id is required');
+        return resendSenderApproval(args.id);
+      },
+    },
     list: {
       access: 'open',
       description: 'List retained approval interactions; filter --status pending for decisions awaiting a response.',
@@ -21,7 +30,7 @@ registerResource({
         if ('expires_at' in args) throw new Error('Interaction expiry filters are no longer supported');
         const selected = Object.entries(args).filter(([key]) => filters.includes(key));
         return queryInteractions<Approval>(
-          `SELECT * FROM interactions WHERE kind!='question'
+          `SELECT * FROM interactions WHERE 1=1
           ${selected.map(([key]) => `AND ${key}=?`).join(' ')} LIMIT ?`,
           ...selected.map(([key, value]) => {
             if (key !== 'created_at') return value;

@@ -18,15 +18,7 @@ vi.mock('../../../container-runner.js', () => ({
 }));
 
 import { killContainer, wakeContainer } from '../../../container-runner.js';
-import {
-  closeDb,
-  createApproval,
-  getDb,
-  getApproval,
-  getQuestion,
-  initTestDb,
-  runMigrations,
-} from '../../../db/index.js';
+import { closeDb, createApproval, getDb, getApproval, initTestDb, runMigrations } from '../../../db/index.js';
 import { createThreadFork, getThreadFork } from '../../../db/thread-forks.js';
 import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
@@ -188,26 +180,6 @@ describe('DELETE chat thread', () => {
     expect(killContainer).not.toHaveBeenCalled();
   });
 
-  it.each(['pending', 'answered', 'cancelled'])('deletes a web thread with %s questions', async (status) => {
-    seedMessagingGroup('web-mg', 'web', `group:${GROUP_ID}`, 'per-thread');
-    const dir = seedSession('web-session', 'web-mg', 'web-thread');
-    getDb()
-      .prepare(
-        `INSERT INTO interactions
-        (id, kind, session_id, message_out_id, input_json, status, response_json, responded_at, created_at, updated_at)
-       VALUES ('question', 'question', 'web-session', 'message', '{"question":"Continue?","responseMode":"choice","options":[]}', ?,
-       CASE WHEN ?='answered' THEN '{"responseType":"skipped"}' END, CASE WHEN ?='answered' THEN 1767225600000 END, ?, 1767225600000)`,
-      )
-      .run(status, status, status, NOW);
-
-    expect(await deleteThread('web-thread', '')).toEqual({
-      status: 200,
-      json: { ok: true, removed: 1, cancelledApprovals: 0 },
-    });
-    expect(getQuestion('question')).toBeUndefined();
-    expect(fs.existsSync(dir)).toBe(false);
-  });
-
   it('requires cancellation consent without changing the session, lineage, or container', async () => {
     seedMessagingGroup('web-mg', 'web', `group:${GROUP_ID}`, 'per-thread');
     const dir = seedSession('web-session', 'web-mg', 'web-thread');
@@ -262,7 +234,7 @@ describe('DELETE chat thread', () => {
       });
       registerApprovalHandler('install_packages', handler);
       const responsePayload = {
-        questionId: 'child-approval',
+        approvalId: 'child-approval',
         value: 'approve',
         userId: USER_ID,
         channelType: 'web',

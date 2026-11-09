@@ -757,9 +757,9 @@ describe('applyDurableRunnerEvent', () => {
     ],
     ['unsafe file name', { files: ['../secret.txt'] }, 'invalid outbound files'],
     [
-      'too many question options',
+      'too many action options',
       { options: Array.from({ length: 51 }, (_, index) => `option-${index}`) },
-      'invalid question options',
+      'invalid action options',
     ],
   ])('rejects message content with %s', (_label, content, error) => {
     expect(() =>

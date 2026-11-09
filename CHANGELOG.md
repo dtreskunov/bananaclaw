@@ -4,6 +4,17 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Optional reply drafts replace conversational question
+  requests.** `suggest_responses` attaches editable drafts to a completed reply;
+  inline `[label](reply:URI-encoded%20draft)` controls can use a short label
+  independently of their full draft. Both forms fill the ordinary composer
+  without sending, preserve existing drafts, and appear only on the latest
+  completed reply. The composer never becomes an answer-required dock. Approvals use
+  their own payloads and indexed callbacks. Host/session/runner storage is v2,
+  archives are v4, and browser conversations use protocol 17. Prepare private
+  offline candidates using [the cutover guide](docs/reply-suggestions-cutover.md);
+  the converter never installs candidates or mutates live data.
+
 - **[BREAKING] Numeric-only host metadata.** Pairing, skill-catalog and startup
   breaker files no longer import ISO dates during normal reads. Run the
   [stopped-host normalization](docs/db.md) before deploying; the explicit tool

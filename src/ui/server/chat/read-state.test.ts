@@ -11,7 +11,6 @@ vi.mock('../../../config.js', async (original) => ({
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
 import { initSessionFolder, inboundDbPath, outboundDbPath } from '../../../session-manager.js';
 import { refreshThreadSummaries, rebuildThreadSummaries } from '../../../thread-summaries.js';
-import { createQuestion } from '../../../db/sessions.js';
 import { createApproval, updateApprovalStatus } from '../../../db/approvals.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { insertIdentity } from '../../../modules/permissions/db/identities.js';
@@ -185,28 +184,6 @@ describe('durable viewer unread state', () => {
     expect(unread()).toBe(false);
     acknowledgeRead('viewer', 'g', 'a', seen);
     expect(unread()).toBe(false);
-  });
-  it('publishes question cards without consuming their waiting/action state', () => {
-    output.exec(`INSERT INTO turns(id,phase,outcome,provenance,origin_channel_type,origin_platform_id,origin_thread_id,started_at)
-      VALUES('question-turn','running','pending','native','web','group:g','a',1767225600000);
-      INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content,turn_id)
-      VALUES('question-output',1,'chat-sdk',1767225600000,'web','group:g','a','{"type":"ask_question","question":"Choose?"}','question-turn');`);
-    refreshThreadSummaries('s');
-    createQuestion({
-      id: 'q',
-      session_id: 's',
-      message_out_id: 'question-output',
-      in_reply_to: null,
-      channel_type: 'web',
-      platform_id: 'group:g',
-      thread_id: 'a',
-      created_at: 1767225600000,
-      input: { question: 'Choose?', responseMode: 'text', options: [] },
-    });
-    expect(unread()).toBe(true);
-    acknowledgeRead('viewer', 'g', 'a', cursor());
-    expect(unread()).toBe(false);
-    expect(readInteractionSync('viewer').attention).toHaveLength(1);
   });
   it('keeps approval publications private to viewers allowed to see their transcript', () => {
     grantRole({

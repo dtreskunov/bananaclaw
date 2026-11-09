@@ -3,7 +3,7 @@
  *
  * Approval cards may be delivered to an admin DM, but the callback payload is
  * still untrusted input. The response handler must not dispatch sensitive
- * approval handlers merely because a response carries a valid questionId.
+ * approval handlers merely because a response carries a valid approvalId.
  */
 import * as fs from 'fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -79,7 +79,7 @@ describe('approval response authorization', () => {
     expect(deleteSession('sess-1', true)).toBe(1);
     expect(
       await handleApprovalsResponse({
-        questionId: 'appr-cancelled',
+        approvalId: 'appr-cancelled',
         value: 'approve',
         userId: 'owner',
         channelType: 'telegram',
@@ -110,7 +110,7 @@ describe('approval response authorization', () => {
     });
 
     const claimed = await handleApprovalsResponse({
-      questionId: 'appr-1',
+      approvalId: 'appr-1',
       value: 'approve',
       userId: 'stranger',
       channelType: 'telegram',
@@ -146,7 +146,7 @@ describe('approval response authorization', () => {
     });
 
     const claimed = await handleApprovalsResponse({
-      questionId: 'appr-2',
+      approvalId: 'appr-2',
       value: 'approve',
       userId: 'owner',
       channelType: 'telegram',
@@ -159,7 +159,7 @@ describe('approval response authorization', () => {
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ userId: 'telegram:owner' }));
     expect(getApproval('appr-2')?.status).toBe('approved');
     await handleApprovalsResponse({
-      questionId: 'appr-2',
+      approvalId: 'appr-2',
       value: 'approve',
       userId: 'owner',
       channelType: 'telegram',
@@ -199,7 +199,7 @@ describe('approval response authorization', () => {
     });
 
     const claimed = await handleApprovalsResponse({
-      questionId: 'appr-3',
+      approvalId: 'appr-3',
       value: 'approve',
       userId: 'global-admin',
       channelType: 'telegram',
@@ -239,7 +239,7 @@ describe('approval response authorization', () => {
     });
 
     const claimed = await handleApprovalsResponse({
-      questionId: 'appr-4',
+      approvalId: 'appr-4',
       value: 'approve',
       userId: 'e5a1f280-uuid',
       channelType: 'web',

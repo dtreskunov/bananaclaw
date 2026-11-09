@@ -1,0 +1,237 @@
+/* src/components/Toast.css */
+.toast {
+  position: fixed;
+  left: 50%;
+  top: max(24px, env(safe-area-inset-top));
+  transform: translateX(-50%);
+  z-index: 100;
+  width: auto;
+  max-width: calc(100vw - 32px);
+  min-height: var(--control-action-size);
+  padding: 6px 14px;
+  font-size: var(--message-input-font-size);
+  letter-spacing: 0;
+  box-shadow: 0 2px 10px var(--shadow-color);
+  pointer-events: auto;
+  animation: toast-in 160ms ease-out, toast-out 220ms ease-in 1.45s forwards;
+}
+.toast-err {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 32px));
+  border-radius: var(--radius-md);
+  background: var(--toast-error);
+  color: var(--toast-error-fg);
+  line-height: 1.4;
+  text-align: left;
+}
+.toast-err:hover:not(:disabled) {
+  background: var(--toast-error);
+}
+.toast:focus-visible {
+  outline: 2px solid var(--surface-fg);
+  outline-offset: 2px;
+}
+.toast-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.toast-err .toast-text {
+  max-height: 50dvh;
+  overflow-y: auto;
+  user-select: text;
+}
+.toast-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.toast-controls button {
+  min-height: var(--control-action-size);
+  border-color: currentColor;
+}
+.toast-controls button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.toast-action {
+  display: flex;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 32px));
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--message-input-font-size);
+  line-height: 1.4;
+  text-align: left;
+  cursor: default;
+}
+.toast-action .toast-controls button {
+  padding-inline: 12px;
+  background: transparent;
+  color: inherit;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+.toast-sticky {
+  animation: toast-in 160ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-sticky {
+    animation: none;
+  }
+}
+
+/* src/reply-suggestions-demo.css */
+:root {
+  font: 16px/1.5 system-ui, sans-serif;
+  color: #242526;
+  background: #f5f6f7;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+.prototype {
+  max-width: 760px;
+  padding: 24px;
+  margin: auto;
+}
+h1 {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+header p,
+form p,
+.working {
+  color: #666;
+}
+button {
+  font: inherit;
+  border: 1px solid #a3b1bd;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: #eef5fa;
+}
+button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+button:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #377aaa;
+  outline-offset: 2px;
+}
+.demo-controls,
+.reply-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.transcript {
+  padding: 24px 0;
+}
+.msg {
+  padding: 16px;
+  margin: 12px 0;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #dce1e5;
+}
+.msg.in {
+  margin-left: 40px;
+  background: #eaf2f8;
+}
+.msg p {
+  margin-top: 0;
+  white-space: pre-wrap;
+}
+.reply-suggestions button {
+  color: #285779;
+  max-width: 100%;
+  white-space: normal;
+}
+.inline-reply-suggestion {
+  position: relative;
+  display: inline;
+  padding: 1px 5px;
+  border: 1px dotted currentColor;
+  border-radius: 6px;
+  background: #eef5fa;
+  color: #285779;
+  font: inherit;
+}
+.inline-reply-suggestion:focus-visible::after {
+  content: "Draft: " attr(data-reply-draft);
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  top: 100%;
+  width: max-content;
+  max-width: min(320px, 70vw);
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #a3b1bd;
+  border-radius: 6px;
+  text-align: left;
+}
+form {
+  border-top: 1px solid #dce1e5;
+  padding-top: 16px;
+}
+label {
+  display: block;
+}
+textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid #a3b1bd;
+  border-radius: 10px;
+  font: inherit;
+}
+.demo-error {
+  padding: 12px;
+  color: #853827;
+  background: #fff0eb;
+  border-radius: 8px;
+}
+@media (max-width: 600px) {
+  .prototype {
+    padding: 16px;
+  }
+  .msg.in {
+    margin-left: 20px;
+  }
+}

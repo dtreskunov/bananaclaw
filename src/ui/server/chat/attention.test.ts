@@ -7,13 +7,11 @@ vi.mock('../../../config.js', async (original) => ({
   DATA_DIR: root,
 }));
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { answerQuestion, createQuestion, getQuestion } from '../../../db/sessions.js';
-import { createApproval, updateApprovalStatus } from '../../../db/approvals.js';
+import { createApproval, getApproval, updateApprovalStatus } from '../../../db/approvals.js';
 import { createApprovalWorkflow } from '../../../modules/approvals/workflows.js';
 import { initSessionFolder } from '../../../session-manager.js';
 import { readInteractionSync } from './attention.js';
-import { questionResponseOrigin } from './interaction-access.js';
-import { insertIdentity } from '../../../modules/permissions/db/identities.js';
+import { canRespondToApproval } from './interaction-access.js';
 
 const NOW = 1791223200000;
 beforeEach(() => {
@@ -38,25 +36,11 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-function question(id: string, session = 's') {
-  createQuestion({
-    id,
-    session_id: session,
-    message_out_id: `out-${id}`,
-    in_reply_to: null,
-    platform_id: session === 's' ? 'group:g' : 'group:g2',
-    channel_type: 'web',
-    thread_id: session === 's' ? 't' : 't2',
-    created_at: NOW,
-    input: { question: 'Choose?', responseMode: 'text', options: [] },
-  });
-}
-
-function approval(id: string, account = false) {
+function approval(id: string, account = false, session = 's') {
   createApproval({
     id,
     request_id: id,
-    session_id: 's',
+    session_id: session,
     created_at: NOW,
     input: {
       action: account ? 'request_access' : 'install_packages',
@@ -74,35 +58,35 @@ function admin(user = 'viewer', group: string | null = 'g') {
     .run(user, group === null ? 'owner' : 'admin', group, NOW);
 }
 
-describe('authorized global input attention', () => {
-  it('uses stable canonical IDs, retains pending queues and returns navigation only', () => {
-    question('q-b');
-    question('q-a');
+describe('authorized approval attention', () => {
+  it('uses stable canonical IDs and returns navigation only to admins, not members', () => {
+    approval('approval-b');
+    approval('approval-a');
+    expect(readInteractionSync('viewer')).toEqual({ approvals: [], attention: [] });
+    admin();
     const data = readInteractionSync('viewer');
     expect(data.attention).toEqual(
-      ['q-a', 'q-b'].map((id) => ({
+      ['approval-a', 'approval-b'].map((id) => ({
         id,
         origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'mg' },
       })),
     );
-    expect(JSON.stringify(data.attention)).not.toContain('Choose?');
+    expect(JSON.stringify(data.attention)).not.toContain('Review');
     expect(readInteractionSync('other').attention).toEqual([]);
   });
 
   it('filters before aggregation and respects scoped admin access across groups', () => {
-    question('visible');
-    question('hidden', 's2');
-    approval('confirmation');
-    expect(readInteractionSync('viewer').attention.map((row) => row.id)).toEqual(['visible']);
+    approval('visible');
+    approval('hidden', false, 's2');
     admin();
-    expect(readInteractionSync('viewer').attention.map((row) => row.id)).toEqual(['confirmation', 'visible']);
+    expect(readInteractionSync('viewer').attention.map((row) => row.id)).toEqual(['visible']);
     admin('other', 'g2');
     expect(readInteractionSync('other').attention.map((row) => row.id)).toEqual(['hidden']);
+    expect(canRespondToApproval('viewer', getApproval('hidden')!)).toBe(false);
   });
 
-  it('includes all four variants without disclosing private progress or selections', () => {
+  it('includes all approval variants without disclosing private progress or selections', () => {
     admin();
-    question('question');
     approval('confirmation');
     approval('access', true);
     approval('setup', true);
@@ -110,28 +94,28 @@ describe('authorized global input attention', () => {
     getDb().exec(`UPDATE interaction_progress SET data_json='{"connectionId":"private-selection"}'`);
     const before = getDb().prepare('SELECT * FROM interaction_progress ORDER BY id').all();
     const data = readInteractionSync('viewer');
-    expect(data.attention.map((row) => row.id)).toEqual(['access', 'confirmation', 'question', 'setup']);
+    expect(data.attention.map((row) => row.id)).toEqual(['access', 'confirmation', 'setup']);
     expect(JSON.stringify(data.attention)).not.toContain('private-selection');
     expect(data.attention.every((row) => Object.keys(row).sort().join(',') === 'id,origin')).toBe(true);
     expect(getDb().prepare('SELECT * FROM interaction_progress ORDER BY id').all()).toEqual(before);
   });
 
-  it('removes answered requests and excludes applying, terminal and expired decisions', () => {
+  it('removes resolved requests and excludes applying, terminal and expired decisions', () => {
     admin();
-    question('q');
+    approval('pending');
     approval('applying');
     approval('rejected');
     approval('expired');
     updateApprovalStatus('expired', 'expired');
     updateApprovalStatus('applying', 'applying');
     updateApprovalStatus('rejected', 'rejected');
-    expect(readInteractionSync('viewer').attention.map((row) => row.id)).toEqual(['q']);
-    answerQuestion('q', { responseType: 'text', value: 'Done', userId: 'other', answeredAt: NOW });
+    expect(readInteractionSync('viewer').attention.map((row) => row.id)).toEqual(['pending']);
+    updateApprovalStatus('pending', 'approved');
     expect(readInteractionSync('viewer').attention).toEqual([]);
     expect(readInteractionSync('viewer').approvals.some((row) => row.id === 'applying')).toBe(true);
   });
 
-  it('retains read-only global references without advertising unavailable response controls', () => {
+  it('retains global references without advertising unavailable response controls', () => {
     createApproval({
       id: 'global',
       request_id: 'global',
@@ -143,16 +127,8 @@ describe('authorized global input attention', () => {
     admin('other', null);
     expect(readInteractionSync('other').attention).toEqual([]);
     expect(readInteractionSync('other').approvals.map((row) => row.id)).toEqual(['global']);
-  });
-
-  it('does not count requests after membership is revoked or their route no longer resolves', () => {
-    question('q');
-    expect(readInteractionSync('viewer').attention).toHaveLength(1);
-    getDb().exec("DELETE FROM agent_group_members WHERE user_id='viewer'");
-    expect(readInteractionSync('viewer').attention).toEqual([]);
-    getDb().exec(`INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('viewer','g',${NOW})`);
-    getDb().exec("UPDATE interactions SET platform_id='different' WHERE id='q'");
-    expect(readInteractionSync('viewer').attention).toEqual([]);
+    expect(canRespondToApproval('viewer', getApproval('global')!)).toBe(false);
+    expect(canRespondToApproval('other', getApproval('global')!)).toBe(true);
   });
 
   it('does not advertise a confirmation that has no available response controls', () => {
@@ -162,24 +138,5 @@ describe('authorized global input attention', () => {
     const data = readInteractionSync('viewer');
     expect(data.approvals).toHaveLength(1);
     expect(data.attention).toEqual([]);
-  });
-
-  it('shares question authorization with the response endpoint rather than exposing foreign recipients', () => {
-    question('a');
-    question('b');
-    getDb().exec(`
-      INSERT INTO agent_group_members(user_id,agent_group_id,added_at) VALUES('other','g',${NOW});
-      UPDATE sessions SET messaging_group_id=NULL,thread_id=NULL WHERE id='s';
-      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('a','resend','resend','resend:a',0,${NOW}),('b','resend','resend','resend:b',0,${NOW});
-      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('a','a','g','agent-shared',${NOW}),('b','b','g','agent-shared',${NOW});
-      UPDATE interactions SET channel_type='resend',thread_id=NULL,platform_id='resend:'||id;
-    `);
-    insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'a' });
-    insertIdentity({ userId: 'other', channel: 'resend', handle: 'b' });
-    expect(readInteractionSync('viewer').attention.map((row) => row.id)).toEqual(['a']);
-    expect(readInteractionSync('other').attention.map((row) => row.id)).toEqual(['b']);
-    expect(questionResponseOrigin('other', getQuestion('a')!)).toBeNull();
   });
 });

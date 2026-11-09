@@ -33,7 +33,7 @@ import {
   extractOutboundText,
   FILLER_INTERVAL_MS,
   FILLERS,
-  renderAskQuestion,
+  renderApprovalRequest,
   safeEqual,
   streamEnd,
   streamError,
@@ -142,75 +142,88 @@ describe('extractOutboundText', () => {
     expect(extractOutboundText({ kind: 'chat', content: null })).toBeNull();
   });
 
-  it('renders an ask_question payload as an inline prompt + options so the HA request settles', () => {
+  it('renders an approval notice so the HA request settles without authorizing a voice reply', () => {
     const text = extractOutboundText({
       kind: 'chat-sdk',
       content: {
-        type: 'ask_question',
-        questionId: 'q1',
+        type: 'approval_request',
+        approvalId: 'a1',
         title: 'Which office lamp?',
-        question: 'Which office lamp did you want to turn on?',
+        body: 'Which office lamp did you want to turn on?',
         options: [
           { label: 'Office Desk Lamp', value: 'Office Desk Lamp' },
           { label: 'Office Floor Lamp', value: 'Office Floor Lamp' },
         ],
       },
     });
-    expect(text).toBe('Which office lamp did you want to turn on? Office Desk Lamp or Office Floor Lamp?');
+    expect(text).toBe(
+      'Which office lamp did you want to turn on? Options: Office Desk Lamp or Office Floor Lamp. Review this approval in BananaClaw or its approval message.',
+    );
   });
 });
 
-describe('renderAskQuestion', () => {
+describe('renderApprovalRequest', () => {
   it('renders the prompt first with options as a natural inline list', () => {
     expect(
-      renderAskQuestion({
-        type: 'ask_question',
+      renderApprovalRequest({
+        type: 'approval_request',
         title: 'Pick one',
-        question: 'Which lamp?',
+        body: 'Which lamp?',
         options: [{ label: 'Desk' }, { label: 'Floor' }, { label: 'Corner' }],
       }),
-    ).toBe('Which lamp? Desk, Floor, or Corner?');
+    ).toBe('Which lamp? Options: Desk, Floor, or Corner. Review this approval in BananaClaw or its approval message.');
   });
 
   it('joins two options with "or"', () => {
     expect(
-      renderAskQuestion({ type: 'ask_question', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }),
-    ).toBe('Which one? A or B?');
+      renderApprovalRequest({
+        type: 'approval_request',
+        body: 'Which one?',
+        options: [{ label: 'A' }, { label: 'B' }],
+      }),
+    ).toBe('Which one? Options: A or B. Review this approval in BananaClaw or its approval message.');
   });
 
-  it('falls back to title when question is missing and gives the prompt a question mark', () => {
+  it('falls back to title when body is missing', () => {
     expect(
-      renderAskQuestion({
-        type: 'ask_question',
+      renderApprovalRequest({
+        type: 'approval_request',
         title: 'Pick one',
         options: [{ label: 'A' }, { label: 'B' }],
       }),
-    ).toBe('Pick one? A or B?');
+    ).toBe('Pick one Options: A or B. Review this approval in BananaClaw or its approval message.');
   });
 
   it('renders the prompt alone when there are no usable option labels', () => {
-    expect(renderAskQuestion({ type: 'ask_question', question: 'Free form?', options: [] })).toBe('Free form?');
-    expect(renderAskQuestion({ type: 'ask_question', question: 'Free form?' })).toBe('Free form?');
-  });
-
-  it('appends a question mark when the prompt does not already end with one', () => {
-    expect(renderAskQuestion({ type: 'ask_question', question: 'Pick a lamp' })).toBe('Pick a lamp?');
-  });
-
-  it('renders options alone when there is no prompt', () => {
-    expect(renderAskQuestion({ type: 'ask_question', options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }] })).toBe(
-      'A, B, or C?',
+    expect(renderApprovalRequest({ type: 'approval_request', body: 'Review required.', options: [] })).toBe(
+      'Review required. Review this approval in BananaClaw or its approval message.',
+    );
+    expect(renderApprovalRequest({ type: 'approval_request', body: 'Review required.' })).toBe(
+      'Review required. Review this approval in BananaClaw or its approval message.',
     );
   });
 
-  it('returns null for non ask_question payloads', () => {
-    expect(renderAskQuestion({ type: 'send_card', text: 'x' })).toBeNull();
-    expect(renderAskQuestion({ title: 'no type' })).toBeNull();
+  it('does not append a question mark to an approval notice', () => {
+    expect(renderApprovalRequest({ type: 'approval_request', body: 'Review access' })).toBe(
+      'Review access Review this approval in BananaClaw or its approval message.',
+    );
   });
 
-  it('returns null when an ask_question has neither prompt nor options', () => {
-    expect(renderAskQuestion({ type: 'ask_question' })).toBeNull();
-    expect(renderAskQuestion({ type: 'ask_question', options: [{ value: 'x' }] })).toBeNull();
+  it('renders options alone when there is no prompt', () => {
+    expect(
+      renderApprovalRequest({ type: 'approval_request', options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }] }),
+    ).toBe('Options: A, B, or C. Review this approval in BananaClaw or its approval message.');
+  });
+
+  it('returns null for unsupported payloads, including old questions', () => {
+    expect(renderApprovalRequest({ type: 'send_card', text: 'x' })).toBeNull();
+    expect(renderApprovalRequest({ type: 'ask_question', question: 'Old question' })).toBeNull();
+    expect(renderApprovalRequest({ title: 'no type' })).toBeNull();
+  });
+
+  it('returns null when an approval has neither body nor options', () => {
+    expect(renderApprovalRequest({ type: 'approval_request' })).toBeNull();
+    expect(renderApprovalRequest({ type: 'approval_request', options: [{ value: 'x' }] })).toBeNull();
   });
 });
 

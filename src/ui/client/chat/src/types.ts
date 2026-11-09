@@ -3,12 +3,7 @@ import type { InputHandling } from '../../../shared/input-state';
 import type { ModelTime } from '../../../shared/activity-presentation';
 import type { ThreadSummary } from '../../../shared/thread';
 import type { EpochMs } from '../../../shared/time';
-import type {
-  ConversationMessage,
-  ConversationQuestion,
-  ConversationUsage,
-  ConversationTurn,
-} from '../../../shared/conversation';
+import type { ConversationMessage, ConversationUsage, ConversationTurn } from '../../../shared/conversation';
 export type { InputHandling, InputState } from '../../../shared/input-state';
 
 export type ChannelType = ThreadSummary['channelType'];
@@ -81,11 +76,6 @@ export type TranscriptRow =
   | { kind: 'message'; message: ChatMessage }
   | { kind: 'interaction'; interaction: PendingApprovalDto }
   | { kind: 'starting'; submission: PendingWebSend }
-  | {
-      kind: 'question-answer';
-      question: PendingQuestionDto;
-      answer: ChatMessage;
-    }
   | {
       kind: 'turn';
       turn: import('../../../shared/conversation').ConversationTurn;
@@ -207,8 +197,6 @@ export type PendingWebSend = ChatSendPacket & {
 } & WebSendState;
 
 export type PendingApprovalDto = import('../../../shared/approval').ConversationApproval;
-
-export type PendingQuestionDto = ConversationQuestion;
 
 export interface RouterApi {
   selectGroup: (gid: string, options?: { newConversation?: boolean }) => Promise<void>;

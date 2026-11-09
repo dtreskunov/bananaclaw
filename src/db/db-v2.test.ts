@@ -29,13 +29,10 @@ import {
   getRunningSessions,
   updateSession,
   deleteSession,
-  createQuestion,
-  getQuestion,
-  answerQuestion,
   createApproval,
   getApproval,
 } from './index.js';
-import { getAskQuestionRender } from './sessions.js';
+import { getApprovalRender } from './sessions.js';
 
 function now() {
   return Date.now();
@@ -373,13 +370,6 @@ describe('sessions', () => {
   });
 
   function seedDeletionDependents(): void {
-    getDb()
-      .prepare(
-        `INSERT INTO interactions
-        (id, kind, session_id, message_out_id, input_json, created_at, updated_at)
-       VALUES ('q-delete', 'question', 'sess-1', 'msg-delete', '{"question":"Continue?","responseMode":"choice","options":[]}', ?, ?)`,
-      )
-      .run(Date.now(), Date.now());
     createApproval({
       id: 'appr-delete',
       session_id: 'sess-1',
@@ -400,12 +390,10 @@ describe('sessions', () => {
 
     expect(() => deleteSession('sess-1')).toThrow('requires confirmation');
     expect(getSession('sess-1')).toBeDefined();
-    expect(getQuestion('q-delete')).toBeDefined();
     expect(getApproval('appr-delete')).toBeDefined();
 
     expect(deleteSession('sess-1', true)).toBe(1);
     expect(getSession('sess-1')).toBeUndefined();
-    expect(getQuestion('q-delete')).toBeUndefined();
     expect(getApproval('appr-delete')).toBeUndefined();
   });
 
@@ -419,7 +407,6 @@ describe('sessions', () => {
 
     expect(() => deleteSession('sess-1', true)).toThrow('blocked deletion');
     expect(getSession('sess-1')).toBeDefined();
-    expect(getQuestion('q-delete')).toBeDefined();
     expect(getApproval('appr-delete')).toBeDefined();
   });
 
@@ -433,9 +420,7 @@ describe('sessions', () => {
   });
 });
 
-// ── Pending Questions ──
-
-describe('durable questions', () => {
+describe('approval render metadata', () => {
   beforeEach(() => {
     createAgentGroup({
       id: 'ag-1',
@@ -457,31 +442,6 @@ describe('durable questions', () => {
     });
   });
 
-  it('should create and retrieve', () => {
-    createQuestion({
-      id: 'q-1',
-      session_id: 'sess-1',
-      message_out_id: 'msg-out-1',
-      in_reply_to: 'msg-in-1',
-      platform_id: 'chan-1',
-      channel_type: 'discord',
-      thread_id: null,
-      created_at: now(),
-      input: {
-        question: 'Choose one',
-        responseMode: 'choice',
-        options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
-      },
-    });
-    const result = getQuestion('q-1');
-    expect(result).toBeDefined();
-    expect(result!.session_id).toBe('sess-1');
-    expect(result!.input.question).toBe('Choose one');
-    expect(result).not.toHaveProperty('title');
-    expect(result!.input.options[0].value).toBe('yes');
-    expect(getAskQuestionRender('q-1')).toEqual({ question: 'Choose one', options: result!.input.options });
-  });
-
   it('retains separate approval titles in channel render metadata', () => {
     createApproval({
       id: 'approval',
@@ -494,33 +454,6 @@ describe('durable questions', () => {
         options: JSON.parse('[]'),
       },
     });
-    expect(getAskQuestionRender('approval')).toEqual({ title: 'Approval required', options: [] });
-  });
-
-  it('retains the answer', () => {
-    createQuestion({
-      id: 'q-1',
-      session_id: 'sess-1',
-      message_out_id: 'msg-out-1',
-      in_reply_to: null,
-      platform_id: null,
-      channel_type: null,
-      thread_id: null,
-      created_at: now(),
-      input: {
-        question: 'What should happen?',
-        responseMode: 'choice_or_text',
-        options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
-      },
-    });
-    expect(
-      answerQuestion('q-1', { value: 'Something else', responseType: 'text', userId: 'user-1', answeredAt: now() }),
-    ).toBe(true);
-    const result = getQuestion('q-1');
-    expect(result?.status).toBe('answered');
-    expect(result?.response).toEqual({ responseType: 'text', value: 'Something else' });
-    expect(answerQuestion('q-1', { value: 'yes', responseType: 'choice', userId: 'user-1', answeredAt: now() })).toBe(
-      false,
-    );
+    expect(getApprovalRender('approval')).toEqual({ title: 'Approval required', options: [] });
   });
 });

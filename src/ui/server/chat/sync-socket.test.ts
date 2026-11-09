@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
 import { createApproval, updateApprovalStatus } from '../../../db/approvals.js';
 import { createInteraction } from '../../../db/interactions.js';
-import { createQuestion } from '../../../db/sessions.js';
 import { removeMember } from '../../../modules/permissions/db/agent-group-members.js';
 import { updateContainerConfigScalars, ensureContainerConfig } from '../../../db/container-configs.js';
 import { authenticate, COOKIE_NAME } from '../auth.js';
@@ -443,41 +442,6 @@ describe('unified sync WebSocket integration', () => {
     expect(frames).toHaveLength(1);
   });
 
-  it('updates inactive-group question attention without rescanning the selected group', async () => {
-    grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
-    getDb().exec(`
-      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('other-mg','web','web','group:other',1,1767225600000);
-      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('other-wire','other-mg','other','per-thread',1767225600000);
-      INSERT INTO sessions(id,agent_group_id,messaging_group_id,thread_id,created_at)
-        VALUES('other-session','other','other-mg','other-thread',1767225600000);
-    `);
-    initSessionFolder('other', 'other-session');
-    await connect('g');
-    createQuestion({
-      id: 'off-screen-question',
-      session_id: 'other-session',
-      message_out_id: 'other-output',
-      in_reply_to: null,
-      channel_type: 'web',
-      platform_id: 'group:other',
-      thread_id: 'other-thread',
-      created_at: now(),
-      input: { question: 'Choose?', responseMode: 'text', options: [] },
-    });
-    await vi.waitFor(() =>
-      expect(globalView()?.attention).toEqual([
-        {
-          id: 'off-screen-question',
-          origin: { agentGroupId: 'other', threadId: 'other-thread', channelType: 'web', messagingGroupId: 'other-mg' },
-        },
-      ]),
-    );
-    expect(globalView()?.agentActivity.find((group) => group.id === 'other')?.waiting).toBe(true);
-    expect(listThreads).toHaveBeenCalledTimes(2);
-  });
-
   it('pushes an inactive-group approval without rescanning the selected group threads', async () => {
     grantRole({ user_id: 'viewer', role: 'admin', agent_group_id: 'other', granted_at: now(), granted_by: null });
     await connect('g');
@@ -615,36 +579,6 @@ describe('unified sync WebSocket integration', () => {
     updateApprovalStatus('visible', 'cancelled');
     await vi.waitFor(() => expect(globalView()?.approvals).toEqual([]));
     expect(listThreads).not.toHaveBeenCalled();
-  });
-
-  it('keeps old pending requests actionable on refresh without an expiry timer', async () => {
-    createInteraction({
-      id: 'q',
-      kind: 'question',
-      session_id: 'session',
-      message_out_id: 'output',
-      in_reply_to: null,
-      channel_type: 'web',
-      platform_id: 'group:g',
-      thread_id: 'thread',
-      created_at: 0,
-      input: { question: 'Continue?', responseMode: 'text', options: [] },
-    });
-    const client = await connect();
-    expect(globalView()!.attention.map((row) => row.id)).toEqual(['q']);
-    expect(frames).toHaveLength(1);
-    client.send(
-      JSON.stringify({
-        kind: 'subscribe',
-        protocolVersion: SYNC_PROTOCOL_VERSION,
-        subscriptionId: 2,
-        groupId: null,
-        conversation: null,
-        globalCursor: globalCursor(),
-      }),
-    );
-    await vi.waitFor(() => expect(globalView()?.attention.map((row) => row.id)).toEqual(['q']), { timeout: 2000 });
-    expect(getDb().prepare("SELECT status FROM interactions WHERE id='q'").get()).toEqual({ status: 'pending' });
   });
 
   it('pushes voice configuration and explicitly clears revoked group state', async () => {

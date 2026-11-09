@@ -1,23 +1,35 @@
 // Format helpers + markdown rendering. Returns plain strings/HTML —
 // components handle escaping via JSX prop interpolation when possible.
-import { marked } from 'marked';
+import { marked, Renderer } from 'marked';
+import { inlineReplyDraft } from './reply-suggestions';
 import type { EpochMs } from '../../../shared/time';
 import type { Group } from './types';
 
 // Open absolute (http/mailto/etc.) links rendered from markdown in a new
 // tab. Relative links are left alone — they get rewritten to in-app
 // file previews by rewriteFileLinks().
-marked.use({
-  renderer: {
-    link({ href, title, tokens }) {
-      const text = this.parser.parseInline(tokens);
-      const isAbs = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
-      const titleAttr = title ? ` title="${title.replace(/"/g, '&quot;')}"` : '';
-      const targetAttr = isAbs ? ' target="_blank" rel="noopener noreferrer"' : '';
-      return `<a href="${href}"${titleAttr}${targetAttr}>${text}</a>`;
-    },
-  },
-});
+function markdownRenderer(inlineReplies: boolean): Renderer {
+  const renderer = new Renderer();
+  renderer.link = function ({ href, title, tokens }) {
+    const text = this.parser.parseInline(tokens);
+    if (/^reply:/i.test(href)) {
+      const draft = inlineReplyDraft(href);
+      if (!inlineReplies || draft === null) return text;
+      const value = draft
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/'/g, '&#39;');
+      return `<button type="button" class="inline-reply-suggestion" data-reply-draft="${value}" title="Draft reply: ${value}" aria-description="Draft reply: ${value}">${text}<span aria-hidden="true"> \u21b5</span></button>`;
+    }
+    const isAbs = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
+    const titleAttr = title ? ` title="${title.replace(/"/g, '&quot;')}"` : '';
+    const targetAttr = isAbs ? ' target="_blank" rel="noopener noreferrer"' : '';
+    return `<a href="${href}"${titleAttr}${targetAttr}>${text}</a>`;
+  };
+  return renderer;
+}
 
 // Message reference extension: [[msg:messageId|threadId]] → clickable link.
 // The chat UI intercepts clicks on these links to navigate to the thread.
@@ -140,9 +152,17 @@ function toGroupFileUrl(groupId: string, rel: string): string {
   return `api/groups/${gid}/files/${segs.join('/')}`;
 }
 
-export function renderMarkdown(text: string | null | undefined, groupId?: string | null): string | null {
+export function renderMarkdown(
+  text: string | null | undefined,
+  groupId?: string | null,
+  inlineReplies = false,
+): string | null {
   try {
-    const html = marked.parse(normalizeFileLinks(text || ''), { breaks: true, gfm: true }) as string;
+    const html = marked.parse(normalizeFileLinks(text || ''), {
+      breaks: true,
+      gfm: true,
+      renderer: markdownRenderer(inlineReplies),
+    }) as string;
     if (!groupId || typeof document === 'undefined') return html;
     const template = document.createElement('template');
     template.innerHTML = html;

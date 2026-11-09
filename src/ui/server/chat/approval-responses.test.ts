@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const runtime = vi.hoisted(() => ({
-  root: `${process.cwd()}/.test-tmp/nanoclaw-question-responses-${process.pid}`,
+  root: `${process.cwd()}/.test-tmp/nanoclaw-approval-responses-${process.pid}`,
   userId: 'web:member' as string | null,
   wake: vi.fn().mockResolvedValue(true),
 }));
@@ -27,17 +27,16 @@ vi.mock('../../../modules/typing/index.js', () => ({
 }));
 
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { createQuestion, getQuestion } from '../../../db/sessions.js';
 import { createApproval } from '../../../db/approvals.js';
 import { initSessionFolder, openInboundDb, openOutboundDbRw } from '../../../session-manager.js';
 import * as sessionManager from '../../../session-manager.js';
 import { inputStateKey } from '../../../input-timeline.js';
-import '../../../modules/interactive/index.js';
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
 import { registerApprovalHandler } from '../../../modules/approvals/primitive.js';
 import { registerResponseHandler } from '../../../response-registry.js';
 import { handle } from './routes.js';
 import { readChatHistory } from './history.js';
+import { UI_PROTOCOL_HEADER, UI_TIMESTAMP_PROTOCOL_VERSION } from '../../shared/time.js';
 
 const NOW = 1791223200000;
 registerResponseHandler(handleApprovalsResponse);
@@ -55,21 +54,6 @@ beforeEach(() => {
     INSERT INTO sessions (id, agent_group_id, created_at) VALUES ('session', 'agent', ${NOW});
   `);
   initSessionFolder('agent', 'session');
-  createQuestion({
-    id: 'q',
-    session_id: 'session',
-    message_out_id: 'out',
-    in_reply_to: null,
-    platform_id: 'group:agent',
-    channel_type: 'web',
-    thread_id: 'thread',
-    created_at: NOW,
-    input: {
-      question: 'Which option?',
-      responseMode: 'choice',
-      options: [{ label: 'Yes', selectedLabel: 'Selected yes', value: 'yes' }],
-    },
-  });
   runtime.userId = 'web:member';
   runtime.wake.mockReset().mockResolvedValue(true);
 });
@@ -82,7 +66,11 @@ async function request(method: string, url: string, body?: unknown) {
   const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]) as http.IncomingMessage;
   req.method = method;
   req.url = url;
-  req.headers = { 'x-nanoclaw-ui-protocol': '16', host: 'localhost', 'content-type': 'application/json' };
+  req.headers = {
+    [UI_PROTOCOL_HEADER.toLowerCase()]: String(UI_TIMESTAMP_PROTOCOL_VERSION),
+    host: 'localhost',
+    'content-type': 'application/json',
+  };
   const res = new http.ServerResponse(req);
   let status = 0;
   let content = '';
@@ -99,7 +87,7 @@ async function request(method: string, url: string, body?: unknown) {
   return { status, body: JSON.parse(content) };
 }
 
-function respond(body: unknown, id = 'q') {
+function respond(body: unknown, id = 'message-approval') {
   return request('POST', `/ui/chat/api/approvals/${id}/respond`, body);
 }
 
@@ -148,31 +136,6 @@ describe('global attention sync', () => {
       outbound.mockRestore();
       all.mockRestore();
     }
-  });
-
-  it('does not make a cancelled question actionable or mutate it during reads', async () => {
-    getDb().prepare("UPDATE interactions SET status='cancelled' WHERE id='q'").run();
-    const before = getQuestion('q');
-    expect((await request('GET', '/ui/chat/api/sync')).body.attention).toEqual([]);
-    expect(await respond({ responseType: 'choice', value: 'yes' })).toMatchObject({
-      status: 409,
-      body: { error: 'question_cancelled' },
-    });
-    expect(getQuestion('q')).toEqual(before);
-    expect(runtime.wake).not.toHaveBeenCalled();
-  });
-
-  it('includes questions without selecting a group and clears only after canonical resolution', async () => {
-    const first = await request('GET', '/ui/chat/api/sync');
-    expect(first.status).toBe(200);
-    expect(first.body.attention).toEqual([
-      {
-        id: 'q',
-        origin: { agentGroupId: 'agent', threadId: 'thread', channelType: 'web', messagingGroupId: 'mg' },
-      },
-    ]);
-    expect(await respond({ responseType: 'skipped' })).toMatchObject({ status: 200 });
-    expect((await request('GET', '/ui/chat/api/sync')).body.attention).toEqual([]);
   });
 
   it('does not disclose counts or destinations to another user', async () => {
@@ -273,108 +236,31 @@ describe('approval response messages', () => {
     expect((await respond({ value: 'approve', message: 'A note' }, 'message-approval')).status).toBe(400);
     expect(applied).not.toHaveBeenCalled();
   });
-  it('does not reinterpret an ordinary question response as an approval message', async () => {
-    expect((await respond({ value: 'yes', message: 'A note' })).status).toBe(400);
-    expect(getQuestion('q')?.status).toBe('pending');
-  });
-});
-
-describe('typed responses through the existing endpoint', () => {
-  it('persists and projects one skip event across duplicate requests', async () => {
-    expect(await respond({ responseType: 'skipped' })).toEqual({ status: 200, body: { ok: true } });
-    const saved = getQuestion('q');
-    expect(saved).toMatchObject({
-      status: 'answered',
-      responded_by: 'web:member',
-      response: { responseType: 'skipped' },
-    });
-    expect((await respond({ responseType: 'skipped' })).status).toBe(200);
-    expect(getQuestion('q')).toEqual(saved);
-    const db = openInboundDb('agent', 'session');
-    try {
-      const rows = db
-        .prepare("SELECT id, kind, trigger, content FROM messages_in WHERE id = 'question-response:q'")
-        .all();
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ id: 'question-response:q', kind: 'interactive_response', trigger: 1 });
-    } finally {
-      db.close();
-    }
-    expect(readChatHistory('web:member', 'agent', 'thread', { channelType: 'web', messagingGroupId: 'mg' })).toEqual([
-      expect.objectContaining({
-        id: 'question-response:q',
-        questionId: 'q',
-        questionResponseType: 'skipped',
-        text: 'Question skipped',
-        timestamp: saved?.responded_at ?? null,
-      }),
-    ]);
-    expect(runtime.wake).toHaveBeenCalled();
-  });
-
-  it.each(['answer', 'skip'])('keeps the first %s resolution across competing requests', async (first) => {
-    const answer = { responseType: 'choice', value: 'yes' };
-    const skip = { responseType: 'skipped' };
-    await respond(first === 'answer' ? answer : skip);
-    await respond(first === 'answer' ? skip : answer);
-    expect(getQuestion('q')).toMatchObject({
-      response: first === 'answer' ? { responseType: 'choice', value: 'yes' } : { responseType: 'skipped' },
-    });
-    const db = openInboundDb('agent', 'session');
-    try {
-      expect(db.prepare('SELECT COUNT(*) AS count FROM messages_in').get()).toEqual({ count: 1 });
-    } finally {
-      db.close();
-    }
-  });
-
-  it('requires authentication and access to the actual question route', async () => {
+  it('requires authentication before responding to approvals', async () => {
     runtime.userId = null;
-    expect((await respond({ responseType: 'skipped' })).status).toBe(401);
-    runtime.userId = 'web:other';
-    expect((await respond({ responseType: 'skipped' })).status).toBe(403);
-    runtime.userId = 'web:member';
-    getDb().exec("UPDATE interactions SET platform_id = 'private-recipient' WHERE id = 'q'");
-    expect((await respond({ responseType: 'skipped' })).status).toBe(403);
-    expect(getQuestion('q')?.status).toBe('pending');
+    expect((await respond({ value: 'approve' })).status).toBe(401);
     expect(runtime.wake).not.toHaveBeenCalled();
   });
-
   it.each([
     { responseType: 'skipped', value: 'yes' },
     { responseType: 'unknown' },
-    { value: 'yes' },
-    { responseType: 'choice', value: 'invalid' },
-    { responseType: 'text', value: 'yes' },
+    { responseType: 'choice', value: 'approve' },
+    { responseType: 'text', value: 'approve' },
+    { value: '' },
+    { value: 42 },
     {},
-  ])('rejects malformed response %j without resolving the question', async (body) => {
+  ])('rejects malformed or legacy typed response %j without resolving an approval', async (body) => {
     expect((await respond(body)).status).toBe(400);
-    expect(getQuestion('q')?.status).toBe('pending');
+    expect(getDb().prepare("SELECT status FROM interactions WHERE id='message-approval'").pluck().get()).toBe(
+      'pending',
+    );
+    expect(applied).not.toHaveBeenCalled();
+    expect(runtime.wake).not.toHaveBeenCalled();
   });
-
-  it('rejects cancelled and unknown questions and never treats a skip as an approval', async () => {
+  it('rejects cancelled and unknown approval IDs', async () => {
     expect((await respond({ responseType: 'skipped' }, 'missing')).status).toBe(404);
-    getDb().exec("UPDATE interactions SET status = 'cancelled' WHERE id = 'q'");
-    expect((await respond({ responseType: 'skipped' })).status).toBe(409);
-    getDb().exec(`INSERT INTO user_roles (user_id, role, granted_at) VALUES ('web:member', 'owner', ${NOW})`);
-    createApproval({
-      id: 'approval',
-      session_id: 'session',
-      request_id: 'request',
-      created_at: NOW,
-      input: { action: 'test', payload: JSON.parse('{}'), title: 'Test approval', options: JSON.parse('[]') },
-    });
-    expect((await respond({ responseType: 'skipped' }, 'approval')).body.error).toBe('approval_cannot_be_skipped');
-    expect(
-      await handleApprovalsResponse({
-        questionId: 'approval',
-        responseType: 'skipped',
-        userId: 'web:member',
-        channelType: 'web',
-        platformId: 'group:agent',
-        threadId: 'thread',
-      }),
-    ).toBe(false);
+    getDb().exec("UPDATE interactions SET status='cancelled' WHERE id='message-approval'");
+    expect((await respond({ value: 'approve' })).status).toBe(409);
     expect(runtime.wake).not.toHaveBeenCalled();
   });
 });

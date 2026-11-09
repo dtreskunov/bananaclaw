@@ -100,7 +100,7 @@ const domains: Record<string, string> = {
   chat_sdk_lists: counter('idx'),
 };
 
-/** Canonical central storage-v1 schema, including installed module tables. */
+/** Canonical central storage-v2 schema, including installed module tables. */
 export const CENTRAL_SCHEMA_SQL = `
 CREATE TABLE credential_gateway_identity (
   id INTEGER PRIMARY KEY CHECK(id=1),
@@ -122,7 +122,7 @@ CREATE TABLE conversation_publications (
   position INTEGER PRIMARY KEY AUTOINCREMENT,
   key TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK(kind IN ('message','question','approval')),
+  kind TEXT NOT NULL CHECK(kind IN ('message','approval')),
   item_id TEXT NOT NULL,
   channel_type TEXT NOT NULL,
   platform_id TEXT NOT NULL,
@@ -276,13 +276,11 @@ CREATE TABLE identity_link_challenges (
 
 CREATE TABLE interactions (
   id TEXT PRIMARY KEY NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('question','confirmation','account_setup','access_grant')),
+  kind TEXT NOT NULL CHECK(kind IN ('confirmation','account_setup','access_grant')),
   session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
   agent_group_id TEXT REFERENCES agent_groups(id),
   origin_message_id TEXT,
   request_id TEXT,
-  message_out_id TEXT,
-  in_reply_to TEXT,
   platform_id TEXT,
   channel_type TEXT,
   thread_id TEXT,
@@ -299,15 +297,7 @@ CREATE TABLE interactions (
   resolved_at INTEGER CHECK (resolved_at IS NULL OR typeof(resolved_at)='integer'),
   route_origin_id TEXT,
   CHECK(COALESCE((
-    (kind='question' AND session_id IS NOT NULL AND message_out_id IS NOT NULL
-      AND status IN ('pending','answered','cancelled')
-      AND ((status='answered' AND response_json IS NOT NULL AND responded_at IS NOT NULL
-        AND json_extract(response_json,'$.responseType') IN ('choice','text','skipped')
-        AND CASE WHEN json_extract(response_json,'$.responseType')='skipped'
-          THEN json_type(response_json,'$.value') IS NULL
-          ELSE json_type(response_json,'$.value')='text' END)
-        OR (status!='answered' AND response_json IS NULL)))
-    OR (kind!='question' AND request_id IS NOT NULL AND response_json IS NOT NULL
+    (request_id IS NOT NULL AND response_json IS NOT NULL
       AND status IN ('pending','applying','approved','completed','rejected','failed','cancelled','expired')
       AND ((kind='confirmation' AND status!='completed') OR (kind!='confirmation' AND status!='approved')))
   ),0))
@@ -605,7 +595,6 @@ CREATE UNIQUE INDEX pending_user_approvals_one_pending_per_sub ON pending_user_a
   WHERE status = 'pending';
 CREATE INDEX idx_ui_private_web_sessions_expires ON ui_private_web_sessions(expires_at);
 CREATE INDEX interactions_session ON interactions(session_id,created_at,id);
-CREATE INDEX interactions_pending_question ON interactions(session_id) WHERE kind='question' AND status='pending';
 CREATE UNIQUE INDEX interactions_pending_key ON interactions(dedupe_key)
   WHERE dedupe_key IS NOT NULL AND status IN ('pending','applying');
 CREATE UNIQUE INDEX user_roles_global_unique ON user_roles(user_id,role) WHERE agent_group_id IS NULL;

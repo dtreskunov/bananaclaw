@@ -22,7 +22,6 @@ vi.mock('../../../session-link.js', async (original) => ({
   getSessionActiveTurn: () => ({ turn: signal.turn, connected: signal.connected }),
 }));
 import { initTestDb, runMigrations, closeDb, getDb } from '../../../db/index.js';
-import { createQuestion, answerQuestion } from '../../../db/sessions.js';
 import { createApproval } from '../../../db/approvals.js';
 import { grantRole } from '../../../modules/permissions/db/user-roles.js';
 import { removeMember } from '../../../modules/permissions/db/agent-group-members.js';
@@ -128,99 +127,6 @@ describe('thread activity projection', () => {
     expect((await activities()).b.activity).toBe('idle');
     expect(readAgentActivity('viewer', [], null, [])[0].activity).toBe('idle');
   });
-
-  it('invalidates queue facts when the trigger gate changes and preserves the waiting overlay', async () => {
-    inbound.exec("UPDATE messages_in SET status='pending', trigger=0 WHERE id='input-a'");
-    refreshThreadSummaries('s');
-    expect((await activities()).a.activity).toBe('idle');
-    inbound.exec("UPDATE messages_in SET trigger=1 WHERE id='input-a'");
-    refreshThreadSummaries('s');
-    createQuestion({
-      id: 'queued-q',
-      session_id: 's',
-      message_out_id: 'queued-question',
-      in_reply_to: null,
-      channel_type: 'web',
-      platform_id: 'group:g',
-      thread_id: 'a',
-      created_at: 1767225600000,
-      input: { question: 'Choose?', responseMode: 'text', options: [] },
-    });
-    expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
-    expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'running', waiting: true, threadCount: 2, unreadThreadCount: 1 },
-    ]);
-  });
-  it('isolates shared DM activity and waiting state to the authorized counterparty', async () => {
-    insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'person@example.com' });
-    getDb().exec(`
-      INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
-        VALUES('dm-mg','resend','resend','person@example.com',0,1767225600000);
-      INSERT INTO messaging_group_agents(id,messaging_group_id,agent_group_id,session_mode,created_at)
-        VALUES('dm-wire','dm-mg','g','shared',1767225600000);
-      INSERT INTO sessions(id,agent_group_id,messaging_group_id,created_at) VALUES('dm-session','g','dm-mg',1767225600000);
-    `);
-    initSessionFolder('g', 'dm-session');
-    const source = new Database(inboundDbPath('g', 'dm-session'));
-    const outputs = new Database(outboundDbPath('g', 'dm-session'));
-    try {
-      source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,content)
-        VALUES('own',2,'chat',1767225600000,'completed','resend','person@example.com','{"text":"Own"}'),
-          ('other',4,'chat',1767225600000,'completed','resend','other@example.com','{"text":"Other"}');`);
-      const active = {
-        id: 'dm-turn',
-        origin_channel_type: 'resend',
-        origin_platform_id: 'person@example.com',
-        origin_thread_id: null,
-        origin_source_session_id: null,
-        started_at: 1793836800000,
-        ended_at: null,
-        phase: 'running' as const,
-        outcome: 'pending' as const,
-        provenance: 'native' as const,
-        imported_from_session_id: null,
-        imported_from_turn_id: null,
-      };
-      putTurn(outputs, active);
-      refreshThreadSummaries('dm-session');
-      signal.turn = {
-        id: active.id,
-        status: 'running',
-        channelType: 'resend',
-        platformId: 'person@example.com',
-        threadId: null,
-      };
-      signal.connected = true;
-      expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'running', stale: false });
-      putTurn(outputs, { ...active, phase: 'settled', outcome: 'replied', ended_at: 1793836860000 });
-      putTurn(outputs, { ...active, id: 'private-turn', origin_platform_id: 'other@example.com' });
-      refreshThreadSummaries('dm-session');
-      signal.turn = { ...signal.turn, id: 'private-turn', platformId: 'other@example.com' };
-      expect((await activities())['__dm:dm-mg'].activity).toBe('idle');
-      source.exec("UPDATE messages_in SET status='pending' WHERE id='own'");
-      refreshThreadSummaries('dm-session');
-      expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'running', stale: false });
-      source.exec("UPDATE messages_in SET status=CASE id WHEN 'own' THEN 'completed' ELSE 'pending' END");
-      refreshThreadSummaries('dm-session');
-      expect((await activities())['__dm:dm-mg'].activity).toBe('idle');
-      createQuestion({
-        id: 'dm-q',
-        session_id: 'dm-session',
-        message_out_id: 'dm-question',
-        in_reply_to: null,
-        channel_type: 'resend',
-        platform_id: 'person@example.com',
-        thread_id: null,
-        created_at: 1767225600000,
-        input: { question: 'Choose?', responseMode: 'text', options: [] },
-      });
-      expect((await activities())['__dm:dm-mg']).toEqual({ activity: 'idle', waiting: true, stale: false });
-      expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])[0].threadCount).toBe(3);
-    } finally {
-      source.close();
-      outputs.close();
-    }
-  });
   it('marks only the executing conversation running in a shared session', async () => {
     expect(await activities()).toEqual({
       a: { activity: 'idle', stale: false },
@@ -247,34 +153,6 @@ describe('thread activity projection', () => {
     signal.connected = true;
     expect((await activities()).a.activity).toBe('running');
   });
-  it('preserves independent waiting and execution on threads and agent groups', async () => {
-    createQuestion({
-      id: 'q',
-      session_id: 's',
-      message_out_id: 'question-output',
-      in_reply_to: null,
-      channel_type: 'web',
-      platform_id: 'group:g',
-      thread_id: 'a',
-      created_at: 1767225600000,
-      input: { question: 'Choose?', responseMode: 'text', options: [] },
-    });
-    expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
-    expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'idle', waiting: true, threadCount: 2, unreadThreadCount: 1 },
-    ]);
-    turn('turn-a', 'a', 'running');
-    signal.turn = { id: 'turn-a', status: 'running', channelType: 'web', platformId: 'group:g', threadId: 'a' };
-    signal.connected = true;
-    expect((await activities()).a).toEqual({ activity: 'running', waiting: true, stale: false });
-    expect(readAgentActivity('viewer', readInteractionSync('viewer').attention, null, [])).toEqual([
-      { id: 'g', activity: 'running', waiting: true, threadCount: 2, unreadThreadCount: 1 },
-    ]);
-    turn('turn-a', 'a', 'settled');
-    expect((await activities()).a).toEqual({ activity: 'idle', waiting: true, stale: false });
-    answerQuestion('q', { responseType: 'text', value: 'Done', userId: 'viewer', answeredAt: 1793836920000 });
-    expect((await activities()).a.activity).toBe('idle');
-  });
   it('counts idle agents from the maintained projection and omits inaccessible groups', () => {
     getDb().exec(
       `INSERT INTO agent_groups(id,name,folder,created_at) VALUES('private','Private','private',1767225600000);`,
@@ -282,29 +160,6 @@ describe('thread activity projection', () => {
     const read = vi.spyOn(summaryProjection, 'readSessionThreadSummary');
     expect(readAgentActivity('viewer', [], null, [])).toEqual([{ id: 'g', activity: 'idle', threadCount: 2 }]);
     expect(read).toHaveBeenCalledOnce();
-  });
-  it('combines running in one thread with waiting in another without hiding stale execution', async () => {
-    createQuestion({
-      id: 'q',
-      session_id: 's',
-      message_out_id: 'question-output',
-      in_reply_to: null,
-      channel_type: 'web',
-      platform_id: 'group:g',
-      thread_id: 'a',
-      created_at: 1767225600000,
-      input: { question: 'Choose?', responseMode: 'text', options: [] },
-    });
-    turn('turn-b', 'b', 'running');
-    const attention = readInteractionSync('viewer').attention;
-    const selected = await listThreadsForViewer('viewer', 'g');
-    expect(selected.find((thread) => thread.threadId === 'a')).toMatchObject({ activity: 'idle', waiting: true });
-    expect(readAgentActivity('viewer', attention, 'g', selected)).toEqual([
-      { id: 'g', activity: 'running', waiting: true, activityStale: true, threadCount: 2, unreadThreadCount: 1 },
-    ]);
-    expect(readAgentActivity('viewer', attention, null, [])).toEqual([
-      { id: 'g', activity: 'running', waiting: true, activityStale: true, threadCount: 2, unreadThreadCount: 1 },
-    ]);
   });
   it('reuses selected summaries and includes unselected groups without private thread leakage', async () => {
     turn('turn-a', 'a', 'running');

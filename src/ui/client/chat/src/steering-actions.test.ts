@@ -36,6 +36,7 @@ import {
 } from './activity-trace-state';
 import { appearance } from './appearance-state';
 import { DEFAULT_APPEARANCE } from './appearance';
+import { installSyncFixture } from './sync-action-test-fixtures';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 vi.mock('./components/PromptModal', () => ({ requestChoice: vi.fn() }));
@@ -51,14 +52,12 @@ beforeEach(() => {
   vi.mocked(requestChoice).mockReset().mockResolvedValue('steer');
   vi.stubGlobal(
     'fetch',
-    vi
-      .fn()
-      .mockResolvedValue({
-        headers: uiHeaders,
-        ok: true,
-        status: 200,
-        json: async () => ({ attention: [], ok: true, approvals: [] }),
-      }),
+    vi.fn().mockResolvedValue({
+      headers: uiHeaders,
+      ok: true,
+      status: 200,
+      json: async () => ({ attention: [], ok: true, approvals: [] }),
+    }),
   );
 });
 afterEach(() => {
@@ -383,7 +382,11 @@ describe('immediate web submission feedback', () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 });
-describe('question response requests', () => {
+describe('approval response requests', () => {
+  beforeEach(async () => {
+    const sync = await installSyncFixture();
+    onTestFinished(sync.dispose);
+  });
   it('sends an optional approval message in the same decision POST and clears the draft only on success', async () => {
     vi.useFakeTimers();
     onTestFinished(() => {
@@ -455,21 +458,21 @@ describe('question response requests', () => {
     expect(await respondInteraction('approval-one', { value: 'approve' })).toBe(false);
     expect(respondingInteractionIds.value.has('approval-one')).toBe(false);
   });
-  it('uses the existing endpoint for typed skips and ordinary answers without submitting files or context', async () => {
+  it('uses the approval endpoint for decisions without submitting files or context', async () => {
     channelType.value = 'web';
     respondingInteractionIds.value = new Set();
     const files = [{ name: 'draft.txt', size: 1, file: new File(['x'], 'draft.txt') }];
     pending.value = files;
     pinnedContext.value = ['keep/context.txt'];
-    expect(await respondInteraction('q:one', { responseType: 'skipped' })).toBe(true);
+    expect(await respondInteraction('approval:one', { value: 'reject' })).toBe(true);
     expect(fetch).toHaveBeenCalledWith(
-      'api/approvals/q%3Aone/respond',
-      expect.objectContaining({ body: JSON.stringify({ responseType: 'skipped' }) }),
+      'api/approvals/approval%3Aone/respond',
+      expect.objectContaining({ body: JSON.stringify({ value: 'reject' }) }),
     );
-    expect(await respondInteraction('q:one', { responseType: 'text', value: 'Yes' })).toBe(true);
+    expect(await respondInteraction('approval:one', { value: 'approve' })).toBe(true);
     expect(fetch).toHaveBeenCalledWith(
-      'api/approvals/q%3Aone/respond',
-      expect.objectContaining({ body: JSON.stringify({ responseType: 'text', value: 'Yes' }) }),
+      'api/approvals/approval%3Aone/respond',
+      expect.objectContaining({ body: JSON.stringify({ value: 'approve' }) }),
     );
     expect(pending.value).toBe(files);
     expect(pinnedContext.value).toEqual(['keep/context.txt']);

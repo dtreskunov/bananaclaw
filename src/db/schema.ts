@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS destinations (
 
 -- Default reply routing for this session. Single-row table (id=1).
 -- Host overwrites on every container wake from the session's messaging_group
--- and thread_id. The session link projects it for send_message / ask_user_question to
+-- and thread_id. The session link projects it for outbound messaging tools to
 -- default the channel/thread of outbound messages when the agent doesn't
 -- specify an explicit destination.
 CREATE TABLE IF NOT EXISTS session_routing (

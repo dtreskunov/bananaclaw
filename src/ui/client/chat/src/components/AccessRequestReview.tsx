@@ -282,7 +282,7 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
               <option value="">Choose tools</option>
               {preview.mcp.names.map(name => <option key={name} value={name}>{name}</option>)}
             </select></label> : null}
-              <label>Name the agent sees<input type="text" class="question-card-input" aria-label="Account name shown to agent" value={accountAlias} maxLength={80} disabled={blocked}
+              <label>Name the agent sees<input type="text" class="approval-text-input" aria-label="Account name shown to agent" value={accountAlias} maxLength={80} disabled={blocked}
                 onInput={event => setAccountAlias(event.currentTarget.value)} /></label>
           </> : null}</div> : null}
           {!preview.matches ? <p role="status">This account doesn't match the request.</p> : null}
@@ -322,7 +322,7 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
           {configureMcp ? ` ${mcpServer || 'The selected'} tools will also use this account.` : ''}
         </p> : null}
         {!signingIn && (!setup || compatible.length) ? <ApprovalMessageInput approvalId={id} disabled={blocked} /> : null}
-        <div class="question-card-actions approval-actions">
+        <div class="approval-actions">
           <button type="button" class="approval-btn approval-reject" disabled={blocked} onClick={() => void reject()}>Decline</button>
           {!compatible.length && !reconnect.length && !signingIn ? <button type="button" class="approval-btn primary" disabled={blocked}
             onClick={() => addAccount()}>{busy ? 'Starting…' : oauth ? 'Sign in' : 'Add account'}</button> : null}

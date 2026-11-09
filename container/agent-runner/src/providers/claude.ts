@@ -72,9 +72,8 @@ function warnUnknownClaudeParamsOnce(modelParams: Record<string, unknown> | unde
 //
 // - CronCreate / CronDelete / CronList / ScheduleWakeup: we have durable
 //   scheduling via mcp__nanoclaw__schedule_task.
-// - AskUserQuestion: SDK returns a placeholder instead of blocking on a
-//   real answer — we have mcp__nanoclaw__ask_user_question that persists
-//   the question and returns immediately; the reply becomes a later turn.
+// - AskUserQuestion: a Claude Code UI affordance; use normal response prose
+//   and mcp__nanoclaw__suggest_responses for optional editable reply drafts.
 // - EnterPlanMode / ExitPlanMode / EnterWorktree / ExitWorktree: Claude
 //   Code UI affordances; in a headless container they'd appear stuck.
 const SDK_DISALLOWED_TOOLS = [

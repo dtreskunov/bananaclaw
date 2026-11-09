@@ -89,52 +89,23 @@ describe('conversation protocol', () => {
       parseConversationFrame({ ...update, changes: { readCursor: { sessionId: 'session', key: 12 } } }),
     ).toThrow('invalid_frame');
   });
-  it.each([2, 3])('requires protocol %s clients to reload for title-free questions', (protocolVersion) => {
+  it.each([2, 3])('requires protocol %s clients to reload', (protocolVersion) => {
     expect(() => parseConversationFrame({ ...snapshot, protocolVersion })).toThrow('Chat protocol changed');
   });
-  it('accepts title-free question records', () => {
-    const conversation: Conversation = {
-      ...empty,
-      interactions: [
+  it.each(['in', 'out'] as const)('rejects %s suggestions without a settled final response', (direction) => {
+    const invalid: Conversation = {
+      ...next,
+      messages: [
         {
-          kind: 'question',
-          id: 'q',
-          question: 'Which day?',
-          responseMode: 'text',
-          options: [],
-          placeholder: 'Describe the day',
-          multiline: true,
-          status: 'pending',
-          answeredAt: null,
-          threadId: 't',
-          agentGroupId: 'g',
-          createdAt: 1767225600000,
-          response: null,
+          ...next.messages[0],
+          direction,
+          suggestedResponses: ['Explore costs'],
         },
       ],
-      timeline: [{ kind: 'interaction', interactionId: 'q' }],
+      timeline: [{ kind: 'message', messageId: 'one' }],
     };
-    expect(reduceConversation(null, parseConversationFrame({ ...snapshot, conversation })).conversation).toEqual(
-      conversation,
-    );
+    expect(() => reduceConversation(null, { ...snapshot, conversation: invalid })).toThrow('invalid_frame');
   });
-  it.each(['in', 'out'] as const)(
-    'rejects %s question references without an authorized question record',
-    (direction) => {
-      const invalid: Conversation = {
-        ...next,
-        messages: [
-          {
-            ...next.messages[0],
-            direction,
-            questionId: 'unknown',
-          },
-        ],
-        timeline: [{ kind: 'message', messageId: 'one' }],
-      };
-      expect(() => reduceConversation(null, { ...snapshot, conversation: invalid })).toThrow('invalid_frame');
-    },
-  );
   it('produces identical initial and incremental state', () => {
     const incremental = reduceConversation(snapshot, parseConversationFrame(JSON.parse(JSON.stringify(update))));
     expect(incremental.conversation).toEqual(next);

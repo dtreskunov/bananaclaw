@@ -1145,39 +1145,45 @@ Send a structured card (interactive or display-only).
 
 Implementation: write a `messages_out` row with `kind: 'chat-sdk'` and the card structure in content.
 
-#### ask_user_question
+#### suggest_responses
 
-Queue a durable interactive question. The tool returns immediately; an answer
-or explicit skip arrives as an `interactive_response` input in a later turn.
+Register optional editable reply drafts for the final response in BananaClaw's
+browser transcript. The tool sends no separate message and never waits for input.
+Other channel apps receive the normal response without draft buttons.
+The composed `interactive.instructions.md` fragment tells agents to use this
+when a final reply offers concrete next steps, alternatives, or a choice, not
+only when blocked. It also explicitly avoids adding suggestions to every
+answer. Tool availability alone does not generate suggestions automatically.
+For inline placement, the agent can instead write
+`[Short label](reply:Please%20fix%20the%20references)` in final Markdown.
+The label and editable draft are independent; the browser previews the full
+draft and never navigates the `reply:` scheme. Inline links need no tool call
+or additional database state. Both forms are offered only on the latest
+completed reply and fill the same draft composer without sending.
 
 ```typescript
 {
-  name: 'ask_user_question',
+  name: 'suggest_responses',
   params: {
-    question: string,
-    responseMode: 'choice' | 'text' | 'choice_or_text',
-    options?: (string | { label: string; selectedLabel?: string; value?: string })[],
-    placeholder?: string,
-    multiline?: boolean,
+    responses: string[], // 1-6 distinct nonblank strings, at most 240 characters each
   }
 }
 ```
 
 Implementation:
-1. Generate a `questionId`
-2. Write a `messages_out` row with `kind: 'chat-sdk'` and a `type: 'ask_question'`
-   payload containing the question, response mode, normalized options and ID
-3. Return `status: 'awaiting_user'` immediately
-4. The host persists the question and journals the eventual response using the
-   deterministic input ID `question-response:<questionId>`, then wakes the runner
+1. Capture the running turn and store its drafts in runner state.
+2. Return `status: 'registered'` immediately. Another call replaces that turn's set.
+3. At successful settlement, associate the set with the last final response
+   on the turn's exact originating route, using its output ID. The durable state
+   mutation precedes the settled barrier; no immutable message is edited.
+4. The host projects `suggestedResponses` only with the settled response.
+5. Clicking fills the ordinary composer without sending or overwriting a draft.
+   Actual Send creates ordinary chat input.
 
-Choice modes require options. A second question is rejected while a previous one
-is awaiting its response, including after Stop. No title or timeout is accepted
-as part of the question contract. Approval and display-card titles are separate
-and unchanged.
-The runner checks the host's durable response identity directly, including
-already-consumed answers and skips; it does not reconstruct an answer registry
-from message bodies or poll a separate question-response helper.
+Silent, stopped, failed and abandoned turns discard their drafts. Suggestions
+never become pending interactions, input-attention requests or authorization.
+See [the offline cutover](reply-suggestions-cutover.md) before deploying this
+prototype to existing stores.
 
 Runner read helpers borrow `getInboundDb()`'s session-owned connection. They do
 not open or close read handles; `closeSessionDb()` alone owns shutdown. Test

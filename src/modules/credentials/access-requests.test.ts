@@ -292,7 +292,7 @@ describe('assisted access approvals', () => {
     await getInteractiveApprovalHandler(approval.input.action)!(
       approval,
       {
-        questionId: approval.id,
+        approvalId: approval.id,
         userId: 'alice',
         channelType: 'web',
         platformId: 'admin',
@@ -326,7 +326,7 @@ describe('assisted access approvals', () => {
     await getInteractiveApprovalHandler(approval.input.action)!(
       approval,
       {
-        questionId: approval.id,
+        approvalId: approval.id,
         userId: 'alice',
         channelType: 'web',
         platformId: 'admin',
@@ -578,7 +578,7 @@ describe('assisted access approvals', () => {
       getInteractiveApprovalHandler(approval.input.action)!(
         approval,
         {
-          questionId: approval.id,
+          approvalId: approval.id,
           userId: 'alice',
           channelType: 'web',
           platformId: 'alice',
@@ -862,7 +862,7 @@ describe('assisted access approvals', () => {
     await getInteractiveApprovalHandler(approval.input.action)!(
       approval,
       {
-        questionId: approval.id,
+        approvalId: approval.id,
         userId: 'alice',
         channelType: 'web',
         platformId: 'alice',

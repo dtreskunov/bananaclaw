@@ -165,7 +165,7 @@ describe('unknown-channel registration flow', () => {
     expect(thread).toBeNull();
     expect(kind).toBe('chat-sdk');
     const payload = JSON.parse(content as string);
-    expect(payload.type).toBe('ask_question');
+    expect(payload.type).toBe('approval_request');
     // Single-agent card offers a direct "Connect to <name>" button.
     const connectOption = payload.options.find((o: { value: string }) => o.value.startsWith('connect:'));
     expect(connectOption).toBeDefined();
@@ -218,7 +218,7 @@ describe('unknown-channel registration flow', () => {
 
     // Owner clicks "Connect to Andy" (single-agent card).
     await dispatchResponse({
-      questionId: pending.messaging_group_id,
+      approvalId: pending.messaging_group_id,
       value: 'connect:ag-1',
       userId: 'owner', // raw platform id — handler namespaces it
       channelType: 'telegram',
@@ -270,7 +270,7 @@ describe('unknown-channel registration flow', () => {
     };
 
     await dispatchResponse({
-      questionId: pending.messaging_group_id,
+      approvalId: pending.messaging_group_id,
       value: 'connect:ag-1',
       userId: 'owner',
       channelType: 'telegram',
@@ -296,7 +296,7 @@ describe('unknown-channel registration flow', () => {
     };
 
     await dispatchResponse({
-      questionId: pending.messaging_group_id,
+      approvalId: pending.messaging_group_id,
       value: 'reject',
       userId: 'owner',
       channelType: 'telegram',
@@ -336,7 +336,7 @@ describe('unknown-channel registration flow', () => {
     };
 
     await dispatchResponse({
-      questionId: pending.messaging_group_id,
+      approvalId: pending.messaging_group_id,
       value: 'approve',
       userId: 'random-bystander',
       channelType: 'telegram',
@@ -420,7 +420,7 @@ describe('unknown-channel registration flow', () => {
     expect(deliverMock.mock.calls[0][1]).toBe('dm-scoped-admin');
 
     await dispatchResponse({
-      questionId: pending.messaging_group_id,
+      approvalId: pending.messaging_group_id,
       value: 'choose_existing',
       userId: 'scoped-admin',
       channelType: 'telegram',
@@ -435,7 +435,7 @@ describe('unknown-channel registration flow', () => {
     expect(followupPayload.options.map((option) => option.value)).not.toContain('connect:ag-2');
 
     await dispatchResponse({
-      questionId: pending.messaging_group_id,
+      approvalId: pending.messaging_group_id,
       value: 'connect:ag-2',
       userId: 'scoped-admin',
       channelType: 'telegram',

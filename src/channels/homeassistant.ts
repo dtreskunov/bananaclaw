@@ -52,15 +52,10 @@
  *     On timeout / teardown / superseded we emit `{"type":"error",…}\n`,
  *     which HA's parser turns into a HomeAssistantError.
  *
- * Clarifying questions: HA is synchronous request/response with no interactive
- * controls, so when the agent emits a chat-sdk `ask_question` we render the
- * prompt with its options as a natural inline list ("Which lamp? Desk, Floor,
- * or Corner?", see `renderAskQuestion`), always ending with a question mark.
- * That settles the held request instead of letting it hang to the timeout,
- * and — because HA core continues a conversation whenever the assistant's
- * reply ends with "?" — keeps the same conversation_id (and reopens the voice
- * mic), so the user's answer returns as the next turn in the same conversation
- * with full prior context.
+ * Approval notices: HA is synchronous request/response with no interactive
+ * controls. Approval cards render as plain-text notices, settling the held
+ * request. Decisions still require the authorized approval response path;
+ * a conversational voice reply is not an approval callback.
  *
  * Security: the endpoint is on the shared public HTTP server, so auth lives
  * on the mount. HTTP Basic credentials are checked against
@@ -76,8 +71,7 @@
  *
  * Session continuity: HA core keeps a conversation alive (same
  * conversation_id, voice mic reopened) when the assistant's reply ends with a
- * question mark; `renderAskQuestion` ends every clarifying reply with "?" to
- * trigger that. We key the session directly off `conversation_id`, so a
+ * question mark. We key the session directly off `conversation_id`, so a
  * continuing HA conversation maps to the same agent session and the agent's
  * own per-thread chat history carries context forward — we do NOT replay
  * HA's `messages` array into the prompt (see `buildTurn`).
@@ -291,9 +285,8 @@ function ensureMessagingGroup(agentGroupId: string): void {
  *   per-thread session already holds those turns, so re-embedding them in the
  *   user message is at best redundant and in practice confuses the model into
  *   responding to the embedded transcript instead of the user's actual query.
- *   `renderAskQuestion` (always ending in "?") keeps clarifying-question
- *   follow-ups on the same `conversation_id` — and thus the same session —
- *   so context survives the round-trip without replay. If HA *does* open a
+ *   Clarifying-question follow-ups use the same `conversation_id` — and thus
+ *   the same session — so context survives the round-trip without replay. If HA *does* open a
  *   fresh `conversation_id` (user timed out, said "stop", etc.) that's a
  *   deliberate new conversation, and treating it as one is the right call.
  * - `tool_result` entries that can appear in `messages`. They only show up
@@ -315,22 +308,11 @@ export function buildTurn(payload: HaPayload): { text: string } {
  * markers are found.
  */
 /**
- * Render a chat-sdk `ask_question` payload as plain text.
- *
- * HA's webhook-conversation integration is synchronous request/response and
- * cannot show interactive option buttons — if we ignore the question the held
- * HTTP request just hangs until it times out. We render the prompt followed by
- * the options as a natural inline list ("Which lamp? Desk, Floor, or
- * Corner?"), always ending with a question mark. That settles the request,
- * lets HA speak/show the prompt, and — because HA core continues a
- * conversation whenever the assistant's reply ends with "?" — keeps the same
- * conversation_id (and reopens the voice mic), so the user's answer comes back
- * as the next turn in the same conversation, where the agent resolves it from
- * context. Returns null if the payload isn't a usable ask_question.
+ * Render an approval notice without implying a voice reply can authorize it.
  */
-export function renderAskQuestion(content: Record<string, unknown>): string | null {
-  if (content.type !== 'ask_question') return null;
-  const prompt = content.question ?? content.title;
+export function renderApprovalRequest(content: Record<string, unknown>): string | null {
+  if (content.type !== 'approval_request') return null;
+  const prompt = content.body ?? content.title;
   const promptText = typeof prompt === 'string' ? prompt.trim() : '';
   const labels = Array.isArray(content.options)
     ? content.options
@@ -339,20 +321,10 @@ export function renderAskQuestion(content: Record<string, unknown>): string | nu
     : [];
   if (!promptText && labels.length === 0) return null;
 
-  const parts: string[] = [];
-  if (promptText) {
-    // Give the prompt its own terminal punctuation so the options read as a
-    // follow-up question rather than running into it.
-    parts.push(/[?;？.!]$/.test(promptText) ? promptText : `${promptText}?`);
-  }
-  if (labels.length > 0) parts.push(`${joinOptions(labels)}?`);
-
-  let text = parts.join(' ').trim();
-  // Guarantee a trailing question mark. HA core only continues a conversation
-  // (keeping the same conversation_id and reopening the voice mic) when the
-  // assistant's reply ends with "?" / ";" / "？". See "Session continuity".
-  if (text && !/[?;？]$/.test(text)) text += '?';
-  return text || null;
+  const parts = [promptText];
+  if (labels.length > 0) parts.push(`Options: ${joinOptions(labels)}.`);
+  parts.push('Review this approval in BananaClaw or its approval message.');
+  return parts.filter(Boolean).join(' ');
 }
 
 /** Join option labels into a natural list: "A", "A or B", "A, B, or C". */
@@ -387,9 +359,8 @@ export function extractOutboundText(message: OutboundMessage): string | null {
     const obj = content as Record<string, unknown>;
     const text = obj.markdown ?? obj.text;
     if (typeof text === 'string') return text;
-    // chat-sdk ask_question: flatten to text so the held HA request settles
-    // with the prompt instead of hanging until timeout.
-    const asked = renderAskQuestion(obj);
+    // Flatten approval notices so the held HA request does not time out.
+    const asked = renderApprovalRequest(obj);
     if (asked !== null) return asked;
   }
   return null;

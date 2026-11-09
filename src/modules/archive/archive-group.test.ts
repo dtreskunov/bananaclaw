@@ -160,7 +160,7 @@ describe('archiveAgentGroup', () => {
 
     // Dump shape.
     const dump = JSON.parse(fs.readFileSync(result.archiveJsonPath, 'utf-8'));
-    expect(dump.version).toBe(3);
+    expect(dump.version).toBe(4);
     expect(dump.archived_by).toEqual({ user_id: 'u-actor', display_name: 'Actor' });
     expect(dump.agent_group.id).toBe('ag-arch-1');
     expect(dump.agent_group.folder).toBe('arch-one');

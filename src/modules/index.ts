@@ -17,7 +17,6 @@
 // registerApprovalHandler / requestApproval symbols are bound when self-mod
 // registers its handlers at import time.
 import './approvals/index.js';
-import './interactive/index.js';
 import './scheduling/index.js';
 import './thread-titles/index.js';
 import './permissions/index.js';

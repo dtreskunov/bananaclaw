@@ -19,6 +19,7 @@ import { transaction } from './db/transaction.js';
 import { encodeTimes } from './db/time.js';
 import { assertStorageVersion } from './db/storage-lifecycle.js';
 import { openOutboundDbRw } from './db/session-db.js';
+import { parseSuggestedResponses } from './ui/shared/suggested-responses.js';
 
 class DurableValidationError extends Error {}
 
@@ -30,7 +31,7 @@ export const MAX_DECLARED_TOOL_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const MAX_CONTENT_ARRAY_ITEMS = 100;
 const MAX_CONTENT_DEPTH = 16;
 const MAX_OUTBOUND_FILES = 32;
-const MAX_QUESTION_OPTIONS = 50;
+const MAX_ACTION_OPTIONS = 50;
 
 export interface DurableRunnerFrame {
   eventId: string;
@@ -140,9 +141,9 @@ function validateMessageCollections(content: Record<string, unknown>): void {
   }
   if (
     content.options !== undefined &&
-    (!Array.isArray(content.options) || content.options.length > MAX_QUESTION_OPTIONS)
+    (!Array.isArray(content.options) || content.options.length > MAX_ACTION_OPTIONS)
   ) {
-    throw new Error('invalid question options');
+    throw new Error('invalid action options');
   }
 }
 
@@ -233,6 +234,20 @@ function applyState(db: Database.Database, payload: Record<string, unknown>): vo
     !text(payload.updated_at)
   )
     throw new DurableValidationError('invalid state.upsert payload');
+  if (payload.key.startsWith('response-suggestions:')) {
+    parseSuggestedResponses(payload.value);
+    const output = db.prepare(`SELECT turn_id FROM messages_out
+      WHERE id=? AND kind IN ('chat','text')
+        AND json_extract(content,'$.delivery_origin')='response'
+        AND COALESCE(json_extract(content,'$.system_generated'),0)=0`)
+      .get(payload.key.slice('response-suggestions:'.length)) as { turn_id: string | null } | undefined;
+    if (!output?.turn_id) throw new Error('suggestions require a final response');
+    const turn = getTurn(db, output.turn_id);
+    const previous = db.prepare('SELECT value FROM session_state WHERE key=?').get(payload.key) as
+      { value: string } | undefined;
+    if (turn?.phase === 'settled' && previous?.value !== payload.value)
+      throw new Error('settled response suggestions are immutable');
+  }
   if (payload.key.startsWith('turn-metadata:')) {
     let value: Record<string, unknown> | null;
     try {

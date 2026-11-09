@@ -11,7 +11,7 @@ export const BUILTIN_ACTIVITY_INPUTS = new Map<string, InputFields>([
   ['edit_message', [['messageId'], []]],
   ['add_reaction', [['emoji'], [['Message', 'messageId']]]],
   ['send_email', [['to'], [['Subject', 'subject'], ['Attachments', 'files']]]],
-  ['ask_user_question', [['question'], [['Title', 'title'], ['Response mode', 'responseMode'], ['Options', 'options']]]],
+  ['suggest_responses', [['responses'], []]],
   ['send_card', [['card.title'], [['Actions', 'card.actions']]]],
   ['schedule_task', [['processAfter'], [['Prompt', 'prompt'], ['Recurrence', 'recurrence']]]],
   ['list_tasks', [['status'], []]],

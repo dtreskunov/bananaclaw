@@ -56,7 +56,7 @@ export function AccessRequestCard({ request, disabled }: { request: AccountInter
         signInMessage={
           signIn.waiting ? (
             <div class="access-sign-in" role="status">
-              <div class="question-card-actions approval-actions">
+              <div class="approval-actions">
                 <a class="approval-btn" href={signIn.waiting.authorizeUrl} target="_blank" rel="noopener noreferrer"
                   onClick={event => { event.preventDefault(); signIn.reopen(); }}>Sign in</a>
                 <button type="button" class="approval-btn" onClick={signIn.stop}>

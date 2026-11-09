@@ -7,11 +7,11 @@ import { responseScrollTop, transcriptReadingTop } from './turn-completion';
 export type ReaderNavigate = (action: () => void) => void;
 
 export interface ReaderId {
-  kind: 'message' | 'question';
+  kind: 'message';
   id: string;
 }
 
-export type ReadableRow = Extract<TranscriptRow, { kind: 'message' | 'question-answer' }>;
+export type ReadableRow = Extract<TranscriptRow, { kind: 'message' }>;
 export interface ReaderPage {
   key: string;
   anchorId: string;
@@ -47,9 +47,6 @@ export function readerPages(rows: readonly TranscriptRow[]): ReaderPage[] {
         return [];
       id = { kind: 'message', id: message.id };
       anchorId = message.id;
-    } else if (row.kind === 'question-answer') {
-      id = { kind: 'question', id: row.question.id };
-      anchorId = row.answer.id;
     } else return [];
     const key = readerKey(id);
     if (seen.has(key)) return [];

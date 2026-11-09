@@ -204,7 +204,7 @@ export const BUILTIN_TOOL_PRESENTATIONS = new Map<string, BuiltinVerbs>([
   ['edit_message', ['Editing message', 'Edited message', 'edit message', 'Message edit']],
   ['add_reaction', ['Reacting', 'Reacted', 'react', 'Reaction', 'with']],
   ['send_email', ['Emailing', 'Emailed', 'email', 'Email']],
-  ['ask_user_question', ['Requesting an answer', 'Requested an answer', 'request an answer', 'Question request', 'to']],
+  ['suggest_responses', ['Suggesting replies', 'Suggested replies', 'suggest replies', 'Reply suggestions', 'for']],
   ['send_card', ['Sending card', 'Sent card', 'send card', 'Card send']],
   ['schedule_task', ['Scheduling task', 'Scheduled task', 'schedule task', 'Task scheduling', 'for']],
   ['list_tasks', ['Listing tasks', 'Listed tasks', 'list tasks', 'Task listing', 'with status']],

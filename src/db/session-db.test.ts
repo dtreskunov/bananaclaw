@@ -72,7 +72,7 @@ describe('countDueMessages', () => {
 
   it('counts an interactive response as wake-eligible', () => {
     const db = freshMessagesInDb();
-    addRow(db, { id: 'answer-1', seq: 2, kind: 'interactive_response' });
+    addRow(db, { id: 'answer-1', seq: 2, kind: 'chat' });
     expect(countDueMessages(db)).toBe(1);
     db.close();
   });

@@ -96,6 +96,33 @@ function output(id: string, turnId: string, seq: number, thread = 'thread') {
 const read = (thread = 'thread') => readConversation(user, group, thread, route);
 const json = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 65));
+
+it('projects durable reply drafts only after settlement and preserves them on reload', () => {
+  apply('turn.upsert', turn('suggestions-turn'));
+  apply('message.upsert', output('reply', 'suggestions-turn', 1));
+  const staged = apply('state.upsert', {
+    key: 'response-suggestions:reply',
+    updated_at: formatTimestamp(now),
+    value: JSON.stringify(['Explore costs', 'Show alternatives']),
+  });
+  expect(read()?.messages).toEqual([]);
+  applyDurableRunnerEvent(group, session, staged);
+  settle('suggestions-turn', { outcome: 'replied' });
+  const initial = read()!;
+  expect(initial.messages).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: 'reply', suggestedResponses: ['Explore costs', 'Show alternatives'] }),
+    ]),
+  );
+  expect(read()).toEqual(initial);
+  expect(() =>
+    apply('state.upsert', {
+      key: 'response-suggestions:reply',
+      updated_at: formatTimestamp(now),
+      value: JSON.stringify(['Different draft']),
+    }),
+  ).toThrow('immutable');
+});
 async function connect(turnId: string) {
   await startSessionSignalServer(session, group);
   socket = net.createConnection(sessionLinkSocketPath(session));

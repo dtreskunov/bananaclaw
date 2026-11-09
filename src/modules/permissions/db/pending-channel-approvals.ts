@@ -18,7 +18,7 @@ export interface PendingChannelApproval {
   original_message: string;
   approver_user_id: string;
   created_at: number;
-  /** Card title shown at creation and re-used by getAskQuestionRender on click. */
+  /** Card title shown at creation and re-used by getApprovalRender on click. */
   title: string;
   /** Normalized options (JSON-encoded NormalizedOption[]) — same shape persisted on approvals. */
   options_json: string;

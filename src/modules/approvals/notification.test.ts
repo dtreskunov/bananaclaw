@@ -126,7 +126,7 @@ async function respond(
     },
   });
   await handleApprovalsResponse({
-    questionId: 'approval',
+    approvalId: 'approval',
     value,
     userId: 'owner',
     channelType: 'web',
@@ -170,7 +170,7 @@ describe('approval conversation identity', () => {
       expect(content.text).toContain(decision === 'approve' ? 'Approved and applied.' : 'rejected by admin.');
       expect(
         await handleApprovalsResponse({
-          questionId: 'approval',
+          approvalId: 'approval',
           value: decision,
           message: 'Duplicate message',
           userId: 'owner',

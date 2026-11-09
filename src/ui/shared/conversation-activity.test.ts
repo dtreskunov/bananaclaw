@@ -32,7 +32,7 @@ const turn: ConversationTurn = {
       text: JSON.stringify({
         kind: 'tool',
         id: 'question-call',
-        tool: 'mcp__nanoclaw__ask_user_question',
+        tool: 'mcp__nanoclaw__suggest_responses',
         status: 'completed',
         detail: 'Which option do you prefer?\nKeep <literal> text.',
       }),
@@ -47,11 +47,11 @@ const turn: ConversationTurn = {
   ],
 };
 describe('whole-turn activity presentation', () => {
-  it('keeps the recorded question call once, without a duplicate synthetic marker', () => {
+  it('keeps the recorded suggestion call once, without a duplicate synthetic marker', () => {
     const lines = conversationActivity(turn);
     expect(lines.map((line) => parseStep(line.text).id)).toEqual(['first', 'question-call', 'last']);
     expect(stepHeadline(parseStep(lines[1].text))).toEqual({
-      action: 'Requested an answer to',
+      action: 'Suggested replies for',
       subject: 'Which option do you prefer? Keep <literal> text.',
       codeSubject: true,
     });

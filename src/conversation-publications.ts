@@ -11,7 +11,7 @@ export interface PublicationRoute {
   thread_id: string;
 }
 interface Publication extends PublicationRoute {
-  kind: 'message' | 'question' | 'approval';
+  kind: 'message' | 'approval';
   item_id: string;
 }
 interface InteractionSource {
@@ -27,8 +27,6 @@ interface InteractionSource {
 
 export function interactionRoute(row: InteractionSource, refresh = false): PublicationRoute | null {
   if (!row.session_id) return null;
-  if (row.kind === 'question' && row.channel_type && row.platform_id)
-    return { session_id: row.session_id, channel_type: row.channel_type, platform_id: row.platform_id, thread_id: row.thread_id ?? '' };
   const session = getDb().prepare(`SELECT s.agent_group_id,s.thread_id,mg.channel_type,mg.platform_id
     FROM sessions s LEFT JOIN messaging_groups mg ON mg.id=s.messaging_group_id WHERE s.id=?`)
     .get(row.session_id) as { agent_group_id: string; thread_id: string | null; channel_type: string | null; platform_id: string | null } | undefined;
@@ -98,17 +96,16 @@ export function projectInteractionPublications(sessionId: string, refresh = fals
   const db = getDb();
   const rows = db.prepare('SELECT * FROM interactions WHERE session_id=? ORDER BY created_at,id')
     .all(sessionId) as InteractionSource[];
-  return replacePublications(sessionId, ['question', 'approval'], rows.flatMap(row => {
+  return replacePublications(sessionId, ['approval'], rows.flatMap(row => {
     const route = interactionRoute(row, refresh);
     if (!row.id) return [];
     if (!route) {
-      if (row.kind !== 'question')
-        db.prepare('UPDATE interactions SET channel_type=NULL,platform_id=NULL,thread_id=NULL,route_origin_id=NULL WHERE id=?').run(row.id);
+      db.prepare('UPDATE interactions SET channel_type=NULL,platform_id=NULL,thread_id=NULL,route_origin_id=NULL WHERE id=?').run(row.id);
       return [];
     }
     db.prepare('UPDATE interactions SET channel_type=?,platform_id=?,thread_id=?,route_origin_id=? WHERE id=?')
       .run(route.channel_type, route.platform_id, route.thread_id || null, row.origin_message_id ?? null, row.id);
-    return [{ ...route, kind: row.kind === 'question' ? 'question' as const : 'approval' as const, item_id: row.id }];
+    return [{ ...route, kind: 'approval' as const, item_id: row.id }];
   }));
 }
 

@@ -14,7 +14,10 @@ import { groupId, threadId, channelType, messagingGroupId } from './state';
 import { testThread } from './conversation-test-fixtures';
 import { installSyncFixture } from './sync-action-test-fixtures';
 
-const target = { id: 'q', origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm' } };
+const target = {
+  id: 'approval',
+  origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm' },
+};
 let sync: Awaited<ReturnType<typeof installSyncFixture>>;
 beforeEach(async () => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
@@ -71,7 +74,7 @@ describe('authoritative attention refresh', () => {
   it('does not remove attention on HTTP acceptance while canonical state remains pending', async () => {
     vi.mocked(postJson).mockResolvedValue({ ok: true, status: 200, data: { ok: true } });
     sync.read.mockResolvedValue({ approvals: [], attention: [target] });
-    expect(await respondInteraction('q', { responseType: 'text', value: 'Answer' })).toBe(true);
+    expect(await respondInteraction('approval', { value: 'approve' })).toBe(true);
     expect(attentionTargets.value).toEqual([target]);
   });
   it('does not let an older failed refresh invalidate a newer authoritative snapshot', async () => {
@@ -105,9 +108,9 @@ describe('authoritative attention refresh', () => {
     ];
     attentionSelection.value = { id: 'second', navigation: 0 };
     expect(await navigateAttention('g')).toBe(true);
-    expect(attentionSelection.value?.id).toBe('q');
+    expect(attentionSelection.value?.id).toBe('approval');
     expect(await navigateAttention('g')).toBe(true);
-    expect(attentionSelection.value?.id).toBe('q');
+    expect(attentionSelection.value?.id).toBe('approval');
     expect(postJson).not.toHaveBeenCalled();
     expect(api).not.toHaveBeenCalled();
     expect(attentionTargets.value).toHaveLength(3);

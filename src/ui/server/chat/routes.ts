@@ -27,8 +27,6 @@ import { createGroup, GroupCreateError } from '../../../modules/groups/create.js
 import { deleteSubscriptionByEndpoint, upsertSubscription } from '../../../modules/push/db.js';
 import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
-import { questionAcceptsResponse, type QuestionResponse } from '../../shared/question.js';
-import { isQuestionResponse } from '../../shared/conversation-protocol.js';
 import { ApprovalMessageError, parseApprovalMessage } from '../../shared/approval-message.js';
 import { isVoiceDiagnostic } from '../../shared/voice.js';
 import type { SyncResponse } from '../../shared/sync.js';
@@ -45,7 +43,7 @@ import { compareEntriesByDate, searchFilesByName } from './file-search.js';
 import { handleChatRequest } from './chat.js';
 import { listThreadsForViewer, viewerHasContent } from './threads.js';
 import { readChatHistory } from './history.js';
-import { canRespondToApproval, questionResponseOrigin } from './interaction-access.js';
+import { canRespondToApproval } from './interaction-access.js';
 import { readGlobalSync } from './sync-state.js';
 import { handleGroupAdminRequest } from './group-admin.js';
 import { handleCredentialsRequest } from './credentials-admin.js';
@@ -654,10 +652,8 @@ async function handleSync(ctx: Ctx, userId: string): Promise<void> {
 async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: string): Promise<void> {
   const row = getInteraction(approvalId);
   if (!row) return json(ctx, 404, { error: 'not_found' });
-  if (row.kind !== 'question') {
-    if (row.status !== 'pending') return json(ctx, 409, { error: 'not_pending' });
-    if (!canRespondToApproval(userId, row)) return json(ctx, 403, { error: 'forbidden' });
-  }
+  if (row.status !== 'pending') return json(ctx, 409, { error: 'not_pending' });
+  if (!canRespondToApproval(userId, row)) return json(ctx, 403, { error: 'forbidden' });
 
   let body: { value?: unknown; responseType?: unknown; message?: unknown };
   try {
@@ -674,26 +670,12 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   }
   if (message && !row?.session_id)
     return json(ctx, 400, { error: 'This approval has no originating conversation for a message.' });
-  let response: QuestionResponse | { value: string };
-  if (row.kind !== 'question') {
-    if (body?.responseType === 'skipped') return json(ctx, 400, { error: 'approval_cannot_be_skipped' });
-    if (body?.responseType !== undefined) return json(ctx, 400, { error: 'invalid_response_type' });
-    if (typeof body?.value !== 'string' || !body.value) return json(ctx, 400, { error: 'value_required' });
-    response = { value: body.value };
-  } else {
-    const question = row;
-    if (question.status === 'cancelled') return json(ctx, 409, { error: 'question_cancelled' });
-    if (!questionResponseOrigin(userId, question)) return json(ctx, 403, { error: 'forbidden' });
-    if (
-      !isQuestionResponse(body) ||
-      !questionAcceptsResponse(question.input.responseMode, question.input.options, body)
-    )
-      return json(ctx, 400, { error: 'invalid_question_response' });
-    response = body;
-  }
+  if (body?.responseType !== undefined) return json(ctx, 400, { error: 'invalid_response_type' });
+  if (typeof body?.value !== 'string' || !body.value) return json(ctx, 400, { error: 'value_required' });
+  const response = { value: body.value };
 
   const claimed = await dispatchResponse({
-    questionId: approvalId,
+    approvalId,
     ...response,
     ...(message ? { message } : {}),
     userId,
@@ -702,7 +684,7 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
     threadId: null,
   });
   if (!claimed) {
-    log.warn('Web approval/question response unclaimed', { approvalId, userId, ...response });
+    log.warn('Web approval response unclaimed', { approvalId, userId, ...response });
     return json(ctx, 404, { error: 'not_found' });
   }
   json(ctx, 200, { ok: true });

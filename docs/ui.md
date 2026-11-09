@@ -45,9 +45,9 @@ POST and PATCH helpers share JSON encoding and decoding. HTTP 204 remains an
 explicit empty response; malformed JSON or a failed body read propagates an
 error rather than becoming a successful empty result.
 
-Conversation projection indexes visible messages, question anchors and live
+Conversation projection indexes visible messages and live
 activity once, then reads selected turns' activity, usage, inputs and metadata
-in batches. Its six scoped projection queries do not grow with the turn count.
+in batches. Its five scoped projection queries do not grow with the turn count.
 Unknown imported turns still expose only already-visible anchors; another
 route's metadata is neither decoded nor exposed. Numeric input timestamps
 retain epoch zero and the existing previous-turn waiting-time clamp.
@@ -77,8 +77,8 @@ approval. Decline keeps its separate interaction-response error behavior.
 
 ### Input attention
 
-Requests have an explicit-resolution lifetime: new questions and approvals stay
-pending until answered, approved, rejected or cancelled. Removing their originating
+Requests have an explicit-resolution lifetime: approvals stay
+pending until approved, rejected or cancelled. Removing their originating
 session/group removes its requests. Request age is not a transition and no
 request-expiry scheduler runs. Current authority, ownership and revision are still
 checked when a decision is applied. Authentication/OAuth deadlines are separate.
@@ -101,7 +101,7 @@ remain visible in the existing UI but do not inflate these actionable counts.
 Clicking an agent's `waiting` label opens its oldest pending request across its
 threads; clicking a thread's waiting icon opens the oldest request in that exact thread. These
 are separate native buttons, not nested inside the agent/thread selection
-control. Navigation focuses the existing question or approval card and does not
+control. Navigation focuses the existing approval card and does not
 steal focus on later refreshes. There is no floating attention control.
 
 Threads and agents use the same activity icon: a subtle muted
@@ -173,9 +173,9 @@ Stale activity does not mute the independent unread dot.
 Agent summaries contain `unreadThreadCount`, counting visible conversations
 rather than messages.
 
-Unread includes newly published messages/files and routed question/approval
+Unread includes newly published messages/files and routed approval
 cards. Own inputs, edits, reactions and trace/runtime updates do not count.
-Reading a question does not answer it or clear waiting. Approvals remain
+Reading a request does not resolve it or clear waiting. Approvals remain
 visible only to authorized approvers; DM counterparty and thread-owner checks
 apply to both unread metadata and read acknowledgements.
 
@@ -339,7 +339,7 @@ offline backfill is required for existing installs; see
 [the upgrade procedure](#thread-summary-upgrade).
 
 Thread, DM and agent activity separates execution (`idle`/`running`) from the
-optional `waiting` overlay. An actionable unanswered question/approval adds the
+optional `waiting` overlay. An actionable unresolved approval adds the
 overlay even while execution continues. Running includes runnable queued inputs
 before a turn starts, as well as stopping/finalization. Future
 scheduled work does not. Shared-session execution marks only its exact origin
@@ -352,7 +352,7 @@ authorized request remains actionable when only its execution signal is stale.
 ### UI timestamp upgrade
 
 UI-owned REST and synchronization records use UTC epoch milliseconds as JSON
-numbers. Message, reaction, activity, question/approval, turn, task, group and
+numbers. Message, reaction, activity, approval, turn, task, group and
 file timestamps share this representation in browser state. Missing dates are
 null; zero is a valid instant. Durations and durable timeline positions remain
 distinct concepts and keep their existing units/order. Display uses local
@@ -376,7 +376,7 @@ and CLI/archive date representations remain unchanged at their boundaries.
   and reload open or installed clients. This is a UI wire-protocol change,
   not another database cutover; provider/session-link timestamps and external
   credential metadata keep their existing boundaries.
-- **Verify:** startup, reconnect, optimistic sends, reactions, question/approval
+- **Verify:** startup, reconnect, optimistic sends, reactions, approval
   responses, task editing, file dates and date sorting still work; inspect
   millisecond precision, null and epoch-zero values. Old clients must receive
   an explicit reload/version error rather than partially ingesting new data.
@@ -445,7 +445,7 @@ control borders and focus rings use stronger colors rather than decorative
 separator tints. Autumn uses parchment and copper in light mode, and walnut
 and amber in dark mode.
 
-The message composer and question-answer input share a rounded, theme-colored
+The message composer has a rounded, theme-colored
 outline: subtle at rest, stronger on hover with a mouse, and full-strength while
 the text input or any control inside has focus. A solid theme-colored backplate
 fills the outline and its gap, preventing the transcript pattern from showing
@@ -510,7 +510,7 @@ spans the same area, including behind and below the floating composer.
 There are no fades or navigation arrows on the transcript itself; header and
 composer shadows separate the fixed controls from the scrolling content.
 There is no JavaScript background-scroll synchronization.
-The composer, status, and question prompts overlay the bottom of the scroller;
+The composer and status overlay the bottom of the scroller;
 their measured height reserves scroll space and limits oversized bubbles so the
 latest response stays readable above them. The overlay leaves the native
 scrollbar accessible. User and agent reply bubbles and the composer input keep
@@ -535,7 +535,7 @@ Edge tracking reads only enabled scroll axes and updates fade classes only when
 an edge changes. Focusability and accessibility attributes update only when
 content starts or stops overflowing, not on each scroll event.
 
-The cap follows window, composer, question-dock, and text-density changes. On
+The cap follows window, composer and text-density changes. On
 mobile, the existing VisualViewport sizing shrinks the transcript when the
 keyboard opens and expands it back when dismissed. Ordinary re-renders preserve
 internal reading positions, with browser clamping if content no longer overflows.
@@ -605,7 +605,7 @@ terminal outcomes do not open, close or move panels.
 Completing the turn does not close its panels or its expanded chapter.
 Same-step status/accounting updates and same-turn reconnect snapshots preserve
 local selections; conversation navigation resets both disclosures.
-Each logical turn has one complete activity trace. Steering, questions, and
+Each logical turn has one complete activity trace. Steering and
 intermediate assistant outputs never split it. While running, a synthetic
 bubble below the turn's latest conversation content carries the trace and
 Stop control. On settlement, the trace attaches to the final response; if
@@ -632,8 +632,8 @@ Submitting a message scrolls to the transcript bottom and clears any previous
 search-result highlight so the authoritative input echo cannot pull the viewer
 back into history. Cancelling a steering/queue choice preserves the draft,
 highlight and scroll position. A rejected send retains the draft and attachments.
-Question activity comes only from the recorded `nanoclaw.ask_user_question`
-tool call; question cards do not synthesize a second action in the trace.
+Reply-suggestion activity comes only from the recorded `nanoclaw.suggest_responses`
+tool call; buttons do not synthesize a second action in the trace.
 Current tool captions remain in the status line instead of duplicating recorded
 entries as standalone rows after their chapters.
 Every trace opens with one display-only start row whose label follows the turn's
@@ -646,8 +646,7 @@ recorded activities, with no synthetic **Done** entry. Completion and notable ou
 completion does not imply that the requested work succeeded. Transient notices
 do not count as activity steps or enter the runner journal, stored activity or
 usage accounting. The step-count disclosure is hidden when there are no recorded steps.
-Questions use their stored output-to-turn associations, and question cards never
-own separate traces. Missing output or turn references are explicit projection
+Reply suggestions use their explicit output association and never own a separate trace. Missing output or turn references are explicit projection
 errors; reads never infer ownership or synthesize historical turns. Legacy imports
 must establish canonical associations before their data is served.
 Headers show the group heading and outcome notices. Recorded file targets and
@@ -739,15 +738,13 @@ queued, running, completed, failed and uncertain states. For example, a complete
 email call reads **Emailed `recipient`**; expansion includes its subject and
 attachment paths. Messages name their destination, files name their paths,
 reactions name their emoji, task actions name their task ID or scheduled time,
-and title changes name the title. Cards name the card and question calls name
-the question. A completed question call reads **Requested an answer to `<question>`**,
-not receipt of an answer; the answer arrives in a later turn. Agent, package, MCP-server and link actions say
+and title changes name the title. Cards name the card; reply-suggestion calls read **Suggested replies** and do not imply user input. Agent, package, MCP-server and link actions say
 **Requested …** where completion only confirms submission to the host or an
 approval flow. **Emailed** confirms the email tool accepted the request, not
 delivery to the recipient.
 
 Providers capture only a per-tool allowlist of primary and supplementary
-arguments. Expansion preserves literal multiline subjects and questions.
+arguments. Expansion preserves literal multiline subjects and reply drafts.
 Message/email bodies, scripts, agent instructions, MCP commands/arguments,
 credential environment variables/headers and generated URLs are not captured.
 Metadata is bounded to 2,000 characters per field. Existing stored events are
@@ -804,15 +801,14 @@ defined once by `--chat-max` / `--chat-gutter` in
 its existing 90% bubbles and 12 px composer gutters.
 The normal composer placeholder uses the selected agent group's display name,
 such as **Message Denis's Lab…**, and follows group switches and renames. While
-group metadata is unavailable it uses **Message the agent…**. Editing, pending
-questions and reconnecting prompts retain their specific wording.
+group metadata is unavailable it uses **Message the agent…**. Editing and reconnecting prompts retain their specific wording.
 
 **Full-frame reading mode.** Readable transcript bubbles offer **Read full screen**
 using the file browser's shared full-frame icon and native preview dialog.
 The reader uses the same Markdown preview component, typography, spacing and
 code-block styling as FILES `.md` previews. It shows message bodies and attachments without sender metadata,
 activity, statistics, composer controls, or the agent selector. User and agent
-messages, cards and completed question answers are pageable; approval/account
+messages and cards are pageable; approval/account
 requests and task/status/trace-only entries are not. Desktop text is centered at `80ch`;
 mobile uses the full available content area. Tables retain horizontal scrolling.
 
@@ -829,9 +825,8 @@ Opening, paging and closing align the viewed bubble at the transcript's readable
 top. Minimal trailing scroll space allows even the last short bubble to align;
 it persists on close and clears when sending or changing conversations.
 Close, Escape and Browser Back leave the last viewed message at that position.
-Pending questions remain in the bounded bottom input dock, outside reader
-pagination. The waiting indicator closes the reader and navigates to the
-existing question or approval controls. Requests and their outcomes remain in
+Reply suggestions are omitted from the read-only reader. The waiting indicator
+closes the reader and navigates to existing approval controls. Requests and their outcomes remain in
 the normal chat workflows rather than gaining a separate reader presentation.
 The reader never mounts credential review forms or submits interaction decisions.
 Waiting-indicator navigation and attachment/image/file navigation close the
@@ -894,7 +889,7 @@ reply and display-card bubbles, including system-generated warning/error notices
 and attachment-only replies, and is absent when the toggle is off. A settled
 turn's final response owns its trace and usage inside that bubble, regardless of
 who generated it.
-Live turns, questions, and turns with only intermediate tool deliveries or no
+Live turns and turns with only intermediate tool deliveries or no
 final response keep their separate turn row. The regular information line
 remains at the bottom and retains relative timestamps and message provenance.
 The disclosure is labelled **5 traces** (or **1 trace**), counting recorded
@@ -1448,61 +1443,33 @@ bound to the actual active response, even when the newest bubble is your input.
 Steering accepted but not yet applied is preserved as a follow-up after Stop.
 When the next queued response starts, Stop targets that new turn instead.
 
-Questions are not cancelled by Stop. They remain actionable in the input dock, and submitting
-an answer is ordinary new input (or a queued follow-up). You can stop the
-resulting turn after answering. If the agent has finished asking a question and
-is only waiting for your answer, there may be no active turn to stop.
+Optional reply drafts do not affect Stop, input queueing, attachments or dictation.
+The agent registers a set with `suggest_responses`, then finishes its response.
+At successful settlement the set is associated with the final originating-route
+output by its ID. Draft metadata arrives before the durable settlement barrier,
+so buttons cannot appear before their response. No separate question event exists.
 
-Questions and responses are separate durable events: the original question output
-keeps its identity, timestamp, recorded position and asking-turn association;
-the answer input has its own identity, timestamp and consumed-input position.
-The host orders both normally and never relocates the question. Asked events
-never render transcript cards. Outstanding questions replace the ordinary
-composer in a bounded, scrollable input dock below the transcript, with choice,
-text and dictation controls, plus an explicit **Skip** button beside the question
-text, without a separate title. Multiple questions keep their recorded order.
-Question text and answer choices use solid theme foreground/surface pairs rather
-than translucent accent text. Choice labels retain at least 4.5:1 contrast in both
-themes and color modes, including hover and disabled states; outlined choices
-also keep a visible keyboard-focus ring.
-Freeform answers use the same textarea, dictation and send controls as ordinary
-composition, including density/width-aware autosizing. Question textareas grow
-to fit the entire answer; only the outer question dock scrolls. The ordinary
-message composer keeps its 200px height cap and inner scrolling. Desktop
-Enter submits; Shift+Enter and mobile Enter insert a newline. Enter during IME
-composition does not submit either editor.
-The ordinary composer stays mounted but hidden, preserving its draft, attachments,
-pinned context and pending-message editor; none of these are submitted as an answer.
-Question submission failures retain typed text and show an error. HTTP acceptance
-or metadata saying "answered" locks the prompt while waiting for its actual answer
-event; neither fabricates an answer bubble nor restores the ordinary composer.
-Once the answer event is available, the prompt disappears and the transcript
-displays a read-only answer bubble at the input event's position. The question text
-is prepended as a Markdown blockquote followed by the response, rendered together
-using the ordinary message Markdown renderer and styling, without a separate
-title or custom card layout. Choice responses retain their selected labels.
-The composer returns without automatically taking focus. Cancelled
-questions leave the dock without creating a transcript card. The asking turn's
-trace stays on its final response (or its own synthetic bubble), independently
-of prompt visibility. Reconnects restore the dock from authoritative question
-and response records; read-only views retain their existing answer permissions.
+Buttons appear below the response in the transcript and fill the ordinary
+composer. They never submit, replace an existing draft, or become approval
+decisions. Users can edit the draft, type something else, or ignore all buttons.
+Up to six distinct nonblank drafts of at most 240 characters are supported;
+the separate button label is the draft text. Agents may also place inline reply
+controls in their final Markdown using `[Short label](reply:URI-encoded%20draft)`.
+The visible label may differ from the full editable draft; hover/focus previews
+the draft. Decoded inline drafts share the 240-character limit. The scheme is
+never navigated, and malformed, blank, oversized or control-character payloads
+remain plain label text. Code examples are not activated. Occupied or unavailable input produces
+an explicit error without changing the draft. Editing pending input, recording,
+and active voice capture disable these controls.
 
-Skipping uses the existing response endpoint with a typed `responseType: "skipped"`
-response and no answer value. It resolves the question with a tagged
-`response_json = '{"responseType":"skipped"}'`,
-records who responded and when, and journals a wake-eligible interactive input.
-The agent is explicitly told that no answer, choice, consent or approval was
-provided; it can continue where possible or explain what is blocked. The transcript
-shows **Question skipped** at the input event's position. HTTP acceptance or
-metadata alone does not restore the composer; the actual response event does.
-Skip failures retain the prompt and typed answer with a retryable error, including
-a **Retry skip** control if the terminal outcome was saved before journaling failed.
-Answers and skips share one idempotent response ID and a first-response-wins update,
-so retries and competing tabs never produce both outcomes. Approvals cannot be skipped.
-Browser protocol version 10 carries questions and consent requests as discriminated
-interactions, with a nullable tagged question `response` instead of nullable
-answer-type/value fields. Choice, literal text, and skip responses are explicit; older
-clients must reload.
+Suggestions persist on reload but controls show only on the latest completed
+successful reply. After a follow-up, separate buttons disappear and inline labels
+remain ordinary text. Running responses, inbound messages, read-only views, file
+previews and full-screen reading mode do not activate inline reply links.
+Silent, failed, stopped and abandoned turns discard
+unattached drafts. They never contribute to waiting attention, and the composer
+is not hidden or disabled by their presence. Channel apps receive ordinary
+response text; draft buttons are a browser-transcript affordance.
 
 The icon is disabled and grayed out while stopping, without adding transient
 status text or changing the bubble's layout. A **Stopping response** tooltip
@@ -1531,83 +1498,16 @@ unavailable** instead of showing zero. Native model-call usage is captured befor
 waiting for tools to finish. This metadata is persisted for reloads, but cannot
 be reconstructed for older stopped responses that never recorded it.
 
-#### Upgrading question skips
+#### Reply-suggestions cutover
 
-The following legacy-table instructions apply only to older host revisions.
-The unified-store prototype instead refuses old storage and requires the
-[data-preserving offline cutover](user-requests-refactor-plan.md#offline-cutover-detect--why--fix--verify--rollback).
-Do not apply legacy-table DDL to a canonical-store database.
-
-Fresh installations support `skipped` directly. Existing databases whose
-`questions.answer_type` CHECK constraint allows only `choice` and `text` need
-an offline upgrade; the host does not run this migration at startup.
-
-Stop this installation's host and verify no process is writing its central DB.
-The temporary script was removed after deployment; recover it from commit
-`aee7b194` into a temporary file inside this checkout when upgrading an older
-installation:
-
-```bash
-(set -C; git show aee7b194:scripts/migrate-question-skips.ts > .question-skip-upgrade.ts)
-pnpm exec tsx .question-skip-upgrade.ts data/v2.db --host-stopped
-rm -- .question-skip-upgrade.ts
-```
-
-The offline script creates a restricted-permission SQLite backup beside the
-database, preserves all question records, rowids, indexes and triggers, extends
-the response constraint transactionally, and verifies data and database integrity.
-Unexpected schemas are rejected. Re-running it on an upgraded database is a no-op.
-Installations still using `pending_questions` must first finish the durable-question
-upgrade offline. With the host stopped, back up the central DB using SQLite's
-backup API, recover `src/db/migrations/028-durable-questions.ts` from `aee7b194`,
-and apply its `migration028.up(db)` inside a SQLite transaction. Verify the
-question IDs and count survived, and run the integrity and foreign-key checks
-before proceeding. Restore the backup if verification fails. No legacy question
-conversion ships in the host.
-Rebuild the host and chat assets, restart the host, and recycle any existing
-agent containers so the runner's formatter recognizes skipped responses.
-Reload stale browsers for the current conversation protocol version.
-
-Verify that `questions` admits `answer_type = 'skipped'` with a NULL value,
-the existing pending question still appears in the dock with **Skip**, and
-normal answers are unchanged. Do not skip a real question merely to validate
-deployment. Before reopening the service, rollback is a restore of the printed
-backup with the host stopped plus the matching previous code/assets. Never
-restore that backup over newer accepted messages.
-
-#### Removing stored question titles
-
-Question titles have been removed from the MCP tool, delivery payload, central
-schema and browser protocol. Fresh databases create the title-free schema
-directly; there is no startup migration. Approval and display-card titles remain
-unchanged. Existing `questions.title` columns must be dropped offline before
-starting this host.
-
-Stop this installation's host and verify that nothing is writing the central DB.
-The temporary offline script was removed after deployment. Recover it from
-commit `e8f909b0` into a temporary file inside this checkout so its dependencies
-resolve. It defaults to read-only inspection:
-
-```bash
-(set -C; git show e8f909b0:scripts/migrate-question-titles.ts > .question-title-upgrade.ts)
-pnpm exec tsx .question-title-upgrade.ts data/v2.db
-pnpm exec tsx .question-title-upgrade.ts data/v2.db --apply --host-stopped
-rm -- .question-title-upgrade.ts
-```
-
-Applying creates a restricted-permission backup using SQLite's backup API, drops
-the title column inside a transaction and verifies every remaining question
-value, rowid, index, trigger, constraint and applied-migration record. Integrity
-and foreign-key checks must pass. Unexpected schemas or failed verification
-abort the upgrade. An already title-free database needs no change. Original
-session journals are immutable history; old title fields there are ignored and
-are not projected into current question records.
-
-Rebuild host and chat assets, restart this host and recycle its existing agent
-containers to refresh their MCP tool schemas. Reload browsers for protocol
-version 4. Before accepting new input, rollback is a restore of the printed
-backup with the host stopped and the matching previous code/assets. Never
-restore the backup over newer accepted messages.
+This prototype removes conversational question storage and runtime handling.
+Old questions and answers must first become ordinary historical conversation
+content in all host/runner projections and archived groups. Approval requests
+remain independent workflows. Host/session/runner storage is version 2, archive
+format is version 4, and browser conversation protocol is 17.
+See [the candidate-only offline cutover](reply-suggestions-cutover.md) for
+inventory, verification, unsafe-state refusal and rollback. Normal startup
+and archive restore do not translate old formats.
 
 ### Authoritative conversation synchronization
 
@@ -1621,13 +1521,13 @@ same viewer/ownership checks as HTTP reads. Web bookmarks can omit the messaging
 group with an explicit null. Navigation resubscribes without replacing the socket.
 The first conversation
 snapshot includes messages, durable input dispositions, turns, current activity,
-usage metadata, questions, runner connection state and permitted actions.
+usage metadata, approvals, runner connection state and permitted actions.
 Subsequent envelopes update that view atomically. A final response is not rendered
 until the host commits the matching turn's `settled` barrier. Platform typing
 notifications are unrelated and cannot complete a browser turn.
 
-Each logical turn has one complete trace, owned by its turn ID. Steering,
-questions and intermediate outputs move the synthetic bubble beneath the latest
+Each logical turn has one complete trace, owned by its turn ID. Steering and
+intermediate outputs move the synthetic bubble beneath the latest
 associated content without splitting the trace. Settlement attaches it to the
 final response, if present. Expansion state stays with the turn. Silent, warning,
 stopped, failed and interrupted turns remain visible even without a response.

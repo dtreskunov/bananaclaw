@@ -42,7 +42,6 @@ import {
   pinnedContext,
   pendingApprovals,
   respondingInteractionIds,
-  pendingQuestions,
   searchQuery,
   searchResults,
   searchLoading,
@@ -456,7 +455,6 @@ export function startSync(): () => void {
           resetTurnState();
           voice.detach();
           cancelRecording();
-          pendingQuestions.value = [];
           chatMessages.value = [];
           canSend.value = false;
           chatReady.value = false;
@@ -623,7 +621,6 @@ export async function openChat(
     channelType.value = ct;
     messagingGroupId.value = mg;
     canSend.value = ct === 'web' ? false : cs;
-    pendingQuestions.value = [];
     if (resumeTid) {
       chatLoading.value = true;
       chatStatus.value = ct === 'web' ? 'connecting\u2026' : 'loading history\u2026';

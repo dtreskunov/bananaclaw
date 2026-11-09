@@ -1,9 +1,8 @@
-import type { Approval, Question, Session } from '../types.js';
-import type { QuestionResponse } from '../ui/shared/question.js';
+import type { Approval, Session } from '../types.js';
+import { USER_APPROVAL_OPTIONS, USER_APPROVAL_TITLE, type NormalizedOption } from '../channels/approval-request.js';
 import { getDb, hasTable } from './connection.js';
-import { createInteraction, getInteraction, mutateInteraction } from './interactions.js';
+import { getInteraction } from './interactions.js';
 import { assertTimestampFields } from './validate-timestamps.js';
-import { epochMs } from '../time.js';
 import { recordHostChange, transaction } from './transaction.js';
 
 // ── Sessions ──
@@ -150,12 +149,10 @@ export function deleteSession(id: string, cancelApprovals = false): number {
   return transaction(db, () => {
     if (db.prepare("SELECT 1 FROM interactions WHERE session_id=? AND status='applying'").get(id))
       throw new SessionApprovalInProgressError();
-    const approval = db
-      .prepare("SELECT 1 FROM interactions WHERE session_id = ? AND kind!='question' AND status='pending' LIMIT 1")
-      .get(id);
+    const approval = db.prepare("SELECT 1 FROM interactions WHERE session_id = ? AND status='pending' LIMIT 1").get(id);
     if (approval && !cancelApprovals) throw new SessionApprovalCancellationRequiredError();
     const cancelledApprovals = db
-      .prepare("DELETE FROM interactions WHERE session_id = ? AND kind!='question' AND status='pending'")
+      .prepare("DELETE FROM interactions WHERE session_id = ? AND status='pending'")
       .run(id).changes;
     db.prepare('DELETE FROM interactions WHERE session_id = ?').run(id);
     db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
@@ -165,69 +162,11 @@ export function deleteSession(id: string, cancelApprovals = false): number {
   })();
 }
 
-// ── Durable Questions ──
+type ApprovalRender = { title: string; options: NormalizedOption[] };
 
-export function createQuestion(
-  question: Pick<
-    Question,
-    | 'id'
-    | 'session_id'
-    | 'message_out_id'
-    | 'in_reply_to'
-    | 'platform_id'
-    | 'channel_type'
-    | 'thread_id'
-    | 'input'
-    | 'created_at'
-  >,
-): boolean {
-  return createInteraction({ ...question, kind: 'question' });
-}
-
-export function getQuestion(questionId: string): Question | undefined {
-  const record = getInteraction(questionId);
-  return record?.kind === 'question' ? record : undefined;
-}
-
-export function answerQuestion(
-  questionId: string,
-  answer: QuestionResponse & {
-    userId: string | null;
-    answeredAt: number;
-  },
-): boolean {
-  epochMs(answer.answeredAt);
-  return mutateInteraction(questionId, () => {
-    const result = getDb()
-      .prepare(
-        `UPDATE interactions
-          SET status = 'answered', response_json = @response,
-              responded_by = @userId, responded_at = @answeredAt, resolved_at = @answeredAt,
-              updated_at = @answeredAt, revision = revision + 1
-        WHERE id = @questionId AND kind='question' AND status = 'pending'`,
-      )
-      .run({
-        questionId,
-        userId: answer.userId,
-        answeredAt: answer.answeredAt,
-        response: JSON.stringify(answer, ['responseType', 'value']),
-      });
-    return result.changes > 0;
-  });
-}
-
-type AskQuestionRender = {
-  options: import('../channels/ask-question.js').NormalizedOption[];
-} & ({ question: string; title?: never } | { title: string; question?: never });
-
-/**
- * Resolve ask_question render metadata (question or approval title + options) for any
- * card, regardless of whether it was persisted as a question (generic
- * ask_user_question) or a pending_approval (self-mod / Agent Vault credential).
- */
-export function getAskQuestionRender(id: string): AskQuestionRender | undefined {
+/** Resolve persisted approval options before decoding a channel callback. */
+export function getApprovalRender(id: string): ApprovalRender | undefined {
   const record = getInteraction(id);
-  if (record?.kind === 'question') return { question: record.input.question, options: record.input.options };
   if (record?.input.title) return { title: record.input.title, options: record.input.options };
 
   // Channel-registration + unknown-sender approvals persist title/options_json
@@ -244,6 +183,11 @@ export function getAskQuestionRender(id: string): AskQuestionRender | undefined 
       | { title: string; options_json: string }
       | undefined;
     if (s?.title) return { title: s.title, options: JSON.parse(s.options_json) };
+  }
+
+  if (hasTable(getDb(), 'pending_user_approvals')) {
+    const user = getDb().prepare('SELECT 1 FROM pending_user_approvals WHERE id = ?').get(id);
+    if (user) return { title: USER_APPROVAL_TITLE, options: USER_APPROVAL_OPTIONS };
   }
 
   return undefined;

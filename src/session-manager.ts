@@ -525,8 +525,8 @@ export function writeSystemResponse(
     kind: 'system',
     timestamp: Date.now(),
     content: JSON.stringify({
-      type: 'question_response',
-      questionId: requestId,
+      type: 'system_response',
+      requestId,
       status,
       result,
     }),

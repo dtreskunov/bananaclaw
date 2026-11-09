@@ -8,7 +8,6 @@ import {
   reduceConversation,
 } from '../../shared/conversation-protocol.js';
 import type { ConversationMessage } from '../../shared/conversation.js';
-import type { Question } from '../../../types.js';
 import { projectConversation } from './conversation.js';
 
 let db: Database.Database;
@@ -52,7 +51,7 @@ const signals = {
   activity: [{ turnId: 'turn', ordinal: 1, ts: 1, text: 'work', timelinePosition: 100 }],
   usage: null,
 };
-const read = (history: ConversationMessage[] = []) => projectConversation(db, context, 't', 'g', history, [], signals);
+const read = (history: ConversationMessage[] = []) => projectConversation(db, context, 't', 'g', history, signals);
 beforeEach(() => {
   db = new Database(':memory:');
   db.exec(OUTBOUND_SCHEMA);
@@ -83,7 +82,7 @@ describe('authoritative conversation projection', () => {
     const prepare = vi.spyOn(db, 'prepare');
     try {
       const view = read(history);
-      expect(prepare).toHaveBeenCalledTimes(6);
+      expect(prepare).toHaveBeenCalledTimes(5);
       expect(view.turns).toHaveLength(81);
       for (const projected of view.turns.filter((entry) => entry.id.startsWith('batch-'))) {
         expect(projected.inputIds).toEqual([`${projected.id}-in`]);
@@ -156,7 +155,7 @@ describe('authoritative conversation projection', () => {
       ...signals,
       active: { connected: true, turn: { ...signals.active.turn, supportsToolCancellation: true } },
     };
-    const readSignals = (current: typeof capable) => projectConversation(db, context, 't', 'g', [], [], current);
+    const readSignals = (current: typeof capable) => projectConversation(db, context, 't', 'g', [], current);
     expect(readSignals(capable).capabilities.stopTool).toBe(true);
     expect(readSignals({ ...capable, active: { ...capable.active, connected: false } }).capabilities.stopTool).toBe(
       false,
@@ -210,7 +209,7 @@ describe('authoritative conversation projection', () => {
     expect(view.timeline[0]).toMatchObject({ kind: 'message', messageId: 'out', trace: { ordinals: [0] } });
   });
   it('reduces tool state by identity while preserving emit order and unrecognized history', () => {
-    const result = projectConversation(db, context, 't', 'g', [], [], {
+    const result = projectConversation(db, context, 't', 'g', [], {
       ...signals,
       activity: [
         {
@@ -249,285 +248,6 @@ describe('authoritative conversation projection', () => {
       durationMs: 1000,
     });
     expect(result.turns[0].activity[1].text).toBe('Imported activity');
-  });
-
-  describe('questions', () => {
-    const question: Parameters<typeof projectConversation>[5][number] = {
-      id: 'q',
-      session_id: 's',
-      message_out_id: 'question-output',
-      in_reply_to: null,
-      channel_type: 'web',
-      platform_id: 'group:g',
-      thread_id: 't',
-      kind: 'question',
-      input: {
-        question: 'Choose?',
-        responseMode: 'text',
-        options: [],
-        placeholder: 'Explain your choice',
-        multiline: true,
-      },
-      status: 'pending',
-      response: null,
-      revision: 1,
-      agent_group_id: null,
-      origin_message_id: null,
-      dedupe_key: null,
-      outcome_message: null,
-      updated_at: 1790640001000,
-      responded_by: null,
-      responded_at: null,
-      resolved_at: null,
-      created_at: 1790640001000,
-    };
-    const questionInput = {
-      question: question.input.question,
-      responseMode: question.input.responseMode,
-      options: [],
-      placeholder: 'Explain your choice',
-      multiline: true,
-    };
-    const withStatus = (status: Question['status']): Question =>
-      status === 'answered'
-        ? {
-            ...question,
-            status,
-            response: { responseType: 'text', value: 'Yes' },
-            responded_at: 1790640003000,
-          }
-        : { ...question, status };
-    beforeEach(() => {
-      db.prepare('INSERT INTO messages_out (id, kind, timestamp, content, turn_id) VALUES (?, ?, ?, ?, ?)').run(
-        question.message_out_id,
-        'system_action',
-        question.created_at,
-        JSON.stringify(questionInput),
-        turn.id,
-      );
-    });
-
-    it('uses canonical turn ownership and scopes questions by channel, platform and thread', () => {
-      db.prepare(
-        'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
-      ).run(question.message_out_id, 3, Number('1'), 'question work', turn.id);
-      const readQuestions = (status: Question['status']) =>
-        projectConversation(
-          db,
-          context,
-          't',
-          'g',
-          [],
-          [
-            withStatus(status),
-            { ...question, id: 'private', platform_id: 'private', message_out_id: 'missing-private-output' },
-            {
-              ...question,
-              id: 'off-thread',
-              thread_id: 'private-thread',
-              message_out_id: 'missing-thread-output',
-            },
-            {
-              ...question,
-              id: 'off-channel',
-              channel_type: 'telegram',
-              message_out_id: 'missing-channel-output',
-            },
-          ],
-          signals,
-        );
-      const pending = readQuestions('pending');
-      expect(pending.interactions).toHaveLength(1);
-      expect(pending.interactions[0]).not.toHaveProperty('title');
-      expect(pending.interactions[0]).toMatchObject({ placeholder: 'Explain your choice', multiline: true });
-      expect(pending.timeline.find((row) => row.kind === 'turn')).toMatchObject({
-        afterId: question.message_out_id,
-      });
-      const view = readQuestions('answered');
-      expect(view.interactions[0]).toMatchObject({ status: 'answered', turnId: turn.id });
-      expect(view.interactions[0]).not.toHaveProperty('activity');
-      expect(view.turns).toHaveLength(1);
-      expect(view.turns[0].activity.filter((line) => line.text === 'question work')).toHaveLength(1);
-      expect(view.timeline.filter((row) => row.trace)).toHaveLength(1);
-      expect(view.timeline.find((row) => row.kind === 'turn')).toMatchObject({
-        afterId: question.message_out_id,
-        trace: { turnId: turn.id, ownsTurn: true, ordinals: [1, 3] },
-      });
-      putTurn(db, { ...turn, origin_platform_id: 'private' });
-      const privateOrigin = readQuestions('answered');
-      expect(privateOrigin.interactions[0]).not.toHaveProperty('turnId');
-      expect(privateOrigin.turns).toHaveLength(0);
-    });
-
-    it.each(['text', 'skipped'] as const)(
-      'preserves the asked event and projects the %s response as its own input event',
-      (responseType) => {
-        const base = Date.parse('2026-09-29T00:00:00Z') * 1000;
-        db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
-          JSON.stringify({ ...questionInput, timelinePosition: base + 1_000_000 }),
-          question.message_out_id,
-        );
-        putTurn(db, { ...turn, phase: 'settled', outcome: 'replied' });
-        const reply = { ...output, timelinePosition: base + 2_000_000 };
-        const readQuestion = (current: Question, inputs: ConversationMessage[] = []) =>
-          projectConversation(db, context, 't', 'g', [reply, ...inputs], [current], signals);
-        const pending = readQuestion({ ...question, created_at: 1790640010000 });
-        expect(pending.interactions[0]).toMatchObject({ timelinePosition: base + 1_000_000 });
-        expect(pending.timeline.map((row) => row.kind)).toEqual(['interaction', 'message']);
-
-        const answered: Question = {
-          ...question,
-          status: 'answered',
-          response: responseType === 'skipped' ? { responseType } : { responseType, value: 'Yes' },
-          responded_at: 1790640003000,
-        };
-        const queued = readQuestion(answered);
-        expect(queued.interactions[0]).toMatchObject({ timelinePosition: base + 1_000_000 });
-        expect(queued.interactions[0].createdAt).toBe(pending.interactions[0].createdAt);
-        expect(queued.timeline).toEqual(pending.timeline);
-
-        const inputId = `question-response:${question.id}`;
-        putTurn(db, { ...turn, id: 'answer-turn' });
-        linkTurnInput(db, { turn_id: 'answer-turn', message_in_id: inputId, association: 'consumed' });
-        const answerInput: ConversationMessage = {
-          id: inputId,
-          direction: 'in',
-          questionId: question.id,
-          text: responseType === 'skipped' ? 'Question skipped' : 'Yes',
-          questionResponseType: responseType,
-          timestamp: 1790640000000,
-          timelinePosition: base + 4_000_000,
-        };
-        const consumed = readQuestion(answered, [answerInput]);
-        expect(consumed.interactions[0]).toMatchObject({ timelinePosition: base + 1_000_000, turnId: turn.id });
-        expect(consumed.messages.find((message) => message.id === inputId)).toEqual(answerInput);
-        expect(consumed.turns.find((turn) => turn.id === 'answer-turn')?.inputIds).toEqual([inputId]);
-        expect(consumed.timeline.map((row) => row.kind)).toEqual(['interaction', 'message', 'message', 'turn']);
-        expect(consumed.timeline.slice(0, 2)).toEqual(pending.timeline);
-        expect(consumed.timeline[3]).toMatchObject({
-          turnId: 'answer-turn',
-          afterId: inputId,
-          trace: { turnId: 'answer-turn', ownsTurn: true },
-        });
-        expect(
-          reduceConversation(
-            null,
-            parseConversationFrame({
-              kind: 'snapshot',
-              protocolVersion: CONVERSATION_PROTOCOL_VERSION,
-              streamId: 'test',
-              revision: 0,
-              conversation: consumed,
-            }),
-          ).conversation,
-        ).toEqual(consumed);
-        expect(readQuestion(answered, [answerInput])).toEqual(consumed);
-      },
-    );
-
-    it('keeps a question-only asking turn before the answer and anchors the consuming turn after it', () => {
-      const inputId = `question-response:${question.id}`;
-      db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
-        JSON.stringify({ ...questionInput, timelinePosition: 200 }),
-        question.message_out_id,
-      );
-      putTurn(db, { ...turn, phase: 'settled', outcome: 'silent' });
-      linkTurnInput(db, { turn_id: turn.id, message_in_id: 'start', association: 'consumed' });
-      putTurn(db, { ...turn, id: 'answer-turn' });
-      linkTurnInput(db, { turn_id: 'answer-turn', message_in_id: inputId, association: 'consumed' });
-      const view = projectConversation(
-        db,
-        context,
-        't',
-        'g',
-        [
-          {
-            id: 'start',
-            direction: 'in',
-            text: 'Ask me',
-            timestamp: 0,
-            timelinePosition: 100,
-          },
-          {
-            id: inputId,
-            direction: 'in',
-            questionId: question.id,
-            questionResponseType: 'text',
-            text: 'Yes',
-            timestamp: 0,
-            timelinePosition: 300,
-          },
-        ],
-        [
-          {
-            ...question,
-            status: 'answered',
-            response: { responseType: 'text', value: 'Yes' },
-            responded_at: 1790640003000,
-          },
-        ],
-        signals,
-      );
-      expect(view.timeline).toMatchObject([
-        { kind: 'message', messageId: 'start' },
-        { kind: 'interaction', interactionId: question.id },
-        { kind: 'turn', turnId: turn.id, afterId: question.message_out_id, trace: { turnId: turn.id, ownsTurn: true } },
-        { kind: 'message', messageId: inputId },
-        {
-          kind: 'turn',
-          turnId: 'answer-turn',
-          afterId: inputId,
-          trace: { turnId: 'answer-turn', ownsTurn: true },
-        },
-      ]);
-      expect(view.interactions[0]).toMatchObject({ turnId: turn.id });
-      expect(view.messages).toHaveLength(2);
-    });
-
-    it('does not move asked events when question status changes', () => {
-      db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
-        JSON.stringify({ ...questionInput, timelinePosition: 100 }),
-        question.message_out_id,
-      );
-      for (const status of ['pending', 'answered', 'cancelled'] as const) {
-        const view = projectConversation(db, context, 't', 'g', [], [withStatus(status)], signals);
-        expect(view.interactions[0]).toMatchObject({ timelinePosition: 100 });
-        expect(view.turns[0].inputIds).toEqual([]);
-      }
-    });
-    it.each([{ placeholder: 42 }, { multiline: 'true' }])(
-      'reads complete canonical input independently of legacy anchor hints %j',
-      (invalid) => {
-        db.prepare('UPDATE messages_out SET content = ? WHERE id = ?').run(
-          JSON.stringify({ ...questionInput, ...invalid }),
-          question.message_out_id,
-        );
-        expect(projectConversation(db, context, 't', 'g', [], [question], signals).interactions[0]).toMatchObject(
-          question.input,
-        );
-      },
-    );
-
-    it.each(['missing output', 'missing output turn', 'missing turn record'])(
-      'rejects a %s instead of normalizing history',
-      (missing) => {
-        if (missing === 'missing output') {
-          db.prepare('DELETE FROM messages_out WHERE id = ?').run(question.message_out_id);
-        } else {
-          db.pragma('foreign_keys = OFF');
-          db.prepare('UPDATE messages_out SET turn_id = ? WHERE id = ?').run(
-            missing === 'missing output turn' ? null : 'missing-turn',
-            question.message_out_id,
-          );
-        }
-        db.prepare(
-          'INSERT INTO turn_activity (message_out_id, ordinal, ts, text, turn_id, timeline_position) VALUES (?, ?, ?, ?, ?, 100)',
-        ).run(question.message_out_id, 3, Number('1'), 'old activity', missing === 'missing output' ? turn.id : null);
-        expect(() => projectConversation(db, context, 't', 'g', [], [question], signals)).toThrow(
-          'Missing conversation question turn association',
-        );
-      },
-    );
   });
   it('stages the response until the matching durable settlement and keeps live trace on reconnect', () => {
     const before = read([output, { ...output, id: 'update', deliveryOrigin: 'send_message' }]);
@@ -659,7 +379,7 @@ describe('authoritative conversation projection', () => {
   });
 
   it('disables controls on disconnect without erasing durable or live turn information', () => {
-    const result = projectConversation(db, context, 't', 'g', [], [], {
+    const result = projectConversation(db, context, 't', 'g', [], {
       ...signals,
       active: { ...signals.active, connected: false },
     });

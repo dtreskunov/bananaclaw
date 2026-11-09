@@ -6,6 +6,7 @@ import { createAgentGroup, getAgentGroup } from '../agent-groups.js';
 import { CENTRAL_BASELINE_MIGRATION_NAMES } from '../central-schema.js';
 import { INSTANT_COLUMNS } from '../time.js';
 import { runMigrations, type Migration } from './index.js';
+import { STORAGE_VERSION } from '../storage-lifecycle.js';
 
 afterEach(closeDb);
 
@@ -50,7 +51,7 @@ describe('canonical central baseline', () => {
     const db = new Database(':memory:', { verbose: (sql) => statements.push(String(sql)) });
     try {
       runMigrations(db);
-      expect(db.pragma('user_version', { simple: true })).toBe(1);
+      expect(db.pragma('user_version', { simple: true })).toBe(STORAGE_VERSION);
       expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
@@ -71,7 +72,7 @@ describe('canonical central baseline', () => {
           .prepare("SELECT count(*) FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'")
           .pluck()
           .get(),
-      ).toBe(116);
+      ).toBe(115);
       expect(CENTRAL_BASELINE_MIGRATION_NAMES).toHaveLength(49);
       expect(
         db.prepare('SELECT version,name,typeof(applied) AS type FROM schema_version ORDER BY version').all(),
@@ -147,22 +148,27 @@ describe('canonical central baseline', () => {
     });
   });
 
-  it.each([0, 2])('rejects populated unsupported storage version %i before modifying any data or schema', (version) => {
-    const db = initTestDb();
-    db.exec(`CREATE TABLE users(id TEXT,created_at TEXT);
+  it.each([0, 1, STORAGE_VERSION + 1])(
+    'rejects populated unsupported storage version %i before modifying any data or schema',
+    (version) => {
+      const db = initTestDb();
+      db.exec(`CREATE TABLE users(id TEXT,created_at TEXT);
       INSERT INTO users VALUES('legacy','2026-01-01T00:00:00.000Z');
       PRAGMA user_version=${version}`);
-    const objects = db.prepare('SELECT * FROM sqlite_schema').all();
-    expect(() => runMigrations(db, [])).toThrow(`Unsupported central storage version ${version}`);
-    expect(db.prepare('SELECT * FROM users').all()).toEqual([{ id: 'legacy', created_at: '2026-01-01T00:00:00.000Z' }]);
-    expect(db.prepare('SELECT * FROM sqlite_schema').all()).toEqual(objects);
-    expect(db.pragma('user_version', { simple: true })).toBe(version);
-  });
+      const objects = db.prepare('SELECT * FROM sqlite_schema').all();
+      expect(() => runMigrations(db, [])).toThrow(`Unsupported central storage version ${version}`);
+      expect(db.prepare('SELECT * FROM users').all()).toEqual([
+        { id: 'legacy', created_at: '2026-01-01T00:00:00.000Z' },
+      ]);
+      expect(db.prepare('SELECT * FROM sqlite_schema').all()).toEqual(objects);
+      expect(db.pragma('user_version', { simple: true })).toBe(version);
+    },
+  );
 
   it('rejects future storage even when empty', () => {
     const db = initTestDb();
-    db.pragma('user_version=2');
-    expect(() => runMigrations(db)).toThrow('Unsupported central storage version 2');
+    db.pragma(`user_version=${STORAGE_VERSION + 1}`);
+    expect(() => runMigrations(db)).toThrow(`Unsupported central storage version ${STORAGE_VERSION + 1}`);
     expect(db.prepare('SELECT * FROM sqlite_schema').all()).toEqual([]);
   });
 

@@ -26,7 +26,7 @@ import { isSenderAllowed, provisionEmailBot, readBotFolder } from '../auto-provi
 import { wakeContainer } from '../container-runner.js';
 import { getDb } from '../db/connection.js';
 import { getMessagingGroup, getMessagingGroupByPlatform, getMessagingGroupAgents } from '../db/messaging-groups.js';
-import { getAskQuestionRender, getSession } from '../db/sessions.js';
+import { getApprovalRender, getSession } from '../db/sessions.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
 import { getEnabledAgentGroupForEmailAlias } from '../modules/email/agent-email.js';
@@ -40,7 +40,7 @@ import { getOwners, getGlobalAdmins, getAdminsOfAgentGroup } from '../modules/pe
 import { getPrimaryIdentityForChannel } from '../modules/permissions/db/identities.js';
 import { dispatchResponse } from '../response-registry.js';
 import { writeSessionMessage } from '../session-manager.js';
-import { normalizeOptions } from './ask-question.js';
+import { normalizeOptions } from './approval-request.js';
 import type { DeliveryContext } from './adapter.js';
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
@@ -448,9 +448,8 @@ registerChannelAdapter('resend', {
           references: headersOf(email).References || headersOf(email).references,
         });
         const claimed = await dispatchResponse({
-          questionId: approvalId,
+          approvalId,
           value: optionValue,
-          responseType: 'choice',
           userId: senderAddress,
           channelType: 'resend',
           platformId,
@@ -737,7 +736,7 @@ registerChannelAdapter('resend', {
     //    a null threadId — the chat-sdk-bridge falls back to threadId =
     //    platformId, which our 4-part decoder rejects. Look up the recipient
     //    via user_dms and ask the adapter to mint a real threadId.
-    // 2. ask_question cards render as Card+Buttons, which has no equivalent
+    // 2. approval_request cards render as Card+Buttons, which has no equivalent
     //    in email. Intercept and send a plain markdown body with the option
     //    list and an "Approval ref: <id>" footer; the inbound webhook
     //    parses that footer to route the reply back to the right approval.
@@ -815,22 +814,22 @@ registerChannelAdapter('resend', {
         tid = await adapter.openDM(recipient);
       }
 
-      if (content.type === 'ask_question' && content.questionId && tid) {
-        const questionId = content.questionId as string;
+      if (content.type === 'approval_request' && content.approvalId && tid) {
+        const approvalId = content.approvalId as string;
         const title = (content.title as string) || '';
-        const question = (content.question as string) || '';
+        const body = (content.body as string) || '';
         const options = normalizeOptions((content.options as never) || []);
         const lines: string[] = [];
         if (title) lines.push(`**${title}**`, '');
-        if (question) lines.push(question, '');
+        if (body) lines.push(body, '');
         lines.push('Reply with one of:');
         for (const o of options) lines.push(`- ${o.label}`);
-        lines.push('', `(Approval ref: ${questionId})`);
+        lines.push('', `(Approval ref: ${approvalId})`);
         // Embed the approval ref in the subject too so reply matching
         // survives clients that strip the quoted body. The adapter reads
         // the stored subject and prepends "Re:" automatically.
         const subjectBase = title || 'Approval';
-        tr.trackSubject(tid, `${subjectBase} [ref:${questionId}]`);
+        tr.trackSubject(tid, `${subjectBase} [ref:${approvalId}]`);
         const result = await adapter.postMessage(tid, { markdown: lines.join('\n') });
         return result?.id;
       }
@@ -850,7 +849,7 @@ function headersOf(email: any): Record<string, string> {
 // Match the "Approval ref: appr-..." footer we embed in outbound approval
 // emails, plus the answer the human typed above the quoted original.
 // Returns { approvalId, optionValue } where optionValue is matched against
-// the persisted options of the pending question (case-insensitive substring
+// the persisted options of the approval (case-insensitive substring
 // match on label or value). Falls back to the raw extracted text when no
 // option list is on file so the response handlers can still try to match.
 function matchApprovalReply(plain: string): { approvalId: string; optionValue: string } | null {
@@ -889,7 +888,7 @@ function extractUnquotedReply(plain: string): string {
 
 function resolveOptionForReply(approvalId: string, answer: string): { approvalId: string; optionValue: string } {
   if (!answer) return { approvalId, optionValue: '' };
-  const render = getAskQuestionRender(approvalId);
+  const render = getApprovalRender(approvalId);
   if (!render) return { approvalId, optionValue: answer };
   const lower = answer.toLowerCase();
   const match = render.options.find(

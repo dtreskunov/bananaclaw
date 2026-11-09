@@ -4,7 +4,7 @@ import { TranscriptReader } from './TranscriptReader';
 import { FilePreviewDialog } from './FilePreviewDialog';
 import { groupId, threadId, threads } from '../state';
 import { openTranscriptReader, readerSelection, type ReaderNavigate } from '../transcript-reader';
-import type { ChatMessage, PendingQuestionDto, TranscriptRow } from '../types';
+import type { ChatMessage, TranscriptRow } from '../types';
 import { testAccountInteraction, testThread } from '../conversation-test-fixtures';
 import { ThreadAttention } from './ThreadsRail';
 
@@ -163,20 +163,7 @@ describe('full-frame transcript reader', () => {
     node.props.onAfterClose();
     expect(action).toHaveBeenCalledOnce();
   });
-  it('keeps the current reader page and position when a question answer arrives', () => {
-    const question: PendingQuestionDto = {
-      kind: 'question',
-      id: 'q',
-      question: 'Choose?',
-      options: [],
-      responseMode: 'text',
-      status: 'pending',
-      createdAt: message.timestamp,
-      answeredAt: null,
-      response: null,
-      threadId: 'thread',
-      agentGroupId: 'group',
-    };
+  it('keeps the current reader page and position when a follow-up arrives', () => {
     rows = [{ kind: 'message', message }];
     openTranscriptReader({ kind: 'message', id: message.id });
     render();
@@ -184,9 +171,8 @@ describe('full-frame transcript reader', () => {
     rows = [
       { kind: 'message', message },
       {
-        kind: 'question-answer',
-        question: { ...question, status: 'answered' },
-        answer: { ...message, id: 'answer', direction: 'in', text: 'Answer', questionId: question.id },
+        kind: 'message',
+        message: { ...message, id: 'answer', direction: 'in', text: 'Answer' },
       },
     ];
     const node = render();
@@ -196,7 +182,7 @@ describe('full-frame transcript reader', () => {
     expect(onNavigate).toHaveBeenCalledExactlyOnceWith(message.id);
     button(node, 'Next message').props.onClick();
     render();
-    expect(readerSelection.value?.key).toBe('question:q');
+    expect(readerSelection.value?.key).toBe('message:answer');
     expect(viewport.scrollTop).toBe(0);
     expect(onNavigate).toHaveBeenLastCalledWith('answer');
     expect(renderMessage.mock.lastCall?.[0].text).toContain('Answer');

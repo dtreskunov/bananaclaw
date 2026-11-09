@@ -5,7 +5,6 @@ import {
   readerLocation, readerPages, readerSelection,
   type ReaderNavigate,
 } from '../transcript-reader';
-import { questionAnswerText } from '../question-presentation';
 import type { ChatMessage, TranscriptRow } from '../types';
 import { FilePreviewDialog } from './FilePreviewDialog';
 import { ThreadAttention, ThreadTitle } from './ThreadsRail';
@@ -91,8 +90,6 @@ export function TranscriptReader({ rows, onNavigate, renderMessage }: Props) {
   let content: ComponentChildren = null;
   if (page?.row.kind === 'message') {
     content = renderMessage(page.row.message, handoff);
-  } else if (page?.row.kind === 'question-answer') {
-    content = renderMessage({ ...page.row.answer, text: questionAnswerText(page.row.question, page.row.answer) }, handoff);
   }
   return (
     <FilePreviewDialog expanded={expanded} title={title} className="transcript-reader-host"

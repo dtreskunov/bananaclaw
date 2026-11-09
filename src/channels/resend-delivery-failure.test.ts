@@ -13,7 +13,7 @@ vi.mock('../container-runner.js', () => ({
 }));
 
 vi.mock('../db/sessions.js', () => ({
-  getAskQuestionRender: vi.fn(),
+  getApprovalRender: vi.fn(),
   getSession: mocks.getSession,
 }));
 
@@ -71,7 +71,7 @@ describe('routeResendDeliveryFailure', () => {
     expect(mocks.writeSessionMessage).toHaveBeenCalledWith('agent-group-1', 'session-1', {
       id: 'resend-delivery-failure:email-1',
       kind: 'chat',
-      timestamp: '2026-08-05T22:42:47.000Z',
+      timestamp: Date.parse('2026-08-05T22:42:47.000Z'),
       platformId: 'agent-group-1',
       channelType: 'agent',
       threadId: null,

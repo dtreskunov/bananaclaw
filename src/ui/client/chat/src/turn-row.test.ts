@@ -442,11 +442,9 @@ describe('turn activity placement', () => {
               status: row.status,
               stats: undefined,
             }
-          : row.kind === 'question-answer'
-            ? { id: row.question.id, status: false }
-            : row.kind === 'interaction'
-              ? { id: row.interaction.id, status: false }
-              : { id: row.submission.messageId, status: true },
+          : row.kind === 'interaction'
+            ? { id: row.interaction.id, status: false }
+            : { id: row.submission.messageId, status: true },
     );
 
   it('keeps recorded activity across steering in the final response without a completion marker', () => {

@@ -1,0 +1,23 @@
+:root { font: 16px/1.5 system-ui, sans-serif; color: #242526; background: #f5f6f7; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.prototype { max-width: 760px; padding: 24px; margin: auto; }
+h1 { font-size: 24px; margin-bottom: 8px; }
+header p, form p, .working { color: #666; }
+button { font: inherit; border: 1px solid #a3b1bd; border-radius: 8px; padding: 8px 12px; background: #fff; cursor: pointer; }
+button:hover:not(:disabled) { background: #eef5fa; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, textarea:focus-visible { outline: 3px solid #377aaa; outline-offset: 2px; }
+.demo-controls, .reply-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
+.transcript { padding: 24px 0; }
+.msg { padding: 16px; margin: 12px 0; border-radius: 12px; background: #fff; border: 1px solid #dce1e5; }
+.msg.in { margin-left: 40px; background: #eaf2f8; }
+.msg p { margin-top: 0; white-space: pre-wrap; }
+.reply-suggestions button { color: #285779; max-width: 100%; white-space: normal; }
+.inline-reply-suggestion { position: relative; display: inline; padding: 1px 5px; border: 1px dotted currentColor; border-radius: 6px; background: #eef5fa; color: #285779; font: inherit; }
+.inline-reply-suggestion:focus-visible::after { content: "Draft: " attr(data-reply-draft); position: absolute; z-index: 2; left: 0; top: 100%; width: max-content; max-width: min(320px, 70vw); padding: 6px; background: #fff; border: 1px solid #a3b1bd; border-radius: 6px; text-align: left; }
+form { border-top: 1px solid #dce1e5; padding-top: 16px; }
+label { display: block; }
+textarea { display: block; width: 100%; resize: vertical; margin: 8px 0; padding: 12px; border: 1px solid #a3b1bd; border-radius: 10px; font: inherit; }
+.demo-error { padding: 12px; color: #853827; background: #fff0eb; border-radius: 8px; }
+@media (max-width: 600px) { .prototype { padding: 16px; } .msg.in { margin-left: 20px; } }

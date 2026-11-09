@@ -44,7 +44,7 @@
  *   - Approver has no reachable DM.
  *   - Delivery adapter missing.
  */
-import { normalizeOptions, type NormalizedOption, type RawOption } from '../../channels/ask-question.js';
+import { normalizeOptions, type NormalizedOption, type RawOption } from '../../channels/approval-request.js';
 import { createAgentGroup, getAgentGroup, getAgentGroupByFolder, getAllAgentGroups } from '../../db/agent-groups.js';
 import { getChannelAdapter } from '../../channels/channel-registry.js';
 import { getMessagingGroup, updateMessagingGroup } from '../../db/messaging-groups.js';
@@ -229,11 +229,10 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
       null,
       'chat-sdk',
       JSON.stringify({
-        type: 'ask_question',
-        questionId: messagingGroupId,
+        type: 'approval_request',
+        approvalId: messagingGroupId,
         title,
-        question,
-        responseMode: 'choice',
+        body: question,
         options,
       }),
     );

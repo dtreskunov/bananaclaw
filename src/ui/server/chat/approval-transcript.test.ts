@@ -79,7 +79,7 @@ function request(action = 'history-test', payload: Record<string, unknown> = {})
   });
 }
 const view = (thread = 'source-thread', user = 'owner') => readConversation(user, 'g', thread);
-const approvals = (conversation = view()) => conversation.interactions.filter((item) => item.kind !== 'question');
+const approvals = (conversation = view()) => conversation.interactions;
 
 describe('retained approval transcript', () => {
   it('retains account-setup purpose and its responder after completion and reload', () => {
@@ -127,7 +127,7 @@ describe('retained approval transcript', () => {
       request();
       const before = view();
       await handleApprovalsResponse({
-        questionId: 'approval',
+        approvalId: 'approval',
         value,
         userId: 'owner',
         channelType: 'web',
@@ -210,7 +210,7 @@ describe('retained approval transcript', () => {
       throw new Error('The image build failed');
     });
     await handleApprovalsResponse({
-      questionId: 'approval',
+      approvalId: 'approval',
       value: 'approve',
       userId: 'owner',
       channelType: 'web',

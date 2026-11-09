@@ -21,8 +21,8 @@ import {
 import { log } from '../log.js';
 import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
-import { getAskQuestionRender } from '../db/sessions.js';
-import { formatQuestionResponse, normalizeOptions, type NormalizedOption } from './ask-question.js';
+import { getApprovalRender } from '../db/sessions.js';
+import { normalizeOptions, resolveApprovalAction, type NormalizedOption } from './approval-request.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
 import { normalizeDisplayCardPayload } from './display-card.js';
 
@@ -100,26 +100,6 @@ export interface ChatSdkBridgeConfig {
  * chunk boundary will render as two independent blocks on the receiving
  * platform, which is the same behavior as manually re-opening a fence.
  */
-/**
- * Decode the actual option value from a button callback. Buttons are encoded
- * with an integer index (to keep under Telegram's 64-byte callback_data cap),
- * and the real value is looked up via `getAskQuestionRender(questionId)`.
- * Falls back to treating the tail as a literal value so old in-flight cards
- * (encoded before this shortening landed) still resolve.
- */
-function resolveSelectedOption(
-  render: { options: NormalizedOption[] } | undefined,
-  eventValue: string | undefined,
-  tail: string | undefined,
-): string {
-  const candidate = eventValue ?? tail ?? '';
-  if (render && /^\d+$/.test(candidate)) {
-    const idx = Number(candidate);
-    if (render.options[idx]) return render.options[idx].value;
-  }
-  return candidate;
-}
-
 export function splitForLimit(text: string, limit: number): string[] {
   if (text.length <= limit) return [text];
   const chunks: string[] = [];
@@ -298,24 +278,22 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, false, true));
       });
 
-      // Handle button clicks (ask_user_question)
+      // Approval callbacks resolve only indexed values from persisted options.
       chat.onAction(async (event) => {
-        if (!event.actionId.startsWith('ncq:')) return;
-        const parts = event.actionId.split(':');
-        if (parts.length < 3) return;
-        const questionId = parts[1];
-        const tail = parts.slice(2).join(':');
+        const action = resolveApprovalAction(event.actionId, getApprovalRender);
+        if (!action) {
+          try {
+            await adapter.postMessage(event.threadId, {
+              markdown: 'This action is unsupported. Open the current approval request.',
+            });
+          } catch (err) {
+            log.warn('Failed to send unsupported-action feedback', { err });
+          }
+          return;
+        }
         const userId = event.user?.userId || '';
-
-        // Resolve render metadata BEFORE dispatching onAction (which deletes the row).
-        const render = getAskQuestionRender(questionId);
-        // New format: button id/value is an integer index into options (kept
-        // short to fit Telegram's 64-byte callback_data cap). Old format:
-        // the full value is embedded in actionId/value directly.
-        const selectedOption = resolveSelectedOption(render, event.value, tail);
-        const title = render?.title ?? '❓ Question';
-        const matched = render?.options.find((o) => o.value === selectedOption);
-        const selectedLabel = matched?.selectedLabel ?? selectedOption ?? '(clicked)';
+        const { approvalId, title, option } = action;
+        const selectedLabel = option.selectedLabel;
 
         // Update the card to show the selected answer, who acted, and remove buttons
         const actorName = event.user?.userName || event.user?.fullName || '';
@@ -323,16 +301,13 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         try {
           const tid = event.threadId;
           await adapter.editMessage(tid, event.messageId, {
-            markdown:
-              render?.question != null
-                ? formatQuestionResponse(render.question, `${selectedLabel}${byLine}`)
-                : `${title}\n\n${selectedLabel}${byLine}`,
+            markdown: `${title}\n\n${selectedLabel}${byLine}`,
           });
         } catch (err) {
           log.warn('Failed to update card after action', { err });
         }
 
-        setupConfig.onAction(questionId, selectedOption, userId);
+        setupConfig.onAction(approvalId, option.value, userId);
       });
 
       await chat.initialize();
@@ -425,35 +400,35 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         return;
       }
 
-      // Ask question card — render as Card with buttons
-      if (content.type === 'ask_question' && content.questionId && content.options) {
-        const questionId = content.questionId as string;
-        const title = content.title as string | undefined;
-        const question = content.question as string;
-        if (!question) {
-          log.error('ask_question missing required question — skipping delivery', { questionId });
+      // Approval card — render as Card with indexed callback buttons.
+      if (content.type === 'approval_request' && content.approvalId && content.options) {
+        const approvalId = content.approvalId as string;
+        const title = content.title as string;
+        const body = content.body as string;
+        if (!title || !body) {
+          log.error('approval_request missing title or body — skipping delivery', { approvalId });
           return;
         }
         const options: NormalizedOption[] = normalizeOptions(content.options as never);
         const card = Card({
           title,
           children: [
-            CardText(question),
+            CardText(body),
             Actions(
               // Encode button id/value with the option index rather than the
               // full value. Telegram caps callback_data at 64 bytes, and
               // long values (e.g. ISO datetimes, URLs) push the JSON payload
               // well past that. The onAction handlers resolve the index back
-              // to the real value via getAskQuestionRender(questionId).
+              // to the real value via getApprovalRender(approvalId).
               options.map((opt, idx) =>
-                Button({ id: `ncq:${questionId}:${idx}`, label: opt.label, value: String(idx) }),
+                Button({ id: `nca:${approvalId}:${idx}`, label: opt.label, value: String(idx) }),
               ),
             ),
           ],
         });
         const result = await adapter.postMessage(tid, {
           card,
-          fallbackText: `${title ? `${title}\n\n` : ''}${question}\nOptions: ${options.map((o) => o.label).join(', ')}`,
+          fallbackText: `${title}\n\n${body}\nOptions: ${options.map((o) => o.label).join(', ')}`,
         });
         return result?.id;
       }
@@ -641,31 +616,28 @@ async function handleForwardedEvent(
       const interactionId = interaction.id as string;
       const interactionToken = interaction.token as string;
 
-      // Parse the selected option from custom_id
-      let questionId: string | undefined;
-      let tail: string | undefined;
-      if (customId?.startsWith('ncq:')) {
-        const colonIdx = customId.indexOf(':', 4); // after "ncq:"
-        if (colonIdx !== -1) {
-          questionId = customId.slice(4, colonIdx);
-          tail = customId.slice(colonIdx + 1);
+      const action = resolveApprovalAction(customId ?? '', getApprovalRender);
+      if (!action) {
+        try {
+          await fetch(`https://discord.com/api/v10/interactions/${interactionId}/${interactionToken}/callback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 4,
+              data: { content: 'This action is unsupported. Open the current approval request.', flags: 64 },
+            }),
+          });
+        } catch (err) {
+          log.warn('Failed to send unsupported-action feedback', { err });
         }
+        return;
       }
 
       // Update the card to show the selected answer and remove buttons
       const originalEmbeds =
         ((interaction.message as Record<string, unknown>)?.embeds as Array<Record<string, unknown>>) || [];
       const originalDescription = (originalEmbeds[0]?.description as string) || '';
-      const render = questionId ? getAskQuestionRender(questionId) : undefined;
-      // Discord custom_id mirrors the new index-based encoding (see Button
-      // construction). Decode back to the real option value for downstream.
-      const selectedOption = resolveSelectedOption(render, tail, tail);
-      const cardTitle =
-        render?.question != null
-          ? undefined
-          : (render?.title ?? ((originalEmbeds[0]?.title as string) || '❓ Question'));
-      const matchedOpt = render?.options.find((o) => o.value === selectedOption);
-      const selectedLabel = matchedOpt?.selectedLabel ?? selectedOption ?? customId;
+      const { approvalId, title, option } = action;
       try {
         await fetch(`https://discord.com/api/v10/interactions/${interactionId}/${interactionToken}/callback`, {
           method: 'POST',
@@ -675,11 +647,8 @@ async function handleForwardedEvent(
             data: {
               embeds: [
                 {
-                  title: cardTitle,
-                  description:
-                    render?.question != null
-                      ? formatQuestionResponse(render.question, selectedLabel)
-                      : `${originalDescription}\n\n${selectedLabel}`,
+                  title,
+                  description: `${originalDescription}\n\n${option.selectedLabel}`,
                 },
               ],
               components: [], // remove buttons
@@ -691,9 +660,7 @@ async function handleForwardedEvent(
       }
 
       // Dispatch to host
-      if (questionId && selectedOption) {
-        setupConfig.onAction(questionId, selectedOption, user?.id || '');
-      }
+      setupConfig.onAction(approvalId, option.value, user?.id || '');
       return;
     }
   }

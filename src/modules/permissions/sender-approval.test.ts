@@ -162,6 +162,24 @@ function stranger(text: string) {
 }
 
 describe('unknown-sender request_approval flow', () => {
+  it('reissues canonical controls without changing the request or its approver', async () => {
+    const { routeInbound } = await import('../../router.js');
+    const { getDb } = await import('../../db/connection.js');
+    const { resendSenderApproval } = await import('./sender-approval.js');
+    await routeInbound(stranger('hello'));
+    await vi.waitFor(() => expect(deliverMock).toHaveBeenCalledOnce());
+    const before = getDb().prepare('SELECT * FROM pending_sender_approvals').get() as { id: string };
+    expect(await resendSenderApproval(before.id)).toEqual({ approvalId: before.id, resent: true });
+    expect(getDb().prepare('SELECT * FROM pending_sender_approvals').get()).toEqual(before);
+    expect(deliverMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(deliverMock.mock.calls[1][4])).toMatchObject({
+      type: 'approval_request',
+      approvalId: before.id,
+    });
+    getDb().prepare('DELETE FROM user_roles WHERE user_id=?').run(ownerId);
+    await expect(resendSenderApproval(before.id)).rejects.toThrow('no longer authorized');
+    expect(deliverMock).toHaveBeenCalledTimes(2);
+  });
   it('delivers an approval card on first unknown message', async () => {
     const { routeInbound } = await import('../../router.js');
     await routeInbound(stranger('hi'));
@@ -176,8 +194,8 @@ describe('unknown-sender request_approval flow', () => {
     expect(thread).toBeNull();
     expect(kind).toBe('chat-sdk');
     const payload = JSON.parse(content as string);
-    expect(payload.type).toBe('ask_question');
-    expect(payload.questionId).toMatch(/^nsa-/);
+    expect(payload.type).toBe('approval_request');
+    expect(payload.approvalId).toMatch(/^nsa-/);
 
     const { getDb } = await import('../../db/connection.js');
     const rows = getDb().prepare('SELECT * FROM pending_sender_approvals').all();
@@ -211,7 +229,7 @@ describe('unknown-sender request_approval flow', () => {
 
     // Fire the approve click through the response-handler chain.
     await dispatchResponse({
-      questionId: pending.id,
+      approvalId: pending.id,
       value: 'approve',
       // Chat SDK's onAction surfaces the raw platform userId (e.g. Telegram
       // chat id). The permissions handler namespaces it with channelType to
@@ -248,7 +266,7 @@ describe('unknown-sender request_approval flow', () => {
     expect(pending).toBeDefined();
 
     await dispatchResponse({
-      questionId: pending.id,
+      approvalId: pending.id,
       value: 'reject',
       userId: 'owner', // raw platform id — handler namespaces with channelType
       channelType: 'telegram',
@@ -280,7 +298,7 @@ describe('unknown-sender request_approval flow', () => {
     // click the approval — e.g. they got the card forwarded. Should be
     // rejected without admitting them.
     await dispatchResponse({
-      questionId: pending.id,
+      approvalId: pending.id,
       value: 'approve',
       userId: 'random-bystander', // not owner, not admin
       channelType: 'telegram',
@@ -323,7 +341,7 @@ describe('unknown-sender request_approval flow', () => {
 
     // Admin clicks approve (not the designated approver, which was owner).
     await dispatchResponse({
-      questionId: pending.id,
+      approvalId: pending.id,
       value: 'approve',
       userId: 'admin-bob',
       channelType: 'telegram',

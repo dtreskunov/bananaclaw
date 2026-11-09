@@ -89,7 +89,7 @@ describe('steering selection', () => {
       { ...message, trigger: 0 },
       { ...message, source_session_id: 'other-session' },
       { ...message, kind: 'task' },
-      { ...message, kind: 'interactive_response' },
+      { ...message, kind: 'unknown' },
       { ...message, content: '{"text":"/clear"}' },
     ]) expect(steeringDisposition(ineligible, context, 'turn', true).status).toBe('queued');
   });

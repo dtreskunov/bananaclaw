@@ -1,5 +1,4 @@
 import type { InputState } from './input-state.js';
-import type { QuestionInput, QuestionResponse } from './question.js';
 import type { ConversationApproval } from './approval.js';
 import type { ReadCursor } from './read-state.js';
 import type { EpochMs } from './time.js';
@@ -26,8 +25,7 @@ export interface ConversationMessage {
   direction: 'in' | 'out' | 'event';
   timestamp: EpochMs;
   text: string;
-  questionId?: string;
-  questionResponseType?: QuestionResponse['responseType'];
+  suggestedResponses?: string[];
   turnId?: string;
   timelinePosition?: number;
   inputState?: InputState;
@@ -56,30 +54,12 @@ export interface ConversationMessage {
   };
 }
 
-export interface ConversationQuestion extends QuestionInput {
-  kind: 'question';
-  id: string;
-  status: 'pending' | 'answered' | 'cancelled';
-  response: QuestionResponse | null;
-  answeredAt: EpochMs | null;
-  activity?: { ts: EpochMs; text: string }[];
-  turnId?: string;
-  threadId: string | null;
-  agentGroupId: string;
-  createdAt: EpochMs;
-  messageId?: string;
-  timelinePosition?: number;
-}
+export type ConversationInteraction = ConversationApproval;
 
-export type ConversationInteraction = ConversationQuestion | ConversationApproval;
-
-export type InteractionResponse = (QuestionResponse | { value: string; responseType?: never }) & {
+export type InteractionResponse = {
+  value: string;
   message?: string;
 };
-
-export function isQuestionInteraction(item: ConversationInteraction): item is ConversationQuestion {
-  return item.kind === 'question';
-}
 
 export interface ConversationActivity {
   ordinal: number;

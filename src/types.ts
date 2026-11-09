@@ -231,28 +231,11 @@ interface InteractionRecord {
   outcome_message: string | null;
 }
 
-interface QuestionRecord extends InteractionRecord {
-  kind: 'question';
-  session_id: string;
-  message_out_id: string;
-  in_reply_to: string | null;
-  platform_id: string | null;
-  channel_type: string | null;
-  thread_id: string | null;
-  input: import('./ui/shared/question.js').QuestionInput;
-}
-
-export type Question = QuestionRecord &
-  (
-    | { status: 'answered'; response: import('./ui/shared/question.js').QuestionResponse; responded_at: EpochMs }
-    | { status: 'pending' | 'cancelled'; response: null }
-  );
-
 export interface ApprovalInput {
   action: string;
   payload: Record<string, unknown>;
   title: string;
-  options: import('./ui/shared/question.js').QuestionOption[];
+  options: import('./channels/approval-request.js').NormalizedOption[];
 }
 
 export interface ApprovalResponse {
@@ -276,7 +259,7 @@ export type Approval = ApprovalRecord &
       }
   );
 
-export type Interaction = Question | Approval;
+export type Interaction = Approval;
 
 // ── Agent destinations (central DB) ──
 

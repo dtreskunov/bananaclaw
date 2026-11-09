@@ -300,7 +300,7 @@ describe('pending input edit CAS', () => {
   it('finds edits before the prompt cap without starving ordinary input or consuming other system messages', () => {
     insert('target', { text: 'before' });
     const requests = Array.from({ length: 20 }, (_, index) => edit('target', index === 0 ? 'before' : `edit-${index - 1}`, `edit-${index}`));
-    insert('unrelated-system', { action: 'ask_user_question', text: 'response' }, 'system');
+    insert('unrelated-system', { action: 'create_agent', text: 'response' }, 'system');
     expect(getPendingMessages().map((row) => row.id)).toEqual(['target', 'unrelated-system']);
     processPendingInputEdits(provider);
     expect(requests.every((id) => readInputEditReceipt(id)?.status === 'accepted')).toBe(true);

@@ -24,6 +24,7 @@ import { createSession } from './db/sessions.js';
 import { createThreadFork } from './db/thread-forks.js';
 import { readEnvFile } from './env.js';
 import { log } from './log.js';
+import { parseSuggestedResponses } from './ui/shared/suggested-responses.js';
 import {
   inputStateKey,
   isCancelledInputContent,
@@ -524,6 +525,14 @@ function populateForkSession(args: {
         turn_id: typeof row.turn_id === 'string' && copiedTurns.has(row.turn_id) ? row.turn_id : null,
       })),
     );
+    const suggestions = srcOut.prepare(`SELECT state.* FROM session_state state
+      JOIN json_each(?) output ON state.key = 'response-suggestions:' || output.value`)
+      .all(JSON.stringify(outRows.map((row) => String(row.id)))) as Row[];
+    for (const suggestion of suggestions) {
+      if (typeof suggestion.value !== 'string') throw new Error('Invalid inherited response suggestions');
+      parseSuggestedResponses(suggestion.value);
+    }
+    insertRows(dstOut, 'session_state', suggestions);
     for (const row of inRows) {
       const state = readInputTimeline(srcOut, String(row.id));
       if (state?.timelinePosition === undefined) continue;

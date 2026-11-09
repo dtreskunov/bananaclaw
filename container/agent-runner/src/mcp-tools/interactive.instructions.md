@@ -1,19 +1,34 @@
-## Interactive prompts
+## Optional reply drafts and display cards
 
-The two tools here solve different problems: `ask_user_question` queues a durable question whose answer arrives in a later turn; `send_card` displays structured content and moves on.
+### Suggesting responses (`suggest_responses`)
 
-### Asking a durable question (`ask_user_question`)
+When your final reply offers concrete next steps or alternatives, or asks the user to choose, offer optional reply drafts using either inline links or `mcp__nanoclaw__suggest_responses({ responses })`. Do not wait until you are blocked: these are conversational shortcuts, not required answers.
 
-`mcp__nanoclaw__ask_user_question({ title, question, responseMode, options?, placeholder?, multiline? })` presents the user with a durable question and returns immediately. The answer arrives as a `<question_response>` in a later turn. Only one question may be outstanding at a time.
+For inline placement in a BananaClaw browser conversation, write a Markdown link with a `reply:` destination containing the URI-encoded full draft:
 
-`responseMode` is `choice`, `text`, or `choice_or_text`. Choice modes require `options`.
+```markdown
+Start with [Fix references](reply:Please%20fix%20the%20dangling%20references%20first.).
+```
 
-`options` can be plain strings or `{ label, selectedLabel?, value? }` objects:
-- `label` — the button text shown before selection
-- `selectedLabel` — the text shown on the button *after* selection (useful for confirmations, e.g. `"✓ Confirmed"`)
-- `value` — the string returned to you when that option is chosen (defaults to `label`)
+The short label and full draft can differ. The link renders as a distinctive inline reply control; hover or focus previews the draft. Clicking fills the composer and never sends. Encode spaces as `%20`, percent signs as `%25`, and other URL-reserved characters as needed. Inline drafts also have a 240-character limit after decoding. No tool call is needed for inline suggestions.
 
-Use this when you genuinely cannot proceed without a decision or structured response. End the current turn after queueing it; continue when the later response arrives.
+Use the tool for a separate row of buttons below your completed reply. You may combine inline and separate suggestions when useful, but do not duplicate the same choice in both places.
+
+For example, after explaining a cleanup plan:
+
+```json
+{"responses":["Fix references first","Reclaim disk space","Run broader verification"]}
+```
+
+`responses` contains 1-6 distinct, nonblank messages of at most 240 characters each. Use concise, useful replies the user might actually send. These separate buttons use the draft itself as their label; inline links allow shorter labels.
+
+Explain the choices in your final reply. The tool returns immediately and sends no separate message. Buttons appear beneath the completed reply in BananaClaw's browser transcript; clicking fills the normal composer without sending. The user can edit the draft, type something else, or ignore every suggestion. Their eventual message arrives as ordinary chat.
+
+Only the latest completed reply offers active suggestions. After a follow-up, separate buttons disappear and inline labels remain as ordinary text. Older messages, file previews, and the full-screen reader do not offer interactive reply links.
+
+Do not add suggestions to every answer: omit them when there is no useful next choice, when the user requested only a result, or when they would be repetitive. Suggestions never authorize actions or replace an approval workflow. Other channel apps receive your normal reply without these buttons.
+
+A later call replaces this turn's suggestions. Finish with a normal final reply: suggestions are discarded if the turn is silent, fails, is stopped, or has no final response.
 
 ### Structured cards (`send_card`)
 
@@ -21,4 +36,4 @@ Use this when you genuinely cannot proceed without a decision or structured resp
 
 `card` supports: `title`, `description`, `children` (strings or `{ text }` blocks), and `actions` (`{ label, url, style? }`). Action URLs must use `http`, `https`, or `mailto`; actions are links only and do not return a value. `fallbackText` is sent as a plain message on platforms without card support.
 
-Use this for presenting information in a cleaner format than prose: summaries, options the user can read (but you're not waiting on), or results with contextual buttons. If you need the user to actually *choose* something and return a value, use `ask_user_question` instead.
+Use this for presenting information in a cleaner format than prose: summaries or results with contextual links. For optional conversational reply buttons, use `suggest_responses`, not a display card.

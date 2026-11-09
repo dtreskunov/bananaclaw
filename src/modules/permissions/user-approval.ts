@@ -31,7 +31,7 @@
  *     openDM) — e.g. owner hasn't registered on any channel we're wired to.
  *   - Delivery adapter missing.
  */
-import { normalizeOptions, type RawOption } from '../../channels/ask-question.js';
+import { USER_APPROVAL_OPTIONS, USER_APPROVAL_TITLE } from '../../channels/approval-request.js';
 import { createAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
 import { getDb } from '../../db/connection.js';
 import { updateContainerConfigScalars } from '../../db/container-configs.js';
@@ -53,11 +53,6 @@ import {
 } from './db/pending-user-approvals.js';
 import { grantRole, isGlobalAdmin, isOwner } from './db/user-roles.js';
 import { transaction } from '../../db/transaction.js';
-
-const APPROVAL_OPTIONS: RawOption[] = [
-  { label: 'Approve', selectedLabel: '✅ Approved', value: 'approve' },
-  { label: 'Reject', selectedLabel: '❌ Rejected', value: 'reject' },
-];
 
 // ── Folder slug ──────────────────────────────────────────────────────────
 
@@ -232,7 +227,7 @@ function buildQuestion(row: PendingUserApproval): { title: string; question: str
   lines.push(`Requested: ${row.created_at}`);
   lines.push('');
   lines.push('Approving creates a new user and a per-user agent group; the user logs in immediately.');
-  return { title: '👤 New user wants access', question: lines.join('\n') };
+  return { title: USER_APPROVAL_TITLE, question: lines.join('\n') };
 }
 
 export async function requestUserApproval(pendingId: string): Promise<void> {
@@ -282,7 +277,7 @@ export async function requestUserApproval(pendingId: string): Promise<void> {
   }
 
   const { title, question } = buildQuestion(row);
-  const options = normalizeOptions(APPROVAL_OPTIONS);
+  const options = USER_APPROVAL_OPTIONS;
   try {
     await adapter.deliver(
       target.messagingGroup.channel_type,
@@ -290,11 +285,10 @@ export async function requestUserApproval(pendingId: string): Promise<void> {
       null,
       'chat-sdk',
       JSON.stringify({
-        type: 'ask_question',
-        questionId: pendingId,
+        type: 'approval_request',
+        approvalId: pendingId,
         title,
-        question,
-        responseMode: 'choice',
+        body: question,
         options,
       }),
     );
@@ -311,15 +305,14 @@ export async function requestUserApproval(pendingId: string): Promise<void> {
 // ── Response handler ─────────────────────────────────────────────────────
 
 /**
- * Claim rule: questionId matches a row in pending_user_approvals. If no
+ * Claim rule: approvalId matches a row in pending_user_approvals. If no
  * such row, return false so the next handler gets a shot.
  *
  * Authorization: clicker must be an owner or global admin. Per-group
  * admins are not authorized — user onboarding is a global act.
  */
 async function handleUserApprovalResponse(payload: ResponsePayload): Promise<boolean> {
-  if (payload.responseType === 'skipped') return false;
-  const row = getPendingApproval(payload.questionId);
+  const row = getPendingApproval(payload.approvalId);
   if (!row) return false;
 
   if (row.status !== 'pending') {
@@ -340,11 +333,8 @@ async function handleUserApprovalResponse(payload: ResponsePayload): Promise<boo
     return true;
   }
 
-  // chat-sdk buttons send the normalized value ('approve'/'reject'); the
-  // resend email-reply path falls through to raw answer text ('Approve',
-  // 'approved', etc.) because pending_user_approvals isn't recognized by
-  // getAskQuestionRender. Normalize on both sides and refuse to act on
-  // anything that doesn't clearly match either option.
+  // Email replies can contain prose; refuse answers that don't clearly
+  // match either approval option.
   const decision = decideFromAnswer(payload.value);
   if (decision === 'approve') {
     try {

@@ -7,7 +7,7 @@ import { approvalThreadHref, isApprovalThread } from '../approval-origin';
 export function ApprovalCardFrame({ approvalId, title, children }: {
   approvalId: string; title: string; children: ComponentChildren;
 }) {
-  return <section class="approval-bubble question-prompt" data-approval-id={approvalId} aria-label={title}>
+  return <section class="approval-bubble" data-approval-id={approvalId} aria-label={title}>
     <div class="approval-title">{title}</div>
     {children}
   </section>;
@@ -45,7 +45,7 @@ export function ApprovalCard({ approval: a, busy, onRespond }: {
       {here && pending && a.supportsResponseMessage ? <ApprovalMessageInput approvalId={a.id}
         disabled={busy} /> : null}
     </div>
-    {here && pending ? <div class="question-card-actions approval-actions">
+    {here && pending ? <div class="approval-actions">
       {!a.options.length ? <span class="approval-disabled">no options</span> : a.options.map(option =>
         <button type="button" class={'approval-btn approval-' + (option.value === 'approve' ? 'approve' : option.value === 'reject' ? 'reject' : 'neutral')}
           disabled={busy} key={option.value}

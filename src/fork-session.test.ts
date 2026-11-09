@@ -254,6 +254,7 @@ describe('forkThread', () => {
           imported_from_session_id: PARENT_SESSION,
           imported_from_turn_id: 'turn-parent',
         });
+
         expect(getTurnInputs(db, 'turn-parent').map((r) => r.message_in_id)).toEqual(['u1']);
         expect(db.prepare('SELECT id, turn_id FROM messages_out').all()).toEqual([
           { id: 'a1', turn_id: 'turn-parent' },
@@ -261,6 +262,32 @@ describe('forkThread', () => {
         expect(db.prepare('SELECT id, cost_usd FROM turn_usage').all()).toEqual([{ id: 'first', cost_usd: 1 }]);
         expect(db.prepare('SELECT text FROM turn_activity').all()).toEqual([{ text: 'first' }]);
         expect(db.pragma('foreign_key_check')).toEqual([]);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  it('inherits only included reply drafts in both projections, never pending tool state', () => {
+    seedTurnHistory();
+    const source = new Database(outboundDbPath(AG, PARENT_SESSION));
+    try {
+      source.exec(`UPDATE messages_out SET content=json_set(content,'$.delivery_origin','response')`);
+      for (const id of ['a1', 'a2']) {
+        source.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,?)')
+          .run(`response-suggestions:${id}`, JSON.stringify([`Continue from ${id}`]), parseTimestamp(ts(4)));
+      }
+      source.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,?)')
+        .run('runner:suggested-responses:unrelated', '["Unfinished draft"]', parseTimestamp(ts(4)));
+    } finally {
+      source.close();
+    }
+    const result = fork('a1');
+    for (const filename of [outboundDbPath(AG, result.sessionId), runnerStateDbPath(AG, result.sessionId)]) {
+      const db = new Database(filename);
+      try {
+        expect(db.prepare("SELECT key,value FROM session_state WHERE key LIKE '%suggestions:%' OR key LIKE '%suggested-responses:%'").all())
+          .toEqual([{ key: 'response-suggestions:a1', value: '["Continue from a1"]' }]);
       } finally {
         db.close();
       }

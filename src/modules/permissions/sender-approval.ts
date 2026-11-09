@@ -26,13 +26,18 @@
  * sender_identity). A retry / rapid second message from the same unknown
  * sender is silently dropped (no duplicate card sent).
  */
-import { normalizeOptions, type RawOption } from '../../channels/ask-question.js';
+import { normalizeOptions, type RawOption, type NormalizedOption } from '../../channels/approval-request.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { log } from '../../log.js';
 import type { InboundEvent } from '../../channels/adapter.js';
 import { pickApprovalDelivery, pickApprover } from '../approvals/primitive.js';
-import { createPendingSenderApproval, hasInFlightSenderApproval } from './db/pending-sender-approvals.js';
+import {
+  createPendingSenderApproval,
+  getPendingSenderApproval,
+  hasInFlightSenderApproval,
+} from './db/pending-sender-approvals.js';
+import { hasAdminPrivilege } from './db/user-roles.js';
 
 const APPROVAL_OPTIONS: RawOption[] = [
   { label: 'Allow', selectedLabel: '✅ Allowed', value: 'approve' },
@@ -49,6 +54,45 @@ export interface RequestSenderApprovalInput {
   senderIdentity: string; // namespaced user id (channel_type:handle)
   senderName: string | null;
   event: InboundEvent;
+}
+
+export async function resendSenderApproval(id: string): Promise<{ approvalId: string; resent: true }> {
+  const row = getPendingSenderApproval(id);
+  if (!row) throw new Error('Pending sender approval not found');
+  if (!hasAdminPrivilege(row.approver_user_id, row.agent_group_id))
+    throw new Error('The recorded approver is no longer authorized');
+  const origin = getMessagingGroup(row.messaging_group_id);
+  if (!origin) throw new Error('Approval origin is unavailable');
+  const target = await pickApprovalDelivery([row.approver_user_id], origin.channel_type);
+  if (!target) throw new Error('The recorded approver has no reachable DM');
+  const adapter = getDeliveryAdapter();
+  if (!adapter) throw new Error('Approval delivery is unavailable');
+  const saved: unknown = JSON.parse(row.options_json);
+  const validOption = (value: unknown): value is NormalizedOption =>
+    !!value &&
+    typeof value === 'object' &&
+    'label' in value &&
+    typeof value.label === 'string' &&
+    'selectedLabel' in value &&
+    typeof value.selectedLabel === 'string' &&
+    'value' in value &&
+    typeof value.value === 'string';
+  if (!Array.isArray(saved) || !saved.every(validOption)) throw new Error('Stored approval options are invalid');
+  await adapter.deliver(
+    target.messagingGroup.channel_type,
+    target.messagingGroup.platform_id,
+    null,
+    'chat-sdk',
+    JSON.stringify({
+      type: 'approval_request',
+      approvalId: row.id,
+      title: row.title,
+      body: `${row.sender_name || row.sender_identity} wants to talk to your agent in ${origin.name || 'this channel'}. Allow?`,
+      options: saved,
+    }),
+  );
+  log.info('Pending sender approval reissued', { approvalId: row.id, approver: row.approver_user_id });
+  return { approvalId: row.id, resent: true };
 }
 
 export async function requestSenderApproval(input: RequestSenderApprovalInput): Promise<void> {
@@ -125,11 +169,10 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
       null,
       'chat-sdk',
       JSON.stringify({
-        type: 'ask_question',
-        questionId: approvalId,
+        type: 'approval_request',
+        approvalId,
         title,
-        question,
-        responseMode: 'choice',
+        body: question,
         options,
       }),
     );

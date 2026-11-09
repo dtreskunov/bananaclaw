@@ -100,12 +100,6 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     ).run(GID, MGID, now());
 
     db.prepare(
-      `INSERT INTO interactions
-         (id, kind, session_id, message_out_id, input_json, status, created_at, updated_at)
-       VALUES (?, 'question', ?, 'mout-1', '{"question":"question","responseMode":"choice","options":[]}', 'pending', ?, 1767225600000)`,
-    ).run('q-1', SID, now());
-
-    db.prepare(
       `INSERT INTO interactions (id, kind, session_id, request_id, input_json, response_json, created_at, updated_at, agent_group_id, status)
        VALUES (?, 'confirmation', ?, 'req-1', '{"action":"cli_command","payload":{},"title":"","options":[]}', '{"decision":null,"message":null}', ?, 1767225600000, ?, 'pending')`,
     ).run('pa-1', SID, now(), GID);
@@ -148,7 +142,7 @@ describe('groups CLI delete cascades dependent rows (#2525)', () => {
     expect(data.deleted).toBe(GID);
     expect(data.removed).toMatchObject({
       sessions: 1,
-      interactions: 2,
+      interactions: 1,
       agent_destinations_owned: 1,
       agent_destinations_pointing: 0,
       pending_sender_approvals: 1,

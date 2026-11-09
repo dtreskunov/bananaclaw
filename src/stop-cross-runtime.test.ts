@@ -22,10 +22,9 @@ vi.mock('./modules/typing/index.js', () => ({
   stopTypingRefresh: vi.fn(),
 }));
 
-import { closeDb, createAgentGroup, createMessagingGroup, getQuestion, initTestDb, runMigrations } from './db/index.js';
+import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrations } from './db/index.js';
 import { upsertSessionRouting } from './db/session-db.js';
 import { setDeliveryAdapter, deliverSessionMessages } from './delivery.js';
-import { handleInteractiveResponse } from './modules/interactive/index.js';
 import { openInboundDb, outboundDbPath, resolveSession, writeSessionMessage } from './session-manager.js';
 import {
   getSessionActiveTurn,
@@ -62,7 +61,7 @@ afterEach(async () => {
 });
 
 it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
-  'stops only the active turn across Node/Bun while preserving questions and queued follow-ups',
+  'stops only the active turn across Node/Bun while discarding suggestions and preserving queued follow-ups',
   async () => {
     runMigrations(initTestDb());
     const now = new Date().toISOString();
@@ -130,22 +129,19 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     };
     await wait(() => expect(getSessionActiveTurn(session!.id).turn?.status).toBe('running'));
     const turnId = getSessionActiveTurn(session.id).turn!.id;
-    await wait(() => expect(events.some((event) => event.kind === 'question')).toBe(true));
+    await wait(() => expect(events.some((event) => event.kind === 'suggestions')).toBe(true));
     let original: { id: string; seq: number; content: string } | undefined;
     await wait(() => {
       original = outDb!
-        .prepare("SELECT id,seq,content FROM messages_out WHERE kind='chat-sdk'")
+        .prepare("SELECT id,seq,content FROM messages_out WHERE json_extract(content,'$.delivery_origin')='send_message'")
         .get() as typeof original;
       expect(original).toBeDefined();
     });
-    const questionId = JSON.parse(original!.content).questionId as string;
     expect(JSON.parse(original!.content)).not.toHaveProperty('turn_id');
-    expect(getQuestion(questionId)?.status).toBe('pending');
     expect(await requestSessionToolStop(session.id, turnId, 'tool-inflight')).toEqual({ accepted: true });
     await wait(() => expect(events.some((event) => event.kind === 'tool-stopped')).toBe(true));
     expect(getSessionActiveTurn(session.id).turn).toMatchObject({ id: turnId, status: 'running' });
     expect(events.some((event) => event.kind === 'aborted')).toBe(false);
-    expect(getQuestion(questionId)?.status).toBe('pending');
     expect(outDb.prepare('SELECT id,seq,content FROM messages_out WHERE id=?').get(original!.id)).toEqual(original);
     writeInput('queued-input', 'queued follow-up');
     notifySessionHostState(session.id);
@@ -180,10 +176,10 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
       holdAcks = false;
       for (const send of held.splice(0)) send();
     };
-    const nullObservations: Array<{ questionStatus: string | undefined; held: number }> = [];
+    const nullObservations: Array<{ held: number }> = [];
     unsubscribe = onSessionSignal((id, kind) => {
       if (id === session!.id && kind === 'turn.state' && !getSessionActiveTurn(id).turn) {
-        nullObservations.push({ questionStatus: getQuestion(questionId)?.status, held: held.length });
+        nullObservations.push({ held: held.length });
       }
     });
     expect(await requestSessionTurnStop(session.id, turnId)).toMatchObject({ accepted: true });
@@ -197,27 +193,17 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     expect(getSessionActiveTurn(session.id).turn?.status).toBe('stopping');
     expect(events.some((event) => event.kind === 'next')).toBe(false);
     expect(nullObservations).toEqual([]);
-    expect(getQuestion(questionId)?.status).toBe('pending');
     expect(outDb.prepare('SELECT id,seq,content FROM messages_out WHERE id=?').get(original!.id)).toEqual(original);
     resumeAcks();
     await wait(() => expect(events.some((event) => event.kind === 'next')).toBe(true));
-    expect(nullObservations).toContainEqual({ questionStatus: 'pending', held: 0 });
-    expect(getQuestion(questionId)?.status).toBe('pending');
+    expect(nullObservations).toContainEqual({ held: 0 });
+    expect(outDb.prepare("SELECT 1 FROM session_state WHERE key LIKE 'response-suggestions:%'").get()).toBeUndefined();
     const next = events.find((event) => event.kind === 'next')!;
     expect(next.prompt).toContain('queued follow-up');
     expect(next.prompt).not.toContain('initial request');
     await wait(() => expect(getSessionActiveTurn(session!.id).turn).toBeNull());
-    await handleInteractiveResponse({
-      questionId,
-      responseType: 'choice',
-      value: 'Yes',
-      userId: null,
-      channelType: 'web',
-      platformId: 'group:agent',
-      threadId: 'thread-1',
-    });
+    writeInput('answer-input', 'Yes');
     notifySessionHostState(session.id);
-    expect(getQuestion(questionId)?.status).toBe('answered');
     await wait(() => expect(events.some((event) => event.kind === 'answer')).toBe(true));
     await wait(() => expect(getSessionActiveTurn(session!.id).turn?.status).toBe('running'));
     expect(events.find((event) => event.kind === 'answer')!.prompt).toContain('Yes');
@@ -225,12 +211,11 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
     expect(answerTurn.id).not.toBe(turnId);
     expect(await requestSessionTurnStop(session.id, answerTurn.id)).toMatchObject({ accepted: true });
     await wait(() => expect(events.some((event) => event.kind === 'done')).toBe(true));
-    expect(getQuestion(questionId)?.status).toBe('answered');
     const done = events.find((event) => event.kind === 'done')!;
     expect(done.inputs).toEqual([
       { id: 'first-input' },
       { id: 'queued-input' },
-      { id: `question-response:${questionId}` },
+      { id: 'answer-input' },
     ]);
     expect(done.processing).toEqual(expect.arrayContaining([{ message_id: 'first-input', status: 'completed' }]));
     const stopRow = outDb
@@ -238,7 +223,6 @@ it.skipIf(spawnSync('bun', ['--version'], { stdio: 'ignore' }).status !== 0)(
       .get() as { id: string; seq: number; content: string };
     expect(stopRow.seq).toBeGreaterThan(original!.seq);
     expect(JSON.parse(stopRow.content)).toMatchObject({ turn_id: turnId, stopped: true });
-    expect(JSON.parse(stopRow.content)).not.toHaveProperty('cancelled_question_ids');
     const stats = JSON.parse(
       (
         outDb.prepare('SELECT value FROM session_state WHERE key = ?').get(`turn-metadata:${turnId}`) as {

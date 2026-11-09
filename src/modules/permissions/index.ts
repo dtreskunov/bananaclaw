@@ -223,9 +223,8 @@ setSenderScopeGate(
 /**
  * Response handler for the unknown-sender approval card.
  *
- * Claim rule: questionId matches a row in pending_sender_approvals. If no
- * such row, return false so the next handler (approvals module, Agent Vault,
- * interactive) gets a shot.
+ * Claim rule: approvalId matches a row in pending_sender_approvals. If no
+ * such row, return false so the next approval handler gets a shot.
  *
  * Approve: add the sender to agent_group_members + re-invoke routeInbound
  * with the stored event. The second routing attempt clears the gate because
@@ -235,8 +234,7 @@ setSenderScopeGate(
  * fresh card per ACTION-ITEMS item 5 "no denial persistence").
  */
 async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<boolean> {
-  if (payload.responseType === 'skipped') return false;
-  const row = getPendingSenderApproval(payload.questionId);
+  const row = getPendingSenderApproval(payload.approvalId);
   if (!row) return false;
 
   // payload.userId is the raw platform handle from the click event. Look up
@@ -254,6 +252,7 @@ async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<b
     return true; // claim the response so it's not unclaimed-logged, but do nothing
   }
   const approverId = clickerId;
+  if (payload.value !== 'approve' && payload.value !== 'reject') return true;
   const approved = payload.value === 'approve';
 
   if (approved) {
@@ -304,7 +303,7 @@ setChannelRequestGate(async (mg, event) => {
 /**
  * Response handler for the unknown-channel registration card.
  *
- * Claim rule: questionId matches a pending_channel_approvals row (keyed
+ * Claim rule: approvalId matches a pending_channel_approvals row (keyed
  * by messaging_group_id). If no such row, return false so downstream
  * handlers get a shot.
  *
@@ -316,8 +315,7 @@ setChannelRequestGate(async (mg, event) => {
  *   reject          — set denied_at, delete pending row
  */
 async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<boolean> {
-  if (payload.responseType === 'skipped') return false;
-  const row = getPendingChannelApproval(payload.questionId);
+  const row = getPendingChannelApproval(payload.approvalId);
   if (!row) return false;
 
   const clickerId = payload.userId ? (getIdentity(payload.channelType, payload.userId)?.user_id ?? null) : null;
@@ -370,11 +368,10 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
         null,
         'chat-sdk',
         JSON.stringify({
-          type: 'ask_question',
-          questionId: row.messaging_group_id,
+          type: 'approval_request',
+          approvalId: row.messaging_group_id,
           title,
-          question: 'Which agent should handle this channel?',
-          responseMode: 'choice',
+          body: 'Which agent should handle this channel?',
           options,
         }),
       );
