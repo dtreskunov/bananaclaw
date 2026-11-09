@@ -5,19 +5,21 @@ import { testThread, testSnapshot, testWebSubmission, testTurn } from '../conver
 import { groupId, threadId, channelType, messagingGroupId, pendingWebSends } from '../state';
 import { conversationState, withPendingActivity } from '../conversation-state';
 import { reconcileWebSubmissions, withWebSendState } from '../web-submissions';
-import { navigateAttention, openChat } from '../actions';
+import { navigateActivity, openChat } from '../actions';
 import type { Thread } from '../types';
 import { DmRow, ThreadRow } from './ThreadsRail';
 import { ActivityIndicator, activityDetails } from './ActivityIndicator';
+import { beginActivityNavigation, cancelActivityNavigation } from '../activity-navigation';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
 vi.mock('../actions', async (original) => ({
   ...(await original<typeof import('../actions')>()),
-  navigateAttention: vi.fn().mockResolvedValue(true),
+  navigateActivity: vi.fn().mockResolvedValue(true),
   openChat: vi.fn().mockResolvedValue(undefined),
 }));
 
 afterEach(() => {
+  cancelActivityNavigation();
   attentionError.value = null;
   attentionTargets.value = null;
   groupId.value = null;
@@ -39,9 +41,9 @@ describe('immediate activity presentation', () => {
     expect(idle.activity).toBe('idle');
     expect(saved.activity).toBe('idle');
     const { indicator } = rowParts(ThreadRow, saved);
-    expect(indicator.props.status?.activity).toBe('idle');
+    expect(indicator.props.children.props.status?.activity).toBe('idle');
     groupId.value = 'group';
-    expect(rowParts(ThreadRow, saved).indicator.props.status?.activity).toBe('running');
+    expect(rowParts(ThreadRow, saved).indicator.props.children.props.status?.activity).toBe('running');
   });
 
   it('scopes local feedback by group, thread and web channel, and clears on failure', () => {
@@ -116,6 +118,7 @@ function rowParts(Row: typeof ThreadRow, thread: Thread) {
       children: VNode<ComponentProps<typeof ActivityIndicator>>;
       disabled: boolean;
       'aria-label': string;
+      'aria-busy'?: boolean;
       description: string;
       status?: ComponentProps<typeof ActivityIndicator>['status'];
       onClick: (event: { stopPropagation: () => void }) => void;
@@ -125,6 +128,18 @@ function rowParts(Row: typeof ThreadRow, thread: Thread) {
 }
 
 describe('shared activity presentation', () => {
+  it.each(['idle', 'running'] as const)(
+    'reports navigation without adding a spinner or changing %s activity',
+    (activity) => {
+      const node = ActivityIndicator({ status: { activity }, navigating: true });
+      expect(node.props.class).toBe(`activity-indicator ${activity}`);
+      expect(node.props['aria-busy']).toBe(true);
+      expect(node.props['aria-live']).toBe('polite');
+      expect(toChildArray(node.props.children)).toEqual([
+        expect.objectContaining({ props: { class: 'activity-indicator-base', 'aria-hidden': 'true' } }),
+      ]);
+    },
+  );
   it.each(['idle', 'running'] as const)('renders the %s base without a text label', (activity) => {
     const node = ActivityIndicator({ status: { activity } })!;
     expect(node.props.class).toBe(`activity-indicator ${activity}`);
@@ -184,11 +199,23 @@ describe('shared activity presentation', () => {
 });
 
 describe.each([ThreadRow, DmRow])('thread/DM status activity (%s)', (Row) => {
+  it('immediately disables and labels a pending jump in the thread/header control', () => {
+    groupId.value = 'group';
+    const thread = testThread();
+    beginActivityNavigation({
+      agentGroupId: 'group',
+      threadId: thread.threadId,
+      channelType: thread.channelType,
+      messagingGroupId: thread.messagingGroupId,
+    });
+    const { indicator } = rowParts(Row, thread);
+    expect(indicator.props.disabled).toBe(true);
+    expect(indicator.props['aria-busy']).toBe(true);
+    expect(indicator.props['aria-label']).toBe(`Opening message in ${thread.title}\u2026`);
+  });
   it.each([false, true])('passes unread state to the status indicator while waiting=%s', (waiting) => {
     const { indicator } = rowParts(Row, testThread({ unread: true, waiting }));
-    const component = (waiting ? indicator.props.children : indicator) as VNode<
-      ComponentProps<typeof ActivityIndicator>
-    >;
+    const component = indicator.props.children as VNode<ComponentProps<typeof ActivityIndicator>>;
     expect(component.type).toBe(ActivityIndicator);
     expect(component.props.unread).toBe(true);
     expect(ActivityIndicator(component.props).props.class).toContain(' unread');
@@ -210,14 +237,12 @@ describe.each([ThreadRow, DmRow])('thread/DM status activity (%s)', (Row) => {
         (child) => typeof child === 'object' && child !== null && child.type === marker.type,
       ),
     ).toBe(false);
-    const component = (status.waiting ? indicator.props.children : indicator) as VNode<
-      ComponentProps<typeof ActivityIndicator>
-    >;
+    const component = indicator.props.children as VNode<ComponentProps<typeof ActivityIndicator>>;
     expect(component.type).toBe(ActivityIndicator);
     expect(ActivityIndicator(component.props).props.class).toContain(status.activity);
   });
 
-  it('navigates to oldest known request without opening the default thread', () => {
+  it('navigates to the newest originating request without opening the default thread', () => {
     groupId.value = 'group';
     const thread = testThread({ activity: 'idle', waiting: true });
     const location = {
@@ -231,12 +256,12 @@ describe.each([ThreadRow, DmRow])('thread/DM status activity (%s)', (Row) => {
     expect(indicator.type).toBe('button');
     expect(indicator.props.disabled).toBe(false);
     expect(indicator.props['aria-label']).toBe(
-      `Activity: Idle. Waiting for input. 1 request needs your input. Open oldest request in ${thread.title}`,
+      `Activity: Idle. Waiting for input. 1 request needs your input. Open newest request in ${thread.title}`,
     );
     const event = { stopPropagation: vi.fn() };
     indicator.props.onClick(event);
     expect(event.stopPropagation).toHaveBeenCalledOnce();
-    expect(navigateAttention).toHaveBeenCalledExactlyOnceWith(location);
+    expect(navigateActivity).toHaveBeenCalledExactlyOnceWith(location, thread, false);
     expect(openChat).not.toHaveBeenCalled();
     row.props.onClick({ target: { classList: { contains: () => false } } });
     expect(openChat).toHaveBeenCalledOnce();
@@ -264,7 +289,7 @@ describe.each([ThreadRow, DmRow])('thread/DM status activity (%s)', (Row) => {
     const { indicator } = rowParts(Row, thread);
     expect(indicator.props.disabled).toBe(true);
     indicator.props.onClick({ stopPropagation: vi.fn() });
-    expect(navigateAttention).not.toHaveBeenCalled();
+    expect(navigateActivity).not.toHaveBeenCalled();
   });
 
   it('keeps a current request actionable while execution is stale', () => {
@@ -284,7 +309,7 @@ describe.each([ThreadRow, DmRow])('thread/DM status activity (%s)', (Row) => {
     expect(rowParts(Row, thread).indicator.props.disabled).toBe(false);
   });
 
-  it('does not turn running into an additional request control even if old requests remain', () => {
+  it('navigates a running indicator to its source, not a lingering request', () => {
     groupId.value = 'group';
     const thread = testThread({ activity: 'running' });
     attentionTargets.value = [
@@ -299,8 +324,36 @@ describe.each([ThreadRow, DmRow])('thread/DM status activity (%s)', (Row) => {
       },
     ];
     const { indicator } = rowParts(Row, thread);
-    expect(indicator.type).toBe(ActivityIndicator);
-    expect(indicator.props.description).toBe('Activity: Running');
+    expect(indicator.type).toBe('button');
+    expect(indicator.props['aria-label']).toBe(`Activity: Running. Open newest originating message in ${thread.title}`);
+    indicator.props.onClick({ stopPropagation: vi.fn() });
+    expect(navigateActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: thread.threadId }),
+      thread,
+      false,
+    );
+  });
+
+  it.each(['idle', 'running'] as const)('makes %s unread indicators independently actionable', (activity) => {
+    groupId.value = 'group';
+    const thread = testThread({ activity, unread: true });
+    const { indicator } = rowParts(Row, thread);
+    expect(indicator.props['aria-label']).toContain('Unread.');
+    expect(indicator.props['aria-label']).toContain('Open newest unread message');
+    indicator.props.onClick({ stopPropagation: vi.fn() });
+    expect(navigateActivity).toHaveBeenCalledWith(expect.objectContaining({ threadId: thread.threadId }), thread, true);
+  });
+
+  it('suppresses unread dots, bold titles and labels in non-web channels', () => {
+    const thread = testThread({ channelType: 'telegram', unread: true });
+    const { row, title, indicator } = rowParts(Row, thread);
+    expect(row.props.class).not.toContain('is-unread');
+    const label = (toChildArray(title.props.children) as VNode<{ unread?: boolean }>[]).find(
+      (node) => typeof node.type !== 'string',
+    )!;
+    expect(label.props.unread).toBe(false);
+    expect(indicator.props.children.props.unread).toBe(false);
+    expect(indicator.props['aria-label']).not.toContain('Unread');
   });
 
   it('scopes request navigation to the full channel and messaging-group identity', () => {

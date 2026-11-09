@@ -9,7 +9,7 @@ import {
 import { object } from '../../shared/validation.js';
 import { lookupSessionByHash } from '../db.js';
 import { createGlobalProjection } from './sync-state.js';
-import { startSyncStream, sendSyncFrame } from './sync-stream.js';
+import { startSyncStream, sendSyncFrame, createSyncBackpressureGate } from './sync-stream.js';
 import { readConversation } from './conversation.js';
 import { resolveTurnContext } from './conversation-context.js';
 import { startConversationStream } from './conversation-stream.js';
@@ -61,8 +61,10 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
     authTimer.unref();
   };
   const projection = createGlobalProjection(userId);
+  const canSend = createSyncBackpressureGate(ws);
   const global = startSyncStream({
     ...projection,
+    canSend,
     authorize,
     subscribe: (invalidate) => {
       invalidateGlobal = invalidate;
@@ -141,6 +143,7 @@ export function attachSyncSocket(ws: WebSocket, userId: string, sessionHash: str
           ? { channelType: conversation.channelType, messagingGroupId: conversation.messagingGroupId }
           : undefined;
         stopConversation = startConversationStream({
+          canSend,
           read: () => {
             authorize();
             return resolveTurnContext(userId, groupId, conversation.threadId, override)

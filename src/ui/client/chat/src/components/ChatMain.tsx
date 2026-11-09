@@ -79,6 +79,8 @@ import { revealLatestActivity } from '../activity-trace-scroll';
 import { showToast } from './Toast';
 import { openCredentials } from '../credentials-navigation';
 import { attachReadTracking } from '../read-state';
+import { highlightMessage } from '../message-highlight';
+import { isActivityNavigating } from '../activity-navigation';
 import './ZoomableImage.css';
 import type { ActivityLine, ChatMessage, DisplayCard, ForkChild, ForkOrigin, PendingApprovalDto, PendingWebSend, Thread, TranscriptRow, TurnUsage } from '../types';
 
@@ -1506,8 +1508,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
       if (el && (appliedHighlightRef.current !== highlight || prevLayoutRef.current !== layoutKey)) {
         appliedHighlightRef.current = highlight;
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('highlight-pulse');
-        setTimeout(() => el.classList.remove('highlight-pulse'), 2000);
+        highlightMessage(el);
       }
       // While a highlight is active (pending or applied), don't scroll to bottom.
     } else {
@@ -1821,7 +1822,9 @@ export function Composer() {
           hidden={attachRecording}
           textarea={{
             id: 'chat-input',
-            placeholder: edit.editing ? 'Edit pending message\u2026' : chatReloadRequired.value ? 'Reload to continue\u2026' : wsDown ? 'Reconnecting\u2026' : `Message ${groupName}\u2026`,
+            placeholder: edit.editing ? 'Edit pending message\u2026' : chatReloadRequired.value ? 'Reload to continue\u2026'
+              : wsDown ? isActivityNavigating(groupId.value ?? '') ? 'Opening message\u2026' : 'Reconnecting\u2026'
+              : `Message ${groupName}\u2026`,
             'aria-label': edit.editing ? 'Pending message text' : 'Message',
             onInput: (event) => {
               edit.input(event.currentTarget.value);

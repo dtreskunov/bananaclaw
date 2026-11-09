@@ -3,6 +3,20 @@ import type { SyncFrame, GlobalSyncState, GlobalProjection, GlobalFrame, Project
 import { diffGlobal, SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
 import { sameValue } from '../../shared/collection-patch.js';
 
+export function createSyncBackpressureGate(socket: { bufferedAmount: number; readyState: number }): () => boolean {
+  let blockedAt: number | null = null;
+  return () => {
+    if (socket.readyState !== 1) return false;
+    if (socket.bufferedAmount <= 1024 * 1024) {
+      blockedAt = null;
+      return true;
+    }
+    blockedAt ??= Date.now();
+    if (Date.now() - blockedAt >= 15_000) throw new Error('Synchronization transport buffer did not drain');
+    return false;
+  };
+}
+
 export function sendSyncFrame(
   socket: {
     bufferedAmount: number;
@@ -25,6 +39,7 @@ export interface SyncStreamOptions {
   read: (groupId: string | null) => Promise<GlobalSyncState>;
   authorize: () => void;
   canPublish: () => boolean;
+  canSend?: () => boolean;
   subscribe: (invalidate: (groupId?: string) => void) => () => void;
   send: (frame: SyncFrame) => void;
   fail: (error: unknown) => void;
@@ -34,8 +49,7 @@ export interface SyncStreamOptions {
 /** Authoritative metadata patches; one in-flight build and one dirty bit, never a queue. */
 export function startSyncStream(options: SyncStreamOptions) {
   let subscription: { id: number; groupId: string | null } | null = null;
-  let previous: GlobalProjection | null = null;
-  let acknowledgedId: number | null = null;
+  let previous: (GlobalProjection & { subscriptionId: number }) | null = null;
   let dirty = false;
   let running = false;
   let stopped = false;
@@ -63,21 +77,20 @@ export function startSyncStream(options: SyncStreamOptions) {
     dirty = false;
     const current = subscription;
     try {
+      if (options.canSend && !options.canSend()) {
+        schedule();
+        return;
+      }
       options.authorize();
       const data = await options.read(current.groupId);
       if (stopped) return;
       options.authorize();
       if (current !== subscription) return;
-      if (!options.canPublish()) {
+      if (!options.canPublish() || (options.canSend && !options.canSend())) {
         schedule();
         return;
       }
-      if (
-        !previous ||
-        acknowledgedId !== current.id ||
-        previous.groupId !== current.groupId ||
-        !sameValue(previous.data, data)
-      ) {
+      if (!previous || previous.subscriptionId !== current.id || !sameValue(previous.data, data)) {
         const global: GlobalFrame = previous
           ? {
               kind: 'update',
@@ -95,13 +108,13 @@ export function startSyncStream(options: SyncStreamOptions) {
           global,
         });
         previous = {
+          subscriptionId: current.id,
           kind: 'snapshot',
           streamId: global.streamId,
           revision: global.revision,
           groupId: current.groupId,
           data,
         };
-        acknowledgedId = current.id;
       }
     } catch (error) {
       if (!stopped) {

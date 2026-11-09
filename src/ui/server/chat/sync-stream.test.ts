@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SyncFrame, GlobalSyncState } from '../../shared/sync.js';
-import { sendSyncFrame, startSyncStream, type SyncStreamOptions } from './sync-stream.js';
+import { createSyncBackpressureGate, sendSyncFrame, startSyncStream, type SyncStreamOptions } from './sync-stream.js';
 import { SYNC_PROTOCOL_VERSION } from '../../shared/sync.js';
 import { reduceGlobal, type GlobalProjection } from '../../shared/sync.js';
 import { testGlobalSnapshot } from '../../shared/sync-test-fixtures.js';
@@ -50,6 +50,54 @@ function fixture(overrides: Partial<SyncStreamOptions> = {}) {
 }
 
 describe('global synchronization stream', () => {
+  it('lets a valid large snapshot drain, but still rejects a stalled transport after 15 seconds', () => {
+    vi.useFakeTimers();
+    const socket = { bufferedAmount: 2 * 1024 * 1024, readyState: 1 };
+    const ready = createSyncBackpressureGate(socket);
+    expect(ready()).toBe(false);
+    vi.advanceTimersByTime(14_999);
+    expect(ready()).toBe(false);
+    socket.bufferedAmount = 0;
+    expect(ready()).toBe(true);
+    socket.bufferedAmount = 2 * 1024 * 1024;
+    expect(ready()).toBe(false);
+    vi.advanceTimersByTime(15_000);
+    expect(ready).toThrow('did not drain');
+  });
+
+  it('does not rebuild metadata or advance revisions while another frame is draining', async () => {
+    let ready = false;
+    const f = fixture({ canSend: () => ready });
+    f.stream.subscribe(1, 'g');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.read).not.toHaveBeenCalled();
+    expect(f.frames).toHaveLength(0);
+    for (let i = 0; i < 1000; i++) f.invalidate();
+    ready = true;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.read).toHaveBeenCalledOnce();
+    expect(f.frames).toHaveLength(1);
+    expect(f.frames[0].global).toMatchObject({ kind: 'snapshot', revision: 0 });
+    f.stream.stop();
+  });
+
+  it('rechecks backpressure after an asynchronous metadata read without committing an unsent revision', async () => {
+    let ready = true;
+    const f = fixture({ canSend: () => ready });
+    const data = { agentActivity: [], approvals: [], attention: [], group: null };
+    f.read.mockImplementationOnce(async () => {
+      ready = false;
+      return data;
+    });
+    f.stream.subscribe(1, 'g');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.frames).toHaveLength(0);
+    ready = true;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.frames[0].global).toMatchObject({ kind: 'snapshot', revision: 0 });
+    f.stream.stop();
+  });
+
   it('closes a slow transport without adding another frame to its buffer', () => {
     const socket = { bufferedAmount: 1024 * 1024 + 1, readyState: 1, close: vi.fn(), send: vi.fn() };
     expect(() =>

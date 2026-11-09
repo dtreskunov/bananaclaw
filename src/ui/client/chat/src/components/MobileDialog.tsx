@@ -68,6 +68,7 @@ interface MobileDialogItemProps {
   badgeLabel?: string;
   onBadgeClick?: () => void;
   badgeDisabled?: boolean;
+  badgeBusy?: boolean;
   sublabel?: string;
   onClick?: () => void;
   type?: 'button' | 'submit';
@@ -78,7 +79,7 @@ interface MobileDialogItemProps {
 }
 
 export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
-  const { label, badge, badgeLabel, onBadgeClick, badgeDisabled, sublabel, onClick, type = 'button', active, chevron, title, className } = props;
+  const { label, badge, badgeLabel, onBadgeClick, badgeDisabled, badgeBusy, sublabel, onClick, type = 'button', active, chevron, title, className } = props;
   const hasBadge = badge != null && badge !== false;
   const item = (
     <button
@@ -97,6 +98,7 @@ export function MobileDialogItem(props: MobileDialogItemProps): JSX.Element {
     <div class="mobile-dialog-item-row">
       {onBadgeClick ? (
         <button type="button" class="msg-action-btn mobile-dialog-item-badge activity-dot-action" disabled={badgeDisabled}
+          aria-busy={badgeBusy || undefined}
           aria-label={badgeLabel} title={badgeLabel} onClick={onBadgeClick}>
           {badge}
         </button>

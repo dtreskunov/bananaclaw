@@ -69,6 +69,7 @@ describe('authorized approval attention', () => {
       ['approval-a', 'approval-b'].map((id) => ({
         id,
         origin: { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'mg' },
+        readCursor: { sessionId: 's', key: expect.stringMatching(/^[a-f0-9]{32}$/) },
       })),
     );
     expect(JSON.stringify(data.attention)).not.toContain('Review');
@@ -96,7 +97,7 @@ describe('authorized approval attention', () => {
     const data = readInteractionSync('viewer');
     expect(data.attention.map((row) => row.id)).toEqual(['access', 'confirmation', 'setup']);
     expect(JSON.stringify(data.attention)).not.toContain('private-selection');
-    expect(data.attention.every((row) => Object.keys(row).sort().join(',') === 'id,origin')).toBe(true);
+    expect(data.attention.every((row) => Object.keys(row).sort().join(',') === 'id,origin,readCursor')).toBe(true);
     expect(getDb().prepare('SELECT * FROM interaction_progress ORDER BY id').all()).toEqual(before);
   });
 

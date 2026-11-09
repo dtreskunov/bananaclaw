@@ -22,6 +22,7 @@ export interface ConversationStreamOptions {
   subscribe: (invalidate: () => void) => () => void;
   send: (frame: ConversationFrame | null) => void;
   fail: (error: unknown) => void;
+  canSend?: () => boolean;
   coalesceMs?: number;
 }
 
@@ -43,6 +44,11 @@ export function startConversationStream(options: ConversationStreamOptions): () 
     if (stopped) return;
     dirty = false;
     try {
+      if (options.canSend && !options.canSend()) {
+        timer = setTimeout(refresh, options.coalesceMs ?? 40);
+        timer.unref?.();
+        return;
+      }
       const next = options.read();
       if (state !== undefined && JSON.stringify(state?.conversation ?? null) === JSON.stringify(next)) return;
       const frame: ConversationFrame | null =

@@ -36,16 +36,22 @@ export const conversationState = signal<ConversationSnapshot | null>(null);
 export const completedResponse = signal<string | null>(null);
 export const chatTranscript = signal<TranscriptRow[]>([]);
 
-export function withPendingActivity(status: ActivityStatus, gid: string | null, thread?: Thread): ActivityStatus {
+export function pendingActivitySends(gid: string | null, thread?: Pick<Thread, 'threadId' | 'channelType'>) {
   const matches = (tid: string) => !thread || ((thread.channelType || 'web') === 'web' && thread.threadId === tid);
   const current = gid === groupId.value && channelType.value === 'web';
-  const local = pendingWebSends.value.some(
+  return pendingWebSends.value.filter(
     (send) =>
       send.groupId === gid &&
       send.status !== 'failed' &&
       matches(send.threadId) &&
       (send.status === 'sending' || (current && send.threadId === threadId.value)),
   );
+}
+
+export function withPendingActivity(status: ActivityStatus, gid: string | null, thread?: Thread): ActivityStatus {
+  const matches = (tid: string) => !thread || ((thread.channelType || 'web') === 'web' && thread.threadId === tid);
+  const current = gid === groupId.value && channelType.value === 'web';
+  const local = pendingActivitySends(gid, thread).length > 0;
   const selected = conversationState.value?.conversation;
   const view =
     current &&

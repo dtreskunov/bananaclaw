@@ -97,7 +97,7 @@ describe('authoritative attention refresh', () => {
     expect(attentionTargets.value).toEqual([]);
     expect(attentionError.value).toBeNull();
   });
-  it('always opens the oldest request in the selected agent without changing request state', async () => {
+  it('always opens the newest request in the selected agent without changing request state', async () => {
     groupId.value = 'g';
     threadId.value = 't';
     messagingGroupId.value = 'm';
@@ -108,15 +108,15 @@ describe('authoritative attention refresh', () => {
     ];
     attentionSelection.value = { id: 'second', navigation: 0 };
     expect(await navigateAttention('g')).toBe(true);
-    expect(attentionSelection.value?.id).toBe('approval');
+    expect(attentionSelection.value?.id).toBe('second');
     expect(await navigateAttention('g')).toBe(true);
-    expect(attentionSelection.value?.id).toBe('approval');
+    expect(attentionSelection.value?.id).toBe('second');
     expect(postJson).not.toHaveBeenCalled();
     expect(api).not.toHaveBeenCalled();
     expect(attentionTargets.value).toHaveLength(3);
     expect(threadId.value).toBe('t');
   });
-  it('opens the oldest request in an exact thread regardless of the current selection', async () => {
+  it('opens the newest request in an exact thread regardless of the current selection', async () => {
     groupId.value = 'g';
     threadId.value = 't';
     messagingGroupId.value = 'm';
@@ -129,7 +129,7 @@ describe('authoritative attention refresh', () => {
       older,
       newest,
     ];
-    attentionSelection.value = { id: newest.id, navigation: 0 };
+    attentionSelection.value = { id: older.id, navigation: 0 };
     expect(
       await navigateAttention({
         agentGroupId: 'g',
@@ -138,7 +138,7 @@ describe('authoritative attention refresh', () => {
         messagingGroupId: 'm',
       }),
     ).toBe(true);
-    expect(attentionSelection.value?.id).toBe(older.id);
+    expect(attentionSelection.value?.id).toBe(newest.id);
     expect(api).not.toHaveBeenCalled();
     expect(postJson).not.toHaveBeenCalled();
   });

@@ -152,6 +152,7 @@ export async function listThreadsForViewer(
   userId: string,
   agentGroupId: string,
   attention?: AttentionTarget[],
+  options: { projectActivity?: boolean } = {},
 ): Promise<ThreadSummary[]> {
   const visibility = () => {
     const spectator = isElevated(userId);
@@ -169,6 +170,7 @@ export async function listThreadsForViewer(
     throw new Error('Thread visibility changed before publication; retry the request');
   }
   const threads = collectThreadsForContexts(agentGroupId, before.contexts, before.spectator, before.handles);
+  if (options.projectActivity === false) return threads;
   return withThreadAttention(
     agentGroupId,
     withExecutionActivity(userId, agentGroupId, threads),

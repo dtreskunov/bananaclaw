@@ -26,11 +26,17 @@ import { handle } from './routes.js';
 import { createSession as createUiSession } from '../db.js';
 import { COOKIE_NAME } from '../auth.js';
 import { claimIdentity } from '../../../modules/permissions/identity-claim.js';
+import { readActivityTarget } from './activity-target.js';
+import { putTurn, linkTurnInput } from '../../../db/turns.js';
+import * as conversationReader from './conversation.js';
+import * as threadReader from './threads.js';
+import * as sessionReader from '../../../session-manager.js';
 
 const root = path.resolve('.test-read-state');
 let input: Database.Database, output: Database.Database;
 beforeEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
+  vi.restoreAllMocks();
   runMigrations(initTestDb());
   getDb().exec(`
     INSERT INTO users(id,kind,created_at) VALUES('viewer','web',1767225600000),('other','web',1767225600000),('admin','web',1767225600000);
@@ -77,6 +83,187 @@ function unread(user = 'viewer', thread = 'a') {
 }
 
 describe('durable viewer unread state', () => {
+  it('does not enumerate the agent or hydrate history when resolving a scoped unread source', async () => {
+    message('source');
+    const list = vi.spyOn(threadReader, 'listThreadsForViewer');
+    const history = vi.spyOn(conversationReader, 'readConversation');
+    expect(
+      await readActivityTarget('viewer', 'g', 'unread', {
+        threadId: 'a',
+        channelType: 'web',
+        messagingGroupId: 'mg',
+      }),
+    ).toMatchObject({ anchor: { id: 'source' } });
+    expect(list).not.toHaveBeenCalled();
+    expect(history).not.toHaveBeenCalled();
+  });
+
+  it('uses central bounds to hydrate only the newest route, not every conversation', async () => {
+    for (let i = 0; i < 30; i++)
+      input
+        .prepare(
+          `INSERT INTO messages_in
+      (id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
+      VALUES(?,?,'chat',1767225600000,'completed','web','group:g',?,'{"text":"Older"}')`,
+        )
+        .run(`extra-${i}`, 6 + i * 2, `thread-${i}`);
+    refreshThreadSummaries('s');
+    message('newest');
+    const history = vi.spyOn(conversationReader, 'readConversation');
+    const source = vi.spyOn(sessionReader, 'openInboundDb');
+    expect(await readActivityTarget('viewer', 'g', 'latest')).toMatchObject({ anchor: { id: 'newest' } });
+    expect(history).toHaveBeenCalledOnce();
+    expect(source).toHaveBeenCalledOnce();
+  });
+
+  it('does not prune completed task events or Chat SDK messages newer than ordinary timestamps', async () => {
+    message('ordinary');
+    input.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,process_after,content)
+      VALUES('task',6,'task',1767225600000,'completed','web','group:g','b',1793836900000,'{"prompt":"Task"}')`);
+    refreshThreadSummaries('s');
+    expect((await readActivityTarget('viewer', 'g', 'latest'))?.anchor.id).toBe('task');
+    output.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
+      VALUES('card',3,'chat-sdk',1793837000000,'web','group:g','b','{"type":"card","card":{},"fallbackText":"Card"}')`);
+    refreshThreadSummaries('s');
+    expect((await readActivityTarget('viewer', 'g', 'latest'))?.anchor.id).toBe('card');
+    getDb().exec("UPDATE thread_summaries SET value=json_remove(value,'$.latestAt') WHERE kind='route'");
+    expect((await readActivityTarget('viewer', 'g', 'latest'))?.anchor.id).toBe('card');
+  });
+
+  it('resolves the newest unread publication, not a newer unrelated inbound or read conversation', async () => {
+    message('older');
+    message('newer', 'b');
+    input.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content)
+      VALUES('unrelated',6,'chat',1893836800000,'completed','web','group:g','a','{"text":"Later input"}')`);
+    refreshThreadSummaries('s');
+    expect(await readActivityTarget('viewer', 'g', 'unread')).toEqual({
+      origin: { agentGroupId: 'g', threadId: 'b', channelType: 'web', messagingGroupId: 'mg' },
+      anchor: { kind: 'message', id: 'newer' },
+      readCursor: cursor('viewer', 'b'),
+    });
+    acknowledgeRead('viewer', 'g', 'b', cursor('viewer', 'b'));
+    expect((await readActivityTarget('viewer', 'g', 'unread'))?.anchor.id).toBe('older');
+    expect(
+      await readActivityTarget('viewer', 'g', 'unread', {
+        threadId: 'b',
+        channelType: 'web',
+        messagingGroupId: 'mg',
+      }),
+    ).toBeNull();
+    expect(
+      await readActivityTarget('viewer', 'g', 'latest', {
+        threadId: 'a',
+        channelType: 'web',
+        messagingGroupId: 'mg',
+      }),
+    ).toMatchObject({ anchor: { kind: 'message', id: 'unrelated' } });
+  });
+
+  it('acknowledges only through a jumped-to publication, preserving newer arrivals and other threads', async () => {
+    message('jump-target');
+    const target = await readActivityTarget('viewer', 'g', 'unread');
+    expect(target?.readCursor).toEqual(cursor());
+    if (!target?.readCursor) throw new Error('Expected jump publication cursor');
+    message('newer-arrival');
+    message('other-thread', 'b');
+    acknowledgeRead('viewer', 'g', 'a', target.readCursor);
+    expect(unread()).toBe(true);
+    expect(unread('viewer', 'b')).toBe(true);
+    expect(cursor().key).not.toBe(target.readCursor.key);
+  });
+
+  it('attaches the exact waiting-request cursor without resolving it or reading later messages', () => {
+    grantRole({ user_id: 'admin', role: 'admin', agent_group_id: 'g', granted_at: 1767225600000, granted_by: null });
+    createApproval({
+      id: 'waiting',
+      request_id: 'waiting',
+      session_id: 's',
+      origin_message_id: 'input-a',
+      created_at: 1793836800000,
+      input: {
+        action: 'test',
+        title: 'Approve?',
+        payload: {},
+        options: [{ label: 'Yes', value: 'yes', selectedLabel: 'Yes' }],
+      },
+    });
+    const target = readInteractionSync('admin').attention.find((item) => item.id === 'waiting');
+    expect(target?.readCursor).toEqual(cursor('admin'));
+    if (!target?.readCursor) throw new Error('Expected waiting publication cursor');
+    message('after-request');
+    acknowledgeRead('admin', 'g', 'a', target.readCursor);
+    expect(unread('admin')).toBe(true);
+    expect(readInteractionSync('admin').attention.find((item) => item.id === 'waiting')).toEqual(target);
+  });
+
+  it('resolves the newest input belonging to running work, not a later unrelated output', async () => {
+    putTurn(output, {
+      id: 'running',
+      origin_channel_type: 'web',
+      origin_platform_id: 'group:g',
+      origin_thread_id: 'a',
+      origin_source_session_id: null,
+      started_at: 1793836800000,
+      ended_at: null,
+      phase: 'running',
+      outcome: 'pending',
+      provenance: 'native',
+      imported_from_session_id: null,
+      imported_from_turn_id: null,
+    });
+    linkTurnInput(output, { turn_id: 'running', message_in_id: 'input-a', association: 'consumed' });
+    input.exec(`UPDATE messages_in SET status='pending',timestamp=1793836800010 WHERE id='input-b'`);
+    input.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,content,process_after)
+      VALUES('future-input',6,'chat',1893836800000,'pending','web','group:g','a','{"text":"Future"}',32503680000000)`);
+    refreshThreadSummaries('s');
+    message('unrelated-output');
+    expect((await readActivityTarget('viewer', 'g', 'running'))?.anchor.id).toBe('input-b');
+    expect(
+      await readActivityTarget('viewer', 'g', 'running', {
+        threadId: 'a',
+        channelType: 'web',
+        messagingGroupId: 'mg',
+      }),
+    ).toMatchObject({ anchor: { kind: 'message', id: 'input-a' } });
+    expect(
+      await readActivityTarget('viewer', 'g', 'running', {
+        threadId: 'a',
+        channelType: 'resend',
+        messagingGroupId: 'mg',
+      }),
+    ).toBeNull();
+  });
+
+  it('authenticates and validates activity-source navigation without acknowledging content', async () => {
+    message('source');
+    const token = createUiSession('viewer', 60_000).token;
+    const server = http.createServer((req, res) => {
+      void handle(req, res);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/ui/chat/api/groups/g/activity-target`;
+    const send = (query: string, authenticated = true) =>
+      fetch(base + query, {
+        headers: { 'x-nanoclaw-ui-protocol': '16', ...(authenticated ? { Cookie: `${COOKIE_NAME}=${token}` } : {}) },
+      });
+    try {
+      expect((await send('?kind=unread', false)).status).toBe(401);
+      expect((await send('?kind=unknown')).status).toBe(400);
+      expect((await send('?kind=unread&thread=a')).status).toBe(400);
+      expect((await send('?kind=unread&thread=&channel=&mg=')).status).toBe(400);
+      expect((await send('?kind=unread&thread=a&channel=web&mg=other')).status).toBe(404);
+      const response = await send('?kind=unread&thread=a&channel=web&mg=mg');
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ anchor: { kind: 'message', id: 'source' } });
+      expect(unread()).toBe(true);
+      getDb().exec("DELETE FROM agent_group_members WHERE user_id='viewer'");
+      expect((await send('?kind=unread')).status).toBe(403);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('merges explicit read positions without broadly copying another account baseline', () => {
     insertIdentity({ userId: 'other', channel: 'resend', handle: 'other@example.com' });
     message('one');
@@ -185,7 +372,7 @@ describe('durable viewer unread state', () => {
     acknowledgeRead('viewer', 'g', 'a', seen);
     expect(unread()).toBe(false);
   });
-  it('keeps approval publications private to viewers allowed to see their transcript', () => {
+  it('keeps approval publications and navigation private to viewers allowed to see their transcript', async () => {
     grantRole({
       user_id: 'admin',
       role: 'admin',
@@ -203,6 +390,12 @@ describe('durable viewer unread state', () => {
     });
     expect(unread()).toBe(false);
     expect(unread('admin')).toBe(true);
+    const interactions = readInteractionSync('admin');
+    expect(await readActivityTarget('viewer', 'g', 'unread')).toBeNull();
+    expect(await readActivityTarget('admin', 'g', 'unread')).toMatchObject({
+      anchor: { kind: 'interaction', id: 'approval' },
+    });
+    expect(readInteractionSync('admin')).toEqual(interactions);
     const approval = cursor('admin');
     expect(() => acknowledgeRead('viewer', 'g', 'a', approval)).toThrow('invalid_read_cursor');
     acknowledgeRead('admin', 'g', 'a', approval);
@@ -251,7 +444,7 @@ describe('durable viewer unread state', () => {
       off();
     }
   });
-  it('does not reveal a different DM counterparty through unread metadata', () => {
+  it('omits unread status and read cursors for all non-web DMs, including visible replies', async () => {
     insertIdentity({ userId: 'viewer', channel: 'resend', handle: 'own@example.com' });
     getDb().exec(`INSERT INTO messaging_groups(id,channel_type,instance,platform_id,is_group,created_at)
         VALUES('dm','resend','resend','own@example.com',0,1767225600000);
@@ -265,11 +458,31 @@ describe('durable viewer unread state', () => {
       source.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,content)
         VALUES('own',2,'chat',1767225600000,'completed','resend','own@example.com','{"text":"Own"}');`);
       replies.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,content)
-        VALUES('secret',1,'chat',1767225600000,'resend','other@example.com','{"text":"Private"}');`);
+        VALUES('secret',1,'chat',1767225600000,'resend','other@example.com','{"text":"Private"}'),
+          ('visible',3,'chat',1793836800000,'resend','own@example.com','{"text":"Visible"}');`);
       refreshThreadSummaries('dm-session');
       const context = resolveTurnContext('viewer', 'g', '__dm:dm', { channelType: 'resend', messagingGroupId: 'dm' });
       if (!context) throw new Error('Expected own DM context');
       expect(conversationUnread('viewer', 'g', context)).toBe(false);
+      const threads = await listThreadsForViewer('viewer', 'g');
+      expect(threads.find((thread) => thread.channelType === 'resend')?.unread).toBeUndefined();
+      expect(readAgentActivity('viewer', [], 'g', threads)[0].unreadThreadCount).toBeUndefined();
+      expect(
+        readConversation('viewer', 'g', '__dm:dm', {
+          channelType: 'resend',
+          messagingGroupId: 'dm',
+        }).readCursor,
+      ).toBeUndefined();
+      expect(await readActivityTarget('viewer', 'g', 'unread')).toBeNull();
+      source.exec("UPDATE messages_in SET status='pending' WHERE id='own'");
+      refreshThreadSummaries('dm-session');
+      expect(
+        await readActivityTarget('viewer', 'g', 'running', {
+          threadId: '__dm:dm',
+          channelType: 'resend',
+          messagingGroupId: 'dm',
+        }),
+      ).toMatchObject({ anchor: { kind: 'message', id: 'own' } });
     } finally {
       source.close();
       replies.close();

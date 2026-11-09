@@ -44,6 +44,7 @@ interface InboundSummary {
   count: number;
   pendingAt: number | null;
   last: number | null;
+  latestAt?: number | null;
   first: { seq: number; title: string } | null;
   owners: { seq: number; handles: string[] }[];
   title: string | null;
@@ -52,6 +53,7 @@ interface InboundSummary {
 interface OutboundSummary {
   count: number;
   last: number | null;
+  latestAt?: number | null;
 }
 export interface SummaryTurn {
   id: string;
@@ -152,12 +154,14 @@ function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
     db
       .prepare(
         `SELECT COUNT(*) AS count, MAX(timestamp) AS last,
+      MAX(CASE WHEN kind='task' AND status='completed' AND process_after IS NOT NULL
+        THEN MAX(timestamp,process_after) ELSE timestamp END) AS latestAt,
       MIN(CASE WHEN status = 'pending' AND trigger = 1 AND kind != 'system'
         THEN CASE WHEN process_after IS NULL THEN 0
           ELSE process_after END END) AS pendingAt
       FROM messages_in WHERE ${where}`,
       )
-      .get(...params) as Pick<InboundSummary, 'count' | 'last' | 'pendingAt'>;
+      .get(...params) as Pick<InboundSummary, 'count' | 'last' | 'latestAt' | 'pendingAt'>;
   const first = db
     .prepare(`SELECT seq, content, platform_id FROM messages_in WHERE ${where} ORDER BY seq LIMIT 5`)
     .all(...params) as { seq: number; content: string; platform_id: string }[];
@@ -228,9 +232,10 @@ function summarizeSource(db: Database.Database, source: SummaryRow['source'], ro
     db
       .prepare(
         `
-    SELECT COUNT(*) AS count, MAX(timestamp) AS last FROM messages_out
+    SELECT COUNT(CASE WHEN kind IN ('chat','text') THEN 1 END) AS count,
+      MAX(CASE WHEN kind IN ('chat','text') THEN timestamp END) AS last,
+      MAX(timestamp) AS latestAt FROM messages_out
     WHERE COALESCE(channel_type,'')=? AND COALESCE(platform_id,'')=? AND COALESCE(thread_id,'')=?
-      AND kind IN ('chat','text')
   `,
       )
       .get(route.channel_type, route.platform_id, route.thread_id)
@@ -423,6 +428,38 @@ export function readSummaryQueuedRoutes(sessionId: string): Route[] {
     const { pendingAt } = readInboundSummary(row);
     return pendingAt !== null && pendingAt <= Date.now();
   });
+}
+
+/** Missing optional bounds disable pruning until their summaries are refreshed. */
+export function readSummaryActivityBounds(sessionIds: string[]): Map<string, (Route & { latestAt: number | null })[]> {
+  assertThreadSummariesReady();
+  for (const id of sessionIds) assertThreadSummaryAvailable(id);
+  const rows = getDb()
+    .prepare(
+      `SELECT session_id,channel_type,platform_id,thread_id,value FROM thread_summaries
+    WHERE kind='route' AND session_id IN (SELECT value FROM json_each(?))`,
+    )
+    .all(JSON.stringify(sessionIds)) as (Route & { session_id: string; value: string })[];
+  const bounds = new Map<string, (Route & { latestAt: number | null })[]>();
+  const missing = new Set<string>();
+  for (const row of rows) {
+    const value = JSON.parse(row.value) as { latestAt?: number | null };
+    if (value.latestAt === undefined) {
+      missing.add(row.session_id);
+      continue;
+    }
+    assertNumericSummaryTime(value.latestAt);
+    const routes = bounds.get(row.session_id) ?? [];
+    routes.push({
+      channel_type: row.channel_type,
+      platform_id: row.platform_id,
+      thread_id: row.thread_id,
+      latestAt: value.latestAt,
+    });
+    bounds.set(row.session_id, routes);
+  }
+  for (const id of missing) bounds.delete(id);
+  return bounds;
 }
 
 /** Central indexed summaries only; no session DB handles, history scans or viewer cache. */

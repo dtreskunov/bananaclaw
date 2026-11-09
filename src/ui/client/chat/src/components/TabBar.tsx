@@ -16,8 +16,9 @@ export interface TabItem {
   label: string;
   badge?: ComponentChildren;
   badgeLabel?: string;
-  onBadgeClick?: () => void;
+  onBadgeClick?: () => void | Promise<unknown>;
   badgeDisabled?: boolean;
+  badgeBusy?: boolean;
   /** Optional second line under the label (e.g. relative activity time). */
   sublabel?: string;
   /** Keep an empty second row when sibling tabs display sublabels. */
@@ -62,6 +63,7 @@ function tabBadge(item: TabItem) {
   if (item.badge == null || item.badge === false) return null;
   return item.onBadgeClick ? (
     <button type="button" class="msg-action-btn tab-item-badge activity-dot-action" disabled={item.badgeDisabled}
+      aria-busy={item.badgeBusy || undefined}
       aria-label={item.badgeLabel} title={item.badgeLabel}
       onClick={(event) => { event.stopPropagation(); item.onBadgeClick?.(); }}>
       {item.badge}
@@ -210,7 +212,10 @@ function TabBarSheet(props: TabBarSheetProps): JSX.Element {
             badge={it.badge}
             badgeLabel={it.badgeLabel}
             badgeDisabled={it.badgeDisabled}
-            onBadgeClick={it.onBadgeClick ? () => { onClose(); it.onBadgeClick?.(); } : undefined}
+            badgeBusy={it.badgeBusy}
+            onBadgeClick={it.onBadgeClick ? async () => {
+              if (await it.onBadgeClick?.() !== false) onClose();
+            } : undefined}
             sublabel={it.sublabel}
             active={it.id === activeId}
             title={it.title}

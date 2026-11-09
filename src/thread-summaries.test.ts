@@ -23,6 +23,7 @@ import {
   readSessionThreadSummary,
   readSummaryQueuedRoutes,
   readSummaryTurns,
+  readSummaryActivityBounds,
   reconcileThreadSummaries,
   rebuildThreadSummaries,
   refreshThreadSummaries,
@@ -64,6 +65,18 @@ afterEach(async () => {
 });
 
 describe('maintained thread summaries', () => {
+  it('projects exact source timestamp bounds without changing ordinary activity timestamps', () => {
+    message('one');
+    inbound.exec(`INSERT INTO messages_in(id,seq,kind,timestamp,status,channel_type,platform_id,thread_id,process_after,content)
+      VALUES('task',4,'task',1793836800000,'completed','web','group:g','t',1793836900000,'{"prompt":"Task"}')`);
+    outbound.exec(`INSERT INTO messages_out(id,seq,kind,timestamp,channel_type,platform_id,thread_id,content)
+      VALUES('card',1,'chat-sdk',1793837000000,'web','group:g','t','{"type":"card","card":{},"fallbackText":"Card"}')`);
+    refreshThreadSummaries('s');
+    expect(readSessionThreadSummary(spec).threads[0].lastActivityAt).toBe(1793836800000);
+    expect(readSummaryActivityBounds(['s']).get('s')?.map(row => row.latestAt).sort()).toEqual([1793836900000, 1793837000000]);
+    getDb().exec("UPDATE thread_summaries SET value=json_remove(value,'$.latestAt') WHERE source='inbound' AND kind='route'");
+    expect(readSummaryActivityBounds(['s']).has('s')).toBe(false);
+  });
   it('keeps epoch-zero cache facts numeric and requires explicit rebuild for older string projections', () => {
     message('one');
     inbound.exec("UPDATE messages_in SET timestamp=0 WHERE id='one'");

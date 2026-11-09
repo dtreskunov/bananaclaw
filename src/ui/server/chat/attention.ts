@@ -3,6 +3,8 @@ import type { Interaction } from '../../../types.js';
 import type { SyncResponse } from '../../shared/sync.js';
 import { projectApproval } from './approval-transcript.js';
 import { canRespondToApproval } from './interaction-access.js';
+import { resolveTurnContext } from './conversation-context.js';
+import { publicationReadCursor } from './read-state.js';
 
 export function readInteractionSync(userId: string): Pick<SyncResponse, 'approvals' | 'attention'> {
   const rows = queryInteractions<Interaction>(
@@ -17,8 +19,18 @@ export function readInteractionSync(userId: string): Pick<SyncResponse, 'approva
       approval.status === 'pending' &&
       approval.origin &&
       (approval.kind !== 'confirmation' || approval.options.length > 0)
-    )
-      result.attention.push({ id: row.id, origin: approval.origin });
+    ) {
+      const origin = approval.origin;
+      const context =
+        origin.channelType === 'web' ? resolveTurnContext(userId, origin.agentGroupId, origin.threadId, origin) : null;
+      const readCursor = context
+        ? publicationReadCursor(userId, origin.agentGroupId, context, {
+            kind: 'interaction',
+            id: row.id,
+          })
+        : undefined;
+      result.attention.push({ id: row.id, origin, ...(readCursor ? { readCursor } : {}) });
+    }
   }
   result.attention.reverse();
   return result;

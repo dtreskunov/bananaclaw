@@ -14,6 +14,41 @@ const view: Conversation = {
 };
 afterEach(() => vi.useRealTimers());
 describe('conversation stream boundary', () => {
+  it('coalesces updates without reads or revision gaps while the socket drains', () => {
+    vi.useFakeTimers();
+    let ready = false;
+    let current = view;
+    let invalidate = () => {};
+    const read = vi.fn(() => current);
+    const frames: Array<ConversationFrame | null> = [];
+    const fail = vi.fn();
+    const stop = startConversationStream({
+      canSend: () => ready,
+      read,
+      subscribe: (fn) => {
+        invalidate = fn;
+        return () => {};
+      },
+      send: (frame) => frames.push(frame),
+      fail,
+    });
+    for (let i = 0; i < 1000; i++) invalidate();
+    vi.advanceTimersByTime(400);
+    expect(read).not.toHaveBeenCalled();
+    ready = true;
+    vi.advanceTimersByTime(40);
+    expect(frames[0]).toMatchObject({ kind: 'snapshot', revision: 0 });
+    ready = false;
+    current = { ...view, connection: { connected: true, activeTurnId: null } };
+    for (let i = 0; i < 1000; i++) invalidate();
+    vi.advanceTimersByTime(400);
+    expect(read).toHaveBeenCalledOnce();
+    ready = true;
+    vi.advanceTimersByTime(40);
+    expect(frames[1]).toMatchObject({ kind: 'update', baseRevision: 0, revision: 1 });
+    expect(fail).not.toHaveBeenCalled();
+    stop();
+  });
   it('explicitly clears revoked state and resnapshots it when access returns', () => {
     vi.useFakeTimers();
     let current: Conversation | null = view;

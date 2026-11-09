@@ -1,8 +1,10 @@
 import type { ApprovalOrigin } from './approval.js';
+import { isReadCursor, type ReadCursor } from './read-state.js';
 
 export interface AttentionTarget {
   id: string;
   origin: ApprovalOrigin;
+  readCursor?: ReadCursor;
 }
 
 export function isAttentionTargets(value: unknown): value is AttentionTarget[] {
@@ -13,6 +15,7 @@ export function isAttentionTargets(value: unknown): value is AttentionTarget[] {
     if (!target || typeof target !== 'object' || !('id' in target) || !text(target.id) || ids.has(target.id))
       return false;
     ids.add(target.id);
+    if ('readCursor' in target && !isReadCursor(target.readCursor)) return false;
     if (!('origin' in target)) return false;
     const origin = target.origin;
     return (

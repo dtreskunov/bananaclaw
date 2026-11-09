@@ -127,11 +127,56 @@ they can read, and appear only in accessible names and tooltips.
 Read-only references without a requesting thread or available response controls
 remain visible in the existing UI but do not inflate these actionable counts.
 
-Clicking an agent's `waiting` label opens its oldest pending request across its
-threads; clicking a thread's waiting icon opens the oldest request in that exact thread. These
-are separate native buttons, not nested inside the agent/thread selection
-control. Navigation focuses the existing approval card and does not
-steal focus on later refreshes. There is no floating attention control.
+Clicking an indicator in the agent picker, thread rail or full-frame conversation
+header jumps to its newest source. Waiting takes priority and opens the newest
+pending request; otherwise unread opens the newest unread publication, running
+opens the newest input belonging to queued or unfinished work, and idle opens
+the newest message or request. Agent indicators search authorized conversations;
+thread and header indicators stay in the exact channel/messaging-group/thread.
+Unread status, counts and read tracking apply only to web conversations, never
+external channels. Navigation never resolves requests.
+
+Indicators are separate native buttons, not nested inside agent/thread selection
+controls. Each click focuses its existing transcript entry, including repeated
+clicks on the same source, and highlights it with the same two-second pulse as
+search matches. Repeated jumps restart the pulse without stealing focus on later
+refreshes. The full-frame reader closes before handing navigation back to the transcript.
+Once a jump target is visible in the foreground, focused transcript, its exact
+publication cursor is acknowledged even if centering it leaves the viewport
+above the bottom. Newer publications and other threads remain unread; reading
+an approval never resolves it.
+Unavailable sources produce an error instead of opening an unrelated message.
+There is no floating attention control.
+
+Non-waiting sources resolve on demand through
+`GET /api/groups/:group/activity-target?kind=unread|running|latest`, optionally
+scoped by `thread`, `channel` and `mg` together. This keeps history reads out of
+routine metadata refreshes; every lookup rechecks the viewer's visible routes.
+Thread/header lookups resolve only their requested route, without rebuilding the
+agent's entire thread list. Agent-wide unread lookups use the publication index;
+idle lookups use central timestamp bounds and hydrate only candidate
+conversations, not every conversation's traces. Bounds include completed task due
+times, Chat SDK messages and approvals, preserving exact newest-source selection.
+Older summaries without optional `latestAt` facts skip pruning and use the normal
+conversation reader. An explicit, host-stopped thread-summary rebuild fills
+these additive facts without changing messages, unread watermarks or publication
+identities; normal startup does not run a backfill.
+
+The clicked indicator reports its opening state through its accessible label and
+`aria-busy` until the target is rendered and highlighted. Navigation adds no
+spinner and does not change the agent's existing activity icon.
+Repeated clicks on that control are disabled while it is opening. Errors,
+cancellation or normal navigation clear the pending state; stale requests cannot
+clear a newer request's feedback. Cross-agent jumps subscribe directly to the
+authorized destination while metadata and files refresh independently, avoiding
+a metadata/file-tree round trip before opening the conversation.
+Mobile pickers remain visible during target lookup so the clicked row's busy
+state stays visible, then close when navigation starts.
+Conversation and metadata streams share a bounded backpressure gate: while a
+valid large snapshot drains, neither stream rebuilds projections or advances
+revisions. Updates coalesce into the existing dirty bit, then resume in order.
+The existing frame/buffer limits remain; a buffer that does not drain within
+15 seconds still fails explicitly rather than accumulating an unbounded queue.
 
 Threads and agents use the same activity icon: a subtle muted
 dot for idle, a blue running ring/spinner, and a stationary amber dot when
@@ -141,7 +186,7 @@ Waiting does not hide simultaneous execution. Only the ring
 rotates. This compact busy ring is an essential progress cue and remains
 animated even with reduced motion enabled; other reduced-motion behavior is
 unchanged. Staleness mutes the indicator without freezing its running ring.
-Waiting remains a separate native clickable control, with a larger hit target
+Every activity indicator is a native clickable control, with a larger hit target
 and visible keyboard focus. Agent tabs, the selected mobile dropdown and picker
 rows, including thread and DM rows, place the icon in the secondary status line
 before the relative activity time and message/thread counts. Channel
@@ -199,8 +244,9 @@ presentations. The dot occupies the same centered status position and 6px size
 as idle and waiting dots, inside the spinner when running. Waiting takes
 precedence over unread in that shared position; names stay bold until read.
 Stale activity does not mute the independent unread dot.
-Agent summaries contain `unreadThreadCount`, counting visible conversations
-rather than messages.
+Agent summaries contain `unreadThreadCount`, counting visible web conversations
+rather than messages. External-channel conversations never show unread status,
+contribute to unread counts or emit browser read acknowledgements.
 
 Unread includes newly published messages/files and routed approval
 cards. Own inputs, edits, reactions and trace/runtime updates do not count.
@@ -214,9 +260,10 @@ positions; deleted content is inactive, and a response held behind an unsettled
 turn gets its position only when it becomes visible. No timestamps, source
 sequence numbers or WebSocket revisions are used as cross-source read cursors.
 
-`Conversation.readCursor` covers only actual projected messages/cards. A
-foreground, focused, visible transcript acknowledges that cursor after reaching
-the bottom, using `POST /api/groups/:group/chat/:thread/read` with
+`Conversation.readCursor` covers only actual projected messages/cards. Ordinary
+reading acknowledges that cursor when the foreground, focused, visible transcript
+reaches the bottom. Indicator jumps instead acknowledge the visible target's
+exact publication cursor. Both use `POST /api/groups/:group/chat/:thread/read` with
 `{ sessionId, key }` and the normal optional channel/messaging-group context.
 The host validates current access and cursor scope and advances read watermarks
 monotonically. A concurrent newer publication remains unread. Failed

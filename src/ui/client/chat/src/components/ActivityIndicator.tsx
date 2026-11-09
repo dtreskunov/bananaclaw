@@ -16,24 +16,34 @@ export function activityDetails(status: ActivityStatus, requestCount = 0, subjec
     description += attentionError.value
       ? ` ${requestCount} last known ${requestCount === 1 ? 'request' : 'requests'} in ${subject}.`
       : requestCount > 0
-        ? `. ${requests} ${requestCount === 1 ? 'needs' : 'need'} your input. Open oldest request in ${subject}`
+        ? `. ${requests} ${requestCount === 1 ? 'needs' : 'need'} your input. Open newest request in ${subject}`
         : `. No actionable requests available in ${subject}.`;
   }
   return { stale, description, actionable: !!status.waiting && !attentionError.value && requestCount > 0 };
 }
 
-export function ActivityIndicator({ status, description, unread = false }: {
+export function activityNavigationDetails(status: ActivityStatus, unread: boolean, requestCount: number, subject: string) {
+  const details = activityDetails(status, requestCount, subject);
+  const description = `${unread ? 'Unread. ' : ''}${details.description}`;
+  if (status.waiting) return { ...details, description };
+  const source = unread ? 'unread message' : status.activity === 'running' ? 'originating message' : 'message';
+  return { ...details, actionable: true, description: `${description}. Open newest ${source} in ${subject}` };
+}
+
+export function ActivityIndicator({ status, description, unread = false, navigating = false }: {
   status: ActivityStatus;
   description?: string;
   unread?: boolean;
+  navigating?: boolean;
 }) {
   const details = activityDetails(status);
-  const label = `${unread ? 'Unread. ' : ''}${description ?? details.description}`;
+  const label = description ?? `${unread ? 'Unread. ' : ''}${details.description}`;
   return (
     <span
       class={`activity-indicator ${status.activity}${status.waiting ? ' waiting' : ''}${unread ? ' unread' : ''}${details.stale ? ' stale' : ''}`}
       role="status"
-      aria-live="off"
+      aria-live={navigating ? 'polite' : 'off'}
+      aria-busy={navigating || undefined}
       aria-label={label}
       title={label}
     >

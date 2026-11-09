@@ -63,4 +63,19 @@ describe('one canonical attention snapshot', () => {
     selectAttention('a', true);
     expect(attentionSelection.value!.navigation).toBeGreaterThan(first.navigation);
   });
+  it('validates optional publication cursors on waiting targets', () => {
+    expect(
+      isAttentionTargets([
+        {
+          ...targets[0],
+          readCursor: {
+            sessionId: 's',
+            key: '0123456789abcdef0123456789abcdef',
+          },
+        },
+      ]),
+    ).toBe(true);
+    expect(isAttentionTargets([{ ...targets[0], readCursor: { sessionId: 's', key: 'invalid' } }])).toBe(false);
+    expect(isAttentionTargets([{ ...targets[0], readCursor: null }])).toBe(false);
+  });
 });

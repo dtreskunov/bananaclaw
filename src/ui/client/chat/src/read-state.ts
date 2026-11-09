@@ -15,12 +15,21 @@ interface ReadTarget {
   messagingGroupId: string | null;
   cursor: ReadCursor;
 }
+interface ReadElement {
+  getClientRects(): { length: number };
+  getBoundingClientRect(): { top: number; bottom: number; left: number; right: number };
+}
 class ReadAckError extends Error {}
 
 // A newer rendered cursor can replace its tracker before the retry succeeds.
 const readErrors = new Map<string, number>();
 
-export function attachReadTracking(log: ReadLog, target: ReadTarget): () => void {
+export function attachReadTracking(
+  log: ReadLog,
+  target: ReadTarget,
+  atReadPosition = () => log.scrollHeight - log.scrollTop - log.clientHeight < 60,
+): () => void {
+  if (target.channelType !== 'web') return () => {};
   const errorKey = JSON.stringify([target.groupId, target.threadId, target.channelType, target.messagingGroupId]);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let complete = false;
@@ -29,7 +38,7 @@ export function attachReadTracking(log: ReadLog, target: ReadTarget): () => void
     document.visibilityState === 'visible' &&
     document.hasFocus() &&
     log.getClientRects().length > 0 &&
-    log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    atReadPosition();
   const send = async () => {
     if (complete || request || !eligible()) return;
     request = new AbortController();
@@ -97,4 +106,22 @@ export function attachReadTracking(log: ReadLog, target: ReadTarget): () => void
     document.removeEventListener('visibilitychange', schedule);
     window.removeEventListener('focus', schedule);
   };
+}
+
+export function attachJumpReadTracking(
+  log: ReadLog & ReadElement,
+  element: ReadElement,
+  target: ReadTarget,
+): () => void {
+  return attachReadTracking(log, target, () => {
+    if (!element.getClientRects().length || document.querySelector('dialog:modal')) return false;
+    const viewport = log.getBoundingClientRect();
+    const message = element.getBoundingClientRect();
+    return (
+      message.bottom > Math.max(viewport.top, 0) &&
+      message.top < Math.min(viewport.bottom, window.innerHeight) &&
+      message.right > Math.max(viewport.left, 0) &&
+      message.left < Math.min(viewport.right, window.innerWidth)
+    );
+  });
 }

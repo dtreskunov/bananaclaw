@@ -57,7 +57,7 @@ describe('status-line tab indicators', () => {
     expect(select).toHaveBeenCalledExactlyOnceWith('g');
   });
 
-  it('closes the mobile sheet when its separate waiting icon is activated', () => {
+  it('closes the mobile sheet when its separate waiting icon is activated', async () => {
     hooks.sheetOpen = true;
     const badge = vi.fn();
     const root = TabBar({
@@ -69,7 +69,7 @@ describe('status-line tab indicators', () => {
     const sheet = root.props.children[2];
     const dialog = sheet.type(sheet.props);
     const item = dialog.props.children.props.children[0][0];
-    item.props.onBadgeClick();
+    await item.props.onBadgeClick();
     expect(hooks.setSheetOpen).toHaveBeenCalledWith(false);
     expect(badge).toHaveBeenCalledOnce();
   });

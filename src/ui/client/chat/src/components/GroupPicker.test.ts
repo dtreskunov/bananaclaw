@@ -8,16 +8,18 @@ vi.mock('preact/hooks', async (original) => ({
 }));
 vi.mock('../actions', async (original) => ({
   ...(await original<typeof import('../actions')>()),
-  navigateAttention: vi.fn().mockResolvedValue(true),
+  navigateActivity: vi.fn().mockResolvedValue(true),
   selectGroup: vi.fn().mockResolvedValue(undefined),
 }));
-import { navigateAttention, selectGroup } from '../actions';
+import { navigateActivity, selectGroup } from '../actions';
 import { attentionError, attentionTargets } from '../attention-state';
 import { agentActivity, groups, groupId, groupPickerMode, groupPickerOpen, isElevatedUser } from '../state';
 import { ActivityIndicator } from './ActivityIndicator';
 import { GroupStrip, GroupPickerModal } from './GroupPicker';
+import { beginActivityNavigation, cancelActivityNavigation } from '../activity-navigation';
 
 afterEach(() => {
+  cancelActivityNavigation();
   attentionTargets.value = null;
   attentionError.value = null;
   agentActivity.value = [];
@@ -38,6 +40,36 @@ function waitingGroup() {
 }
 
 describe('agent activity status', () => {
+  it('keeps the picker visible while the destination is being located', async () => {
+    waitingGroup();
+    groupPickerOpen.value = true;
+    let resolve!: (opened: boolean) => void;
+    vi.mocked(navigateActivity).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const row = GroupPickerModal()!.props.children.props.children[0];
+    const opening = row.props.onBadgeClick();
+    expect(groupPickerOpen.value).toBe(true);
+    resolve(true);
+    await opening;
+    expect(groupPickerOpen.value).toBe(false);
+  });
+  it('immediately exposes an independent busy control in desktop, dropdown and picker rows', () => {
+    waitingGroup();
+    beginActivityNavigation('g');
+    const item = GroupStrip()!.props.items[0];
+    expect(item.badgeBusy).toBe(true);
+    expect(item.badgeDisabled).toBe(true);
+    expect(item.badgeLabel).toBe('Opening message in Group\u2026');
+    expect(item.badge.props.navigating).toBe(true);
+    groupPickerOpen.value = true;
+    const row = GroupPickerModal()!.props.children.props.children[0];
+    expect(row.props.badgeBusy).toBe(true);
+    expect(row.props.badgeDisabled).toBe(true);
+  });
   it('shares unread styling and descriptions across tabs and the admin-only mobile fallback', () => {
     waitingGroup();
     agentActivity.value = [{ id: 'g', activity: 'idle', waiting: true, unreadThreadCount: 2 }];
@@ -65,27 +97,28 @@ describe('agent activity status', () => {
     expect(GroupStrip()!.props.items[0].sublabel).toBe(threadCount ? `${threadCount} thr` : undefined);
   });
 
-  it('uses the shared icon for waiting, and opens the oldest pending request', () => {
+  it('uses the shared icon for waiting, and opens the newest pending request', () => {
     waitingGroup();
     const item = GroupStrip()!.props.items[0];
     expect(item.badge.type).toBe(ActivityIndicator);
     expect(ActivityIndicator(item.badge.props)!.props.class).toBe('activity-indicator idle waiting');
     expect(item.badgeLabel).toBe(
-      'Activity: Idle. Waiting for input. 1 request needs your input. Open oldest request in Group',
+      'Activity: Idle. Waiting for input. 1 request needs your input. Open newest request in Group',
     );
     expect(item.badgeDisabled).toBe(false);
     item.onBadgeClick();
-    expect(navigateAttention).toHaveBeenCalledExactlyOnceWith('g');
+    expect(navigateActivity).toHaveBeenCalledExactlyOnceWith('g', expect.objectContaining({ waiting: true }), false);
     expect(selectGroup).not.toHaveBeenCalled();
   });
 
-  it('keeps running labels non-interactive even if an old attention count remains', () => {
+  it('makes running labels navigate to their source even if old attention remains', () => {
     waitingGroup();
     agentActivity.value = [{ id: 'g', activity: 'running' }];
     const item = GroupStrip()!.props.items[0];
     expect(ActivityIndicator(item.badge.props)!.props.class).toBe('activity-indicator running');
-    expect(item.badgeLabel).toBe('Activity: Running');
-    expect(item.onBadgeClick).toBeUndefined();
+    expect(item.badgeLabel).toBe('Activity: Running. Open newest originating message in Group');
+    item.onBadgeClick();
+    expect(navigateActivity).toHaveBeenCalledWith('g', expect.objectContaining({ activity: 'running' }), false);
   });
 
   it('omits unknown status rather than inventing idle', () => {
@@ -102,7 +135,8 @@ describe('agent activity status', () => {
     agentActivity.value = [{ id: 'g', activity: 'idle' }];
     const item = GroupStrip()!.props.items[0];
     expect(ActivityIndicator(item.badge.props).props.class).toBe('activity-indicator idle');
-    expect(item.onBadgeClick).toBeUndefined();
+    item.onBadgeClick();
+    expect(navigateActivity).toHaveBeenCalledWith('g', expect.objectContaining({ activity: 'idle' }), false);
   });
 
   it.each(['unknown', 'empty', 'offline'] as const)('disables waiting navigation when %s', (reason) => {
@@ -120,7 +154,7 @@ describe('agent activity status', () => {
       expect(item.badgeLabel).toContain('No actionable requests');
     }
     item.onBadgeClick();
-    expect(navigateAttention).not.toHaveBeenCalled();
+    expect(navigateActivity).not.toHaveBeenCalled();
   });
 
   it('does not navigate to another agent’s request', () => {
@@ -143,7 +177,7 @@ describe('agent activity status', () => {
 });
 
 describe.each(['all', 'non-members'] as const)('agent picker (%s)', (mode) => {
-  it('reuses activity icons and oldest-request navigation, retaining normal row selection', () => {
+  it('reuses activity icons and newest-source navigation, retaining normal row selection', async () => {
     waitingGroup();
     agentActivity.value = [{ id: 'g', activity: 'idle', waiting: true, threadCount: 3, unreadThreadCount: 1 }];
     if (mode === 'non-members') {
@@ -158,17 +192,17 @@ describe.each(['all', 'non-members'] as const)('agent picker (%s)', (mode) => {
     expect(row.props.badge.type).toBe(ActivityIndicator);
     expect(row.props.badge.props.unread).toBe(true);
     expect(row.props.sublabel).toMatch(/ \u00b7 3 thr$/);
-    expect(row.props.badgeLabel).toContain('Open oldest request in Group');
+    expect(row.props.badgeLabel).toContain('Open newest request in Group');
     expect(row.props.badgeDisabled).toBe(false);
-    row.props.onBadgeClick();
+    await row.props.onBadgeClick();
     expect(groupPickerOpen.value).toBe(false);
-    expect(navigateAttention).toHaveBeenCalledExactlyOnceWith('g');
+    expect(navigateActivity).toHaveBeenCalledExactlyOnceWith('g', expect.objectContaining({ waiting: true }), true);
     expect(selectGroup).not.toHaveBeenCalled();
     row.props.onClick();
     expect(selectGroup).toHaveBeenCalledExactlyOnceWith('g');
   });
 
-  it('keeps both running and idle icons passive in the picker', () => {
+  it('makes both running and idle icons actionable in the picker', () => {
     groups.value = [
       { id: 'running', name: 'Running agent', elevatedOnly: mode === 'non-members', lastActivityAt: null },
       { id: 'idle', name: 'Idle agent', elevatedOnly: mode === 'non-members', lastActivityAt: null },
@@ -182,8 +216,10 @@ describe.each(['all', 'non-members'] as const)('agent picker (%s)', (mode) => {
     groupPickerMode.value = mode;
     const rows = GroupPickerModal()!.props.children.props.children;
     expect(ActivityIndicator(rows[0].props.badge.props)!.props.class).toBe('activity-indicator running');
-    expect(rows[0].props.onBadgeClick).toBeUndefined();
+    rows[0].props.onBadgeClick();
+    expect(navigateActivity).toHaveBeenCalledWith('running', expect.objectContaining({ activity: 'running' }), false);
     expect(ActivityIndicator(rows[1].props.badge.props).props.class).toBe('activity-indicator idle');
-    expect(rows[1].props.onBadgeClick).toBeUndefined();
+    rows[1].props.onBadgeClick();
+    expect(navigateActivity).toHaveBeenCalledWith('idle', expect.objectContaining({ activity: 'idle' }), false);
   });
 });

@@ -16,19 +16,21 @@ import {
   clearSearch,
   openTaskPanel,
   threadCtxOf,
-  navigateAttention,
+  navigateActivity,
 } from '../actions';
 import { requestChoice, requestConfirm } from './PromptModal';
 import { Pane } from './Pane';
 import { TrashIcon } from './ActionIcons';
 import { RelativeTime } from './RelativeTime';
 import type { Thread, SearchResult } from '../types';
-import { ActivityIndicator, activityDetails } from './ActivityIndicator';
+import { ActivityIndicator, activityNavigationDetails } from './ActivityIndicator';
 import { threadAttentionCount } from '../attention-state';
 import { withPendingActivity } from '../conversation-state';
 import { buildThreadTree } from '../thread-tree';
 import { attachScrollEdges } from '../scroll-edges';
 import type { ReaderNavigate } from '../transcript-reader';
+import { highlightMessage } from '../message-highlight';
+import { isActivityNavigating } from '../activity-navigation';
 
 export function ThreadTitle({ title, unread }: { title: string; unread?: boolean }) {
   const ref = useRef<HTMLSpanElement | null>(null);
@@ -55,24 +57,29 @@ export function ThreadAttention({ thread, onNavigate }: { thread: Thread; onNavi
   };
   const count = threadAttentionCount(location);
   const status = withPendingActivity(thread, groupId.value, thread);
-  const { actionable, description } = activityDetails(status, count, thread.title);
-  const indicator = <ActivityIndicator status={status} description={description} unread={thread.unread} />;
-  return status.waiting ? (
+  const unread = location.channelType === 'web' && !!thread.unread;
+  const navigating = isActivityNavigating(location);
+  const details = activityNavigationDetails(status, unread, count, thread.title);
+  const actionable = details.actionable && !navigating;
+  const description = navigating ? `Opening message in ${thread.title}\u2026` : details.description;
+  const indicator = <ActivityIndicator status={status} description={description} unread={unread} navigating={navigating} />;
+  return (
     <button type="button" class="activity-action activity-dot-action thread-attention"
       disabled={!actionable}
+      aria-busy={navigating || undefined}
       aria-label={description}
       title={description}
       onClick={(event: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
         if (actionable) {
-          const navigate = (): void => { void navigateAttention(location); };
+          const navigate = (): void => { void navigateActivity(location, status, unread); };
           if (onNavigate) onNavigate(navigate);
           else navigate();
         }
       }}>
       {indicator}
     </button>
-  ) : indicator;
+  );
 }
 
 export function ThreadRow({ t, guides = [] }: { t: Thread; guides?: boolean[] }) {
@@ -136,7 +143,7 @@ export function ThreadRow({ t, guides = [] }: { t: Thread; guides?: boolean[] })
   };
   return (
     <div
-      class={'thread' + (active ? ' active' : '') + (guides.length ? ' branch' : '') + (t.unread ? ' is-unread' : '')}
+      class={'thread' + (active ? ' active' : '') + (guides.length ? ' branch' : '') + (ct === 'web' && t.unread ? ' is-unread' : '')}
       data-id={t.threadId}
       style={{ '--thread-depth': guides.length }}
       onClick={onOpen}
@@ -153,7 +160,7 @@ export function ThreadRow({ t, guides = [] }: { t: Thread; guides?: boolean[] })
       ) : null}
       <div class="title">
         {ct !== 'web' ? <span class="ch-pill" title={pillTitle}>{meta.icon}</span> : null}
-        <ThreadTitle title={t.title} unread={t.unread} />
+        <ThreadTitle title={t.title} unread={ct === 'web' && t.unread} />
         {head ? (
           <button
             type="button"
@@ -189,10 +196,10 @@ export function DmRow({ t }: { t: Thread }) {
     drawerOpen.threads.value = false;
   };
   return (
-    <div class={'thread dm' + (active ? ' active' : '') + (t.unread ? ' is-unread' : '')} data-id={t.threadId} onClick={onOpen}>
+    <div class={'thread dm' + (active ? ' active' : '') + (ct === 'web' && t.unread ? ' is-unread' : '')} data-id={t.threadId} onClick={onOpen}>
       <div class="title">
         <span class="ch-pill dm" title={meta.label}>{meta.icon}</span>
-        <ThreadTitle title={meta.label} unread={t.unread} />
+        <ThreadTitle title={meta.label} unread={ct === 'web' && t.unread} />
       </div>
       <div class="meta">
         <ThreadAttention thread={t} />
@@ -277,8 +284,7 @@ function SearchResultRow({ r }: { r: SearchResult }) {
         const el = document.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          el.classList.add('highlight-pulse');
-          setTimeout(() => el.classList.remove('highlight-pulse'), 2000);
+          highlightMessage(el);
         }
       }, 100);
     } else {

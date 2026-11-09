@@ -71,6 +71,7 @@ import { conversationSnapshot } from './conversation-stream.js';
 import { acknowledgeRead, ReadStateError } from './read-state.js';
 import { isReadCursor } from '../../shared/read-state.js';
 import { chatAssetVersion } from './asset-version.js';
+import { readActivityTarget } from './activity-target.js';
 
 // UI assets live under src/ (not compiled by tsc); resolve from project root,
 // which the host always runs from.
@@ -166,6 +167,32 @@ function on(method: FmwMethod, route: string, handler: RouteHandler): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   router.on(method, route, handler as any);
 }
+
+on(
+  'GET',
+  '/api/groups/:groupId/activity-target',
+  authed(async (ctx, userId, params) => {
+    if (!canAccessAgentGroup(userId, params.groupId).allowed) return json(ctx, 403, { error: 'forbidden' });
+    const kind = ctx.url.searchParams.get('kind');
+    if (kind !== 'unread' && kind !== 'running' && kind !== 'latest')
+      return json(ctx, 400, { error: 'invalid_activity_kind' });
+    const threadId = ctx.url.searchParams.get('thread');
+    const channelType = ctx.url.searchParams.get('channel');
+    const messagingGroupId = ctx.url.searchParams.get('mg');
+    if (
+      ['thread', 'channel', 'mg'].some((key) => ctx.url.searchParams.has(key)) &&
+      !(threadId && channelType && messagingGroupId)
+    )
+      return json(ctx, 400, { error: 'invalid_context' });
+    const target = await readActivityTarget(
+      userId,
+      params.groupId,
+      kind,
+      threadId && channelType && messagingGroupId ? { threadId, channelType, messagingGroupId } : undefined,
+    );
+    return target ? json(ctx, 200, target) : json(ctx, 404, { error: 'activity_source_unavailable' });
+  }),
+);
 
 on(
   'POST',

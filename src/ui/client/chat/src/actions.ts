@@ -53,11 +53,16 @@ import {
   userMenuOpen,
   credentialsOpen,
 } from './state';
-import { api, postJson, redirectToLogin, protocolFetch } from './api';
+import { api, postJson, redirectToLogin, protocolFetch, UnauthorizedError, UiProtocolError } from './api';
 import { clearApprovalMessage } from './approval-messages';
 import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
-import { applyConversationFrame, conversationState, resetConversation } from './conversation-state';
+import {
+  applyConversationFrame,
+  conversationState,
+  pendingActivitySends,
+  resetConversation,
+} from './conversation-state';
 import type { GlobalSyncState } from '../../../shared/sync';
 import { SyncConnection } from './sync-connection';
 import {
@@ -69,7 +74,19 @@ import {
 } from './attention-state';
 import { openChat as openChatView } from './credentials-navigation';
 import type { InteractionResponse } from '../../../shared/conversation';
-import type { ChatStartResponse } from '../../../shared/thread';
+import type { ActivityStatus, ChatStartResponse } from '../../../shared/thread';
+import type { ActivityNavigationKind, ActivityTarget } from '../../../shared/activity-target';
+import {
+  activitySelection,
+  selectActivity,
+  beginActivityNavigation,
+  cancelActivityNavigation,
+  isCurrentActivityNavigation,
+  setActivityDestination,
+  finishActivityNavigation,
+  isActivityNavigating,
+} from './activity-navigation';
+import { readerSelection } from './transcript-reader';
 import { applyTurnState, resetTurnState } from './stop-turn';
 import { parentPath } from './utils';
 import { showToast } from './components/Toast';
@@ -420,7 +437,9 @@ export function clearSearch(): void {
 }
 
 // ── chat ────────────────────────────────────────────────────────────
-export function clearChat(): void {
+export function clearChat(preserveActivityNavigation = false): void {
+  if (!preserveActivityNavigation) cancelActivityNavigation();
+  activitySelection.value = null;
   resetConversation();
   resetTurnState();
   voice.detach();
@@ -451,6 +470,7 @@ export function startSync(): () => void {
     apply: (frame) => {
       batch(() => {
         if (frame.conversation === null && threadId.value) {
+          cancelActivityNavigation();
           resetConversation();
           resetTurnState();
           voice.detach();
@@ -467,7 +487,8 @@ export function startSync(): () => void {
       });
     },
     connecting: () => {
-      if (threadId.value) chatStatus.value = 'syncing\u2026';
+      if (threadId.value)
+        chatStatus.value = isActivityNavigating(groupId.value ?? '') ? 'Opening message\u2026' : 'syncing\u2026';
     },
     unavailable: (message) => {
       attentionError.value = message;
@@ -478,6 +499,7 @@ export function startSync(): () => void {
       }
     },
     reload: () => {
+      cancelActivityNavigation();
       chatReloadRequired.value = true;
       showClientReloadPrompt('Synchronization protocol changed');
     },
@@ -580,8 +602,9 @@ export async function openChat(
   gid: string,
   resumeTid: string | null,
   opts: ThreadCtx | null,
-  options: { focusComposer?: boolean } = {},
+  options: { focusComposer?: boolean; activityNavigation?: number } = {},
 ): Promise<void> {
+  if (options.activityNavigation === undefined) cancelActivityNavigation();
   if (
     resumeTid &&
     groupId.value === gid &&
@@ -623,7 +646,12 @@ export async function openChat(
     canSend.value = ct === 'web' ? false : cs;
     if (resumeTid) {
       chatLoading.value = true;
-      chatStatus.value = ct === 'web' ? 'connecting\u2026' : 'loading history\u2026';
+      chatStatus.value =
+        options.activityNavigation !== undefined
+          ? 'Opening message\u2026'
+          : ct === 'web'
+            ? 'connecting\u2026'
+            : 'loading history\u2026';
     }
   });
   refs.seenIds.clear();
@@ -926,6 +954,7 @@ export async function selectGroup(
     newConversation?: boolean;
     resume?: { threadId: string; context: ThreadCtx };
     focusComposer?: boolean;
+    activityNavigation?: number;
   } = {},
 ): Promise<void> {
   const groupChanged = groupId.value !== gid;
@@ -940,7 +969,7 @@ export async function selectGroup(
   // to, so neither the echo nor the reply appears live. Clearing threadId
   // here makes sendChat early-return and disables the composer until
   // openChat wires up the new group's thread.
-  clearChat();
+  clearChat(options.activityNavigation !== undefined && isCurrentActivityNavigation(options.activityNavigation));
   const generation = refs.chatGeneration;
   batch(() => {
     if (groupChanged) threads.value = [];
@@ -950,6 +979,15 @@ export async function selectGroup(
   });
   clearSearch();
   clearFileSearch();
+  if (options.resume && options.activityNavigation !== undefined) {
+    // The target has already been authorized; the normal subscription refreshes metadata and files.
+    await openChat(gid, options.resume.threadId, options.resume.context, {
+      focusComposer: false,
+      activityNavigation: options.activityNavigation,
+    });
+    void loadTree('');
+    return;
+  }
   const threadsFresh = await loadThreads(gid);
   if (generation !== refs.chatGeneration || groupId.value !== gid) return;
   // The global socket follows the selected group automatically.
@@ -970,32 +1008,143 @@ export async function selectGroup(
   }
 }
 
+async function openActivityTarget(
+  target: ActivityTarget,
+  navigation: number,
+  local = false,
+): Promise<ActivityTarget | null> {
+  setActivityDestination(navigation, target);
+  if (credentialsOpen.value) openChatView();
+  drawerOpen.threads.value = false;
+  drawerOpen.files.value = false;
+  clearSearch();
+  highlightMessageId.value = null;
+  readerSelection.value = null;
+  const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
+  const context: ThreadCtx = { channelType: channel, messagingGroupId: mg || null, canSend: false };
+  const options = { focusComposer: false, activityNavigation: navigation };
+  if (groupId.value !== gid) await selectGroup(gid, { ...options, resume: { threadId: tid, context } });
+  else await openChat(gid, tid, local ? null : context, options);
+  if (
+    !isCurrentActivityNavigation(navigation) ||
+    groupId.value !== gid ||
+    threadId.value !== tid ||
+    channelType.value !== channel ||
+    (!local && messagingGroupId.value !== mg)
+  ) {
+    finishActivityNavigation(navigation);
+    return null;
+  }
+  if (local) {
+    target = { ...target, origin: { ...target.origin, messagingGroupId: messagingGroupId.value ?? '' } };
+    setActivityDestination(navigation, target);
+  }
+  return target;
+}
+
+function failActivityNavigation(
+  navigation: number,
+  error: unknown,
+  subject: 'input request' | 'activity source',
+): false {
+  finishActivityNavigation(navigation);
+  if (
+    !(error instanceof TypeError) &&
+    !(error instanceof UnauthorizedError) &&
+    !(error instanceof UiProtocolError) &&
+    !(error instanceof Error && /^HTTP \d{3}$/.test(error.message))
+  )
+    throw error;
+  if (!isCurrentActivityNavigation(navigation)) return false;
+  console.error('Activity navigation failed', error);
+  showToast(`Could not open ${subject}: ${error.message}`, 'err', 5000, { transient: error.message === 'HTTP 404' });
+  return false;
+}
+
 export async function navigateAttention(scope: string | AttentionLocation): Promise<boolean> {
   const targets = attentionTargets.value;
   if (!targets?.length || attentionError.value) return false;
-  const target = targets.find((target) =>
-    typeof scope === 'string' ? target.origin.agentGroupId === scope : matchesAttentionLocation(target, scope),
-  );
+  const target = [...targets]
+    .reverse()
+    .find((target) =>
+      typeof scope === 'string' ? target.origin.agentGroupId === scope : matchesAttentionLocation(target, scope),
+    );
   if (!target) return false;
+  const navigation = beginActivityNavigation(scope);
+  activitySelection.value = null;
   selectAttention(target.id, true);
   try {
-    if (credentialsOpen.value) openChatView();
-    drawerOpen.threads.value = false;
-    drawerOpen.files.value = false;
-    const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
-    const context: ThreadCtx = { channelType: channel, messagingGroupId: mg, canSend: false };
-    if (groupId.value !== gid) await selectGroup(gid, { resume: { threadId: tid, context }, focusComposer: false });
-    else await openChat(gid, tid, context, { focusComposer: false });
+    return (
+      (await openActivityTarget(
+        {
+          origin: target.origin,
+          anchor: { kind: 'interaction', id: target.id },
+          ...(target.readCursor ? { readCursor: target.readCursor } : {}),
+        },
+        navigation,
+      )) !== null
+    );
+  } catch (error) {
+    return failActivityNavigation(navigation, error, 'input request');
+  }
+}
+
+export async function navigateActivity(
+  scope: string | AttentionLocation,
+  status: ActivityStatus,
+  unread = false,
+): Promise<boolean> {
+  if (status.waiting) return navigateAttention(scope);
+  const navigation = beginActivityNavigation(scope);
+  const gid = typeof scope === 'string' ? scope : scope.agentGroupId;
+  if (!gid) {
+    finishActivityNavigation(navigation);
+    showToast('Could not open activity source: no agent selected.', 'err', 5000, { transient: true });
+    return false;
+  }
+  const generation = refs.chatGeneration;
+  try {
+    const local =
+      !unread && status.activity === 'running'
+        ? pendingActivitySends(
+            gid,
+            typeof scope === 'string'
+              ? undefined
+              : {
+                  threadId: scope.threadId ?? '',
+                  channelType: scope.channelType ?? 'web',
+                },
+          ).reduce<PendingWebSend | undefined>(
+            (latest, send) => (!latest || send.timestamp > latest.timestamp ? send : latest),
+            undefined,
+          )
+        : undefined;
+    let target: ActivityTarget;
+    if (local) {
+      target = {
+        origin: { agentGroupId: gid, threadId: local.threadId, channelType: 'web', messagingGroupId: '' },
+        anchor: { kind: 'message', id: local.messageId },
+      };
+    } else {
+      const kind: ActivityNavigationKind = unread ? 'unread' : status.activity === 'running' ? 'running' : 'latest';
+      const query = new URLSearchParams({ kind });
+      if (typeof scope !== 'string') {
+        query.set('thread', scope.threadId ?? '');
+        query.set('channel', scope.channelType || 'web');
+        query.set('mg', scope.messagingGroupId ?? '');
+      }
+      target = await api<ActivityTarget>(`api/groups/${encodeURIComponent(gid)}/activity-target?${query}`);
+    }
+    if (generation !== refs.chatGeneration || !isCurrentActivityNavigation(navigation)) {
+      finishActivityNavigation(navigation);
+      return false;
+    }
+    const selectedTarget = await openActivityTarget(target, navigation, !!local);
+    if (!selectedTarget) return false;
+    selectActivity(selectedTarget);
     return true;
   } catch (error) {
-    console.error('Input request navigation failed', error);
-    showToast(
-      'Could not open input request: ' + (error instanceof Error ? error.message : String(error)),
-      'err',
-      5000,
-      { transient: error instanceof Error && error.message === 'HTTP 404' },
-    );
-    return false;
+    return failActivityNavigation(navigation, error, 'activity source');
   }
 }
 
@@ -1091,7 +1240,8 @@ export async function restoreFileSearch(open: boolean, root: string, query: stri
 let fileSelectionGeneration = 0;
 
 export async function loadTree(p: string): Promise<void> {
-  fileSelectionGeneration++;
+  const generation = ++fileSelectionGeneration;
+  const gid = groupId.value;
   batch(() => {
     treePath.value = p;
     filePath.value = null;
@@ -1100,15 +1250,17 @@ export async function loadTree(p: string): Promise<void> {
     treeEntries.value = [];
   });
   try {
-    if (!groupId.value) return;
+    if (!gid) return;
     const segs = String(p || '')
       .split('/')
       .filter(Boolean)
       .map(encodeURIComponent);
-    const url = `api/groups/${encodeURIComponent(groupId.value)}/dirs/${segs.length ? segs.join('/') + '/' : ''}`;
+    const url = `api/groups/${encodeURIComponent(gid)}/dirs/${segs.length ? segs.join('/') + '/' : ''}`;
     const { entries } = await api<{ entries: TreeEntry[] }>(url);
+    if (generation !== fileSelectionGeneration || groupId.value !== gid) return;
     treeEntries.value = entries || [];
   } catch (err) {
+    if (generation !== fileSelectionGeneration || groupId.value !== gid) return;
     const msg = /HTTP 404/.test(String(err && (err as Error).message))
       ? 'Not found. It may have been renamed or deleted.'
       : String((err as Error)?.message || err);

@@ -14,29 +14,33 @@ import {
   agentActivity,
 } from '../state';
 import { openChat } from '../credentials-navigation';
-import { navigateAttention, selectGroup } from '../actions';
+import { navigateActivity, selectGroup } from '../actions';
 import { fmtRelative, fmtAbsolute } from '../utils';
 import type { Group } from '../types';
 import { createGroupOpen } from './CreateGroupModal';
 import { TabBar, type TabItem, type TabExtra } from './TabBar';
 import { MobileDialog, MobileDialogItem, MobileDialogList } from './MobileDialog';
-import { ActivityIndicator, activityDetails } from './ActivityIndicator';
+import { ActivityIndicator, activityNavigationDetails } from './ActivityIndicator';
 import { groupAttentionCount } from '../attention-state';
 import { withPendingActivity } from '../conversation-state';
+import { isActivityNavigating } from '../activity-navigation';
 
 function activityBadge(group: Group) {
   const saved = agentActivity.value.find((activity) => activity.id === group.id);
   if (!saved) return {};
   const status = withPendingActivity(saved, group.id);
   const count = groupAttentionCount(group.id);
-  const { actionable, description } = activityDetails(status, count, group.name);
+  const unread = !!saved.unreadThreadCount;
+  const navigating = isActivityNavigating(group.id);
+  const details = activityNavigationDetails(status, unread, count, group.name);
+  const actionable = details.actionable && !navigating;
+  const description = navigating ? `Opening message in ${group.name}\u2026` : details.description;
   return {
-    badge: <ActivityIndicator status={status} description={description} unread={!!saved.unreadThreadCount} />,
+    badge: <ActivityIndicator status={status} description={description} unread={unread} navigating={navigating} />,
     badgeLabel: description,
     badgeDisabled: !actionable,
-    onBadgeClick: status.waiting
-      ? () => { if (actionable) void navigateAttention(group.id); }
-      : undefined,
+    badgeBusy: navigating,
+    onBadgeClick: () => actionable ? navigateActivity(group.id, status, unread) : undefined,
   };
 }
 
@@ -166,7 +170,9 @@ export function GroupPickerModal() {
             <MobileDialogItem
               key={g.id}
               {...item}
-              onBadgeClick={item.onBadgeClick ? () => { close(); item.onBadgeClick?.(); } : undefined}
+              onBadgeClick={item.onBadgeClick ? async () => {
+                if (await item.onBadgeClick?.() !== false) close();
+              } : undefined}
               active={isActive}
               onClick={() => pick(g.id)}
             />

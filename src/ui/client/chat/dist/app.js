@@ -19837,12 +19837,17 @@ function submissionPresentation(transcript, submissions, view, groupId3, threadI
 var conversationState = y3(null);
 var completedResponse = y3(null);
 var chatTranscript = y3([]);
+function pendingActivitySends(gid, thread2) {
+  const matches2 = (tid) => !thread2 || (thread2.channelType || "web") === "web" && thread2.threadId === tid;
+  const current = gid === groupId.value && channelType.value === "web";
+  return pendingWebSends.value.filter(
+    (send) => send.groupId === gid && send.status !== "failed" && matches2(send.threadId) && (send.status === "sending" || current && send.threadId === threadId.value)
+  );
+}
 function withPendingActivity(status, gid, thread2) {
   const matches2 = (tid) => !thread2 || (thread2.channelType || "web") === "web" && thread2.threadId === tid;
   const current = gid === groupId.value && channelType.value === "web";
-  const local = pendingWebSends.value.some(
-    (send) => send.groupId === gid && send.status !== "failed" && matches2(send.threadId) && (send.status === "sending" || current && send.threadId === threadId.value)
-  );
+  const local = pendingActivitySends(gid, thread2).length > 0;
   const selected = conversationState.value?.conversation;
   const view = current && selected?.threadId === threadId.value && matches2(selected.threadId) && (!thread2?.messagingGroupId || thread2.messagingGroupId === messagingGroupId.value) ? selected : null;
   const busy = local || view?.turns.some((turn2) => turn2.phase !== "settled");
@@ -19995,6 +20000,7 @@ function isAttentionTargets(value) {
     if (!target || typeof target !== "object" || !("id" in target) || !text2(target.id) || ids.has(target.id))
       return false;
     ids.add(target.id);
+    if ("readCursor" in target && !isReadCursor(target.readCursor)) return false;
     if (!("origin" in target)) return false;
     const origin = target.origin;
     return !!origin && typeof origin === "object" && "agentGroupId" in origin && text2(origin.agentGroupId) && "threadId" in origin && text2(origin.threadId) && "channelType" in origin && text2(origin.channelType) && "messagingGroupId" in origin && text2(origin.messagingGroupId);
@@ -20389,6 +20395,85 @@ function openChat() {
   credentialsOpen.value = false;
   writeHash();
   if (location.hash === "#credentials") location.hash = "";
+}
+
+// src/activity-navigation.ts
+var activitySelection = y3(null);
+var activityNavigationPending = y3(null);
+var sequence = 0;
+var requestSequence = 0;
+function beginActivityNavigation(scope) {
+  const request = ++requestSequence;
+  activityNavigationPending.value = { request, scope };
+  return request;
+}
+function cancelActivityNavigation() {
+  requestSequence++;
+  activityNavigationPending.value = null;
+}
+function isCurrentActivityNavigation(request) {
+  return request === requestSequence;
+}
+function setActivityDestination(request, target) {
+  const pending4 = activityNavigationPending.value;
+  if (pending4?.request === request) activityNavigationPending.value = { ...pending4, target };
+}
+function finishActivityNavigation(request) {
+  if (activityNavigationPending.value?.request === request) activityNavigationPending.value = null;
+}
+function isActivityNavigating(scope) {
+  const pending4 = activityNavigationPending.value;
+  if (!pending4) return false;
+  const source = pending4.target?.origin ?? pending4.scope;
+  const gid = typeof source === "string" ? source : source.agentGroupId;
+  if ((typeof scope === "string" ? scope : scope.agentGroupId) !== gid) return false;
+  if (typeof scope === "string") return true;
+  return typeof source !== "string" && scope.threadId === source.threadId && (scope.channelType || "web") === (source.channelType || "web") && (!scope.messagingGroupId || !source.messagingGroupId || scope.messagingGroupId === source.messagingGroupId);
+}
+function selectActivity(target) {
+  activitySelection.value = { target, navigation: ++sequence };
+}
+
+// src/transcript-reader.ts
+var readerSelection = y3(null);
+function readerLocation() {
+  return JSON.stringify([groupId.value, threadId.value, channelType.value, messagingGroupId.value]);
+}
+function readerKey(id2) {
+  return `${id2.kind}:${id2.id}`;
+}
+function openTranscriptReader(id2) {
+  readerSelection.value = { location: readerLocation(), key: readerKey(id2) };
+}
+function readerPages(rows) {
+  const seen = /* @__PURE__ */ new Set();
+  return rows.flatMap((row) => {
+    let id2;
+    let anchorId;
+    if (row.kind === "message") {
+      const message2 = row.message;
+      if (message2.direction === "event" || isSystemNotice(message2.direction, message2.systemGenerated, message2.suggestedAction) || !message2.text.trim() && !message2.files?.length && !message2.card)
+        return [];
+      id2 = { kind: "message", id: message2.id };
+      anchorId = message2.id;
+    } else return [];
+    const key = readerKey(id2);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, anchorId, row }];
+  });
+}
+function alignReaderMessage(viewport, message2) {
+  viewport.style.removeProperty("--reader-tail-space");
+  const top = responseScrollTop(
+    viewport.scrollTop,
+    message2.getBoundingClientRect().top,
+    transcriptReadingTop(viewport)
+  );
+  const space = Math.max(0, top - Math.max(0, viewport.scrollHeight - viewport.clientHeight));
+  viewport.style.setProperty("--reader-tail-space", `${space}px`);
+  viewport.scrollTop = top;
+  return viewport.scrollTop;
 }
 
 // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
@@ -20791,7 +20876,7 @@ function MobileDialogList({ children, className }) {
   return /* @__PURE__ */ u4("div", { class: `mobile-dialog-list${className ? ` ${className}` : ""}`, children });
 }
 function MobileDialogItem(props) {
-  const { label, badge, badgeLabel, onBadgeClick, badgeDisabled, sublabel, onClick, type = "button", active, chevron, title, className } = props;
+  const { label, badge, badgeLabel, onBadgeClick, badgeDisabled, badgeBusy, sublabel, onClick, type = "button", active, chevron, title, className } = props;
   const hasBadge = badge != null && badge !== false;
   const item = /* @__PURE__ */ u4(
     "button",
@@ -20815,6 +20900,7 @@ function MobileDialogItem(props) {
         type: "button",
         class: "msg-action-btn mobile-dialog-item-badge activity-dot-action",
         disabled: badgeDisabled,
+        "aria-busy": badgeBusy || void 0,
         "aria-label": badgeLabel,
         title: badgeLabel,
         onClick: onBadgeClick,
@@ -21251,7 +21337,9 @@ function clearSearch() {
     searchOpen.value = false;
   });
 }
-function clearChat() {
+function clearChat(preserveActivityNavigation = false) {
+  if (!preserveActivityNavigation) cancelActivityNavigation();
+  activitySelection.value = null;
   resetConversation();
   resetTurnState();
   voice.detach();
@@ -21280,6 +21368,7 @@ function startSync() {
     apply: (frame2) => {
       n2(() => {
         if (frame2.conversation === null && threadId.value) {
+          cancelActivityNavigation();
           resetConversation();
           resetTurnState();
           voice.detach();
@@ -21296,7 +21385,8 @@ function startSync() {
       });
     },
     connecting: () => {
-      if (threadId.value) chatStatus.value = "syncing\u2026";
+      if (threadId.value)
+        chatStatus.value = isActivityNavigating(groupId.value ?? "") ? "Opening message\u2026" : "syncing\u2026";
     },
     unavailable: (message2) => {
       attentionError.value = message2;
@@ -21307,6 +21397,7 @@ function startSync() {
       }
     },
     reload: () => {
+      cancelActivityNavigation();
       chatReloadRequired.value = true;
       showClientReloadPrompt("Synchronization protocol changed");
     },
@@ -21385,6 +21476,7 @@ function openTaskPanel(gid, tid, focusSeriesId) {
   taskPanelRequest.value = { gid, tid, ...focusSeriesId ? { focusSeriesId } : {} };
 }
 async function openChat2(gid, resumeTid, opts, options = {}) {
+  if (options.activityNavigation === void 0) cancelActivityNavigation();
   if (resumeTid && groupId.value === gid && threadId.value === resumeTid && (!opts || opts.channelType === channelType.value && (opts.messagingGroupId || null) === messagingGroupId.value))
     return;
   if (!resumeTid && refs.newChatInFlight) return;
@@ -21419,7 +21511,7 @@ async function openChat2(gid, resumeTid, opts, options = {}) {
     canSend.value = ct === "web" ? false : cs;
     if (resumeTid) {
       chatLoading.value = true;
-      chatStatus.value = ct === "web" ? "connecting\u2026" : "loading history\u2026";
+      chatStatus.value = options.activityNavigation !== void 0 ? "Opening message\u2026" : ct === "web" ? "connecting\u2026" : "loading history\u2026";
     }
   });
   refs.seenIds.clear();
@@ -21656,7 +21748,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
 }
 async function selectGroup(gid, options = {}) {
   const groupChanged = groupId.value !== gid;
-  clearChat();
+  clearChat(options.activityNavigation !== void 0 && isCurrentActivityNavigation(options.activityNavigation));
   const generation2 = refs.chatGeneration;
   n2(() => {
     if (groupChanged) threads.value = [];
@@ -21666,6 +21758,14 @@ async function selectGroup(gid, options = {}) {
   });
   clearSearch();
   clearFileSearch();
+  if (options.resume && options.activityNavigation !== void 0) {
+    await openChat2(gid, options.resume.threadId, options.resume.context, {
+      focusComposer: false,
+      activityNavigation: options.activityNavigation
+    });
+    void loadTree("");
+    return;
+  }
   const threadsFresh = await loadThreads(gid);
   if (generation2 !== refs.chatGeneration || groupId.value !== gid) return;
   await loadTree("");
@@ -21683,32 +21783,108 @@ async function selectGroup(gid, options = {}) {
     showToast("Could not load threads", "err");
   }
 }
+async function openActivityTarget(target, navigation, local = false) {
+  setActivityDestination(navigation, target);
+  if (credentialsOpen.value) openChat();
+  drawerOpen.threads.value = false;
+  drawerOpen.files.value = false;
+  clearSearch();
+  highlightMessageId.value = null;
+  readerSelection.value = null;
+  const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
+  const context = { channelType: channel, messagingGroupId: mg || null, canSend: false };
+  const options = { focusComposer: false, activityNavigation: navigation };
+  if (groupId.value !== gid) await selectGroup(gid, { ...options, resume: { threadId: tid, context } });
+  else await openChat2(gid, tid, local ? null : context, options);
+  if (!isCurrentActivityNavigation(navigation) || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || !local && messagingGroupId.value !== mg) {
+    finishActivityNavigation(navigation);
+    return null;
+  }
+  if (local) {
+    target = { ...target, origin: { ...target.origin, messagingGroupId: messagingGroupId.value ?? "" } };
+    setActivityDestination(navigation, target);
+  }
+  return target;
+}
+function failActivityNavigation(navigation, error, subject) {
+  finishActivityNavigation(navigation);
+  if (!(error instanceof TypeError) && !(error instanceof UnauthorizedError) && !(error instanceof UiProtocolError) && !(error instanceof Error && /^HTTP \d{3}$/.test(error.message)))
+    throw error;
+  if (!isCurrentActivityNavigation(navigation)) return false;
+  console.error("Activity navigation failed", error);
+  showToast(`Could not open ${subject}: ${error.message}`, "err", 5e3, { transient: error.message === "HTTP 404" });
+  return false;
+}
 async function navigateAttention(scope) {
   const targets = attentionTargets.value;
   if (!targets?.length || attentionError.value) return false;
-  const target = targets.find(
+  const target = [...targets].reverse().find(
     (target2) => typeof scope === "string" ? target2.origin.agentGroupId === scope : matchesAttentionLocation(target2, scope)
   );
   if (!target) return false;
+  const navigation = beginActivityNavigation(scope);
+  activitySelection.value = null;
   selectAttention(target.id, true);
   try {
-    if (credentialsOpen.value) openChat();
-    drawerOpen.threads.value = false;
-    drawerOpen.files.value = false;
-    const { agentGroupId: gid, threadId: tid, channelType: channel, messagingGroupId: mg } = target.origin;
-    const context = { channelType: channel, messagingGroupId: mg, canSend: false };
-    if (groupId.value !== gid) await selectGroup(gid, { resume: { threadId: tid, context }, focusComposer: false });
-    else await openChat2(gid, tid, context, { focusComposer: false });
+    return await openActivityTarget(
+      {
+        origin: target.origin,
+        anchor: { kind: "interaction", id: target.id },
+        ...target.readCursor ? { readCursor: target.readCursor } : {}
+      },
+      navigation
+    ) !== null;
+  } catch (error) {
+    return failActivityNavigation(navigation, error, "input request");
+  }
+}
+async function navigateActivity(scope, status, unread = false) {
+  if (status.waiting) return navigateAttention(scope);
+  const navigation = beginActivityNavigation(scope);
+  const gid = typeof scope === "string" ? scope : scope.agentGroupId;
+  if (!gid) {
+    finishActivityNavigation(navigation);
+    showToast("Could not open activity source: no agent selected.", "err", 5e3, { transient: true });
+    return false;
+  }
+  const generation2 = refs.chatGeneration;
+  try {
+    const local = !unread && status.activity === "running" ? pendingActivitySends(
+      gid,
+      typeof scope === "string" ? void 0 : {
+        threadId: scope.threadId ?? "",
+        channelType: scope.channelType ?? "web"
+      }
+    ).reduce(
+      (latest, send) => !latest || send.timestamp > latest.timestamp ? send : latest,
+      void 0
+    ) : void 0;
+    let target;
+    if (local) {
+      target = {
+        origin: { agentGroupId: gid, threadId: local.threadId, channelType: "web", messagingGroupId: "" },
+        anchor: { kind: "message", id: local.messageId }
+      };
+    } else {
+      const kind = unread ? "unread" : status.activity === "running" ? "running" : "latest";
+      const query = new URLSearchParams({ kind });
+      if (typeof scope !== "string") {
+        query.set("thread", scope.threadId ?? "");
+        query.set("channel", scope.channelType || "web");
+        query.set("mg", scope.messagingGroupId ?? "");
+      }
+      target = await api(`api/groups/${encodeURIComponent(gid)}/activity-target?${query}`);
+    }
+    if (generation2 !== refs.chatGeneration || !isCurrentActivityNavigation(navigation)) {
+      finishActivityNavigation(navigation);
+      return false;
+    }
+    const selectedTarget = await openActivityTarget(target, navigation, !!local);
+    if (!selectedTarget) return false;
+    selectActivity(selectedTarget);
     return true;
   } catch (error) {
-    console.error("Input request navigation failed", error);
-    showToast(
-      "Could not open input request: " + (error instanceof Error ? error.message : String(error)),
-      "err",
-      5e3,
-      { transient: error instanceof Error && error.message === "HTTP 404" }
-    );
-    return false;
+    return failActivityNavigation(navigation, error, "activity source");
   }
 }
 var fileSearchGeneration = 0;
@@ -21796,7 +21972,8 @@ async function restoreFileSearch(open, root, query) {
 }
 var fileSelectionGeneration = 0;
 async function loadTree(p5) {
-  fileSelectionGeneration++;
+  const generation2 = ++fileSelectionGeneration;
+  const gid = groupId.value;
   n2(() => {
     treePath.value = p5;
     filePath.value = null;
@@ -21805,12 +21982,14 @@ async function loadTree(p5) {
     treeEntries.value = [];
   });
   try {
-    if (!groupId.value) return;
+    if (!gid) return;
     const segs = String(p5 || "").split("/").filter(Boolean).map(encodeURIComponent);
-    const url = `api/groups/${encodeURIComponent(groupId.value)}/dirs/${segs.length ? segs.join("/") + "/" : ""}`;
+    const url = `api/groups/${encodeURIComponent(gid)}/dirs/${segs.length ? segs.join("/") + "/" : ""}`;
     const { entries } = await api(url);
+    if (generation2 !== fileSelectionGeneration || groupId.value !== gid) return;
     treeEntries.value = entries || [];
   } catch (err) {
+    if (generation2 !== fileSelectionGeneration || groupId.value !== gid) return;
     const msg = /HTTP 404/.test(String(err && err.message)) ? "Not found. It may have been renamed or deleted." : String(err?.message || err);
     treeError.value = msg;
   }
@@ -22263,6 +22442,7 @@ function tabBadge(item) {
       type: "button",
       class: "msg-action-btn tab-item-badge activity-dot-action",
       disabled: item.badgeDisabled,
+      "aria-busy": item.badgeBusy || void 0,
       "aria-label": item.badgeLabel,
       title: item.badgeLabel,
       onClick: (event) => {
@@ -22393,9 +22573,9 @@ function TabBarSheet(props) {
         badge: it.badge,
         badgeLabel: it.badgeLabel,
         badgeDisabled: it.badgeDisabled,
-        onBadgeClick: it.onBadgeClick ? () => {
-          onClose();
-          it.onBadgeClick?.();
+        badgeBusy: it.badgeBusy,
+        onBadgeClick: it.onBadgeClick ? async () => {
+          if (await it.onBadgeClick?.() !== false) onClose();
         } : void 0,
         sublabel: it.sublabel,
         active: it.id === activeId,
@@ -22429,19 +22609,27 @@ function activityDetails(status, requestCount = 0, subject) {
   if (status.waiting) description += ". Waiting for input";
   if (status.waiting && subject) {
     const requests2 = `${requestCount} ${requestCount === 1 ? "request" : "requests"}`;
-    description += attentionError.value ? ` ${requestCount} last known ${requestCount === 1 ? "request" : "requests"} in ${subject}.` : requestCount > 0 ? `. ${requests2} ${requestCount === 1 ? "needs" : "need"} your input. Open oldest request in ${subject}` : `. No actionable requests available in ${subject}.`;
+    description += attentionError.value ? ` ${requestCount} last known ${requestCount === 1 ? "request" : "requests"} in ${subject}.` : requestCount > 0 ? `. ${requests2} ${requestCount === 1 ? "needs" : "need"} your input. Open newest request in ${subject}` : `. No actionable requests available in ${subject}.`;
   }
   return { stale, description, actionable: !!status.waiting && !attentionError.value && requestCount > 0 };
 }
-function ActivityIndicator({ status, description, unread = false }) {
+function activityNavigationDetails(status, unread, requestCount, subject) {
+  const details = activityDetails(status, requestCount, subject);
+  const description = `${unread ? "Unread. " : ""}${details.description}`;
+  if (status.waiting) return { ...details, description };
+  const source = unread ? "unread message" : status.activity === "running" ? "originating message" : "message";
+  return { ...details, actionable: true, description: `${description}. Open newest ${source} in ${subject}` };
+}
+function ActivityIndicator({ status, description, unread = false, navigating = false }) {
   const details = activityDetails(status);
-  const label = `${unread ? "Unread. " : ""}${description ?? details.description}`;
+  const label = description ?? `${unread ? "Unread. " : ""}${details.description}`;
   return /* @__PURE__ */ u4(
     "span",
     {
       class: `activity-indicator ${status.activity}${status.waiting ? " waiting" : ""}${unread ? " unread" : ""}${details.stale ? " stale" : ""}`,
       role: "status",
-      "aria-live": "off",
+      "aria-live": navigating ? "polite" : "off",
+      "aria-busy": navigating || void 0,
       "aria-label": label,
       title: label,
       children: [
@@ -22458,14 +22646,17 @@ function activityBadge(group) {
   if (!saved) return {};
   const status = withPendingActivity(saved, group.id);
   const count = groupAttentionCount(group.id);
-  const { actionable, description } = activityDetails(status, count, group.name);
+  const unread = !!saved.unreadThreadCount;
+  const navigating = isActivityNavigating(group.id);
+  const details = activityNavigationDetails(status, unread, count, group.name);
+  const actionable = details.actionable && !navigating;
+  const description = navigating ? `Opening message in ${group.name}\u2026` : details.description;
   return {
-    badge: /* @__PURE__ */ u4(ActivityIndicator, { status, description, unread: !!saved.unreadThreadCount }),
+    badge: /* @__PURE__ */ u4(ActivityIndicator, { status, description, unread, navigating }),
     badgeLabel: description,
     badgeDisabled: !actionable,
-    onBadgeClick: status.waiting ? () => {
-      if (actionable) void navigateAttention(group.id);
-    } : void 0
+    badgeBusy: navigating,
+    onBadgeClick: () => actionable ? navigateActivity(group.id, status, unread) : void 0
   };
 }
 function isElevatedOnly(g8) {
@@ -22576,9 +22767,8 @@ function GroupPickerModal() {
       MobileDialogItem,
       {
         ...item,
-        onBadgeClick: item.onBadgeClick ? () => {
-          close();
-          item.onBadgeClick?.();
+        onBadgeClick: item.onBadgeClick ? async () => {
+          if (await item.onBadgeClick?.() !== false) close();
         } : void 0,
         active: isActive,
         onClick: () => pick(g8.id)
@@ -22920,6 +23110,24 @@ function attachScrollEdges(element, axes = {}, onUpdate) {
   };
 }
 
+// src/message-highlight.ts
+var timers = /* @__PURE__ */ new WeakMap();
+function highlightMessage(target) {
+  clearTimeout(timers.get(target));
+  if (target.classList.contains("highlight-pulse")) {
+    target.classList.remove("highlight-pulse");
+    target.getBoundingClientRect();
+  }
+  target.classList.add("highlight-pulse");
+  timers.set(
+    target,
+    setTimeout(() => {
+      target.classList.remove("highlight-pulse");
+      timers.delete(target);
+    }, 2e3)
+  );
+}
+
 // src/components/ThreadsRail.tsx
 function ThreadTitle({ title, unread }) {
   const ref = A2(null);
@@ -22944,21 +23152,26 @@ function ThreadAttention({ thread: thread2, onNavigate }) {
   };
   const count = threadAttentionCount(location3);
   const status = withPendingActivity(thread2, groupId.value, thread2);
-  const { actionable, description } = activityDetails(status, count, thread2.title);
-  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status, description, unread: thread2.unread });
-  return status.waiting ? /* @__PURE__ */ u4(
+  const unread = location3.channelType === "web" && !!thread2.unread;
+  const navigating = isActivityNavigating(location3);
+  const details = activityNavigationDetails(status, unread, count, thread2.title);
+  const actionable = details.actionable && !navigating;
+  const description = navigating ? `Opening message in ${thread2.title}\u2026` : details.description;
+  const indicator = /* @__PURE__ */ u4(ActivityIndicator, { status, description, unread, navigating });
+  return /* @__PURE__ */ u4(
     "button",
     {
       type: "button",
       class: "activity-action activity-dot-action thread-attention",
       disabled: !actionable,
+      "aria-busy": navigating || void 0,
       "aria-label": description,
       title: description,
       onClick: (event) => {
         event.stopPropagation();
         if (actionable) {
           const navigate = () => {
-            void navigateAttention(location3);
+            void navigateActivity(location3, status, unread);
           };
           if (onNavigate) onNavigate(navigate);
           else navigate();
@@ -22966,7 +23179,7 @@ function ThreadAttention({ thread: thread2, onNavigate }) {
       },
       children: indicator
     }
-  ) : indicator;
+  );
 }
 function ThreadRow({ t: t4, guides = [] }) {
   const ct = t4.channelType || "web";
@@ -23026,7 +23239,7 @@ This also cancels its outstanding approval requests. Already applied changes are
   return /* @__PURE__ */ u4(
     "div",
     {
-      class: "thread" + (active ? " active" : "") + (guides.length ? " branch" : "") + (t4.unread ? " is-unread" : ""),
+      class: "thread" + (active ? " active" : "") + (guides.length ? " branch" : "") + (ct === "web" && t4.unread ? " is-unread" : ""),
       "data-id": t4.threadId,
       style: { "--thread-depth": guides.length },
       onClick: onOpen,
@@ -23040,7 +23253,7 @@ This also cancels its outstanding approval requests. Already applied changes are
         )) }) : null,
         /* @__PURE__ */ u4("div", { class: "title", children: [
           ct !== "web" ? /* @__PURE__ */ u4("span", { class: "ch-pill", title: pillTitle, children: meta.icon }) : null,
-          /* @__PURE__ */ u4(ThreadTitle, { title: t4.title, unread: t4.unread }),
+          /* @__PURE__ */ u4(ThreadTitle, { title: t4.title, unread: ct === "web" && t4.unread }),
           head ? /* @__PURE__ */ u4(
             "button",
             {
@@ -23077,10 +23290,10 @@ function DmRow({ t: t4 }) {
     if (groupId.value) openChat2(groupId.value, t4.threadId, threadCtxOf(t4)).catch(console.error);
     drawerOpen.threads.value = false;
   };
-  return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : "") + (t4.unread ? " is-unread" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
+  return /* @__PURE__ */ u4("div", { class: "thread dm" + (active ? " active" : "") + (ct === "web" && t4.unread ? " is-unread" : ""), "data-id": t4.threadId, onClick: onOpen, children: [
     /* @__PURE__ */ u4("div", { class: "title", children: [
       /* @__PURE__ */ u4("span", { class: "ch-pill dm", title: meta.label, children: meta.icon }),
-      /* @__PURE__ */ u4(ThreadTitle, { title: meta.label, unread: t4.unread })
+      /* @__PURE__ */ u4(ThreadTitle, { title: meta.label, unread: ct === "web" && t4.unread })
     ] }),
     /* @__PURE__ */ u4("div", { class: "meta", children: [
       /* @__PURE__ */ u4(ThreadAttention, { thread: t4 }),
@@ -23157,8 +23370,7 @@ function SearchResultRow({ r: r4 }) {
         const el = document.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
         if (el) {
           el.scrollIntoView({ behavior: "smooth", block: "center" });
-          el.classList.add("highlight-pulse");
-          setTimeout(() => el.classList.remove("highlight-pulse"), 2e3);
+          highlightMessage(el);
         }
       }, 100);
     } else {
@@ -24495,10 +24707,96 @@ function mountInlineReplySuggestions(root, controls) {
   };
 }
 
+// src/read-state.ts
+var ReadAckError = class extends Error {
+};
+var readErrors = /* @__PURE__ */ new Map();
+function attachReadTracking(log, target, atReadPosition = () => log.scrollHeight - log.scrollTop - log.clientHeight < 60) {
+  if (target.channelType !== "web") return () => {
+  };
+  const errorKey = JSON.stringify([target.groupId, target.threadId, target.channelType, target.messagingGroupId]);
+  let timer2;
+  let complete = false;
+  let request = null;
+  const eligible = () => document.visibilityState === "visible" && document.hasFocus() && log.getClientRects().length > 0 && atReadPosition();
+  const send = async () => {
+    if (complete || request || !eligible()) return;
+    request = new AbortController();
+    const active = request;
+    let url = `api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/read`;
+    if (target.messagingGroupId)
+      url += `?channel=${encodeURIComponent(target.channelType)}&mg=${encodeURIComponent(target.messagingGroupId)}`;
+    const timeout = setTimeout(() => active.abort(), 1e4);
+    try {
+      const response = await protocolFetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(target.cursor),
+        signal: active.signal
+      });
+      if (request !== active) return;
+      if (!response.ok) throw new ReadAckError(`Read acknowledgement failed: HTTP ${response.status}`);
+      complete = true;
+      const errorId = readErrors.get(errorKey);
+      if (errorId !== void 0) {
+        dismissToastById(errorId);
+        readErrors.delete(errorKey);
+      }
+    } catch (error) {
+      if (request === null) return;
+      if (!(error instanceof ReadAckError) && !(error instanceof UiProtocolError) && !(error instanceof TypeError) && !(error instanceof Error && error.name === "AbortError"))
+        throw error;
+      console.warn("Read acknowledgement failed", error);
+      const previousError = readErrors.get(errorKey);
+      if (previousError !== void 0) dismissToastById(previousError);
+      readErrors.set(
+        errorKey,
+        showToast("Could not mark this conversation read. Refocus or scroll to retry.", "err", 5e3, {
+          transient: true
+        })
+      );
+    } finally {
+      clearTimeout(timeout);
+      if (request === active) request = null;
+    }
+  };
+  const schedule = () => {
+    clearTimeout(timer2);
+    if (eligible() && !complete)
+      timer2 = setTimeout(() => {
+        void send();
+      }, 150);
+  };
+  log.addEventListener("scroll", schedule);
+  document.addEventListener("visibilitychange", schedule);
+  window.addEventListener("focus", schedule);
+  schedule();
+  return () => {
+    clearTimeout(timer2);
+    const active = request;
+    request = null;
+    active?.abort();
+    log.removeEventListener("scroll", schedule);
+    document.removeEventListener("visibilitychange", schedule);
+    window.removeEventListener("focus", schedule);
+  };
+}
+function attachJumpReadTracking(log, element, target) {
+  return attachReadTracking(log, target, () => {
+    if (!element.getClientRects().length || document.querySelector("dialog:modal")) return false;
+    const viewport = log.getBoundingClientRect();
+    const message2 = element.getBoundingClientRect();
+    return message2.bottom > Math.max(viewport.top, 0) && message2.top < Math.min(viewport.bottom, window.innerHeight) && message2.right > Math.max(viewport.left, 0) && message2.left < Math.min(viewport.right, window.innerWidth);
+  });
+}
+
 // src/components/AttentionFocus.tsx
 function AttentionFocus() {
   const targets = attentionTargets.value;
-  const selection = attentionSelection.value;
+  const activity = activitySelection.value;
+  const pendingTarget = activityNavigationPending.value?.target;
+  const selection = activity ?? attentionSelection.value;
   const handled = A2(null);
   const location3 = {
     agentGroupId: groupId.value,
@@ -24506,17 +24804,53 @@ function AttentionFocus() {
     channelType: channelType.value,
     messagingGroupId: messagingGroupId.value
   };
-  const selected = targets?.find((target) => target.id === selection?.id);
+  const selected = activity ? { id: activity.target.anchor.id, origin: activity.target.origin, readCursor: activity.target.readCursor } : targets?.find((target) => target.id === attentionSelection.value?.id) ?? (pendingTarget && pendingTarget.anchor.id === attentionSelection.value?.id ? { id: pendingTarget.anchor.id, origin: pendingTarget.origin, readCursor: pendingTarget.readCursor } : void 0);
   const snapshot = conversationState.value;
+  const ready = chatReady.value;
+  const finish = () => {
+    const pending4 = activityNavigationPending.peek();
+    if (pending4?.target && selected && pending4.target.anchor.id === selected.id && matchesAttentionLocation({
+      id: pending4.target.anchor.id,
+      origin: pending4.target.origin
+    }, location3)) finishActivityNavigation(pending4.request);
+  };
+  y2(() => () => {
+    if (handled.current?.selection === selection) {
+      handled.current.stopRead?.();
+      handled.current.stopRead = void 0;
+    }
+  }, [selection, location3.agentGroupId, location3.threadId, location3.channelType, location3.messagingGroupId]);
   y2(() => {
-    if (!selection?.navigation || !selected || handled.current === selection.navigation || !matchesAttentionLocation(selected, location3))
+    if (!selection?.navigation || !selected || handled.current?.selection === selection || !matchesAttentionLocation(selected, location3))
       return;
     const frame2 = requestAnimationFrame(() => {
-      const target = document.getElementById(`attention-${selection.id}`);
-      if (!target) return;
-      handled.current = selection.navigation;
+      const target = activity ? document.querySelector(`#chat-log [data-msg-id="${CSS.escape(selected.id)}"]`) : document.getElementById(`attention-${selected.id}`);
+      if (!target) {
+        if ((activity || pendingTarget) && ready) {
+          handled.current = { selection };
+          console.warn("Activity source is no longer in the transcript", selected.id);
+          showToast("This activity source is no longer available.", "err", 5e3, { transient: true });
+          finish();
+        }
+        return;
+      }
+      handled.current?.stopRead?.();
+      handled.current = { selection };
+      if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
       target.scrollIntoView({ block: "center", behavior: "auto" });
       target.focus({ preventScroll: true });
+      highlightMessage(target);
+      finish();
+      if (selected.readCursor && location3.agentGroupId && location3.threadId) {
+        const log = target.closest("#chat-log");
+        if (log) handled.current.stopRead = attachJumpReadTracking(log, target, {
+          groupId: location3.agentGroupId,
+          threadId: location3.threadId,
+          channelType: location3.channelType || "web",
+          messagingGroupId: location3.messagingGroupId,
+          cursor: selected.readCursor
+        });
+      }
     });
     return () => cancelAnimationFrame(frame2);
   }, [
@@ -24526,7 +24860,8 @@ function AttentionFocus() {
     location3.threadId,
     location3.channelType,
     location3.messagingGroupId,
-    snapshot
+    snapshot,
+    ready
   ]);
   return null;
 }
@@ -24629,48 +24964,6 @@ function ApprovalCard({ approval: a4, busy, onRespond }) {
       option.value
     )) }) : null
   ] });
-}
-
-// src/transcript-reader.ts
-var readerSelection = y3(null);
-function readerLocation() {
-  return JSON.stringify([groupId.value, threadId.value, channelType.value, messagingGroupId.value]);
-}
-function readerKey(id2) {
-  return `${id2.kind}:${id2.id}`;
-}
-function openTranscriptReader(id2) {
-  readerSelection.value = { location: readerLocation(), key: readerKey(id2) };
-}
-function readerPages(rows) {
-  const seen = /* @__PURE__ */ new Set();
-  return rows.flatMap((row) => {
-    let id2;
-    let anchorId;
-    if (row.kind === "message") {
-      const message2 = row.message;
-      if (message2.direction === "event" || isSystemNotice(message2.direction, message2.systemGenerated, message2.suggestedAction) || !message2.text.trim() && !message2.files?.length && !message2.card)
-        return [];
-      id2 = { kind: "message", id: message2.id };
-      anchorId = message2.id;
-    } else return [];
-    const key = readerKey(id2);
-    if (seen.has(key)) return [];
-    seen.add(key);
-    return [{ key, anchorId, row }];
-  });
-}
-function alignReaderMessage(viewport, message2) {
-  viewport.style.removeProperty("--reader-tail-space");
-  const top = responseScrollTop(
-    viewport.scrollTop,
-    message2.getBoundingClientRect().top,
-    transcriptReadingTop(viewport)
-  );
-  const space = Math.max(0, top - Math.max(0, viewport.scrollHeight - viewport.clientHeight));
-  viewport.style.setProperty("--reader-tail-space", `${space}px`);
-  viewport.scrollTop = top;
-  return viewport.scrollTop;
 }
 
 // src/components/MessageBubble.tsx
@@ -24944,26 +25237,26 @@ function useCredentialResource(url) {
   const [data, setData] = h2(null);
   const [error, setError] = h2("");
   const [loading, setLoading] = h2(true);
-  const sequence = A2(0);
+  const sequence2 = A2(0);
   async function refresh() {
-    const request = ++sequence.current;
+    const request = ++sequence2.current;
     setLoading(true);
     setError("");
     try {
       const result = await credentialRequest(url);
-      if (request === sequence.current) setData(result);
+      if (request === sequence2.current) setData(result);
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
-      if (request === sequence.current) setError(errorMessage(error2));
+      if (request === sequence2.current) setError(errorMessage(error2));
     } finally {
-      if (request === sequence.current) setLoading(false);
+      if (request === sequence2.current) setLoading(false);
     }
   }
   y2(() => {
     setData(null);
     void refresh();
     return () => {
-      sequence.current++;
+      sequence2.current++;
     };
   }, [url]);
   return { data, error, loading, refresh };
@@ -26401,30 +26694,30 @@ function OAuthScopePicker({
   const [discovery, setDiscovery] = h2({ key: "", loading: false, data: null, error: "" });
   const [retry, setRetry] = h2(0);
   const [draft, setDraft] = h2("");
-  const sequence = A2(0);
+  const sequence2 = A2(0);
   const initialized2 = A2(/* @__PURE__ */ new Set());
   y2(() => {
-    const request = ++sequence.current;
+    const request = ++sequence2.current;
     const controller = new AbortController();
     if (!key) {
       setDiscovery({ key, loading: false, data: null, error: "" });
       return () => {
-        sequence.current++;
+        sequence2.current++;
         controller.abort();
       };
     }
     setDiscovery({ key, loading: true, data: null, error: "" });
     const timer2 = setTimeout(() => {
       void credentialRequest(credentialsPath("/scopes"), "POST", JSON.parse(key), controller.signal).then((data) => {
-        if (sequence.current === request) setDiscovery({ key, loading: false, data, error: "" });
+        if (sequence2.current === request) setDiscovery({ key, loading: false, data, error: "" });
       }).catch((error) => {
         if (controller.signal.aborted) return;
         if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
-        if (sequence.current === request) setDiscovery({ key, loading: false, data: null, error: errorMessage(error) });
+        if (sequence2.current === request) setDiscovery({ key, loading: false, data: null, error: errorMessage(error) });
       });
     }, 500);
     return () => {
-      sequence.current++;
+      sequence2.current++;
       clearTimeout(timer2);
       controller.abort();
     };
@@ -27931,80 +28224,6 @@ function revealLatestActivity(viewport, details = false) {
   );
 }
 
-// src/read-state.ts
-var ReadAckError = class extends Error {
-};
-var readErrors = /* @__PURE__ */ new Map();
-function attachReadTracking(log, target) {
-  const errorKey = JSON.stringify([target.groupId, target.threadId, target.channelType, target.messagingGroupId]);
-  let timer2;
-  let complete = false;
-  let request = null;
-  const eligible = () => document.visibilityState === "visible" && document.hasFocus() && log.getClientRects().length > 0 && log.scrollHeight - log.scrollTop - log.clientHeight < 60;
-  const send = async () => {
-    if (complete || request || !eligible()) return;
-    request = new AbortController();
-    const active = request;
-    let url = `api/groups/${encodeURIComponent(target.groupId)}/chat/${encodeURIComponent(target.threadId)}/read`;
-    if (target.messagingGroupId)
-      url += `?channel=${encodeURIComponent(target.channelType)}&mg=${encodeURIComponent(target.messagingGroupId)}`;
-    const timeout = setTimeout(() => active.abort(), 1e4);
-    try {
-      const response = await protocolFetch(url, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(target.cursor),
-        signal: active.signal
-      });
-      if (request !== active) return;
-      if (!response.ok) throw new ReadAckError(`Read acknowledgement failed: HTTP ${response.status}`);
-      complete = true;
-      const errorId = readErrors.get(errorKey);
-      if (errorId !== void 0) {
-        dismissToastById(errorId);
-        readErrors.delete(errorKey);
-      }
-    } catch (error) {
-      if (request === null) return;
-      if (!(error instanceof ReadAckError) && !(error instanceof UiProtocolError) && !(error instanceof TypeError) && !(error instanceof Error && error.name === "AbortError"))
-        throw error;
-      console.warn("Read acknowledgement failed", error);
-      const previousError = readErrors.get(errorKey);
-      if (previousError !== void 0) dismissToastById(previousError);
-      readErrors.set(
-        errorKey,
-        showToast("Could not mark this conversation read. Refocus or scroll to retry.", "err", 5e3, {
-          transient: true
-        })
-      );
-    } finally {
-      clearTimeout(timeout);
-      if (request === active) request = null;
-    }
-  };
-  const schedule = () => {
-    clearTimeout(timer2);
-    if (eligible() && !complete)
-      timer2 = setTimeout(() => {
-        void send();
-      }, 150);
-  };
-  log.addEventListener("scroll", schedule);
-  document.addEventListener("visibilitychange", schedule);
-  window.addEventListener("focus", schedule);
-  schedule();
-  return () => {
-    clearTimeout(timer2);
-    const active = request;
-    request = null;
-    active?.abort();
-    log.removeEventListener("scroll", schedule);
-    document.removeEventListener("visibilitychange", schedule);
-    window.removeEventListener("focus", schedule);
-  };
-}
-
 // src/components/ChatMain.tsx
 var imageViewer = y3(null);
 function imageFileName(src) {
@@ -29364,8 +29583,7 @@ function MessageLog({ dockRef }) {
       if (el && (appliedHighlightRef.current !== highlight || prevLayoutRef.current !== layoutKey)) {
         appliedHighlightRef.current = highlight;
         el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.classList.add("highlight-pulse");
-        setTimeout(() => el.classList.remove("highlight-pulse"), 2e3);
+        highlightMessage(el);
       }
     } else {
       appliedHighlightRef.current = null;
@@ -29653,7 +29871,7 @@ function Composer() {
               hidden: attachRecording,
               textarea: {
                 id: "chat-input",
-                placeholder: edit.editing ? "Edit pending message\u2026" : chatReloadRequired.value ? "Reload to continue\u2026" : wsDown ? "Reconnecting\u2026" : `Message ${groupName}\u2026`,
+                placeholder: edit.editing ? "Edit pending message\u2026" : chatReloadRequired.value ? "Reload to continue\u2026" : wsDown ? isActivityNavigating(groupId.value ?? "") ? "Opening message\u2026" : "Reconnecting\u2026" : `Message ${groupName}\u2026`,
                 "aria-label": edit.editing ? "Pending message text" : "Message",
                 onInput: (event) => {
                   edit.input(event.currentTarget.value);
