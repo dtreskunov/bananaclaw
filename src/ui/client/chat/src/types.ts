@@ -166,6 +166,7 @@ export interface ToastMessage {
   id: number;
   text: string;
   kind?: 'ok' | 'err';
+  transient?: boolean;
   // When set, the toast is sticky (no auto-hide) and invokes this action.
   action?: () => void;
   actionLabel?: string;

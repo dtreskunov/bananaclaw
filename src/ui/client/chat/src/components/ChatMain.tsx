@@ -1564,7 +1564,7 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
     const target = log?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
     if (!log || !target) {
       console.warn('Reader transcript target unavailable', anchorId);
-      showToast('Could not locate this message in the transcript.', 'err');
+      showToast('Could not locate this message in the transcript.', 'err', 5000, { transient: true });
       return;
     }
     cancelScheduledScroll();

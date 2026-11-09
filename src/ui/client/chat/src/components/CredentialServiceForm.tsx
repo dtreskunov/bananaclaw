@@ -1,10 +1,12 @@
 import type { JSX, RefObject } from 'preact';
+import { useState } from 'preact/hooks';
 import { GroupAdminField as Field } from './GroupAdminField';
 import { CredentialAction } from './CredentialsTable';
 import { TrashIcon } from './ActionIcons';
 import { credentialFields, authentication, unusedKey, type RouteDraft } from './credential-routing';
 import type { Service } from './CredentialsApi';
 import { showToast } from './Toast';
+import { ErrorNotice } from './CredentialsParts';
 
 export function CredentialServiceForm({ route, index, busy, firstInput, onChange, onRemove }: {
   route: RouteDraft; index: number; busy: boolean;
@@ -40,7 +42,10 @@ export function CredentialAuthenticationForm({ auth, keys, busy, preferredKey, s
       <Field label="Send in"><select aria-label="API key placement" value={auth.location ?? 'header'} disabled={busy}
         onChange={event => {
           const location = event.currentTarget.value;
-          if (location !== 'header' && location !== 'query') { showToast('Choose header or query placement.', 'err'); return; }
+          if (location !== 'header' && location !== 'query') {
+            showToast('Choose header or query placement.', 'err', 5000, { transient: true });
+            return;
+          }
           onChange({ ...auth, location, header: location === 'header' ? 'X-Api-Key' : undefined,
             parameter: location === 'query' ? '' : undefined, prefix: undefined });
         }}>
@@ -62,12 +67,14 @@ export function CredentialAuthenticationForm({ auth, keys, busy, preferredKey, s
 function HeaderFields({ auth, keys, busy, onChange }: {
   auth: Service['auth']; keys: string[]; busy: boolean; onChange: (headers: Record<string, string>) => void;
 }): JSX.Element {
+  const [error, setError] = useState('');
   const entries = Object.entries(auth.headers ?? {});
   const set = (position: number, header: string, template: string): boolean => {
     if (entries.some(([other], at) => at !== position && other.toLowerCase() === header.toLowerCase())) {
-      showToast('This header already exists.', 'err');
+      setError('This header already exists.');
       return false;
     }
+    setError('');
     onChange(Object.fromEntries(entries.map((entry, at) => at === position ? [header, template] : entry)));
     return true;
   };
@@ -76,12 +83,17 @@ function HeaderFields({ auth, keys, busy, onChange }: {
       <input type="text" aria-label={`Header ${position + 1}`} placeholder="Header" value={header}
         onInput={event => { if (!set(position, event.currentTarget.value, template)) event.currentTarget.value = header; }} />
       <CredentialAction label={`Remove header ${position + 1}`} disabled={entries.length === 1}
-        onClick={() => onChange(Object.fromEntries(entries.filter((_, at) => at !== position)))}><TrashIcon /></CredentialAction>
+        onClick={() => {
+          setError('');
+          onChange(Object.fromEntries(entries.filter((_, at) => at !== position)));
+        }}><TrashIcon /></CredentialAction>
     </div>
     <HeaderTemplate template={template} keys={keys} auth={auth} busy={busy}
       onChange={value => set(position, header, value)} />
   </fieldset>)}
+    <ErrorNotice message={error} />
     <button type="button" disabled={busy} onClick={() => {
+      setError('');
       const key = unusedKey(keys, 'HEADER_VALUE');
       let header = 'X-Api-Key';
       let number = 2;

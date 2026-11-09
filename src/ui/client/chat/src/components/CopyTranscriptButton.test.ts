@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toastMessage } from '../state';
 import { dismissToast } from './Toast';
 import { CopyTranscriptButton } from './CopyTranscriptButton';
@@ -7,9 +7,11 @@ vi.hoisted(() => {
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
 });
 
+beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   vi.unstubAllGlobals();
   while (toastMessage.value) dismissToast();
+  vi.useRealTimers();
 });
 
 function transcriptElement(): HTMLElement {
@@ -40,7 +42,11 @@ describe('copy transcript button', () => {
 
     await button.props.onClick();
 
-    expect(toastMessage.value).toMatchObject({ text: 'Could not copy message', kind: 'ok' });
+    expect(toastMessage.value).toMatchObject({ text: 'Could not copy message', kind: 'err', transient: true });
+    vi.advanceTimersByTime(4999);
+    expect(toastMessage.value?.text).toBe('Could not copy message');
+    vi.advanceTimersByTime(1);
+    expect(toastMessage.value).toBeNull();
     consoleError.mockRestore();
   });
 
@@ -48,7 +54,7 @@ describe('copy transcript button', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await CopyTranscriptButton({ getContent: () => null }).props.onClick();
     expect(consoleError).toHaveBeenCalled();
-    expect(toastMessage.value).toMatchObject({ text: 'Could not copy message', kind: 'ok' });
+    expect(toastMessage.value).toMatchObject({ text: 'Could not copy message', kind: 'err', transient: true });
     consoleError.mockRestore();
   });
 });

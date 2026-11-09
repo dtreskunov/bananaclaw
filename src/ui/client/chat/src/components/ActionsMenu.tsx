@@ -47,7 +47,7 @@ export async function sharePrivate(gid: string | null, entry: { path?: string; n
     await navigator.clipboard.writeText(url);
     showToast('Link copied');
   } catch {
-    showToast('Copy failed', 'err');
+    showToast('Copy failed', 'err', 5000, { transient: true });
   }
 }
 

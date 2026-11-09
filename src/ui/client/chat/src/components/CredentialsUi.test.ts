@@ -21,7 +21,7 @@ import { channelType, credentialsOpen, groupId, isMobile, messagingGroupId, thre
 import { CredentialAuthenticationForm, CredentialServiceForm } from './CredentialServiceForm';
 import type { RouteDraft } from './credential-routing';
 import { OAuthAppForm } from './OAuthAppForm';
-import type { OAuthAppDraft } from './oauth-app-form';
+import { oauthAppDraft, type OAuthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
 import { ApprovalCardFrame } from './ApprovalCard';
 import { ApprovalMessageInput } from './ApprovalMessageInput';
@@ -132,6 +132,7 @@ afterEach(() => {
 });
 
 interface TestProps {
+  label?: string;
   busy?: boolean;
   auth: Service['auth'];
   savedLabel?: string;
@@ -1128,6 +1129,81 @@ function requestBody(): Record<string, unknown> {
 }
 
 describe('connection UI safety and ownership', () => {
+  it('shows duplicate custom headers inline without queuing toasts, and clears the error after correction', () => {
+    const onChange = vi.fn();
+    const form = CredentialAuthenticationForm({
+      auth: { type: 'custom', headers: { 'X-One': '{{ FIRST }}', 'X-Two': '{{ SECOND }}' } },
+      keys: ['FIRST', 'SECOND'],
+      busy: false,
+      onChange,
+    });
+    const headers = descendants(form).find(
+      (child) => typeof child.type === 'function' && child.props.auth?.type === 'custom',
+    )!;
+    let node = render(headers);
+    const input = descendants(node).find((child) => child.props['aria-label'] === 'Header 2')!;
+    const event = { currentTarget: { value: 'x-one' } };
+    input.props.oninput(event);
+    input.props.oninput({ currentTarget: { value: 'X-One' } });
+    expect(event.currentTarget.value).toBe('X-Two');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+    node = render(headers);
+    expect(find(node, ErrorNotice).props.message).toBe('This header already exists.');
+    descendants(node)
+      .find((child) => child.props['aria-label'] === 'Header 2')!
+      .props.oninput({ currentTarget: { value: 'X-Three' } });
+    expect(onChange).toHaveBeenCalledWith({
+      type: 'custom',
+      headers: { 'X-One': '{{ FIRST }}', 'X-Three': '{{ SECOND }}' },
+    });
+    expect(find(render(headers), ErrorNotice).props.message).toBe('');
+  });
+
+  it.each([
+    ['Client authentication', 'Choose a supported client authentication method.'],
+    ['Account identity', 'Choose a supported account identity verifier.'],
+    ['Scope separator', 'Choose a supported scope separator.'],
+  ])('makes invalid %s feedback transient without changing the app', (label, text) => {
+    const onChange = vi.fn();
+    const form = OAuthAppForm({ draft: oauthAppDraft(), busy: false, onChange });
+    descendants(form)
+      .find((child) => child.props['aria-label'] === label)!
+      .props.onChange({ currentTarget: { value: 'invalid' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledExactlyOnceWith(text, 'err', 5000, { transient: true });
+  });
+
+  it('makes invalid credential type and placement feedback transient', () => {
+    const form = newFormRenderer()();
+    descendants(form)
+      .find((child) => child.props['aria-label'] === 'Account type')!
+      .props.onChange({ currentTarget: { value: 'invalid' } });
+    expect(showToast).toHaveBeenLastCalledWith('Choose a credential type.', 'err', 5000, { transient: true });
+    const onChange = vi.fn();
+    const auth = CredentialAuthenticationForm({ auth: { type: 'api-key' }, keys: [], busy: false, onChange });
+    descendants(auth)
+      .find((child) => child.props['aria-label'] === 'API key placement')!
+      .props.onChange({ currentTarget: { value: 'invalid' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenLastCalledWith('Choose header or query placement.', 'err', 5000, { transient: true });
+  });
+
+  it('makes callback URL copy failures transient', async () => {
+    vi.stubGlobal('navigator', {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new DOMException('Denied', 'NotAllowedError')) },
+    });
+    const form = OAuthAppForm({ draft: oauthAppDraft(), busy: false, onChange: vi.fn() });
+    descendants(form)
+      .find((child) => child.props.label === 'Copy callback URL')!
+      .props.onClick();
+    await vi.waitFor(() =>
+      expect(showToast).toHaveBeenCalledExactlyOnceWith('Could not copy the callback URL', 'err', 5000, {
+        transient: true,
+      }),
+    );
+  });
+
   it.each([false, true])('uses the standard account dialog and authorization table (mobile=%s)', (mobile) => {
     credentialsOpen.value = true;
     isMobile.value = mobile;

@@ -65,7 +65,7 @@ export function TranscriptReader({ rows, onNavigate, renderMessage }: Props) {
       readerSelection.value = null;
     } else if (!page && !chatLoading.value) {
       console.warn('Reader message unavailable', selection.key);
-      showToast('This message is no longer available.', 'err');
+      showToast('This message is no longer available.', 'err', 5000, { transient: true });
       readerSelection.value = null;
     }
   }, [selection, sameLocation, !!page, chatLoading.value]);

@@ -759,7 +759,7 @@ export async function retryChatSend(messageId: string): Promise<boolean> {
         send.status === 'failed',
     );
   if (!context?.isWeb || !submission) {
-    showToast('This message is no longer available to retry.', 'err');
+    showToast('This message is no longer available to retry.', 'err', 5000, { transient: true });
     return false;
   }
   return submitChatPacket(submission, context);
@@ -989,7 +989,12 @@ export async function navigateAttention(scope: string | AttentionLocation): Prom
     return true;
   } catch (error) {
     console.error('Input request navigation failed', error);
-    showToast('Could not open input request: ' + (error instanceof Error ? error.message : String(error)), 'err');
+    showToast(
+      'Could not open input request: ' + (error instanceof Error ? error.message : String(error)),
+      'err',
+      5000,
+      { transient: error instanceof Error && error.message === 'HTTP 404' },
+    );
     return false;
   }
 }
@@ -1431,7 +1436,7 @@ export function addPendingFiles(
   }
   pending.value = next;
   if (next.length > previousCount) void warmChat();
-  if (validationError) showToast(validationError, 'err');
+  if (validationError) showToast(validationError, 'err', 5000, { transient: true });
 }
 
 export function removePending(i: number): void {

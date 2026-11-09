@@ -164,7 +164,10 @@ function ConnectionForm({ connection, apps, initialKind = 'static', resourceUrl,
       {!connection ? <Field label="Sign-in method"><select aria-label="Account type" value={kind} disabled={busy || !!oauthDraft}
         onChange={(event) => {
           const next = event.currentTarget.value;
-          if (next !== 'static' && next !== 'mcp_oauth' && next !== 'oauth_app') { showToast('Choose a credential type.', 'err'); return; }
+          if (next !== 'static' && next !== 'mcp_oauth' && next !== 'oauth_app') {
+            showToast('Choose a credential type.', 'err', 5000, { transient: true });
+            return;
+          }
           setKind(next);
           setScopes((next === 'static' ? [] : accessRequest?.scopes ?? (next === 'oauth_app' ? apps.find(app => app.id === appId)?.default_scopes ?? [] : [])).join('\n'));
           setUnspecifiedScopes(false);

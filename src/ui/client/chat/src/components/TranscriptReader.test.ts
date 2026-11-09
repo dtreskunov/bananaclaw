@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isValidElement, toChildArray, type ComponentChildren, type VNode } from 'preact';
 import { TranscriptReader } from './TranscriptReader';
 import { FilePreviewDialog } from './FilePreviewDialog';
-import { groupId, threadId, threads } from '../state';
+import { chatLoading, groupId, threadId, threads, toastMessage } from '../state';
+import { dismissToast } from './Toast';
 import { openTranscriptReader, readerSelection, type ReaderNavigate } from '../transcript-reader';
 import type { ChatMessage, TranscriptRow } from '../types';
 import { testAccountInteraction, testThread } from '../conversation-test-fixtures';
@@ -66,6 +67,9 @@ function button(node: ReturnType<typeof TranscriptReader>, label: string) {
 }
 afterEach(() => {
   disposers.splice(0).forEach((dispose) => dispose());
+  while (toastMessage.value) dismissToast();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 beforeEach(() => {
@@ -76,6 +80,7 @@ beforeEach(() => {
   threadId.value = 'thread';
   threads.value = [testThread({ title: 'Thread title' })];
   readerSelection.value = null;
+  chatLoading.value = false;
   viewport.scrollTop = 0;
   rows = [
     { kind: 'message', message },
@@ -85,6 +90,23 @@ beforeEach(() => {
 });
 
 describe('full-frame transcript reader', () => {
+  it('closes a missing message with a five-second warning', () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    openTranscriptReader({ kind: 'message', id: 'missing' });
+    render();
+    expect(readerSelection.value).toBeNull();
+    expect(toastMessage.value).toMatchObject({
+      text: 'This message is no longer available.',
+      kind: 'err',
+      transient: true,
+    });
+    vi.advanceTimersByTime(4999);
+    expect(toastMessage.value).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(toastMessage.value).toBeNull();
+  });
+
   it('uses the shared native preview dialog and updates live header position without changing the selected page', () => {
     openTranscriptReader({ kind: 'message', id: 'one' });
     let node = render();

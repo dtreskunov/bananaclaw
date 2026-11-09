@@ -1054,10 +1054,12 @@ header .mobile-only {
     animation: none;
   }
 }
+.toast-err,
 .toast-sticky {
   animation: toast-in 160ms ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
+  .toast-err,
   .toast-sticky {
     animation: none;
   }

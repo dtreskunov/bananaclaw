@@ -409,7 +409,7 @@ function InstallSection() {
   async function onInstall(): Promise<void> {
     const outcome = await triggerInstall();
     if (outcome === 'accepted') showToast('Installing…');
-    else if (outcome === 'dismissed') showToast('Install canceled', 'err');
+    else if (outcome === 'dismissed') showToast('Install canceled');
   }
   return (
     <section>

@@ -202,7 +202,10 @@ the bottom, using `POST /api/groups/:group/chat/:thread/read` with
 `{ sessionId, key }` and the normal optional channel/messaging-group context.
 The host validates current access and cursor scope and advances read watermarks
 monotonically. A concurrent newer publication remains unread. Failed
-acknowledgements retain unread state and report an error; refocus/scroll retries.
+acknowledgements retain unread state and report an error that auto-dismisses
+after five seconds; refocus/scroll retries even after the warning expires.
+Navigation cancellation does not report an error; a request that stalls for
+ten seconds does.
 A successful retry clears only that conversation's read warning, including
 queued warnings and warnings from an older rendered cursor. Repeated failures
 replace that warning rather than queuing duplicates; unrelated errors persist.
@@ -2196,7 +2199,14 @@ does not preserve the retired settings.
 Ordinary error toasts across the UI remain visible until explicitly dismissed. Their text
 can be selected and copied, long messages wrap and scroll, and each has a
 keyboard-accessible **Dismiss** button. Later notifications queue behind an
-unread error rather than replacing it. Success messages still auto-dismiss;
+unread error rather than replacing it. Low-impact errors explicitly auto-dismiss
+after five seconds: read acknowledgements, clipboard failures, stale message or
+activity targets (including HTTP 404), and local attachment/form validation.
+Read warnings expiring do not mark content read or disable retries. Duplicate
+credential headers instead show inline validation, cleared when corrected.
+Cancelling app installation is a neutral transient notice, not an error.
+Failed writes, access/server failures, and required action prompts stay persistent.
+Success messages still auto-dismiss;
 action prompts remain persistent. New-version and incompatible-protocol notices
 share a **Reload** action instead of **Dismiss**. Reload checks for a newer
 service worker and waits for it to activate before reloading, so a cached client

@@ -87,6 +87,12 @@ describe('rendered content acknowledgements', () => {
     attach();
     await vi.advanceTimersByTimeAsync(150);
     expect(showToast).toHaveBeenCalledOnce();
+    expect(showToast).toHaveBeenCalledWith(
+      'Could not mark this conversation read. Refocus or scroll to retry.',
+      'err',
+      5000,
+      { transient: true },
+    );
     await vi.advanceTimersByTimeAsync(2000);
     expect(fetch).toHaveBeenCalledOnce();
     log.dispatchEvent(new Event('scroll'));
@@ -135,7 +141,7 @@ describe('rendered content acknowledgements', () => {
     await vi.advanceTimersByTimeAsync(150);
     expect(dismissToastById).toHaveBeenCalledTimes(2);
   });
-  it('surfaces a timeout and clears the warning after a successful retry', async () => {
+  it('surfaces a timeout transiently and clears the warning after a successful retry', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(fetch).mockImplementationOnce(
       (_url, init) =>
@@ -146,11 +152,13 @@ describe('rendered content acknowledgements', () => {
     attach();
     await vi.advanceTimersByTimeAsync(10_150);
     expect(showToast).toHaveBeenCalledOnce();
+    expect(showToast).toHaveBeenCalledWith(expect.any(String), 'err', 5000, { transient: true });
     windowEvents.dispatchEvent(new Event('focus'));
     await vi.advanceTimersByTimeAsync(150);
     expect(dismissToastById).toHaveBeenCalledWith(42);
   });
   it('does not report a canceled request as a failure after unmounting', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(fetch).mockImplementationOnce(
       (_url, init) =>
         new Promise((_resolve, reject) => {
@@ -160,8 +168,9 @@ describe('rendered content acknowledgements', () => {
     attach();
     await vi.advanceTimersByTimeAsync(150);
     cleanups.pop()!();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(showToast).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
   });
   it('does not send an acknowledgement after the conversation unmounts', async () => {
     attach();

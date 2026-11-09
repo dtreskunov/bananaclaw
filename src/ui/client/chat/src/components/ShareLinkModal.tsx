@@ -84,7 +84,8 @@ export function ShareLinkModal() {
         try { ok = document.execCommand('copy'); } catch { /* ignore */ }
       }
     }
-    showToast(ok ? 'Link copied' : 'Copy failed', ok ? 'ok' : 'err');
+    if (ok) showToast('Link copied');
+    else showToast('Copy failed', 'err', 5000, { transient: true });
   }
 
   async function shareSystem(): Promise<void> {

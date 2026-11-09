@@ -66,7 +66,12 @@ export function attachReadTracking(log: ReadLog, target: ReadTarget): () => void
       console.warn('Read acknowledgement failed', error);
       const previousError = readErrors.get(errorKey);
       if (previousError !== undefined) dismissToastById(previousError);
-      readErrors.set(errorKey, showToast('Could not mark this conversation read. Refocus or scroll to retry.', 'err'));
+      readErrors.set(
+        errorKey,
+        showToast('Could not mark this conversation read. Refocus or scroll to retry.', 'err', 5000, {
+          transient: true,
+        }),
+      );
     } finally {
       clearTimeout(timeout);
       if (request === active) request = null;

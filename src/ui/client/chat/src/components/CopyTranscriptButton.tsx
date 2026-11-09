@@ -7,7 +7,7 @@ export function CopyTranscriptButton({ getContent }: { getContent: () => HTMLEle
     const content = getContent();
     if (!content) {
       console.error('Failed to copy transcript message: message content is unavailable.');
-      showToast('Could not copy message');
+      showToast('Could not copy message', 'err', 5000, { transient: true });
       return;
     }
     try {
@@ -15,7 +15,7 @@ export function CopyTranscriptButton({ getContent }: { getContent: () => HTMLEle
       showToast('Copied message');
     } catch (error) {
       console.error('Failed to copy transcript message:', error);
-      showToast('Could not copy message');
+      showToast('Could not copy message', 'err', 5000, { transient: true });
     }
   };
 

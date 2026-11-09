@@ -26,7 +26,7 @@ export function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }
         const method = event.currentTarget.value;
         if (method === 'none' || method === 'client_secret_post' || method === 'client_secret_basic')
           update({ token_endpoint_auth_method: method });
-        else showToast('Choose a supported client authentication method.', 'err');
+        else showToast('Choose a supported client authentication method.', 'err', 5000, { transient: true });
       }}>
       <option value="none">Public client (no secret)</option>
       <option value="client_secret_post">Client secret in request body</option>
@@ -42,7 +42,8 @@ export function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }
       <div class="credential-inline-field"><code class="credential-callback">{`${location.origin}/oauth/callback`}</code>
         <CredentialAction label="Copy callback URL" disabled={busy} onClick={() => {
           void navigator.clipboard.writeText(`${location.origin}/oauth/callback`).then(
-            () => showToast('Callback URL copied'), () => showToast('Could not copy the callback URL', 'err'),
+            () => showToast('Callback URL copied'),
+            () => showToast('Could not copy the callback URL', 'err', 5000, { transient: true }),
           );
         }}><CopyIcon /></CredentialAction>
       </div>
@@ -62,7 +63,7 @@ export function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }
         onChange={(event) => {
           const identity = event.currentTarget.value;
           if (identity === 'none' || identity === 'oidc' || identity === 'google' || identity === 'github') update({ identity });
-          else showToast('Choose a supported account identity verifier.', 'err');
+          else showToast('Choose a supported account identity verifier.', 'err', 5000, { transient: true });
         }}>
         <option value="none">No identity verification</option><option value="oidc">OpenID Connect</option>
         <option value="google">Google</option><option value="github">GitHub</option>
@@ -75,7 +76,7 @@ export function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }
         onChange={(event) => {
           const separator = event.currentTarget.value;
           if (separator === 'space' || separator === 'comma') update({ token_scope_separator: separator });
-          else showToast('Choose a supported scope separator.', 'err');
+          else showToast('Choose a supported scope separator.', 'err', 5000, { transient: true });
         }}>
         <option value="space">Space</option><option value="comma">Comma</option>
       </select></Field>

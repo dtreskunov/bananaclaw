@@ -1,4 +1,4 @@
-// Shared feedback: errors persist until dismissed; successes are transient.
+// Errors persist unless explicitly transient; actions always remain sticky.
 import './Toast.css';
 import { toastMessage } from '../state';
 import type { ToastMessage } from '../types';
@@ -10,7 +10,7 @@ const pending: { message: ToastMessage; ms: number }[] = [];
 function displayToast(message: ToastMessage, ms: number): void {
   if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
   toastMessage.value = message;
-  if (message.kind === 'err' || message.action) return;
+  if ((message.kind === 'err' && !message.transient) || message.action) return;
   hideTimer = setTimeout(() => {
     hideTimer = null;
     if (toastMessage.value?.id === message.id) dismissToast();
@@ -29,9 +29,11 @@ function enqueueToast(message: ToastMessage, ms = 1800): void {
   }
 }
 
-export function showToast(text: string, kind: 'ok' | 'err' = 'ok', ms = 1800): number {
+export function showToast(
+  text: string, kind: 'ok' | 'err' = 'ok', ms = 1800, options: { transient?: boolean } = {},
+): number {
   const id = nextId++;
-  enqueueToast({ id, text, kind }, ms);
+  enqueueToast({ id, text, kind, ...options }, ms);
   return id;
 }
 
@@ -78,7 +80,7 @@ export function Toast() {
   }
   if (t.kind === 'err') {
     return (
-      <div class="toast toast-err toast-sticky" key={t.id}>
+      <div class={'toast toast-err' + (t.transient ? '' : ' toast-sticky')} key={t.id}>
         <span class="toast-text" role="alert">{t.text}</span>
         <div class="toast-controls">
           {t.action ? <button type="button" onClick={t.action}>Continue</button> : null}

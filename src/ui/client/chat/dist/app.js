@@ -20400,7 +20400,7 @@ function displayToast(message2, ms) {
     hideTimer = null;
   }
   toastMessage.value = message2;
-  if (message2.kind === "err" || message2.action) return;
+  if (message2.kind === "err" && !message2.transient || message2.action) return;
   hideTimer = setTimeout(() => {
     hideTimer = null;
     if (toastMessage.value?.id === message2.id) dismissToast();
@@ -20416,9 +20416,9 @@ function enqueueToast(message2, ms = 1800) {
     displayToast(message2, ms);
   }
 }
-function showToast(text2, kind = "ok", ms = 1800) {
+function showToast(text2, kind = "ok", ms = 1800, options = {}) {
   const id2 = nextId++;
-  enqueueToast({ id: id2, text: text2, kind }, ms);
+  enqueueToast({ id: id2, text: text2, kind, ...options }, ms);
   return id2;
 }
 function showStickyToast(text2, onClick, kind = "ok", actionLabel) {
@@ -20456,7 +20456,7 @@ function Toast() {
     );
   }
   if (t4.kind === "err") {
-    return /* @__PURE__ */ u4("div", { class: "toast toast-err toast-sticky", children: [
+    return /* @__PURE__ */ u4("div", { class: "toast toast-err" + (t4.transient ? "" : " toast-sticky"), children: [
       /* @__PURE__ */ u4("span", { class: "toast-text", role: "alert", children: t4.text }),
       /* @__PURE__ */ u4("div", { class: "toast-controls", children: [
         t4.action ? /* @__PURE__ */ u4("button", { type: "button", onClick: t4.action, children: "Continue" }) : null,
@@ -21516,7 +21516,7 @@ async function retryChatSend(messageId) {
     (send) => send.messageId === messageId && send.groupId === groupId.value && send.threadId === threadId.value && send.status === "failed"
   );
   if (!context?.isWeb || !submission) {
-    showToast("This message is no longer available to retry.", "err");
+    showToast("This message is no longer available to retry.", "err", 5e3, { transient: true });
     return false;
   }
   return submitChatPacket(submission, context);
@@ -21689,7 +21689,12 @@ async function navigateAttention(scope) {
     return true;
   } catch (error) {
     console.error("Input request navigation failed", error);
-    showToast("Could not open input request: " + (error instanceof Error ? error.message : String(error)), "err");
+    showToast(
+      "Could not open input request: " + (error instanceof Error ? error.message : String(error)),
+      "err",
+      5e3,
+      { transient: error instanceof Error && error.message === "HTTP 404" }
+    );
     return false;
   }
 }
@@ -22068,7 +22073,7 @@ function addPendingFiles(fileList, max, maxSize, maxTotal) {
   }
   pending.value = next;
   if (next.length > previousCount) void warmChat();
-  if (validationError) showToast(validationError, "err");
+  if (validationError) showToast(validationError, "err", 5e3, { transient: true });
 }
 function removePending(i5) {
   const next = pending.value.slice();
@@ -26134,7 +26139,7 @@ function CredentialAuthenticationForm({ auth, keys, busy, preferredKey, savedLab
           onChange: (event) => {
             const location3 = event.currentTarget.value;
             if (location3 !== "header" && location3 !== "query") {
-              showToast("Choose header or query placement.", "err");
+              showToast("Choose header or query placement.", "err", 5e3, { transient: true });
               return;
             }
             onChange({
@@ -26191,12 +26196,14 @@ function CredentialAuthenticationForm({ auth, keys, busy, preferredKey, savedLab
   ] });
 }
 function HeaderFields({ auth, keys, busy, onChange }) {
+  const [error, setError] = h2("");
   const entries = Object.entries(auth.headers ?? {});
   const set = (position2, header, template) => {
     if (entries.some(([other], at) => at !== position2 && other.toLowerCase() === header.toLowerCase())) {
-      showToast("This header already exists.", "err");
+      setError("This header already exists.");
       return false;
     }
+    setError("");
     onChange(Object.fromEntries(entries.map((entry, at) => at === position2 ? [header, template] : entry)));
     return true;
   };
@@ -26220,7 +26227,10 @@ function HeaderFields({ auth, keys, busy, onChange }) {
           {
             label: `Remove header ${position2 + 1}`,
             disabled: entries.length === 1,
-            onClick: () => onChange(Object.fromEntries(entries.filter((_6, at) => at !== position2))),
+            onClick: () => {
+              setError("");
+              onChange(Object.fromEntries(entries.filter((_6, at) => at !== position2)));
+            },
             children: /* @__PURE__ */ u4(TrashIcon, {})
           }
         )
@@ -26236,7 +26246,9 @@ function HeaderFields({ auth, keys, busy, onChange }) {
         }
       )
     ] }, position2)),
+    /* @__PURE__ */ u4(ErrorNotice, { message: error }),
     /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => {
+      setError("");
       const key = unusedKey(keys, "HEADER_VALUE");
       let header = "X-Api-Key";
       let number2 = 2;
@@ -26534,7 +26546,7 @@ function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }) {
           const method = event.currentTarget.value;
           if (method === "none" || method === "client_secret_post" || method === "client_secret_basic")
             update({ token_endpoint_auth_method: method });
-          else showToast("Choose a supported client authentication method.", "err");
+          else showToast("Choose a supported client authentication method.", "err", 5e3, { transient: true });
         },
         children: [
           /* @__PURE__ */ u4("option", { value: "none", children: "Public client (no secret)" }),
@@ -26571,7 +26583,7 @@ function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }) {
       /* @__PURE__ */ u4(CredentialAction, { label: "Copy callback URL", disabled: busy, onClick: () => {
         void navigator.clipboard.writeText(`${location.origin}/oauth/callback`).then(
           () => showToast("Callback URL copied"),
-          () => showToast("Could not copy the callback URL", "err")
+          () => showToast("Could not copy the callback URL", "err", 5e3, { transient: true })
         );
       }, children: /* @__PURE__ */ u4(CopyIcon, {}) })
     ] }) }),
@@ -26619,7 +26631,7 @@ function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }) {
           onChange: (event) => {
             const identity = event.currentTarget.value;
             if (identity === "none" || identity === "oidc" || identity === "google" || identity === "github") update({ identity });
-            else showToast("Choose a supported account identity verifier.", "err");
+            else showToast("Choose a supported account identity verifier.", "err", 5e3, { transient: true });
           },
           children: [
             /* @__PURE__ */ u4("option", { value: "none", children: "No identity verification" }),
@@ -26649,7 +26661,7 @@ function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }) {
           onChange: (event) => {
             const separator = event.currentTarget.value;
             if (separator === "space" || separator === "comma") update({ token_scope_separator: separator });
-            else showToast("Choose a supported scope separator.", "err");
+            else showToast("Choose a supported scope separator.", "err", 5e3, { transient: true });
           },
           children: [
             /* @__PURE__ */ u4("option", { value: "space", children: "Space" }),
@@ -26937,7 +26949,7 @@ function ConnectionForm({ connection: connection2, apps, initialKind = "static",
         onChange: (event) => {
           const next = event.currentTarget.value;
           if (next !== "static" && next !== "mcp_oauth" && next !== "oauth_app") {
-            showToast("Choose a credential type.", "err");
+            showToast("Choose a credential type.", "err", 5e3, { transient: true });
             return;
           }
           setKind(next);
@@ -27550,7 +27562,7 @@ function TranscriptReader({ rows, onNavigate, renderMessage }) {
       readerSelection.value = null;
     } else if (!page && !chatLoading.value) {
       console.warn("Reader message unavailable", selection.key);
-      showToast("This message is no longer available.", "err");
+      showToast("This message is no longer available.", "err", 5e3, { transient: true });
       readerSelection.value = null;
     }
   }, [selection, sameLocation, !!page, chatLoading.value]);
@@ -27786,7 +27798,7 @@ function CopyTranscriptButton({ getContent }) {
     const content = getContent();
     if (!content) {
       console.error("Failed to copy transcript message: message content is unavailable.");
-      showToast("Could not copy message");
+      showToast("Could not copy message", "err", 5e3, { transient: true });
       return;
     }
     try {
@@ -27794,7 +27806,7 @@ function CopyTranscriptButton({ getContent }) {
       showToast("Copied message");
     } catch (error) {
       console.error("Failed to copy transcript message:", error);
-      showToast("Could not copy message");
+      showToast("Could not copy message", "err", 5e3, { transient: true });
     }
   };
   return /* @__PURE__ */ u4(
@@ -27935,7 +27947,12 @@ function attachReadTracking(log, target) {
       console.warn("Read acknowledgement failed", error);
       const previousError = readErrors.get(errorKey);
       if (previousError !== void 0) dismissToastById(previousError);
-      readErrors.set(errorKey, showToast("Could not mark this conversation read. Refocus or scroll to retry.", "err"));
+      readErrors.set(
+        errorKey,
+        showToast("Could not mark this conversation read. Refocus or scroll to retry.", "err", 5e3, {
+          transient: true
+        })
+      );
     } finally {
       clearTimeout(timeout);
       if (request === active) request = null;
@@ -29369,7 +29386,7 @@ function MessageLog({ dockRef }) {
     const target = log?.querySelector(`[data-msg-id="${CSS.escape(anchorId)}"]`);
     if (!log || !target) {
       console.warn("Reader transcript target unavailable", anchorId);
-      showToast("Could not locate this message in the transcript.", "err");
+      showToast("Could not locate this message in the transcript.", "err", 5e3, { transient: true });
       return;
     }
     cancelScheduledScroll();
@@ -30154,7 +30171,7 @@ async function sharePrivate(gid, entry) {
     await navigator.clipboard.writeText(url);
     showToast("Link copied");
   } catch {
-    showToast("Copy failed", "err");
+    showToast("Copy failed", "err", 5e3, { transient: true });
   }
 }
 function shareWithToken(gid, entry) {
@@ -32010,7 +32027,7 @@ function InstallSection() {
   async function onInstall() {
     const outcome = await triggerInstall();
     if (outcome === "accepted") showToast("Installing\u2026");
-    else if (outcome === "dismissed") showToast("Install canceled", "err");
+    else if (outcome === "dismissed") showToast("Install canceled");
   }
   return /* @__PURE__ */ u4("section", { children: [
     /* @__PURE__ */ u4("h3", { children: "Install app" }),
@@ -32107,7 +32124,8 @@ function ShareLinkModal() {
         }
       }
     }
-    showToast(ok ? "Link copied" : "Copy failed", ok ? "ok" : "err");
+    if (ok) showToast("Link copied");
+    else showToast("Copy failed", "err", 5e3, { transient: true });
   }
   async function shareSystem() {
     const navAny2 = navigator;

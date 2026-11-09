@@ -33,6 +33,31 @@ describe('shared toast policy', () => {
     expect(toastMessage.value).toBeNull();
   });
 
+  it('auto-dismisses an explicitly transient error after its duration without losing the next error', () => {
+    showToast('Read failed', 'err', 5000, { transient: true });
+    expect(Toast()?.props.class).toBe('toast toast-err');
+    showToast('Upload failed', 'err');
+    vi.advanceTimersByTime(4999);
+    expect(toastMessage.value?.text).toBe('Read failed');
+    vi.advanceTimersByTime(1);
+    expect(toastMessage.value?.text).toBe('Upload failed');
+    vi.advanceTimersByTime(60_000);
+    expect(toastMessage.value?.text).toBe('Upload failed');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('starts a queued transient error timer only when the error is displayed', () => {
+    showToast('Upload failed', 'err');
+    showToast('Read failed', 'err', 5000, { transient: true });
+    vi.advanceTimersByTime(60_000);
+    expect(toastMessage.value?.text).toBe('Upload failed');
+    dismissToast();
+    vi.advanceTimersByTime(4999);
+    expect(toastMessage.value?.text).toBe('Read failed');
+    vi.advanceTimersByTime(1);
+    expect(toastMessage.value).toBeNull();
+  });
+
   it('cancels an earlier success timer when an error appears', () => {
     showToast('Saved');
     vi.advanceTimersByTime(1000);

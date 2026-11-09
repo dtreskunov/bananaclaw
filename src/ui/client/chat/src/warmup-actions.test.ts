@@ -1,6 +1,7 @@
 import { UiResponse as Response } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { addPendingFiles, deleteThread, sendChat, warmChat } from './actions';
+import { addPendingFiles, deleteThread, retryChatSend, sendChat, warmChat } from './actions';
+import { showToast } from './components/Toast';
 import {
   activeTurn,
   canSend,
@@ -19,6 +20,7 @@ import type { Thread } from './types';
 import { testThread } from './conversation-test-fixtures';
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
+vi.mock('./components/Toast', () => ({ showToast: vi.fn() }));
 
 let sequence = 0;
 let thread: Thread;
@@ -26,6 +28,7 @@ const response = (status = 200, body = { sessionId: 'warm-session' }) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 beforeEach(() => {
+  vi.mocked(showToast).mockClear();
   resetConversation();
   groupId.value = 'agent';
   threadId.value = `empty-${++sequence}`;
@@ -62,6 +65,29 @@ afterEach(() => {
 });
 
 describe('composer-intent warmup', () => {
+  it('shows a transient warning when a retry target no longer exists', async () => {
+    expect(await retryChatSend('missing')).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith('This message is no longer available to retry.', 'err', 5000, {
+      transient: true,
+    });
+  });
+
+  it.each([
+    { reason: 'count', max: 1, maxSize: 10, maxTotal: 10, size: 1, error: 'Max 1 files per message' },
+    { reason: 'size', max: 2, maxSize: 1, maxTotal: 10, size: 2, error: 'draft.txt too large (max 0 MB)' },
+    { reason: 'total', max: 2, maxSize: 10, maxTotal: 1, size: 1, error: 'Total upload too large (max 0 MB)' },
+  ])(
+    'makes $reason validation transient without accepting the rejected attachment',
+    ({ max, maxSize, maxTotal, size, error }) => {
+      pending.value = [{ name: 'existing.txt', size: 1 }];
+      addPendingFiles([new File(['x'.repeat(size)], 'draft.txt')], max, maxSize, maxTotal);
+      expect(pending.value).toEqual([{ name: 'existing.txt', size: 1 }]);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(showToast).toHaveBeenCalledWith(error, 'err', 5000, { transient: true });
+    },
+  );
+
   it('captures optimistic submissions as epoch milliseconds, including zero', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(0);
     expect(await sendChat('Hello', null)).toBe(true);
