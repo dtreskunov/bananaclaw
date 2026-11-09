@@ -23317,7 +23317,7 @@ function ChannelSection({ ct, items, defaultOpen }) {
     const ts = t4.lastActivityAt;
     return ts !== null && (latest === null || ts > latest) ? ts : latest;
   }, null);
-  const handles = Array.from(new Set(items.map((t4) => t4.counterparty).filter((h5) => !!h5)));
+  const handles = ct === "agent" ? [] : Array.from(new Set(items.map((t4) => t4.counterparty).filter((h5) => !!h5)));
   const handleStr = handles.length === 0 ? "" : handles.length === 1 ? handles[0] : `${handles[0]} +${handles.length - 1}`;
   return /* @__PURE__ */ u4("div", { class: "thread-section" + (expanded ? " open" : " collapsed"), children: [
     ct === "web" ? null : /* @__PURE__ */ u4(

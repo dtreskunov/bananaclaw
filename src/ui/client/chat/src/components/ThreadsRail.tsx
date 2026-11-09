@@ -221,7 +221,7 @@ export function ThreadList({ items }: { items: Thread[] }) {
   ))}</>;
 }
 
-function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[]; defaultOpen: boolean }) {
+export function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[]; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const expanded = ct === 'web' || open;
   const meta = channelMeta(ct);
@@ -230,7 +230,7 @@ function ChannelSection({ ct, items, defaultOpen }: { ct: string; items: Thread[
     const ts = t.lastActivityAt;
     return ts !== null && (latest === null || ts > latest) ? ts : latest;
   }, null);
-  const handles = Array.from(new Set(items.map((t) => t.counterparty).filter((h): h is string => !!h)));
+  const handles = ct === 'agent' ? [] : Array.from(new Set(items.map((t) => t.counterparty).filter((h): h is string => !!h)));
   const handleStr = handles.length === 0
     ? ''
     : handles.length === 1 ? handles[0]

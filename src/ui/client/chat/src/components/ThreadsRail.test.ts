@@ -4,12 +4,16 @@ import { epochMs } from '../../../../shared/time';
 import { testThread } from '../conversation-test-fixtures';
 import { groupId, threadId } from '../state';
 import { openChat } from '../actions';
-import { DmRow, ThreadList, ThreadRow, ThreadTitle } from './ThreadsRail';
+import { ChannelSection, DmRow, ThreadList, ThreadRow, ThreadTitle } from './ThreadsRail';
 import { RelativeTime } from './RelativeTime';
 
 type ElementNode = VNode<JSX.HTMLAttributes<HTMLElement>>;
 
 vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) }));
+vi.mock('preact/hooks', async (original) => ({
+  ...(await original<typeof import('preact/hooks')>()),
+  useState: (initial: boolean) => [initial, vi.fn()],
+}));
 vi.mock('../actions', async (original) => ({
   ...(await original<typeof import('../actions')>()),
   openChat: vi.fn().mockResolvedValue(undefined),
@@ -19,6 +23,36 @@ afterEach(() => {
   groupId.value = null;
   threadId.value = null;
   vi.clearAllMocks();
+});
+
+describe('channel section subtitles', () => {
+  function header(counterparties: string[], ct: string) {
+    const section = ChannelSection({
+      ct,
+      items: counterparties.map((counterparty) => testThread({ channelType: ct, counterparty })),
+      defaultOpen: true,
+    });
+    const button = (toChildArray(section.props.children) as ElementNode[])[0];
+    return toChildArray(button.props.children) as ElementNode[];
+  }
+
+  it.each([{ peers: [] }, { peers: ['Research'] }, { peers: ['Research', 'Planner'] }])(
+    'omits the Agents peer summary for $peers',
+    ({ peers }) => {
+      const children = header(peers, 'agent');
+      expect(children.some((node) => node.props.class === 'handle')).toBe(false);
+      expect(children[0].props.class).toBe('row');
+    },
+  );
+
+  it.each([
+    [['alice@example.com'], 'alice@example.com'],
+    [['alice@example.com', 'bob@example.com'], 'alice@example.com +1'],
+  ] as const)('preserves the Email subtitle for %j', (peers, expected) => {
+    const subtitle = header([...peers], 'resend').find((node) => node.props.class === 'handle')!;
+    expect(subtitle.props.children).toBe(expected);
+    expect(subtitle.props.title).toBe(peers.join(', '));
+  });
 });
 
 describe('thread family rendering', () => {

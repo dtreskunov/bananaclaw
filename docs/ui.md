@@ -946,6 +946,8 @@ their sender attribution in both history and live updates.
 Peer-agent messages use the same sender labels as other users. Received messages
 name the sending agent; sent messages show **To &lt;agent name&gt;**. Identity comes
 from the journal's routing fields, never from names supplied in message text.
+The Agents section header omits the aggregate peer-name subtitle; message
+attribution identifies each exchange's participants.
 Dedicated per-thread sessions include both sides of their peer exchanges in the
 original transcript. Shared or channel-less sessions instead expose a read-only
 **Agent messages** thread (`__agent:<sessionId>`, with channel `agent` and the
