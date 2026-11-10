@@ -864,7 +864,7 @@ the app and the bootstrap.
 
 On desktop, collapsed THREADS and FILES rails float over the transcript at their
 respective top corners. Each rail is only as tall as its label and quick actions,
-and reserves no transcript column. Transcript padding on each collapsed side
+has no top border, and reserves no transcript column. Transcript padding on each collapsed side
 leaves at least 16 px between the rail and message bubbles, while preserving
 larger centered gutters. Expanded panes and mobile drawers are unchanged.
 Desktop expansion and collapse resize the columns over 180 ms, with a brief fade

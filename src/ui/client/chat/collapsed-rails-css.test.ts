@@ -39,6 +39,7 @@ describe('collapsed desktop rails CSS contract', () => {
       'z-index: 4',
       'background: var(--surface)',
       'border: 1px solid var(--border)',
+      'border-top: 0',
       'border-radius: var(--radius-lg)',
       'box-shadow:',
     ]) {
