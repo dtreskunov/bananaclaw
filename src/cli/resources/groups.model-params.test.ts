@@ -21,7 +21,7 @@ vi.mock('../../config.js', async () => {
 const TEST_DIR = `${process.cwd()}/.test-state/nanoclaw-test-cli-model-params`;
 
 import { initTestDb, closeDb, runMigrations, createAgentGroup } from '../../db/index.js';
-import { createContainerConfig, getContainerConfig } from '../../db/container-configs.js';
+import { createContainerConfig, getContainerConfig, updateContainerConfigScalars } from '../../db/container-configs.js';
 import { dispatch } from '../dispatch.js';
 import './groups.js';
 
@@ -62,16 +62,43 @@ describe('groups config set-param / unset-param', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     closeDb();
     if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
   });
 
+  it('sets, rejects and clears thinking levels through config update', async () => {
+    seedGroup('thinking');
+    vi.stubEnv('DEFAULT_EFFORT', '');
+    updateContainerConfigScalars('thinking', { provider: 'native', model: 'minimax/MiniMax-M3.1-Flash' });
+    const invoke = (effort: unknown) =>
+      dispatch(
+        {
+          id: 'thinking-request',
+          command: 'groups-config-update',
+          args: { id: 'thinking', effort },
+        },
+        { caller: 'host' },
+      );
+    expect(await invoke('max')).toMatchObject({ ok: true, data: { effort: 'max' } });
+    expect(await invoke('none')).toMatchObject({ ok: false });
+    expect(getContainerConfig('thinking')?.effort).toBe('max');
+    expect(await invoke(true)).toMatchObject({ ok: false });
+    expect(await invoke('')).toMatchObject({ ok: true, data: { effort: null } });
+    expect(getContainerConfig('thinking')?.model_params).toBe('{}');
+  });
+
   it('sets, reports and clears the native soft budget through config update', async () => {
     seedGroup('budget');
-    const invoke = (value: string) => dispatch({
-      id: 'budget-request', command: 'groups-config-update',
-      args: { id: 'budget', 'soft-turn-token-budget': value },
-    }, { caller: 'host' });
+    const invoke = (value: string) =>
+      dispatch(
+        {
+          id: 'budget-request',
+          command: 'groups-config-update',
+          args: { id: 'budget', 'soft-turn-token-budget': value },
+        },
+        { caller: 'host' },
+      );
     expect(await invoke('1234')).toMatchObject({ ok: true, data: { soft_turn_token_budget: 1234 } });
     expect(getContainerConfig('budget')?.model_params).toBe('{}');
     expect(await invoke('')).toMatchObject({ ok: true, data: { soft_turn_token_budget: null } });

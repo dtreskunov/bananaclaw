@@ -15,7 +15,7 @@ import zlib from 'zlib';
 import { URL } from 'url';
 
 import { CONTAINER_IMAGE } from '../../../config.js';
-import { readEnvFile, resolveDefaultModel } from '../../../env.js';
+import { defaultProvider, resolveDefaultModel, resolveDefaultEffort } from '../../../env.js';
 import { buildAgentGroupImage, isContainerRunning, runMcpProbeContainer } from '../../../container-runner.js';
 import { restartAgentGroupContainers } from '../../../container-restart.js';
 import { getDb } from '../../../db/connection.js';
@@ -85,6 +85,7 @@ import { McpAuthenticationError, parseMcpAuthentication } from '../../shared/mcp
 import { defaultVoiceInputBackend, resolveVoiceInputConfig, type VoiceInputConfig } from './voice-input-config.js';
 import { allocateSiteSlug, isValidSlug, pagesBaseDomain, pagesEnabled, siteFqdn, siteUrl } from '../pages/site.js';
 import { transaction } from '../../../db/transaction.js';
+import { thinkingLevelError } from '../../shared/thinking-levels.js';
 
 // ── allowed scalar config fields (mirrors ncl groups config update) ───────
 
@@ -297,6 +298,7 @@ interface SettingsResponse {
     provider: string | null;
     /** Default model per provider — model ids don't carry across providers. */
     models: Record<string, string | null>;
+    effort: string | null;
     image_tag: string | null;
     voice_input_backend: VoiceInputConfig['backend'];
   };
@@ -370,8 +372,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
   }
 
   // Resolve effective defaults for fields the UI shows as placeholders.
-  const envDefaults = readEnvFile(['DEFAULT_PROVIDER']);
-  const defaultProviderName = envDefaults.DEFAULT_PROVIDER || 'claude';
+  const defaultProviderName = defaultProvider();
   // Every provider the picker can land on, so the Model placeholder can track
   // the drafted provider without another round trip.
   const defaultModels: Record<string, string | null> = {};
@@ -413,6 +414,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
     disabledSkills: parseStringArray(cfg.disabled_skills),
     availableSkills: listAvailableSkills(groupSkillRoots(group.folder)),
     defaults: {
+      effort: resolveDefaultEffort() ?? null,
       provider: defaultProviderName,
       models: defaultModels,
       image_tag: defaultImage,
@@ -561,6 +563,11 @@ async function handlePatchSettings(
         throw new BadRequest(`provider must be one of: ${VALID_PROVIDERS.join(', ')}`);
       }
       updates.provider = v;
+    } else if (key === 'effort') {
+      if (raw != null && typeof raw !== 'string') {
+        throw new BadRequest('Thinking level must be a string or null');
+      }
+      updates.effort = raw || null;
     } else if (key === 'voice_input_backend') {
       if (raw !== null && typeof raw !== 'string') {
         throw new BadRequest('voice_input_backend must be null or a backend ID string');
@@ -656,6 +663,15 @@ async function handlePatchSettings(
     const existing = getContainerConfig(gid);
     const effectiveProvider = updates.provider ?? existing?.provider ?? null;
     updates.small_model = dbValueFromBareId(effectiveProvider, updates.small_model ?? null);
+  }
+
+  if ('effort' in updates || 'model' in updates || 'provider' in updates) {
+    const existing = getContainerConfig(gid);
+    const provider = ('provider' in updates ? updates.provider : existing?.provider) ?? defaultProvider();
+    const model = ('model' in updates ? updates.model : existing?.model) ?? resolveDefaultModel(provider) ?? null;
+    const effort = ('effort' in updates ? updates.effort : existing?.effort) ?? resolveDefaultEffort();
+    const error = thinkingLevelError(provider, model, effort);
+    if (error) throw new BadRequest(error);
   }
 
   if (

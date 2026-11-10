@@ -441,6 +441,63 @@ describe('native soft usage advisory', () => {
 });
 
 describe('NativeProvider', () => {
+  it.each((['openai-chat', 'anthropic-messages'] as const).flatMap(protocol =>
+    ['low', 'medium', 'high', 'xhigh', 'max'].map(effort => [protocol, effort] as const),
+  ))(
+    'sends MiniMax thinking level on the %s wire at %s for every model step', async (protocol, effort) => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      if (protocol === 'openai-chat') toolMode = true;
+      else anthropicToolMode = true;
+      const events = await collect(new NativeProvider({ model: 'local/MiniMax-M3.1-Flash', effort }));
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      expect(requests.length).toBeGreaterThan(1);
+      for (const request of requests) {
+        expect(request[protocol === 'openai-chat' ? 'reasoning_effort' : 'output_config'])
+          .toEqual(protocol === 'openai-chat' ? effort : { effort });
+        expect(request.thinking).toBeUndefined();
+      }
+    },
+  );
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'preserves default MiniMax request shapes on %s', async protocol => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      const events = await collect(new NativeProvider({ model: 'local/MiniMax-M3.1-Flash' }));
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].reasoning_effort).toBeUndefined();
+      expect(requests[0].output_config).toBeUndefined();
+      expect(requests[0].thinking).toBeUndefined();
+    },
+  );
+
+  it('sends Off as reasoning_effort none only for a supported OpenAI model', async () => {
+    const events = await collect(new NativeProvider({ model: 'local/gpt-5.1', effort: 'none' }));
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(requests[0].reasoning_effort).toBe('none');
+  });
+
+  it('enables adaptive thinking alongside effort for native Claude', async () => {
+    process.env.NATIVE_PROTOCOL = 'anthropic-messages';
+    const events = await collect(new NativeProvider({ model: 'local/claude-sonnet-4-6', effort: 'high' }));
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(requests[0].output_config).toEqual({ effort: 'high' });
+    expect(requests[0].thinking).toEqual({ type: 'adaptive' });
+  });
+
+  it.each([
+    ['MiniMax-M3.1-Flash', 'none', 'openai-chat'],
+    ['unknown', 'high', 'openai-chat'],
+    ['gpt-5', 'max', 'openai-chat'],
+    ['claude-sonnet-4-6', 'high', 'openai-chat'],
+    ['gpt-5', 'high', 'anthropic-messages'],
+  ] as const)('rejects unsupported thinking %s/%s/%s before making an API call', async (model, effort, protocol) => {
+    process.env.NATIVE_PROTOCOL = protocol;
+    const events = await collect(new NativeProvider({ model: `local/${model}`, effort }));
+    expect(requests).toHaveLength(0);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringMatching(/[Tt]hinking/) }));
+  });
+
   it('calls the Groq default endpoint with the unprefixed model ID', async () => {
     delete process.env.NATIVE_BASE_URL;
     catalogModels = {
@@ -1663,13 +1720,32 @@ describe('NativeProvider', () => {
     } finally { store.close(); }
   });
 
-  function miniMaxFlash(maxOutputTokens = 512_000, modelId = 'MiniMax-M3.1-Flash-Preview') {
+  function miniMaxFlash(maxOutputTokens = 512_000, modelId = 'MiniMax-M3.1-Flash-Preview', effort?: string) {
     catalogModels = { local: { models: { [modelId]: {
       modalities: { input: ['text'], output: ['text'] },
       limit: { context: 1_000_000, output: maxOutputTokens },
     } } } };
-    return new NativeProvider({ model: `local/${modelId}` });
+    return new NativeProvider({ model: `local/${modelId}`, effort });
   }
+
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'keeps low-effort compaction separate from agent thinking at %s', async protocol => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      contextOverflows = 1;
+      const events = await collect(miniMaxFlash(512_000, 'MiniMax-M3.1-Flash', 'high'), history());
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      const summaries = requests.filter(request => JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+      const normal = requests.filter(request => !JSON.stringify(request).includes(COMPACTION_INSTRUCTIONS));
+      expect(summaries.length).toBeGreaterThan(0);
+      expect(normal.length).toBeGreaterThan(0);
+      for (const [calls, effort] of [[summaries, 'low'], [normal, 'high']] as const) {
+        for (const request of calls) {
+          expect(request[protocol === 'openai-chat' ? 'reasoning_effort' : 'output_config'])
+            .toEqual(protocol === 'openai-chat' ? effort : { effort });
+        }
+      }
+    },
+  );
 
   it.each([
     ['openai-chat', 'MiniMax-M3.1-Flash-Preview'], ['anthropic-messages', 'MiniMax-M3.1-Flash-Preview'],

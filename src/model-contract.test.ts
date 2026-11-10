@@ -11,6 +11,16 @@ import cases from '../container/agent-runner/src/providers/model-contract-cases.
 import { normalizeLimits } from './model-limits.js';
 import { joinWireModel } from './model-wire.js';
 import { isNativeCompatible, resolveCatalogEndpoint } from './ui/server/chat/models-dev-catalog.js';
+import { thinkingLevels } from './ui/shared/thinking-levels.js';
+
+describe('thinking levels contract', () => {
+  for (const c of cases.thinking.cases) {
+    it(c.modelId, () => {
+      expect(thinkingLevels('native', `local/${c.modelId}`)).toEqual(c.levels);
+      if (c.modelId.startsWith('claude-')) expect(thinkingLevels('claude', c.modelId)).toEqual(c.levels);
+    });
+  }
+});
 
 describe('model limits contract', () => {
   for (const c of cases.limits.cases) {

@@ -5420,7 +5420,8 @@ nav.tab-bar-strip.group-strip {
 }
 .group-admin-control > input[type=text],
 .group-admin-control > input[type=number],
-.group-admin-control > select {
+.group-admin-control > select,
+.group-admin-control > .group-admin-stack > select {
   flex: 1;
   min-width: 0;
   font: inherit;

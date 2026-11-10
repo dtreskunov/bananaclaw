@@ -41,6 +41,7 @@ import {
   noReplyReason,
 } from './native/reply.js';
 import { DeferredMcpTools, mcpToolSearchMode } from './native/tool-search.js';
+import { nativeThinkingOptions } from './native/thinking.js';
 import { boundToolResults, finishedToolReceipts } from './native/tool-results.js';
 
 function log(message: string): void {
@@ -317,7 +318,6 @@ export class NativeProvider implements AgentProvider {
   constructor(options: ProviderOptions = {}) {
     this.options = options;
     this.store = new NativeStore();
-    if (options.effort) log(`Ignoring unsupported generic Chat effort value: ${options.effort}`);
   }
 
   isSessionInvalid(error: unknown): boolean {
@@ -404,6 +404,7 @@ export class NativeProvider implements AgentProvider {
               journal = turnJournal;
               abortController.signal.throwIfAborted();
               const resolved = await resolveNativeModel(configuredModel);
+              const thinkingOptions = nativeThinkingOptions(resolved, options.effort);
               const miniMaxFlash = /^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(resolved.modelId);
               const conversation = continuation;
               abortController.signal.throwIfAborted();
@@ -632,6 +633,7 @@ export class NativeProvider implements AgentProvider {
                     ? { temperature: options.modelParams.temperature }
                     : {}),
                   ...(typeof options.modelParams?.top_p === 'number' ? { topP: options.modelParams.top_p } : {}),
+                  providerOptions: thinkingOptions,
                 });
 
                 // Start the resumed generation before yielding acknowledgements.

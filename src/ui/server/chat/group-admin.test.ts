@@ -170,6 +170,72 @@ afterEach(() => {
   if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
 });
 
+describe('thinking level settings', () => {
+  beforeEach(() => {
+    seedUser('web:owner');
+    seedGroup('thinking-group', 'thinking-group');
+    grantRole({ user_id: 'web:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: NOW() });
+    mockUserId = 'web:owner';
+    getDb()
+      .prepare(
+        "UPDATE container_configs SET provider = 'native', model = 'minimax/MiniMax-M3.1-Flash' WHERE agent_group_id = ?",
+      )
+      .run('thinking-group');
+    vi.stubEnv('DEFAULT_EFFORT', '');
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(['low', 'medium', 'high', 'xhigh', 'max'])(
+    'round-trips %s through the existing effort field',
+    async (effort) => {
+      const response = await call('PATCH', '/api/groups/thinking-group/admin/settings', { effort });
+      expect(response.status()).toBe(200);
+      expect(response.body()).toMatchObject({ config: { effort }, modelParams: {} });
+    },
+  );
+
+  it('clears the override and reports the inherited default', async () => {
+    await call('PATCH', '/api/groups/thinking-group/admin/settings', { effort: 'high' });
+    vi.stubEnv('DEFAULT_EFFORT', 'low');
+    const response = await call('PATCH', '/api/groups/thinking-group/admin/settings', { effort: null });
+    expect(response.status()).toBe(200);
+    expect(response.body()).toMatchObject({ config: { effort: null }, defaults: { effort: 'low' } });
+  });
+
+  it.each(['none', 'off', 'invalid', 10, true, ['high'], { level: 'high' }])(
+    'rejects unsupported level %s without writing it',
+    async (effort) => {
+      const response = await call('PATCH', '/api/groups/thinking-group/admin/settings', { effort });
+      expect(response.status()).toBe(400);
+      expect(response.body()).toMatchObject({ error: expect.stringContaining('Thinking level') });
+      expect(
+        getDb().prepare('SELECT effort FROM container_configs WHERE agent_group_id = ?').get('thinking-group'),
+      ).toEqual({ effort: null });
+    },
+  );
+
+  it('validates retained effort on provider changes, but allows explicitly clearing it', async () => {
+    await call('PATCH', '/api/groups/thinking-group/admin/settings', { effort: 'high' });
+    const invalid = await call('PATCH', '/api/groups/thinking-group/admin/settings', { provider: 'opencode' });
+    expect(invalid.status()).toBe(400);
+    expect(invalid.body()).toMatchObject({ error: expect.stringContaining('not supported') });
+    const cleared = await call('PATCH', '/api/groups/thinking-group/admin/settings', {
+      provider: 'opencode',
+      effort: null,
+    });
+    expect(cleared.status()).toBe(200);
+  });
+
+  it('validates inherited effort and leaves unrelated PATCH requests usable', async () => {
+    vi.stubEnv('DEFAULT_EFFORT', 'none');
+    expect((await call('PATCH', '/api/groups/thinking-group/admin/settings', { effort: null })).status()).toBe(400);
+    expect(
+      (await call('PATCH', '/api/groups/thinking-group/admin/settings', { assistant_name: 'Agent' })).status(),
+    ).toBe(200);
+  });
+});
+
 describe('soft turn token budget settings', () => {
   beforeEach(() => {
     seedUser('web:owner');
@@ -182,13 +248,17 @@ describe('soft turn token budget settings', () => {
     const response = await call('PATCH', '/api/groups/budget-group/admin/settings', { soft_turn_token_budget: 1000 });
     expect(response.status()).toBe(200);
     expect(response.body()).toMatchObject({ config: { soft_turn_token_budget: 1000 }, modelParams: {} });
-    expect((await call('PATCH', '/api/groups/budget-group/admin/settings', { soft_turn_token_budget: null })).body())
-      .toMatchObject({ config: { soft_turn_token_budget: null } });
+    expect(
+      (await call('PATCH', '/api/groups/budget-group/admin/settings', { soft_turn_token_budget: null })).body(),
+    ).toMatchObject({ config: { soft_turn_token_budget: null } });
   });
 
   it.each([0, -1, 1.5, false, 'invalid', ' ', Number.MAX_SAFE_INTEGER + 1])(
-    'rejects invalid thresholds %s with a user-visible error', async value => {
-      const response = await call('PATCH', '/api/groups/budget-group/admin/settings', { soft_turn_token_budget: value });
+    'rejects invalid thresholds %s with a user-visible error',
+    async (value) => {
+      const response = await call('PATCH', '/api/groups/budget-group/admin/settings', {
+        soft_turn_token_budget: value,
+      });
       expect(response.status()).toBe(400);
       expect(response.body()).toMatchObject({ error: expect.stringContaining('positive safe integer') });
     },
