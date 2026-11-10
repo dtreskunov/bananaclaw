@@ -362,10 +362,34 @@ describe('POST /api/groups/:gid/admin/restart', () => {
     }
   });
 
-  it('does not schedule a restart when the image build fails', async () => {
-    vi.mocked(buildAgentGroupImage).mockRejectedValueOnce(new Error('Image build failed'));
+  it.each([
+    {
+      name: 'package installation',
+      error: Object.assign(new Error('Image build failed'), { code: 1 }),
+      message: 'Image rebuild failed. Existing sessions were not restarted. Check the host logs for details.',
+    },
+    {
+      name: 'wrapped exit 137',
+      error: Object.assign(new Error('docker build: while running runtime: exit status 137'), { code: 125 }),
+      message:
+        'Image rebuild was killed (exit 137), likely due to memory exhaustion. Existing sessions were not restarted.',
+    },
+    {
+      name: 'direct exit 137',
+      error: Object.assign(new Error('Command failed: docker build'), { code: 137 }),
+      message:
+        'Image rebuild was killed (exit 137), likely due to memory exhaustion. Existing sessions were not restarted.',
+    },
+    {
+      name: 'unexpected',
+      error: new Error('Unexpected error'),
+      message: 'internal_error',
+    },
+  ])('reports $name build failures without exposing raw output or restarting sessions', async ({ error, message }) => {
+    vi.mocked(buildAgentGroupImage).mockRejectedValueOnce(error);
     const res = await call('POST', '/ui/chat/api/groups/ag-settings/admin/restart', { rebuild: true });
     expect(res.status()).toBe(500);
+    expect(res.body()).toEqual({ error: message });
     expect(killContainer).not.toHaveBeenCalled();
     const db = openInboundDb('ag-settings', 'settings-session');
     try {

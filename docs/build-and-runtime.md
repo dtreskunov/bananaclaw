@@ -125,6 +125,16 @@ cannot consume swap. A runaway install can hit its own container's OOM limit
 rather than exhausting host RAM and thrashing swap. The existing `--memory=2g`
 limit for per-group image builds is separate and unchanged.
 
+Per-group rebuilds run asynchronously so HTTP requests and session-link
+heartbeats remain responsive. Rebuild requests run one at a time in arrival
+order, reading the current saved packages when each build starts so a request
+cannot reuse an earlier build that omits newly added packages. npm installation
+uses a 768 MiB Node heap, one lifecycle-script worker, and four network requests
+to reduce peak memory without raising the build cap.
+A failed rebuild leaves the previous image and sessions in place;
+the admin UI reports the failure explicitly, including a memory-exhaustion hint
+for exit 137. Full diagnostics remain in the host logs.
+
 **Applying changes:** rebuild the host with `pnpm run build`, restart the host
 service, and recycle existing agent containers when safe. Host restarts adopt
 running containers, so only newly created containers receive the new limits;

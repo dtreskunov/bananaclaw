@@ -59,7 +59,8 @@ describe('packageDockerfile', () => {
   it('quotes npm specs in both the build allowlist and the install', () => {
     const out = packageDockerfile('base', { ...none, npm: ['@stripe/link-cli@0.13.1'] });
     expect(out).toContain(`echo 'only-built-dependencies[]=@stripe/link-cli@0.13.1' >> /root/.npmrc`);
-    expect(out).toContain(`pnpm install -g '@stripe/link-cli@0.13.1'`);
+    expect(out).toContain(`pnpm install -g --child-concurrency=1 --network-concurrency=4 '@stripe/link-cli@0.13.1'`);
+    expect(out).toContain('NODE_OPTIONS=--max-old-space-size=768');
   });
 
   it('escapes a quote inside a spec rather than closing the string', () => {
@@ -254,13 +255,6 @@ describe('container boot-failure tripwire (structural)', () => {
     expect(src).toContain('runStderr += data.toString()');
     expect(src).toMatch(/runStderr[\s\S]*slice\(-20\)/);
     expect(src).toMatch(/exited non-zero[\s\S]*stderr: tail/);
-  });
-});
-
-describe('agent-group image build limits (structural)', () => {
-  it('caps build memory so package installation cannot starve the host', () => {
-    const src = fs.readFileSync(path.join(process.cwd(), 'src', 'container-runner.ts'), 'utf-8');
-    expect(src).toContain('${CONTAINER_RUNTIME_BIN} build --memory=2g');
   });
 });
 

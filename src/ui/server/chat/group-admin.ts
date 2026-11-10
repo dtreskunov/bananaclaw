@@ -1217,7 +1217,19 @@ async function handleRestart(
   const message = typeof body.message === 'string' && body.message.length > 0 ? body.message : undefined;
 
   if (rebuild) {
-    await buildAgentGroupImage(gid);
+    try {
+      await buildAgentGroupImage(gid);
+    } catch (err) {
+      if (!(err instanceof Error) || !('code' in err)) throw err;
+      log.error('group-admin image rebuild failed', { gid, err });
+      const killed = err.code === 137 || /\bexit (?:status|code)[: ]+137\b/.test(err.message);
+      writeJson(res, 500, {
+        error: killed
+          ? 'Image rebuild was killed (exit 137), likely due to memory exhaustion. Existing sessions were not restarted.'
+          : 'Image rebuild failed. Existing sessions were not restarted. Check the host logs for details.',
+      });
+      return;
+    }
   }
   const count = restartAgentGroupContainers(gid, 'settings changed via chat-ui admin', message, true);
   recordAdminAction({

@@ -3,9 +3,10 @@
  * Spawns agent containers with session folder + agent group folder mounts.
  * The container runs the v2 agent-runner which polls the session DB.
  */
-import { ChildProcess, execSync, spawn } from 'child_process';
+import { ChildProcess, execFile, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 
 import {
   CONTAINER_CPU_LIMIT,
@@ -96,6 +97,8 @@ export interface McpProbeResult {
  */
 const wakePromises = new Map<string, Promise<boolean>>();
 const recoveryPromises = new Map<string, Promise<boolean>>();
+let imageBuildQueue = Promise.resolve();
+const execFileAsync = promisify(execFile);
 
 export function getActiveContainerCount(): number {
   return activeContainers.size;
@@ -1137,12 +1140,19 @@ export function packageDockerfile(from: string, packages: { apt: string[]; npm: 
     const allowlist = packages.npm
       .map((p) => `echo ${shellQuote(`only-built-dependencies[]=${p}`)} >> /root/.npmrc`)
       .join(' && ');
-    dockerfile += `RUN ${allowlist} && pnpm install -g ${packages.npm.map(shellQuote).join(' ')}\n`;
+    dockerfile += `RUN ${allowlist} && NODE_OPTIONS=--max-old-space-size=768 pnpm install -g --child-concurrency=1 --network-concurrency=4 ${packages.npm.map(shellQuote).join(' ')}\n`;
   }
   return dockerfile + 'USER node\n';
 }
 
-export async function buildAgentGroupImage(agentGroupId: string): Promise<void> {
+export function buildAgentGroupImage(agentGroupId: string): Promise<void> {
+  // Keep the old one-build-at-a-time memory bound without blocking the host.
+  const build = () => buildImage(agentGroupId);
+  imageBuildQueue = imageBuildQueue.then(build, build);
+  return imageBuildQueue;
+}
+
+async function buildImage(agentGroupId: string): Promise<void> {
   const agentGroup = getAgentGroup(agentGroupId);
   if (!agentGroup) throw new Error('Agent group not found');
 
@@ -1175,11 +1185,11 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
   const tmpDockerfile = path.join(DATA_DIR, `Dockerfile.${agentGroupId}`);
   fs.writeFileSync(tmpDockerfile, dockerfile);
   try {
-    execSync(`${CONTAINER_RUNTIME_BIN} build --memory=2g -t ${imageTag} -f ${tmpDockerfile} .`, {
-      cwd: DATA_DIR,
-      stdio: 'pipe',
-      timeout: 900_000,
-    });
+    await execFileAsync(
+      CONTAINER_RUNTIME_BIN,
+      ['build', '--memory=2g', '-t', imageTag, '-f', tmpDockerfile, '.'],
+      { cwd: DATA_DIR, timeout: 900_000, maxBuffer: 16 * 1024 * 1024 },
+    );
   } finally {
     fs.unlinkSync(tmpDockerfile);
   }
