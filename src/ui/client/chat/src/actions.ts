@@ -40,7 +40,6 @@ import {
   isMobile,
   nowTick,
   pinnedContext,
-  pendingApprovals,
   respondingInteractionIds,
   searchQuery,
   searchResults,
@@ -538,7 +537,6 @@ function applyGlobalSync(res: GlobalSyncState, gid: string | null): void {
     attentionTargets.value = res.attention;
     agentActivity.value = res.agentActivity;
     attentionError.value = null;
-    pendingApprovals.value = res.approvals;
   });
   if (!gid || groupId.value !== gid) return;
   if (res.group === null) {

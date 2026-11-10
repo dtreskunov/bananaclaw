@@ -20,7 +20,6 @@ import {
   messagingGroupId,
   pending,
   pendingWebSends,
-  pendingApprovals,
   pinnedContext,
   scrollToBottomTick,
   respondingInteractionIds,
@@ -507,13 +506,12 @@ describe('approval response requests', () => {
         }),
     );
     const request = testAccountInteraction({ id: 'approval-one' });
-    onTestFinished(() => {
-      pendingApprovals.value = [];
-    });
-    pendingApprovals.value = [request];
+    applyConversationFrame(testSnapshot({ interactions: [request] }), 'thread');
+    const snapshot = conversationState.value;
     chatStatus.value = 'Current response is streaming';
     const submission = respondInteraction(request.id, { value: 'review' });
-    expect(pendingApprovals.value).toEqual([request]);
+    expect(conversationState.value).toBe(snapshot);
+    expect(conversationState.value?.conversation.interactions).toEqual([request]);
     expect(respondingInteractionIds.value.has(request.id)).toBe(true);
     expect(await respondInteraction(request.id, { value: 'review' })).toBe(false);
     accept(new Response('{"ok":true}'));

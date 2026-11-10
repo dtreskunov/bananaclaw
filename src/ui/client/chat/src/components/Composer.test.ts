@@ -45,7 +45,8 @@ import {
   warmChat,
 } from '../actions';
 import type { ActivityLine, ChatMessage } from '../types';
-import { testThread } from '../conversation-test-fixtures';
+import { testAccountInteraction, testThread } from '../conversation-test-fixtures';
+import { attentionTargets } from '../attention-state';
 import type { ConversationMessage, ConversationTurn } from '../../../../shared/conversation';
 import { applyConversationFrame, completedResponse, conversationState, resetConversation } from '../conversation-state';
 import { testSnapshot, testTurn, testWebSubmission } from '../conversation-test-fixtures';
@@ -697,6 +698,45 @@ describe('main composer pending edits', () => {
     await vi.waitFor(() => expect(composerSendInFlight.value).toBe(false));
     expect(input.value).toBe('New draft');
   });
+
+  it.each(['pending', 'applying', 'completed', 'rejected', 'failed'] as const)(
+    'renders only the selected transcript requests, including %s audit records',
+    (status) => {
+      const origin = { agentGroupId: 'group', threadId: 'thread', channelType: 'web', messagingGroupId: 'web-group' };
+      const request = testAccountInteraction({
+        status,
+        agentGroupId: 'group',
+        origin,
+      });
+      const previousAttention = attentionTargets.value;
+      onTestFinished(() => {
+        attentionTargets.value = previousAttention;
+      });
+      attentionTargets.value = [
+        {
+          id: 'another-request',
+          origin: { ...origin, threadId: 'another-thread' },
+        },
+      ];
+      applyConversationFrame(testSnapshot({ interactions: [request] }), 'thread');
+      const transcript = () => {
+        resetMount();
+        const log = findComponent(ChatMain(), 'MessageLog');
+        resetMount();
+        return log.type(log.props);
+      };
+      const selected = transcript();
+      expect(findComponent(selected, 'ApprovalRow').props.approval).toEqual(request);
+      expect(findComponent(selected, 'ApprovalReferences')).toBeUndefined();
+
+      threadId.value = 'another-thread';
+      applyConversationFrame(testSnapshot({ threadId: 'another-thread' }, 'another-stream'), 'another-thread');
+      const unrelated = transcript();
+      expect(findComponent(unrelated, 'ApprovalRow')).toBeUndefined();
+      expect(findComponent(unrelated, 'ApprovalReferences')).toBeUndefined();
+      expect(attentionTargets.value).toHaveLength(1);
+    },
+  );
 
   it('does not infer read-only permissions before a snapshot or while a client reload is required', () => {
     canSend.value = false;

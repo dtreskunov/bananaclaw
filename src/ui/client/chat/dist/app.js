@@ -15771,7 +15771,6 @@ var toastMessage = y3(null);
 var previewBlock = y3(null);
 var nowTick = y3(Date.now());
 var pinnedContext = y3([]);
-var pendingApprovals = y3([]);
 var respondingInteractionIds = y3(/* @__PURE__ */ new Set());
 var refs = {
   chatGeneration: 0,
@@ -21476,7 +21475,6 @@ function applyGlobalSync(res, gid) {
     attentionTargets.value = res.attention;
     agentActivity.value = res.agentActivity;
     attentionError.value = null;
-    pendingApprovals.value = res.approvals;
   });
   if (!gid || groupId.value !== gid) return;
   if (res.group === null) {
@@ -25014,14 +25012,6 @@ function AttentionFocus() {
   return null;
 }
 
-// src/approval-origin.ts
-function isApprovalThread(origin) {
-  return !!origin && origin.agentGroupId === groupId.value && origin.threadId === threadId.value && origin.channelType === (channelType.value || "web") && (origin.channelType === "web" || origin.messagingGroupId === messagingGroupId.value);
-}
-function approvalThreadHref(origin) {
-  return `#g/${encodeURIComponent(origin.agentGroupId)}/t/${encodeURIComponent(origin.threadId)}`;
-}
-
 // ../../shared/approval-message.ts
 var MAX_APPROVAL_MESSAGE_LENGTH = 4e3;
 
@@ -25053,6 +25043,14 @@ function ApprovalMessageInput({ approvalId, disabled }) {
       }
     )
   ] });
+}
+
+// src/approval-origin.ts
+function isApprovalThread(origin) {
+  return !!origin && origin.agentGroupId === groupId.value && origin.threadId === threadId.value && origin.channelType === (channelType.value || "web") && (origin.channelType === "web" || origin.messagingGroupId === messagingGroupId.value);
+}
+function approvalThreadHref(origin) {
+  return `#g/${encodeURIComponent(origin.agentGroupId)}/t/${encodeURIComponent(origin.threadId)}`;
 }
 
 // src/components/ApprovalCard.tsx
@@ -27866,7 +27864,7 @@ function AccessRequestCard({ request, disabled }) {
 }
 
 // src/components/ApprovalBubble.tsx
-function ApprovalBubble({ approval: approval2, busy, onRespond, reference }) {
+function ApprovalBubble({ approval: approval2, busy, onRespond }) {
   const status = approval2.status;
   const answered = approval2.decision === "approve" || approval2.decision === "reject" || status === "approved" || status === "completed" || status === "rejected";
   const author = answered ? approval2.respondedBy : { agentGroupId: approval2.agentGroupId ?? "", displayName: approval2.agentGroupName || "Global" };
@@ -27875,7 +27873,7 @@ function ApprovalBubble({ approval: approval2, busy, onRespond, reference }) {
   return /* @__PURE__ */ u4(
     MessageBubble,
     {
-      class: `msg ${answered ? "in" : "out"} approval-message${access ? " markdown access-approval-message" : ""}${reference ? " approval-reference" : ""}`,
+      class: `msg ${answered ? "in" : "out"} approval-message${access ? " markdown access-approval-message" : ""}`,
       "data-msg-id": approval2.id,
       id: `attention-${approval2.id}`,
       "data-attention-target": approval2.id,
@@ -29236,12 +29234,11 @@ function DisplayCardMessage({ message: message2, card, reading = false }) {
     }
   );
 }
-function ApprovalRow({ approval: approval2, reference }) {
+function ApprovalRow({ approval: approval2 }) {
   return /* @__PURE__ */ u4(
     ApprovalBubble,
     {
       approval: approval2,
-      reference,
       busy: respondingInteractionIds.value.has(approval2.id),
       onRespond: (value, message2) => {
         void respondInteraction(approval2.id, { value, message: message2 }).catch(console.error);
@@ -29323,11 +29320,6 @@ function EventsGroup({ events }) {
       /* @__PURE__ */ u4(RelativeTime, { ts: last.timestamp })
     ] })
   ] });
-}
-function ApprovalReferences() {
-  const list = pendingApprovals.value.filter((a4) => !isApprovalThread(a4.origin));
-  if (list.length === 0) return null;
-  return /* @__PURE__ */ u4(k, { children: list.map((a4) => /* @__PURE__ */ u4(ApprovalRow, { reference: true, approval: a4 }, a4.id)) });
 }
 function TaskIndicator() {
   const gid = groupId.value;
@@ -29847,7 +29839,6 @@ function MessageLog({ dockRef }) {
         ] });
       }),
       !chatLoading.value && queued.map((message2) => /* @__PURE__ */ u4(MessageRow, { m: message2 }, `${threadId.value}:${message2.id}`)),
-      !chatLoading.value && /* @__PURE__ */ u4(ApprovalReferences, {}),
       /* @__PURE__ */ u4(TaskIndicator, {})
     ] }),
     /* @__PURE__ */ u4(

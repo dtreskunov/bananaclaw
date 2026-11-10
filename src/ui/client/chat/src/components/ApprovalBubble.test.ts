@@ -28,8 +28,8 @@ describe('shared approval bubble chrome', () => {
     groupId.value = 'current-agent';
     currentUserId.value = 'current-user';
   });
-  it.each([false, true])('uses the common sender and timestamp for reference=%s', (reference) => {
-    const node = ApprovalBubble({ approval, busy: false, onRespond: vi.fn(), reference });
+  it('uses the common sender and timestamp', () => {
+    const node = ApprovalBubble({ approval, busy: false, onRespond: vi.fn() });
     expect(node.type).toBe(MessageBubble);
     expect(node.props.from).toBe('Research agent');
     expect(node.props.timestamp).toBe(approval.createdAt);
@@ -104,14 +104,13 @@ describe('shared approval bubble chrome', () => {
         messagingGroupId: 'web-agent',
       },
     });
-    const reference = ApprovalBubble({
+    const offThread = ApprovalBubble({
       approval: access,
       busy: false,
 
       onRespond: vi.fn(),
-      reference: true,
     });
-    expect(reference.props.children.type).toBe(AccountRequestSummary);
+    expect(offThread.props.children.type).toBe(AccountRequestSummary);
     threadId.value = 'requesting-thread';
     const resolved = ApprovalBubble({
       approval: { ...access, status: 'completed' },

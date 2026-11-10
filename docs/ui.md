@@ -124,8 +124,10 @@ mobile agent picker and thread rows. Agent activity covers authorized threads;
 thread activity uses the exact agent/channel/messaging-group/thread route.
 Request counts include only requests the viewer can act on, not every request
 they can read, and appear only in accessible names and tooltips.
-Read-only references without a requesting thread or available response controls
-remain visible in the existing UI but do not inflate these actionable counts.
+Requests appear only in their requesting conversation. Agent and thread
+indicators provide cross-conversation discovery without inserting unrelated
+request bubbles. Requests without available response controls do not inflate
+these actionable counts.
 
 Clicking an indicator in the agent picker, thread rail or full-frame conversation
 header jumps to its newest source. Waiting takes priority and opens the newest
@@ -2116,10 +2118,11 @@ the requesting agent; the decision body separately identifies the responder.
 Pending requests show their creation time, and resolved decisions show their
 resolution time without moving the request's transcript position.
 
-Pending requests from another conversation appear as read-only transcript
-references with **Open requesting thread**. Decision buttons and the message
-field are available only in the exact requesting group/thread/channel, including
-the adapter messaging group for non-web channels. Unknown or inaccessible origins
+Requests from other conversations are not inserted into the open transcript;
+use the agent/thread activity indicators to open their requesting conversation.
+Decision buttons and the message field are available only in the exact
+requesting group/thread/channel, including the adapter messaging group for
+non-web channels. Unknown or inaccessible origins
 offer no decision controls. Private credential review applies the same rule, and
 captured callbacks refuse submission after navigating away.
 

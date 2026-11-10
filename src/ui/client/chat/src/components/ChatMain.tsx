@@ -7,7 +7,7 @@ import { memo } from 'preact/compat';
 import { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
 import {
   chatMessages, chatStatus, chatLoading, chatReady, chatReloadRequired, threadId, channelType, canSend, pending,
-  threads, groups, groupId, messagingGroupId, channelMeta, pinnedContext, pendingApprovals, respondingInteractionIds,
+  threads, groups, groupId, messagingGroupId, channelMeta, pinnedContext, respondingInteractionIds,
   highlightMessageId, searchQuery, voiceInput, isMobile, scrollToBottomTick,
   currentUserId,
   revealedMobileMessageActionsId,
@@ -62,7 +62,6 @@ import { ComposerPlusMenu } from './ComposerPlusMenu';
 import { QuickCapture } from './QuickCapture';
 import { mountInlineReplySuggestions, replySuggestionControls } from './SuggestedResponses';
 import { AttentionFocus } from './AttentionFocus';
-import { isApprovalThread } from '../approval-origin';
 import { ApprovalBubble } from './ApprovalBubble';
 import { readerLocation, readerSelection, alignReaderMessage, type ReaderNavigate } from '../transcript-reader';
 import { TranscriptReader } from './TranscriptReader';
@@ -982,8 +981,8 @@ function DisplayCardMessage({ message, card, reading = false }: { message: ChatM
   );
 }
 
-function ApprovalRow({ approval, reference }: { approval: PendingApprovalDto; reference?: boolean }) {
-  return <ApprovalBubble approval={approval} reference={reference}
+function ApprovalRow({ approval }: { approval: PendingApprovalDto }) {
+  return <ApprovalBubble approval={approval}
     busy={respondingInteractionIds.value.has(approval.id)}
     onRespond={(value, message) => { void respondInteraction(approval.id, { value, message }).catch(console.error); }} />;
 }
@@ -1078,18 +1077,6 @@ function EventsGroup({ events }: { events: ChatMessage[] }) {
       </span>
       <span class="event-meta">last&nbsp;<RelativeTime ts={last.timestamp} /></span>
     </button>
-  );
-}
-
-function ApprovalReferences() {
-  const list = pendingApprovals.value.filter(a => !isApprovalThread(a.origin));
-  if (list.length === 0) return null;
-  return (
-    <>
-        {list.map((a) => (
-          <ApprovalRow key={a.id} reference approval={a} />
-        ))}
-    </>
   );
 }
 
@@ -1628,7 +1615,6 @@ function MessageLog({ dockRef }: { dockRef: RefObject<HTMLDivElement> }) {
                   );
                 })}
         {!chatLoading.value && queued.map((message) => <MessageRow key={`${threadId.value}:${message.id}`} m={message} />)}
-        {!chatLoading.value && <ApprovalReferences />}
         <TaskIndicator />
     </div>
     <TranscriptReader rows={readerRows} onNavigate={alignReader}

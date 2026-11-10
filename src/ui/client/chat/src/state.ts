@@ -14,7 +14,6 @@ import type {
   PendingFile,
   PendingWebSend,
   ThinkingChoice,
-  PendingApprovalDto,
   ChannelMetaEntry,
   SearchResult,
   TaskPanelRequest,
@@ -131,7 +130,6 @@ export const toastMessage: Signal<ToastMessage | null> = signal<ToastMessage | n
 export const previewBlock: Signal<PreviewBlock | null> = signal<PreviewBlock | null>(null);
 export const nowTick: Signal<number> = signal(Date.now());
 export const pinnedContext: Signal<string[]> = signal<string[]>([]);
-export const pendingApprovals: Signal<PendingApprovalDto[]> = signal<PendingApprovalDto[]>([]);
 export const respondingInteractionIds: Signal<Set<string>> = signal<Set<string>>(new Set());
 
 // ── non-reactive refs (mutated outside render) ──────────────────────
