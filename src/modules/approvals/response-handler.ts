@@ -19,12 +19,6 @@ import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/use
 import { getApprovalHandler, getInteractiveApprovalHandler } from './primitive.js';
 import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
 
-import {
-  ApprovalMessageError,
-  parseApprovalMessage,
-  type ApprovalResponseMessage,
-} from '../../ui/shared/approval-message.js';
-
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
   const approval = getApproval(payload.approvalId);
   if (!approval) return false;
@@ -49,9 +43,8 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
     log.warn('Ignoring unsupported approval decision', { approvalId: approval.id, value: payload.value });
     return true;
   }
-  const message = parseApprovalMessage(payload.message);
-  if (message && !approval.session_id)
-    throw new ApprovalMessageError('This approval has no originating conversation for a message.');
+  if ('message' in payload)
+    throw new Error('Approval messages are no longer supported. Use the conversation to steer the agent.');
 
   const interactive = getInteractiveApprovalHandler(approval.input.action);
   if (interactive) {
@@ -64,19 +57,14 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
     return true;
   }
   try {
-    await handleRegisteredApproval(approval, payload.value, namespacedUserId(payload) ?? '', message);
+    await handleRegisteredApproval(approval, payload.value, namespacedUserId(payload) ?? '');
   } finally {
     endApprovalExecution(approval.id);
   }
   return true;
 }
 
-async function handleRegisteredApproval(
-  approval: Approval,
-  selectedOption: string,
-  userId: string,
-  message?: string,
-): Promise<void> {
+async function handleRegisteredApproval(approval: Approval, selectedOption: string, userId: string): Promise<void> {
   const session = approval.session_id ? getSession(approval.session_id) : undefined;
   if (!session) {
     const outcome = 'Approval cannot be applied because its originating conversation is unavailable.';
@@ -85,17 +73,14 @@ async function handleRegisteredApproval(
     return;
   }
 
-  let responseMessage: ApprovalResponseMessage | undefined = message ? { userId, message } : undefined;
-  const response = { userId, decision: selectedOption, message };
+  const response = { userId, decision: selectedOption };
   let outcomeMessage: string | undefined;
   const notify = (text: string, options?: Pick<ApprovalNotificationOptions, 'afterRestart'>): void => {
     writeApprovalNotification(session, text, {
       originMessageId: approval.origin_message_id,
       ...options,
-      responseMessage,
       approvalId: approval.id,
     });
-    responseMessage = undefined;
     if (!options?.afterRestart || !outcomeMessage) outcomeMessage = text;
   };
 
@@ -121,11 +106,13 @@ async function handleRegisteredApproval(
   }
 
   const payload = approval.input.payload;
-  updateApprovalStatus(approval.id, 'applying', response);
+  if (!updateApprovalStatus(approval.id, 'applying', response, approval.revision)) {
+    log.info('Approval changed before execution', { approvalId: approval.id });
+    return;
+  }
   let outcome: 'approved' | 'failed' = 'approved';
   try {
     await handler({ session, payload, userId, notify, originMessageId: approval.origin_message_id });
-    if (responseMessage) notify(`Your ${approval.input.action} request was approved.`);
     log.info('Approval handled', { approvalId: approval.id, action: approval.input.action, userId });
   } catch (err) {
     outcome = 'failed';

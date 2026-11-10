@@ -1,7 +1,5 @@
 import type { ComponentChildren } from 'preact';
 import type { ConfirmationInteraction } from '../../../../shared/approval';
-import { ApprovalMessageInput } from './ApprovalMessageInput';
-import { approvalMessageDrafts } from '../approval-messages';
 import { approvalThreadHref, isApprovalThread } from '../approval-origin';
 
 export function ApprovalCardFrame({ approvalId, title, children }: {
@@ -16,7 +14,7 @@ export function ApprovalCardFrame({ approvalId, title, children }: {
 export function ApprovalCard({ approval: a, busy, onRespond }: {
   approval: ConfirmationInteraction;
   busy: boolean;
-  onRespond: (value: string, message?: string) => void;
+  onRespond: (value: string) => void;
 }) {
   const status = a.status;
   const pending = status === 'pending';
@@ -42,8 +40,6 @@ export function ApprovalCard({ approval: a, busy, onRespond }: {
         {a.responseMessage ? <p class="approval-response-text">{a.responseMessage}</p> : null}
         {status === 'failed' && a.outcomeMessage ? <p class="approval-response-text" role="alert">{a.outcomeMessage}</p> : null}
       </div> : null}
-      {here && pending && a.supportsResponseMessage ? <ApprovalMessageInput approvalId={a.id}
-        disabled={busy} /> : null}
     </div>
     {here && pending ? <div class="approval-actions">
       {!a.options.length ? <span class="approval-disabled">no options</span> : a.options.map(option =>
@@ -51,9 +47,7 @@ export function ApprovalCard({ approval: a, busy, onRespond }: {
           disabled={busy} key={option.value}
           onClick={() => {
             if (!isApprovalThread(a.origin)) return;
-            const message = a.supportsResponseMessage ? approvalMessageDrafts.value[a.id]?.trim() : undefined;
-            if (message) onRespond(option.value, message);
-            else onRespond(option.value);
+            onRespond(option.value);
           }}>
           {option.label}
         </button>)}

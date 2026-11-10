@@ -53,7 +53,6 @@ import {
   credentialsOpen,
 } from './state';
 import { api, postJson, redirectToLogin, protocolFetch, UnauthorizedError, UiProtocolError } from './api';
-import { clearApprovalMessage } from './approval-messages';
 import { writeHash } from './hash';
 import { publicWebMessageId } from './chat-protocol';
 import {
@@ -1618,15 +1617,12 @@ export async function respondInteraction(id: string, response: InteractionRespon
   respondingInteractionIds.value = new Set(respondingInteractionIds.value).add(id);
   let accepted = false;
   try {
-    const { message, ...answer } = response;
-    const note = message?.trim();
-    const res = await postJson<{ ok?: boolean; error?: string }>(`api/approvals/${encodeURIComponent(id)}/respond`, {
-      ...answer,
-      ...(note ? { message: note } : {}),
-    });
+    const res = await postJson<{ ok?: boolean; error?: string }>(
+      `api/approvals/${encodeURIComponent(id)}/respond`,
+      response,
+    );
     if (!res.ok) throw new Error(res.data?.error || 'HTTP ' + res.status);
     if (res.data?.ok !== true) throw new Error('Invalid interaction response. Refresh and retry.');
-    clearApprovalMessage(id);
     accepted = true;
   } catch (err) {
     console.error('interaction respond failed', err);

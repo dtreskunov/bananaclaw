@@ -75,6 +75,7 @@ export async function handleInstallPackages(
   ].join(', ');
   await requestApproval({
     session,
+    approvalId: typeof content.requestId === 'string' ? content.requestId : undefined,
     originMessageId: context?.originMessageId,
     agentName: agentGroup.name,
     action: 'install_packages',
@@ -132,6 +133,7 @@ export async function handleAddMcpServer(
   }
   await requestApproval({
     session,
+    approvalId: typeof content.requestId === 'string' ? content.requestId : undefined,
     originMessageId: context?.originMessageId,
     agentName: agentGroup.name,
     action: 'add_mcp_server',

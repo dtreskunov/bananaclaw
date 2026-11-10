@@ -36,7 +36,7 @@ import {
   type Check,
 } from './validation.js';
 
-export const CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 2;
+export const CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 3;
 export type EntityChanges<T> = CollectionPatch<T>;
 export type ConversationTurnFields = Omit<ConversationTurn, 'activity'>;
 export interface ConversationActivityPatch {
@@ -203,7 +203,6 @@ const approval = shape({
   details: nullable(text),
   packages: nullable(shape({ apt: array(text), npm: array(text), pip: array(text) })),
   options: array(shape({ label: text, selectedLabel: text, value: text })),
-  supportsResponseMessage: bool,
   status: oneOf('pending', 'applying', 'approved', 'rejected', 'failed', 'cancelled', 'expired'),
 });
 const requirements: Check = (value) => {

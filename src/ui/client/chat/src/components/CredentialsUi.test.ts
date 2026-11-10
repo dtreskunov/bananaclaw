@@ -24,7 +24,6 @@ import { OAuthAppForm } from './OAuthAppForm';
 import { oauthAppDraft, type OAuthAppDraft } from './oauth-app-form';
 import { OAuthScopePicker, ScopeList } from './OAuthScopePicker';
 import { ApprovalCardFrame } from './ApprovalCard';
-import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { AccessRequestReview } from './AccessRequestReview';
 import { AccessRequestCard } from './AccessRequestCard';
 import { accessApprovalId } from '../credentials-navigation';
@@ -864,7 +863,7 @@ describe('transcript access review presentation', () => {
         .filter((child) => child.type === 'button')
         .map((child) => child.props.children),
     ).toEqual(['Decline']);
-    expect(descendants(node).some((child) => child.type === ApprovalMessageInput)).toBe(false);
+    expect(descendants(node).some((child) => child.type === 'textarea')).toBe(false);
   });
   it('uses the common account editor to review permissions before creating an OAuth account', async () => {
     hooks.resource.data = { connections: [], groups, apps: [], canEditInstall: true };

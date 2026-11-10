@@ -11,7 +11,6 @@ import type { PendingApprovalDto } from '../types';
 const approval: PendingApprovalDto = {
   kind: 'confirmation',
   status: 'pending',
-  supportsResponseMessage: false,
 
   id: 'approval',
   action: 'install_packages',

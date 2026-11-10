@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { closeSessionDb, initTestSessionDb } from '../db/connection.js';
 import { getUndeliveredMessages } from '../db/messages-out.js';
-import { addMcpServer } from './self-mod.js';
+import { addMcpServer, installPackages } from './self-mod.js';
 
 beforeEach(() => initTestSessionDb());
 afterEach(() => closeSessionDb());
@@ -21,7 +21,16 @@ describe('add_mcp_server', () => {
     expect(result.content[0].text).toContain('After approval and the automatic restart, request_access');
     const messages = getUndeliveredMessages();
     expect(messages).toHaveLength(1);
+    expect(result.content[0].text).toContain(`ncl approvals withdraw --id ${messages[0].id}`);
+    expect(JSON.parse(messages[0].content).requestId).toBe(messages[0].id);
     expect(JSON.parse(messages[0].content)).toMatchObject({ action: 'add_mcp_server', ...request });
+  });
+
+  it('returns a stable withdrawal reference for package installation', async () => {
+    const result = await installPackages.handler({ apt: ['jq'], reason: 'Read JSON' });
+    const [message] = getUndeliveredMessages();
+    expect(JSON.parse(message.content)).toMatchObject({ requestId: message.id, action: 'install_packages' });
+    expect(result.content[0].text).toContain(`ncl approvals withdraw --id ${message.id}`);
   });
 
   it.each([

@@ -99,7 +99,6 @@ export function projectApproval(userId: string, row: Approval): ConversationAppr
     agentGroupId: groupId,
     agentGroupName: groupId ? (getAgentGroup(groupId)?.name ?? null) : null,
     createdAt: row.created_at,
-    supportsResponseMessage: row.session_id !== null,
     status: row.status,
     resolvedAt: row.resolved_at,
     outcomeMessage: row.outcome_message,
@@ -110,7 +109,7 @@ export function approvalTranscript(userId: string, groupId: string, context: Tur
   const sessionId = context.sessionId;
   if (!sessionId || !hasAdminPrivilege(userId, groupId)) return [];
   const rows = queryInteractions<Approval>(
-    "SELECT * FROM interactions WHERE session_id=? AND kind!='question' ORDER BY created_at,id",
+    "SELECT * FROM interactions WHERE session_id=? AND status!='cancelled' ORDER BY created_at,id",
     sessionId,
   );
   return rows.flatMap((row) => {

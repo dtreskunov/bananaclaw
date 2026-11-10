@@ -257,6 +257,20 @@ describe('global sync browser connection', () => {
     expect(f.sockets).toHaveLength(1);
   });
 
+  it('reloads instead of reconnecting to the retired approval-message protocol', async () => {
+    const f = fixture();
+    f.connection.start();
+    f.sockets[0].open();
+    f.sockets[0].onmessage?.({
+      data: JSON.stringify({ kind: 'sync', protocolVersion: 18, subscriptionId: 0, groupId: null }),
+    });
+    expect(SYNC_PROTOCOL_VERSION).toBeGreaterThan(18);
+    expect(f.reload).toHaveBeenCalledOnce();
+    expect(f.apply).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.sockets).toHaveLength(1);
+  });
+
   it('returns to login after session revocation instead of retrying an unauthorized socket', async () => {
     const f = fixture();
     f.connection.start();

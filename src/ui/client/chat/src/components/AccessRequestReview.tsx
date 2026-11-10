@@ -4,8 +4,6 @@ import { credentialRequest, credentialsPath, errorMessage, CredentialsError, typ
 import { ErrorNotice } from './CredentialsParts';
 import { accountRequestStatusText, connectionName, serviceDestination } from './credential-presentation';
 import { respondInteraction } from '../actions';
-import { approvalMessageDrafts, clearApprovalMessage } from '../approval-messages';
-import { ApprovalMessageInput } from './ApprovalMessageInput';
 import { ApprovalCardFrame } from './ApprovalCard';
 import { approvalThreadHref, isApprovalThread } from '../approval-origin';
 import type { AccountInteraction } from '../../../../shared/approval';
@@ -167,7 +165,6 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
   async function apply(): Promise<void> {
     if (!preview || !canApply) return;
     await runCredentialAction(async () => {
-      const message = approvalMessageDrafts.value[id]?.trim();
       await credentialRequest(path + (setup ? '/account' : '/apply'), 'POST', {
         connection_id: preview.connection.id, connection_revision: preview.connection.revision,
         request_revision: preview.requestRevision,
@@ -175,9 +172,7 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
           configure_mcp: configureMcp, config_revision: preview.mcp?.revision,
           ...(configureMcp ? { mcp_server: mcpServer, account_alias: accountAlias } : {}),
         } : {}),
-        ...(message ? { message } : {}),
       });
-      clearApprovalMessage(id);
       setSubmitted(`${id}:${request.revision}`);
       setPreview(null);
       onSaved();
@@ -197,7 +192,7 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
     setBusy(true);
     setError('');
     try {
-      if (await respondInteraction(id, { value: 'reject', message: approvalMessageDrafts.value[id] }))
+      if (await respondInteraction(id, { value: 'reject' }))
         setSubmitted(`${id}:${request.revision}`);
     } catch (error) {
       setError(errorMessage(error));
@@ -321,7 +316,6 @@ export function AccessRequestReview({ request, connections, preferredConnectionI
           {agentName} can use the <strong>{connectionName(preview.connection)} account</strong>.
           {configureMcp ? ` ${mcpServer || 'The selected'} tools will also use this account.` : ''}
         </p> : null}
-        {!signingIn && (!setup || compatible.length) ? <ApprovalMessageInput approvalId={id} disabled={blocked} /> : null}
         <div class="approval-actions">
           <button type="button" class="approval-btn approval-reject" disabled={blocked} onClick={() => void reject()}>Decline</button>
           {!compatible.length && !reconnect.length && !signingIn ? <button type="button" class="approval-btn primary" disabled={blocked}

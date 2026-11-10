@@ -220,6 +220,24 @@ it('retains the transport-captured input when requesting approval for a CLI comm
   expect(requestApproval).toHaveBeenCalledWith(expect.objectContaining({ originMessageId: 'original-input' }));
 });
 
+it('returns a stable withdrawal reference with a pending CLI approval', async () => {
+  mockGetContainerConfig.mockReturnValue({ cli_scope: 'global' });
+  mockGetSession.mockReturnValue({ id: 'session', agent_group_id: 'group' });
+  vi.mocked(requestApproval).mockResolvedValueOnce('approval-reference');
+  expect(
+    await dispatch(
+      { id: 'request', command: 'groups-approval-origin-test', args: {} },
+      agentCtx({ sessionId: 'session', agentGroupId: 'group' }),
+    ),
+  ).toMatchObject({
+    ok: false,
+    error: {
+      code: 'approval-pending',
+      message: expect.stringContaining('ncl approvals withdraw --id approval-reference'),
+    },
+  });
+});
+
 it('adds readable approval context without modifying the executable frame', async () => {
   mockGetContainerConfig.mockReturnValue({ cli_scope: 'global' });
   mockGetSession.mockReturnValue({ id: 'session', agent_group_id: 'group' });

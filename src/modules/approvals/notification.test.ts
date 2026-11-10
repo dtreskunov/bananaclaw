@@ -5,18 +5,19 @@ import { closeDb, getDb, initTestDb } from '../../db/connection.js';
 import { runMigrations } from '../../db/migrations/index.js';
 import { createMessagingGroup, getMessagingGroup } from '../../db/messaging-groups.js';
 import { createSession } from '../../db/sessions.js';
-import { createApproval, getApproval } from '../../db/approvals.js';
+import { createApproval, getApproval, updateApprovalStatus } from '../../db/approvals.js';
 import { initSessionFolder, openInboundDb, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { grantRole } from '../permissions/db/user-roles.js';
 import { upsertUser } from '../permissions/db/users.js';
 import { applyAddMcpServer } from '../self-mod/apply.js';
 import { writeApprovalNotification } from './notification.js';
-import { registerApprovalHandler, requestApproval } from './primitive.js';
+import { registerApprovalHandler, requestApproval, type RequestApprovalOptions } from './primitive.js';
 import { handleApprovalsResponse } from './response-handler.js';
 import { createApprovalWorkflow, finishApprovalWorkflow, notifyApprovalWorkflow } from './workflows.js';
 import { ensureUserDm } from '../permissions/user-dm.js';
 import * as delivery from '../../delivery.js';
+import { handleAddMcpServer, handleInstallPackages } from '../self-mod/request.js';
 
 const mocks = vi.hoisted(() => ({ wake: vi.fn().mockResolvedValue(true), kill: vi.fn() }));
 vi.mock('../../container-runner.js', () => ({
@@ -149,6 +150,92 @@ function expectOriginalRoute(row: ReturnType<typeof notifications>[number]) {
 }
 
 describe('approval conversation identity', () => {
+  const submission = (): RequestApprovalOptions => ({
+    session,
+    approvalId: 'stable-receipt',
+    originMessageId: 'original',
+    agentName: 'Agent',
+    action: 'request-test',
+    payload: { first: 1, second: 2 },
+    title: 'Review',
+    question: 'Allow?',
+  });
+
+  it.each<Partial<RequestApprovalOptions>>([
+    { session: { ...session, id: 'sibling', thread_id: 'sibling-thread' } },
+    { originMessageId: 'later' },
+    { action: 'different-action' },
+    { payload: { first: 9, second: 2 } },
+    { title: 'Different action' },
+    { options: [{ label: 'Different option', value: 'different' }] },
+    { workflowKey: 'different-workflow' },
+  ])('rejects mismatched receipt reuse before delivering a second card: %j', async (changes) => {
+    input('original');
+    input('later');
+    if (changes.session) createSession(changes.session);
+    vi.mocked(ensureUserDm).mockResolvedValueOnce(getMessagingGroup('web-group')!);
+    const deliver = vi.fn().mockResolvedValue('receipt');
+    vi.spyOn(delivery, 'getDeliveryAdapter').mockReturnValue({ deliver });
+    const opts = submission();
+    await requestApproval(opts);
+    const before = getApproval('stable-receipt');
+    await expect(requestApproval({ ...opts, ...changes })).rejects.toThrow(
+      'Approval ID is already associated with a different request.',
+    );
+    expect(deliver).toHaveBeenCalledOnce();
+    expect(getApproval('stable-receipt')).toEqual(before);
+  });
+
+  it.each([
+    { handle: handleAddMcpServer, content: { name: 'example', url: 'https://mcp.example.com/mcp' } },
+    { handle: handleInstallPackages, content: { apt: ['jq'] } },
+  ])('does not reissue an existing action under a self-modification card: %j', async ({ handle, content }) => {
+    input('original');
+    vi.mocked(ensureUserDm).mockResolvedValueOnce(getMessagingGroup('web-group')!);
+    const deliver = vi.fn().mockResolvedValue('receipt');
+    vi.spyOn(delivery, 'getDeliveryAdapter').mockReturnValue({ deliver });
+    await requestApproval(submission());
+    await expect(
+      handle({ ...content, requestId: 'stable-receipt' }, session, undefined, { originMessageId: 'original' }),
+    ).rejects.toThrow('different request');
+    expect(deliver).toHaveBeenCalledOnce();
+    expect(getApproval('stable-receipt')?.input.action).toBe('request-test');
+  });
+
+  it('allows an identical pending replay despite JSON key order and omitted undefined fields', async () => {
+    input('original');
+    const target = getMessagingGroup('web-group')!;
+    vi.mocked(ensureUserDm).mockResolvedValueOnce(target).mockResolvedValueOnce(target);
+    const deliver = vi.fn().mockResolvedValue('receipt');
+    vi.spyOn(delivery, 'getDeliveryAdapter').mockReturnValue({ deliver });
+    const opts = submission();
+    await requestApproval(opts);
+    const before = getApproval('stable-receipt');
+    expect(await requestApproval({ ...opts, payload: { second: 2, first: 1, omitted: undefined } })).toBe(
+      'stable-receipt',
+    );
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(deliver.mock.calls[1]).toEqual(deliver.mock.calls[0]);
+    expect(getApproval('stable-receipt')).toEqual(before);
+  });
+
+  it.each(['approved', 'rejected', 'cancelled'] as const)(
+    'does not reissue an identical %s request',
+    async (status) => {
+      input('original');
+      vi.mocked(ensureUserDm).mockResolvedValueOnce(getMessagingGroup('web-group')!);
+      const deliver = vi.fn().mockResolvedValue('receipt');
+      vi.spyOn(delivery, 'getDeliveryAdapter').mockReturnValue({ deliver });
+      const opts = submission();
+      await requestApproval(opts);
+      updateApprovalStatus('stable-receipt', status);
+      const before = getApproval('stable-receipt');
+      expect(await requestApproval(opts)).toBe('stable-receipt');
+      expect(deliver).toHaveBeenCalledOnce();
+      expect(getApproval('stable-receipt')).toEqual(before);
+    },
+  );
+
   it('reports failed approval delivery without showing the approver UUID', async () => {
     input('original');
     vi.mocked(ensureUserDm).mockResolvedValueOnce(getMessagingGroup('web-group')!);
@@ -187,76 +274,67 @@ describe('approval conversation identity', () => {
     expect(content.approvalResponse).toEqual({ userId: 'owner', message: 'Read only.' });
   });
 
-  it.each(['approve', 'reject'])(
-    'includes an attributed user message in the same %s notification',
-    async (decision) => {
-      input('original');
-      let applied = false;
-      registerApprovalHandler('message-test', async ({ payload, notify }) => {
-        applied = true;
-        expect(payload).toEqual({ name: 'gmail', url: 'https://gmail.example/mcp' });
-        notify('Approved and applied.');
-      });
-      await respond('message-test', decision, 'original', '  Keep existing labels.\nDo not send email.  ');
-      expect(applied).toBe(decision === 'approve');
-      const rows = notifications();
-      expect(rows).toHaveLength(1);
-      expectOriginalRoute(rows[0]);
-      const content = JSON.parse(rows[0].content);
-      expect(content.approvalResponse).toEqual({
+  it.each(['approve', 'reject'])('delivers the %s outcome without an inline user message', async (decision) => {
+    input('original');
+    let applied = false;
+    registerApprovalHandler('message-test', async ({ payload, notify }) => {
+      applied = true;
+      expect(payload).toEqual({ name: 'gmail', url: 'https://gmail.example/mcp' });
+      notify('Approved and applied.');
+    });
+    await respond('message-test', decision, 'original');
+    expect(applied).toBe(decision === 'approve');
+    const rows = notifications();
+    expect(rows).toHaveLength(1);
+    expectOriginalRoute(rows[0]);
+    const content = JSON.parse(rows[0].content);
+    expect(content.approvalResponse).toBeUndefined();
+    expect(content.text).toContain(decision === 'approve' ? 'Approved and applied.' : 'rejected by admin.');
+    expect(
+      await handleApprovalsResponse({
+        approvalId: 'approval',
+        value: decision,
         userId: 'owner',
-        message: 'Keep existing labels.\nDo not send email.',
-      });
-      expect(content.text).toContain('User message from "Owner":\nKeep existing labels.\nDo not send email.');
-      expect(content.text).toContain(decision === 'approve' ? 'Approved and applied.' : 'rejected by admin.');
-      expect(
-        await handleApprovalsResponse({
-          approvalId: 'approval',
-          value: decision,
-          message: 'Duplicate message',
-          userId: 'owner',
-          channelType: 'web',
-          platformId: 'admin-dm',
-          threadId: null,
-        }),
-      ).toBe(true);
-      expect(notifications()).toHaveLength(1);
-    },
-  );
+        channelType: 'web',
+        platformId: 'admin-dm',
+        threadId: null,
+      }),
+    ).toBe(true);
+    expect(notifications()).toHaveLength(1);
+  });
 
-  it('includes the user message only once when an approval also queues post-restart verification', async () => {
+  it('queues post-restart verification without adding inline messages', async () => {
     input('original');
     registerApprovalHandler('message-restart', applyAddMcpServer);
-    await respond('message-restart', 'approve', 'original', 'Use this server for reading only.');
+    await respond('message-restart', 'approve', 'original');
     const rows = notifications();
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.on_wake)).toEqual([0, 1]);
-    expect(JSON.parse(rows[0].content).approvalResponse).toEqual({
-      userId: 'owner',
-      message: 'Use this server for reading only.',
-    });
+    expect(JSON.parse(rows[0].content).approvalResponse).toBeUndefined();
     expect(JSON.parse(rows[1].content).approvalResponse).toBeUndefined();
-    expect(JSON.parse(rows[1].content).text).not.toContain('Use this server for reading only.');
   });
 
-  it('delivers the user message with the failure outcome, not in an additional chat', async () => {
+  it('delivers a handler failure in a single outcome notification', async () => {
     input('original');
     registerApprovalHandler('message-failure', async () => {
       throw new Error('test failure');
     });
-    await respond('message-failure', 'approve', 'original', 'Tell me if this fails.');
+    await respond('message-failure', 'approve', 'original');
     expect(notifications()).toHaveLength(1);
     expect(JSON.parse(notifications()[0].content).text).toContain('test failure');
-    expect(JSON.parse(notifications()[0].content).text).toContain('Tell me if this fails.');
+    expect(JSON.parse(notifications()[0].content).approvalResponse).toBeUndefined();
   });
 
-  it('supplies a normal outcome when a handler otherwise sends no notification', async () => {
+  it('rejects retired inline messages without applying the action', async () => {
     input('original');
-    registerApprovalHandler('message-no-notify', async () => {});
-    await respond('message-no-notify', 'approve', 'original', 'Finish the report.');
-    expect(notifications()).toHaveLength(1);
-    expect(JSON.parse(notifications()[0].content).text).toContain('request was approved.');
-    expect(JSON.parse(notifications()[0].content).text).toContain('Finish the report.');
+    const handler = vi.fn();
+    registerApprovalHandler('message-no-notify', handler);
+    await expect(respond('message-no-notify', 'approve', 'original', 'Finish the report.')).rejects.toThrow(
+      'Approval messages are no longer supported',
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(getApproval('approval')?.status).toBe('pending');
+    expect(notifications()).toEqual([]);
   });
 
   it('persists the requesting input, not a later conversation in a shared session', async () => {

@@ -51,6 +51,12 @@ const update: ConversationUpdate = {
   changes: diffConversation(empty, next),
 };
 describe('conversation protocol', () => {
+  it('rejects the retired approval-message protocol with a reload error rather than an invalid frame', () => {
+    expect(CONVERSATION_PROTOCOL_VERSION).toBeGreaterThan(18);
+    expect(() => parseConversationFrame({ ...snapshot, protocolVersion: 18 })).toThrow(
+      'Reload this page to load the current client.',
+    );
+  });
   it('round-trips optional thinking capabilities and durable message levels through snapshots and patches', () => {
     const view: Conversation = {
       ...next,

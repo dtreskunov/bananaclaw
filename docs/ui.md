@@ -2120,7 +2120,7 @@ resolution time without moving the request's transcript position.
 
 Requests from other conversations are not inserted into the open transcript;
 use the agent/thread activity indicators to open their requesting conversation.
-Decision buttons and the message field are available only in the exact
+Decision buttons are available only in the exact
 requesting group/thread/channel, including the adapter messaging group for
 non-web channels. Unknown or inaccessible origins
 offer no decision controls. Private credential review applies the same rule, and
@@ -2135,27 +2135,44 @@ applying effects. Restored account records cannot resume private recovery or
 retry. Old storage is reset only by the explicit
 [offline cutover](user-requests-refactor-plan.md#offline-cutover-detect--why--fix--verify--rollback).
 
-### Messages with approval decisions
+### Steering and withdrawing approval requests
 
-Session-bound approval cards and private credential-access reviews offer an
-optional **Message to agent** field on both approval and rejection. Drafts are
-shared between a card and its private review, retained after failed submissions,
-and cleared only after a confirmed response. The limit is 4000 characters; blank
-messages preserve the existing request shape. Do not enter passwords or tokens.
+Approval cards and private credential reviews contain decisions, not a second
+message composer. Use normal chat to steer the agent. Existing historical
+decision messages remain readable, and in-flight legacy workflow recovery
+preserves their annotations. New decision submissions reject the retired
+`message` field rather than silently discarding steering text.
+Conversation/sync protocol 19 requires older clients to reload instead of
+reconnecting indefinitely with the retired approval shape.
 
-The optional field uses the shared `ComposerInput`, its styling and autosizing,
-including in private credential review. It is a passive composer with no
-standalone send action: Enter adds a newline, and the message is submitted only
-with an explicit approval or rejection. Other composers retain their normal
-send, microphone and keyboard controls.
+Agents can inspect their own requests with `ncl approvals list --status pending`
+and `ncl approvals get --id <request-id>`, and withdraw an obsolete request with
+`ncl approvals withdraw --id <request-id>`. These operations are session-scoped,
+including for agents with global CLI access; disabled CLI scope remains disabled.
+Submission receipts supply stable IDs. Credential submissions can also use
+their receipt ID with the existing `ncl access cancel --request-id <id>` command.
 
-The message accompanies the decision in the same request and the same agent
-outcome notification, attributed to the authenticated responder. It uses the
-existing conversation routing and steering/queueing path; it does not produce a
-separate chat turn or alter the approved packages, command, credential or grant.
-It appears once even when the change also schedules post-restart verification.
-Sessionless approvals do not offer this field because they have
-no originating conversation; the server rejects a non-empty message for them.
+Withdrawal requires no approval. It retains a cancelled storage record for
+status checks but removes the request from the transcript and unread publications,
+without adding a "Withdrawn" bubble or a host notification. Reload and live
+conversation updates use the same projection. It only succeeds while pending;
+an executing or resolved action cannot be undone. Late approval clicks cannot
+execute a withdrawn request. All cancelled requests, including archive/system
+cancellations, are hidden; they remain available through administrative inspection.
+Reusing a submission ID is allowed only for the identical session, originating
+message and request content. Conflicting reuse is rejected without delivering
+a misleading approval card; replaying a resolved request does not reissue it.
+
+Sending chat does not itself cancel anything: the agent must process the
+message and explicitly withdraw the request. **Decline** remains the immediate
+way to veto an action.
+
+For an existing installation, deploy the host and rebuilt UI together and reload
+open tabs. An old client submitting an inline message receives HTTP 400; send
+that text through chat instead. No database conversion is needed. Verify that
+a withdrawn card disappears after live updates and reload, while completed
+decisions and historical messages remain readable. Roll back the host and UI
+together if needed; rollback does not reopen withdrawn requests or undo actions.
 
 ### Next-message thinking slider
 

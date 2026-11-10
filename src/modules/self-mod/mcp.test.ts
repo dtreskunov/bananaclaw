@@ -55,12 +55,23 @@ describe('native MCP additions', () => {
     { url: 'https://mcp.example.com/mcp', headers: { 'X-Version': 'v1' } },
     { url: 'https://mcp.example.com/sse', transport: 'sse' },
   ])('matches host configuration semantics and defers verification until restart: %j', async (input) => {
-    const request = { name: 'example', instructions: 'Use for the current task', timeout: 600000, ...input };
+    const request = {
+      requestId: 'self-mod-request',
+      name: 'example',
+      instructions: 'Use for the current task',
+      timeout: 600000,
+      ...input,
+    };
     await handleAddMcpServer(request, session, undefined, { originMessageId: 'human-request' });
     expect(requestApproval).toHaveBeenCalledOnce();
     expect(servers()).toEqual(initial);
     const approval = vi.mocked(requestApproval).mock.calls[0][0];
-    expect(approval).toMatchObject({ action: 'add_mcp_server', originMessageId: 'human-request', session });
+    expect(approval).toMatchObject({
+      approvalId: request.requestId,
+      action: 'add_mcp_server',
+      originMessageId: 'human-request',
+      session,
+    });
     const notify = vi.fn();
     await applyAddMcpServer({ session, payload: approval.payload, userId: 'admin', notify });
     const native = servers();
@@ -75,7 +86,14 @@ describe('native MCP additions', () => {
       {
         id: 'host',
         command: 'groups-config-add-mcp-server',
-        args: { id: 'agent', ...request, type: 'url' in input ? (input.transport ?? 'http') : 'stdio' },
+        args: {
+          id: 'agent',
+          ...input,
+          name: request.name,
+          instructions: request.instructions,
+          timeout: request.timeout,
+          type: 'url' in input ? (input.transport ?? 'http') : 'stdio',
+        },
       },
       { caller: 'host' },
     );

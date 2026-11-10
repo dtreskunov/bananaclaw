@@ -21,10 +21,11 @@
  * exposing just user-roles/user-dms) is more churn than it's worth. Revisit
  * if either module becomes genuinely optional (see REFACTOR_PLAN open q #3).
  */
+import { isDeepStrictEqual } from 'node:util';
 import { normalizeOptions, type RawOption } from '../../channels/approval-request.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getSession } from '../../db/sessions.js';
-import { createApproval } from '../../db/approvals.js';
+import { createApproval, getApproval } from '../../db/approvals.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
@@ -36,7 +37,6 @@ import { getDb } from '../../db/connection.js';
 import { createApprovalWorkflow } from './workflows.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { writeApprovalNotification, type ApprovalNotificationOptions } from './notification.js';
-import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
 import { transaction } from '../../db/transaction.js';
 
 /** Two-button approval UI — the only options the primitive supports today. */
@@ -145,13 +145,8 @@ export async function pickApprovalDelivery(
 // ── Request API ──
 
 /** Send a system chat to the agent's session. Used by callers and by the response handler. */
-export function notifyAgent(
-  session: Session,
-  text: string,
-  originMessageId?: string | null,
-  responseMessage?: ApprovalResponseMessage,
-): void {
-  writeApprovalNotification(session, text, { originMessageId, responseMessage });
+export function notifyAgent(session: Session, text: string, originMessageId?: string | null): void {
+  writeApprovalNotification(session, text, { originMessageId });
   const fresh = getSession(session.id);
   if (fresh) {
     wakeContainer(fresh).catch((err) => log.error('Failed to wake container after notification', { err }));
@@ -204,7 +199,8 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
   const approvalId = opts.approvalId ?? `appr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const options = opts.options ?? APPROVAL_OPTIONS;
   const normalizedOptions = normalizeOptions(options);
-  transaction(getDb(), () => {
+  const input = { action, payload, title, options: normalizedOptions };
+  const shouldDeliver = transaction(getDb(), () => {
     const created = createApproval({
       id: approvalId,
       session_id: session.id,
@@ -212,10 +208,24 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<str
       created_at: Date.now(),
       origin_message_id: opts.originMessageId ?? null,
       ...(opts.workflowKey ? { agent_group_id: session.agent_group_id } : {}),
-      input: { action: action, payload: payload, title: title, options: normalizedOptions },
+      input,
     });
-    if (created && opts.workflowKey) createApprovalWorkflow(approvalId, opts.workflowKey);
+    if (created) {
+      if (opts.workflowKey) createApprovalWorkflow(approvalId, opts.workflowKey);
+      return true;
+    }
+    const existing = getApproval(approvalId);
+    if (
+      !existing ||
+      existing.session_id !== session.id ||
+      existing.origin_message_id !== (opts.originMessageId ?? null) ||
+      existing.dedupe_key !== (opts.workflowKey ?? null) ||
+      !isDeepStrictEqual(existing.input, JSON.parse(JSON.stringify(input)))
+    )
+      throw new Error('Approval ID is already associated with a different request.');
+    return existing.status === 'pending';
   })();
+  if (!shouldDeliver) return approvalId;
 
   const target = await pickApprovalDelivery(approvers, originChannelType);
   if (!target) {
