@@ -340,6 +340,37 @@ Selecting a Groq model does not create or broaden credential grants. Connect
 the user's Groq credential and explicitly grant the agent access through Agent
 Vault; runtime model requests still use the private session egress socket.
 
+### Native Provider: Thinking Levels
+
+The per-agent `effort` setting controls normal native model requests:
+OpenAI-compatible Chat Completions sends `reasoning_effort`; Anthropic Messages
+sends `output_config.effort`. Supported native Claude models also enable adaptive
+thinking where available. No override means no added thinking/effort fields, so
+existing provider defaults are preserved.
+
+The reviewed capability list covers MiniMax M3.1 Flash (including Preview),
+Claude models supporting effort, and selected OpenAI Chat reasoning families
+(`o1`, `o3`, `o3-mini`, `o4-mini`, GPT-5/mini/nano, GPT-5.1, GPT-5.2 and GPT-5.4).
+It is deliberately conservative: a catalog `reasoning` flag alone does not
+prove that a model accepts configurable effort. Unknown models, nested
+third-party routes and unsupported levels fail explicitly when an override is
+requested; selecting Default continues to work. Responses-only Codex models
+are not offered thinking controls by the Chat-only native transport.
+
+MiniMax accepts `low`, `medium`, `high`, `xhigh` and `max` on either transport,
+but not `none`. Its default is Maximum. Native Claude uses Anthropic Messages;
+the OpenAI families use Chat Completions. A mismatched custom endpoint protocol
+is rejected before making a model request. The host/UI and isolated runner
+assert their capability rules against the shared model contract fixture.
+
+Use Agent Settings -> Models -> Thinking level, or
+`ncl groups config update --id <group-id> --effort high`.
+An empty `--effort ''` clears the override, inheriting `DEFAULT_EFFORT` if set.
+CLI changes require `ncl groups restart --id <group-id>`; UI saves schedule the
+normal deferred restart. A running response is never modified mid-turn.
+See [MiniMax's effort contract](https://platform.minimax.io/docs/guides/text-generation#thinking-depth-effort)
+and [Claude's effort contract](https://platform.claude.com/docs/en/build-with-claude/effort).
+
 ### Native Provider: Errors
 
 The AI SDK retries transient model-request failures before the native provider

@@ -33776,6 +33776,9 @@ function ModelPickerDialog({
 function apiPath(gid, sub) {
   return `/ui/chat/api/groups/${encodeURIComponent(gid)}/admin${sub}`;
 }
+function settingsPatch(draft, pending4) {
+  return Object.fromEntries(Object.entries(draft).filter(([key]) => pending4.has(key)));
+}
 async function call(url, method = "GET", body) {
   const r4 = await protocolFetch(url, {
     method,
@@ -36196,6 +36199,82 @@ function SkillsSection({
   ] });
 }
 
+// ../../shared/thinking-levels.ts
+var STANDARD = ["low", "medium", "high"];
+var EXTENDED = [...STANDARD, "xhigh", "max"];
+function thinkingLevels(provider, model) {
+  if (!model || provider !== "claude" && provider !== "native") return [];
+  if (provider === "native" && model.indexOf("/") <= 0) return [];
+  const id2 = provider === "native" ? model.slice(model.indexOf("/") + 1) : model;
+  if (provider === "native") {
+    if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(id2)) return EXTENDED;
+    if (/^(?:o1|o3(?:-mini)?|o4-mini)(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
+    if (/^gpt-5(?:-mini|-nano)?(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
+    if (/^gpt-5\.[12](?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) {
+      return id2.startsWith("gpt-5.2") ? ["none", ...STANDARD, "xhigh"] : ["none", ...STANDARD];
+    }
+    if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return [...STANDARD, "xhigh"];
+  }
+  if (/^claude-(?:opus-4-[78]|(?:opus|sonnet)-5(?:-5)?|haiku-5-5)(?:-\d{8})?$/.test(id2)) return EXTENDED;
+  if (/^claude-(?:opus|sonnet)-4-6(?:-\d{8})?$/.test(id2)) return [...STANDARD, "max"];
+  if (/^claude-opus-4-5(?:-\d{8})?$/.test(id2) || provider === "claude" && /^(?:opus|sonnet)$/.test(id2))
+    return STANDARD;
+  return [];
+}
+function thinkingLevelError(provider, model, effort) {
+  if (effort == null || effort === "") return null;
+  const levels = thinkingLevels(provider, model);
+  if (typeof effort === "string" && levels.includes(effort)) return null;
+  return levels.length ? `Thinking level must be one of: ${levels.join(", ")} for ${model}.` : `Configurable thinking is not supported for ${provider ?? "this provider"}/${model ?? "the default model"}. Choose Default.`;
+}
+function thinkingLevelLabel(level) {
+  if (level === "none") return "Off";
+  if (level === "xhigh") return "Extra high";
+  if (level === "max") return "Maximum";
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+// src/components/ThinkingLevelSelect.tsx
+function ThinkingLevelSelect({
+  provider,
+  model,
+  value,
+  defaultEffort,
+  busy,
+  onChange
+}) {
+  const levels = thinkingLevels(provider, model);
+  const error = thinkingLevelError(provider, model, value ?? defaultEffort);
+  return /* @__PURE__ */ u4(
+    GroupAdminField,
+    {
+      label: "Thinking level",
+      info: "Agent-wide default for all conversations. More thinking may improve difficult answers, but increases latency and token usage. Saving schedules a restart after active responses finish.",
+      children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
+        /* @__PURE__ */ u4(
+          "select",
+          {
+            "aria-label": "Thinking level",
+            value: value ?? "",
+            disabled: busy || levels.length === 0 && value === null,
+            onChange: (event) => onChange(event.currentTarget.value || null),
+            children: [
+              /* @__PURE__ */ u4("option", { value: "", children: defaultEffort ? `Default (inherited: ${thinkingLevelLabel(defaultEffort)})` : "Default (provider setting)" }),
+              value && !levels.includes(value) ? /* @__PURE__ */ u4("option", { value, disabled: true, children: [
+                value,
+                " (unsupported)"
+              ] }) : null,
+              levels.map((level) => /* @__PURE__ */ u4("option", { value: level, children: thinkingLevelLabel(level) }, level))
+            ]
+          }
+        ),
+        levels.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "This model/provider has no reviewed thinking-level control." }) : null,
+        error ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", role: "alert", children: error }) : null
+      ] })
+    }
+  );
+}
+
 // src/components/GroupAdmin.tsx
 var SETTINGS_SECTIONS = /* @__PURE__ */ new Set(["models", "settings", "packages", "mcp", "skills"]);
 var TAB_ITEMS = [
@@ -36545,13 +36624,18 @@ function SettingsTab({
   const [archiveBusy, setArchiveBusy] = h2(false);
   const effectiveRebuild = !voiceOnlyChange && (needsRebuild || rebuildChecked);
   const effectiveRestart = needsRestart || effectiveRebuild;
-  const canSave = changed;
+  const thinkingChanged = ["provider", "model", "effort"].some((field) => pending4.has(field));
+  const canSave = changed && (!thinkingChanged || !thinkingLevelError(
+    effectiveProvider,
+    draft.model ?? defaultModel,
+    draft.effort ?? data.defaults.effort
+  ));
   y2(() => {
     onActions({ refresh, apply, busy, canSave });
     return () => onActions(null);
   }, [busy, canSave, needsRestart, needsRebuild]);
   function apply() {
-    if (!changed) return;
+    if (!canSave) return;
     setRebuildChecked(false);
     setConfirmOpen(true);
   }
@@ -36570,7 +36654,7 @@ function SettingsTab({
       ]);
       const settingsChanged = [...pending4].some((f5) => !JSON_FIELDS.has(f5));
       if (settingsChanged) {
-        const body = voiceOnlyChange ? { voice_input_backend: draft.voice_input_backend, voice_input_enabled: draft.voice_input_enabled } : { ...draft };
+        const body = settingsPatch(draft, pending4);
         if (data && draftName.trim() !== data.name) body.name = draftName.trim();
         if (pending4.has("site_enabled")) body.site_enabled = siteEnabled;
         if (pending4.has("site_slug")) body.site_slug = siteSlug.trim() || null;
@@ -36757,6 +36841,17 @@ function SettingsTab({
         }
       ) }),
       /* @__PURE__ */ u4(
+        ThinkingLevelSelect,
+        {
+          provider: effectiveProvider,
+          model: draft.model ?? defaultModel,
+          value: draft.effort,
+          defaultEffort: data.defaults.effort,
+          busy,
+          onChange: (value) => update("effort", value)
+        }
+      ),
+      /* @__PURE__ */ u4(
         GroupAdminField,
         {
           label: "Small model",
@@ -36841,16 +36936,6 @@ function SettingsTab({
           disabled: busy,
           maxLength: 100,
           onInput: (e4) => setDraftName(e4.target.value)
-        }
-      ) }),
-      /* @__PURE__ */ u4(GroupAdminField, { label: "Effort", children: /* @__PURE__ */ u4(
-        "input",
-        {
-          type: "text",
-          value: draft.effort ?? "",
-          disabled: busy,
-          onInput: (e4) => update("effort", e4.currentTarget.value || null),
-          placeholder: "provider-specific (e.g. high)"
         }
       ) }),
       /* @__PURE__ */ u4(GroupAdminField, { label: "Image tag", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [

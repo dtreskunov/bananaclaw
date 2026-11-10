@@ -2133,6 +2133,26 @@ no originating conversation; the server rejects a non-empty message for them.
 
 ### Applying Agent Settings
 
+The **Models** tab places **Thinking level** directly below **Model**. It is an
+agent-wide default, stored in the existing `effort` field, not a per-message
+override or a token limit. Higher levels can improve difficult answers at the
+cost of latency and token usage.
+
+The dropdown offers only reviewed levels for the selected provider/model.
+MiniMax M3.1 Flash offers Low, Medium, High, Extra high and Maximum; it cannot
+turn thinking off. **Off** appears only for models supporting `none`. Unknown
+models and providers without an implemented effort mapping offer only Default.
+Unsupported saved values stay visible with a warning until explicitly changed;
+the UI, settings API and CLI reject unsupported combinations.
+Unrelated settings edits send only changed fields and do not require changing
+an existing unsupported thinking level.
+
+**Default** clears the agent override and inherits `DEFAULT_EFFORT` when set,
+otherwise leaving the provider's default untouched. The inherited value is
+shown in the dropdown. If the fleet default is unsupported for the selected
+model, choose an explicit supported level or update `DEFAULT_EFFORT`.
+Advanced token-based thinking budgets remain in Model parameters for Claude.
+
 Saving runtime settings (provider, model, effort, image, MCP servers, skills or
 packages) automatically schedules a silent restart. There is no **Restart
 sessions** checkbox: active responses finish and commit their journals before

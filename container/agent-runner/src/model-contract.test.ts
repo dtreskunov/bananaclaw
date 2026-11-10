@@ -9,6 +9,15 @@ import cases from './providers/model-contract-cases.json';
 import { normalizeLimits } from './providers/model-catalog.js';
 import { stripUpstreamPrefix } from './providers/opencode.js';
 import { resolveCatalogEndpoint } from './providers/native/catalog.js';
+import { nativeThinkingLevels } from './providers/native/thinking.js';
+
+describe('thinking levels contract', () => {
+  for (const c of cases.thinking.cases) {
+    it(c.modelId, () => {
+      expect(nativeThinkingLevels(c.modelId)).toEqual(c.levels);
+    });
+  }
+});
 
 describe('model limits contract', () => {
   for (const c of cases.limits.cases) {

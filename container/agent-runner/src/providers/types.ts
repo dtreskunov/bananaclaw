@@ -150,8 +150,9 @@ export interface ProviderOptions {
   /** Optional cheaper model for provider-owned background work. */
   smallModel?: string;
   /**
-   * Reasoning effort (`'low' | 'medium' | 'high' | 'xhigh' | 'max'`). Passed
-   * through to the underlying SDK. If omitted, the SDK default is used.
+   * Agent-wide thinking level (`low`, `medium`, `high`, `xhigh`, `max`,
+   * or `none` where supported). Claude passes it to its SDK; native validates
+   * the model/transport and maps it to API options. Omit for provider defaults.
    */
   effort?: string;
   /**

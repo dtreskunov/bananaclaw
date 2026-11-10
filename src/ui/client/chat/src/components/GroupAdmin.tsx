@@ -16,13 +16,15 @@ import { TabBar, type TabItem } from './TabBar';
 import { MobileDialog, MobileDialogFooter, MobileDialogItem, MobileDialogList } from './MobileDialog';
 import { MembersTab, RolesTab } from './GroupAdminAccess';
 import { GroupCredentials } from './GroupCredentialAccess';
-import { apiPath, call, errMsg } from './GroupAdminApi';
+import { apiPath, call, errMsg, settingsPatch } from './GroupAdminApi';
 import { DestinationsTab } from './GroupAdminDestinations';
 import { GroupAdminField as Field } from './GroupAdminField';
 import { McpServersSection, type McpProbeResultDto, type McpServerConfigDto } from './GroupAdminMcp';
 import { ModelParamsEditor } from './GroupAdminModelParams';
 import { PackagesSection } from './GroupAdminPackages';
 import { SkillsSection, type AvailableSkillDto } from './GroupAdminSkills';
+import { ThinkingLevelSelect } from './ThinkingLevelSelect';
+import { thinkingLevelError } from '../../../../shared/thinking-levels';
 
 type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'credentials' | 'members' | 'roles' | 'destinations';
 
@@ -77,6 +79,7 @@ interface SettingsResponse {
   defaults: {
     provider: string | null;
     models: Record<string, string | null>;
+    effort: string | null;
     image_tag: string | null;
     voice_input_backend: 'disabled' | 'elevenlabs';
   };
@@ -492,7 +495,10 @@ function SettingsTab({
   const [archiveBusy, setArchiveBusy] = useState(false);
   const effectiveRebuild = !voiceOnlyChange && (needsRebuild || rebuildChecked);
   const effectiveRestart = needsRestart || effectiveRebuild;
-  const canSave = changed;
+  const thinkingChanged = ['provider', 'model', 'effort'].some((field) => pending.has(field));
+  const canSave = changed && (!thinkingChanged || !thinkingLevelError(
+    effectiveProvider, draft.model ?? defaultModel, draft.effort ?? data.defaults.effort,
+  ));
 
   useEffect(() => {
     onActions({ refresh, apply, busy, canSave });
@@ -500,7 +506,7 @@ function SettingsTab({
   }, [busy, canSave, needsRestart, needsRebuild]);
 
   function apply(): void {
-    if (!changed) return;
+    if (!canSave) return;
     setRebuildChecked(false);
     setConfirmOpen(true);
   }
@@ -520,9 +526,7 @@ function SettingsTab({
       ]);
       const settingsChanged = [...pending].some((f) => !JSON_FIELDS.has(f));
       if (settingsChanged) {
-        const body: Record<string, unknown> = voiceOnlyChange
-          ? { voice_input_backend: draft.voice_input_backend, voice_input_enabled: draft.voice_input_enabled }
-          : { ...draft };
+        const body = settingsPatch(draft, pending);
         if (data && draftName.trim() !== data.name) body.name = draftName.trim();
         if (pending.has('site_enabled')) body.site_enabled = siteEnabled;
         if (pending.has('site_slug')) body.site_slug = siteSlug.trim() || null;
@@ -721,6 +725,14 @@ function SettingsTab({
               onChange={(v) => update('model', v)}
             />
           </Field>
+          <ThinkingLevelSelect
+            provider={effectiveProvider}
+            model={draft.model ?? defaultModel}
+            value={draft.effort}
+            defaultEffort={data.defaults.effort}
+            busy={busy}
+            onChange={(value) => update('effort', value)}
+          />
           <Field
             label="Small model"
             info="Lighter model for background tasks like compaction and summaries (cost optimization). Restricted to the same upstream as the main model — OpenCode only enables one gateway per session."
@@ -800,16 +812,6 @@ function SettingsTab({
               onInput={(e) => setDraftName((e.target as HTMLInputElement).value)}
             />
           </Field>
-          <Field label="Effort">
-            <input
-              type="text"
-              value={draft.effort ?? ''}
-              disabled={busy}
-              onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => update('effort', e.currentTarget.value || null)}
-              placeholder="provider-specific (e.g. high)"
-            />
-          </Field>
-
           <Field label="Image tag">
             <div class="group-admin-stack">
               <Combobox

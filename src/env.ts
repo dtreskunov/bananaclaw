@@ -52,6 +52,10 @@ export function defaultProvider(): string {
   return envValue('DEFAULT_PROVIDER') || 'claude';
 }
 
+export function resolveDefaultEffort(): string | undefined {
+  return envValue('DEFAULT_EFFORT') || undefined;
+}
+
 /** Env var carrying the fleet default model for `provider`. */
 export function defaultModelEnvKey(provider: string): string {
   return `DEFAULT_MODEL_${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;

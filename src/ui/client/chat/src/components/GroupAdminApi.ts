@@ -2,6 +2,10 @@ export function apiPath(gid: string, sub: string): string {
   return `/ui/chat/api/groups/${encodeURIComponent(gid)}/admin${sub}`;
 }
 
+export function settingsPatch(draft: object, pending: ReadonlySet<string>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(draft).filter(([key]) => pending.has(key)));
+}
+
 export async function call<T>(
   url: string,
   method: string = 'GET',

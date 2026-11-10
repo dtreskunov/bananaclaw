@@ -1,6 +1,39 @@
 {
   "_": "Shared fixture: the host (src/) and the container agent-runner are separate package trees and cannot import each other, so the rules they both implement are asserted against this one file from both sides. Keep it dependency-free JSON.",
 
+  "thinking": {
+    "_": "Reviewed thinking controls only, not a guess based on a reasoning boolean. Native Chat uses reasoning_effort; Anthropic Messages uses output_config.effort. Unknown models retain provider defaults.",
+    "cases": [
+      { "modelId": "MiniMax-M3.1-Flash", "levels": ["low", "medium", "high", "xhigh", "max"] },
+      { "modelId": "MiniMax-M3.1-Flash-Preview", "levels": ["low", "medium", "high", "xhigh", "max"] },
+      { "modelId": "MiniMax-M3", "levels": [] },
+      { "modelId": "MiniMax-M2.5", "levels": [] },
+      { "modelId": "gpt-5", "levels": ["low", "medium", "high"] },
+      { "modelId": "gpt-5-mini", "levels": ["low", "medium", "high"] },
+      { "modelId": "gpt-5-nano-2025-08-07", "levels": ["low", "medium", "high"] },
+      { "modelId": "gpt-5.1", "levels": ["none", "low", "medium", "high"] },
+      { "modelId": "gpt-5.2", "levels": ["none", "low", "medium", "high", "xhigh"] },
+      { "modelId": "gpt-5.2-pro", "levels": [] },
+      { "modelId": "gpt-5.3-codex", "levels": [] },
+      { "modelId": "gpt-5.4", "levels": ["low", "medium", "high", "xhigh"] },
+      { "modelId": "gpt-4.1", "levels": [] },
+      { "modelId": "o1", "levels": ["low", "medium", "high"] },
+      { "modelId": "o1-mini", "levels": [] },
+      { "modelId": "o3", "levels": ["low", "medium", "high"] },
+      { "modelId": "o3-mini", "levels": ["low", "medium", "high"] },
+      { "modelId": "o4-mini", "levels": ["low", "medium", "high"] },
+      { "modelId": "claude-opus-4-5-20251101", "levels": ["low", "medium", "high"] },
+      { "modelId": "claude-opus-4-6", "levels": ["low", "medium", "high", "max"] },
+      { "modelId": "claude-sonnet-4-6", "levels": ["low", "medium", "high", "max"] },
+      { "modelId": "claude-opus-4-7", "levels": ["low", "medium", "high", "xhigh", "max"] },
+      { "modelId": "claude-opus-5-5", "levels": ["low", "medium", "high", "xhigh", "max"] },
+      { "modelId": "claude-sonnet-4-5", "levels": [] },
+      { "modelId": "claude-haiku-4-5", "levels": [] },
+      { "modelId": "unknown-reasoning-model", "levels": [] },
+      { "modelId": "openai/gpt-5", "levels": [] }
+    ]
+  },
+
   "limits": {
     "_": "How a catalog's raw (context, output) pair becomes recorded limits. An output cap at or above the whole context window is the absence of a cap — 47 of the Vercel gateway's 226 models and 1309 of models.dev's 6652 report it that way, and storing it renders a budget bar that can never move.",
     "cases": [

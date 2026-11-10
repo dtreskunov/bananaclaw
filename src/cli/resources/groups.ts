@@ -22,6 +22,8 @@ import {
 import type { ContainerConfigRow } from '../../types.js';
 import { VALID_AGENT_PROVIDERS } from '../../ui/server/chat/agent-providers.js';
 import { registerResource } from '../crud.js';
+import { defaultProvider, resolveDefaultEffort, resolveDefaultModel } from '../../env.js';
+import { thinkingLevelError } from '../../ui/shared/thinking-levels.js';
 
 /** Deserialize JSON columns for display. */
 function presentConfig(row: ContainerConfigRow): Record<string, unknown> {
@@ -256,13 +258,18 @@ registerResource({
           const upstream = ((args['upstream-provider'] ?? args.upstream_provider) as string).trim();
           updates.upstream_provider = upstream === '' ? null : upstream;
         }
-        if (args.effort !== undefined) updates.effort = args.effort as string;
+        if (args.effort !== undefined) {
+          if (typeof args.effort !== 'string') throw new Error('--effort must be a thinking level or an empty string');
+          updates.effort = args.effort || null;
+        }
         if (args.image_tag !== undefined) updates.image_tag = args.image_tag as string;
         if (args.assistant_name !== undefined) updates.assistant_name = args.assistant_name as string;
         if (args.max_messages_per_prompt !== undefined)
           updates.max_messages_per_prompt = Number(args.max_messages_per_prompt);
         if (args['soft-turn-token-budget'] !== undefined || args.soft_turn_token_budget !== undefined)
-          updates.soft_turn_token_budget = parseSoftTurnTokenBudget(args['soft-turn-token-budget'] ?? args.soft_turn_token_budget);
+          updates.soft_turn_token_budget = parseSoftTurnTokenBudget(
+            args['soft-turn-token-budget'] ?? args.soft_turn_token_budget,
+          );
         if (args['cli-scope'] !== undefined || args.cli_scope !== undefined) {
           const scope = (args['cli-scope'] ?? args.cli_scope) as string;
           if (!['disabled', 'group', 'global'].includes(scope)) {
@@ -277,6 +284,13 @@ registerResource({
           );
         }
 
+        if ('effort' in updates || 'model' in updates || 'provider' in updates) {
+          const provider = updates.provider ?? row.provider ?? defaultProvider();
+          const model = updates.model ?? row.model ?? resolveDefaultModel(provider) ?? null;
+          const effort = ('effort' in updates ? updates.effort : row.effort) ?? resolveDefaultEffort();
+          const error = thinkingLevelError(provider, model, effort);
+          if (error) throw new Error(error);
+        }
         updateContainerConfigScalars(id, updates);
 
         const updated = getContainerConfig(id)!;
@@ -408,7 +422,8 @@ registerResource({
         'Use --id <group-id> --key <name> --value <value>. ' +
         'Value is parsed as JSON first (so `8192`, `true`, `0.7`, `["a","b"]` come through typed); ' +
         'if JSON parsing fails it is stored as a string. ' +
-        'Common keys: max_tokens, temperature, top_p, thinking_budget_tokens (Claude), reasoning_effort. ' +
+        'Common keys: max_tokens, temperature, top_p, thinking_budget_tokens (Claude). ' +
+        'Configure thinking levels with config update --effort <level>, not a model parameter. ' +
         'Unknown keys are accepted — the active provider warns and ignores them at startup.',
       handler: async (args) => {
         const id = args.id as string;
