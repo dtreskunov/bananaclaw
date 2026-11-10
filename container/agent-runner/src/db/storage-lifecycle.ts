@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const STORAGE_VERSION = 2;
+export const STORAGE_VERSION = 3;
 export const EPOCH_NOW_SQL =
   "(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER))";
 
@@ -12,6 +12,6 @@ export function assertStorageVersion(db: Database, store: string, expectedVersio
     .get();
   if (version === 0 && !existing) return;
   throw new Error(
-    `Unsupported ${store} storage version ${version}; stop host AND runners and follow docs/reply-suggestions-cutover.md`,
+    `Unsupported ${store} storage version ${version}; stop host AND runners and follow docs/usage-efficiency.md#offline-cutover`,
   );
 }

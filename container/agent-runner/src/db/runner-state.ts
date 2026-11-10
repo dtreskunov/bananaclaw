@@ -160,6 +160,9 @@ function applyRunnerStateSchema(db: Database): void {
       message_out_id TEXT,
       turn_id TEXT REFERENCES turns(id),
       cost_usd REAL,
+      reported_tokens INTEGER CHECK (reported_tokens IS NULL OR
+        (typeof(reported_tokens)='integer' AND reported_tokens BETWEEN 0 AND 9007199254740991)),
+      cost_source TEXT CHECK (cost_source IS NULL OR cost_source IN ('reported','estimated','unavailable','mixed')),
       input_tokens INTEGER,
       output_tokens INTEGER,
       cache_read_tokens INTEGER,
@@ -337,7 +340,8 @@ function applyRunnerStateSchema(db: Database): void {
         'usage.persist',
         `json_object(
         'id', NEW.id, 'message_out_id', NEW.message_out_id, 'turn_id', NEW.turn_id,
-        'cost_usd', NEW.cost_usd, 'input_tokens', NEW.input_tokens,
+        'cost_usd', NEW.cost_usd, 'reported_tokens', NEW.reported_tokens, 'cost_source', NEW.cost_source,
+        'input_tokens', NEW.input_tokens,
         'output_tokens', NEW.output_tokens, 'cache_read_tokens', NEW.cache_read_tokens,
         'cache_write_tokens', NEW.cache_write_tokens, 'reasoning_tokens', NEW.reasoning_tokens,
         'num_turns', NEW.num_turns, 'duration_ms', NEW.duration_ms,
@@ -353,7 +357,8 @@ function applyRunnerStateSchema(db: Database): void {
         'usage.persist',
         `json_object(
         'id', NEW.id, 'message_out_id', NEW.message_out_id, 'turn_id', NEW.turn_id,
-        'cost_usd', NEW.cost_usd, 'input_tokens', NEW.input_tokens,
+        'cost_usd', NEW.cost_usd, 'reported_tokens', NEW.reported_tokens, 'cost_source', NEW.cost_source,
+        'input_tokens', NEW.input_tokens,
         'output_tokens', NEW.output_tokens, 'cache_read_tokens', NEW.cache_read_tokens,
         'cache_write_tokens', NEW.cache_write_tokens, 'reasoning_tokens', NEW.reasoning_tokens,
         'num_turns', NEW.num_turns, 'duration_ms', NEW.duration_ms,

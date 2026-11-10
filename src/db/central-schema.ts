@@ -234,6 +234,8 @@ CREATE TABLE container_configs (
   image_tag TEXT,
   assistant_name TEXT,
   max_messages_per_prompt INTEGER,
+  soft_turn_token_budget INTEGER CHECK (soft_turn_token_budget IS NULL OR
+    (typeof(soft_turn_token_budget)='integer' AND soft_turn_token_budget>0 AND soft_turn_token_budget<=9007199254740991)),
   skills TEXT NOT NULL DEFAULT '"all"',
   mcp_servers TEXT NOT NULL DEFAULT '{}',
   packages_apt TEXT NOT NULL DEFAULT '[]',

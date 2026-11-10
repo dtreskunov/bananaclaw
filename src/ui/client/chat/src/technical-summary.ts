@@ -7,6 +7,21 @@ export function formatUsageCost(usd: number): string {
   return '$' + usd.toFixed(4);
 }
 
+export function usageCostPresentation(
+  usage: Partial<ConversationUsage>,
+  partial: boolean,
+): { usd: number; label: string } | null {
+  if (usage.cost_usd === undefined || usage.cost_source === 'unavailable') return null;
+  let label: string;
+  switch (usage.cost_source) {
+    case 'reported': label = 'Reported cost'; break;
+    case 'mixed': label = 'Mixed-source cost'; break;
+    case 'estimated': label = 'Estimated cost'; break;
+    default: label = partial ? 'Reported cost' : 'Estimated cost';
+  }
+  return { usd: usage.cost_usd, label };
+}
+
 export function formatContextPercent(used: number, limit: number): string {
   const pct = (used / limit) * 100;
   if (pct > 0 && pct < 1) return '<1%';
@@ -44,7 +59,7 @@ export function technicalSummary({
   usage: readonly Partial<ConversationUsage>[];
   context?: KnownContext | null;
 }): string {
-  const costs = usage.map((record) => record.cost_usd);
+  const costs = usage.map((record) => usageCostPresentation(record, false)?.usd);
   const cost =
     costs.length && costs.every((value): value is number => value !== undefined)
       ? costs.reduce((total, value) => total + value, 0)

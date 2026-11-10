@@ -449,6 +449,8 @@ CREATE TABLE container_configs (
   image_tag              TEXT,
   assistant_name         TEXT,
   max_messages_per_prompt INTEGER,
+  soft_turn_token_budget INTEGER CHECK (soft_turn_token_budget IS NULL OR
+    (typeof(soft_turn_token_budget)='integer' AND soft_turn_token_budget>0 AND soft_turn_token_budget<=9007199254740991)),
   skills                 TEXT NOT NULL DEFAULT '"all"',
   mcp_servers            TEXT NOT NULL DEFAULT '{}',
   packages_apt           TEXT NOT NULL DEFAULT '[]',
@@ -469,6 +471,13 @@ CREATE TABLE container_configs (
 
 - **Readers:** `src/container-config.ts`, `src/container-runner.ts`, `src/cli/dispatch.ts` (scope enforcement), `src/claude-md-compose.ts`
 - **Writers:** `src/db/container-configs.ts`, `src/modules/self-mod/apply.ts`
+
+`soft_turn_token_budget` is an optional native-runner policy, not a model
+generation parameter. NULL disables wrap-up guidance; positive safe integers
+set the reported-token threshold. Existing v2 stores receive the nullable column
+in the [offline cutover](usage-efficiency.md#offline-cutover), leaving groups
+disabled unless explicitly configured. Runtime performs no schema conversion.
+See [usage efficiency](usage-efficiency.md#soft-turn-usage-advisory).
 
 ### 1.16 Credential gateway identity and reconciliation
 

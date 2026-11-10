@@ -9,7 +9,7 @@ vi.mock('./config.js', async (importOriginal) => ({
 }));
 
 import { initSessionFolder, outboundDbPath, openInboundDb } from './session-manager.js';
-import { applyDurableRunnerEvent } from './session-link-durable.js';
+import { applyDurableRunnerEvent, readTurnMetadata } from './session-link-durable.js';
 import { log } from './log.js';
 
 const ROOT = '.test-durable-link';
@@ -39,6 +39,8 @@ function timingPayload(duration: unknown): Record<string, unknown> {
     turn_id: null,
     message_out_id: null,
     cost_usd: 0.00773868,
+    reported_tokens: null,
+    cost_source: null,
     input_tokens: 25490,
     output_tokens: 70,
     cache_read_tokens: 128,
@@ -67,6 +69,44 @@ afterEach(() => {
 });
 
 describe('applyDurableRunnerEvent', () => {
+  it('journals canonical usage through replay and settlement', () => {
+    const turn = {
+      id: 'advisory-turn', origin_channel_type: 'web', origin_platform_id: 'chat', origin_thread_id: null,
+      origin_source_session_id: null, started_at: '2026-10-06T05:44:52.674Z', ended_at: null,
+      phase: 'running', outcome: 'pending', provenance: 'native',
+      imported_from_session_id: null, imported_from_turn_id: null,
+    };
+    const apply = (sequence: number, type: string, payload: Record<string, unknown>) =>
+      applyDurableRunnerEvent(AGENT_GROUP_ID, SESSION_ID, {
+        sequence, eventId: `advisory-${sequence}`, event: { type, payload },
+      });
+    apply(1, 'turn.upsert', turn);
+    apply(2, 'usage.persist', { ...timingPayload(100), turn_id: turn.id,
+      reported_tokens: 25688, cost_source: 'estimated' });
+    const metadata = {
+      turnId: turn.id, durationMs: 1000, model: 'stub', usageId: 'usage-timing', status: 'partial', final: false,
+      usageAdvisory: { threshold: 10000, reportedTokens: 25688, triggeredAt: 100, status: 'applied', appliedAt: 110, finishedAt: null },
+    };
+    const payload = (value: typeof metadata) => ({
+      key: `turn-metadata:${turn.id}`, value: JSON.stringify(value), updated_at: '2026-10-06T05:45:00.000Z',
+    });
+    apply(3, 'state.upsert', payload(metadata));
+    apply(3, 'state.upsert', payload(metadata));
+    const db = new Database(outboundDbPath(AGENT_GROUP_ID, SESSION_ID), { readonly: true });
+    try {
+      expect(readTurnMetadata(db, turn.id)).not.toHaveProperty('reportedTokens');
+      expect(readTurnMetadata(db, turn.id)).not.toHaveProperty('costSource');
+      expect(db.prepare('SELECT reported_tokens,cost_source FROM turn_usage').get())
+        .toEqual({ reported_tokens: 25688, cost_source: 'estimated' });
+      const final = { ...metadata, status: 'final', final: true };
+      apply(4, 'state.upsert', payload(final));
+      apply(5, 'turn.upsert', { ...turn, phase: 'settled', outcome: 'silent', ended_at: '2026-10-06T05:45:00.000Z' });
+      expect(readTurnMetadata(db, turn.id)).toMatchObject({
+        status: 'final', final: true, usageAdvisory: metadata.usageAdvisory,
+      });
+      expect(log.warn).not.toHaveBeenCalled();
+    } finally { db.close(); }
+  });
   it.each([null, 0, 3328.568369, Number.MAX_SAFE_INTEGER])(
     'replays model timing %s before the saved reply and settlement without changing replay identity',
     (duration) => {
@@ -666,6 +706,8 @@ describe('applyDurableRunnerEvent', () => {
       id: 'usage-1',
       message_out_id: 'out-1',
       cost_usd: 0.1,
+      reported_tokens: null,
+      cost_source: null,
       input_tokens: 10,
       output_tokens: 2,
       cache_read_tokens: 0,

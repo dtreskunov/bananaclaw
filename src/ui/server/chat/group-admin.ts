@@ -25,6 +25,8 @@ import {
   getContainerConfig,
   updateContainerConfigJson,
   updateContainerConfigScalars,
+  parseSoftTurnTokenBudget,
+  type ContainerConfigScalarUpdates,
 } from '../../../db/container-configs.js';
 import { log } from '../../../log.js';
 import { archiveAgentGroup } from '../../../modules/archive/archive-group.js';
@@ -94,6 +96,7 @@ const SCALAR_FIELDS = [
   'image_tag',
   'assistant_name',
   'max_messages_per_prompt',
+  'soft_turn_token_budget',
   'cli_scope',
   'voice_input_backend',
   'voice_input_enabled',
@@ -272,6 +275,7 @@ interface SettingsResponse {
     | 'image_tag'
     | 'assistant_name'
     | 'max_messages_per_prompt'
+    | 'soft_turn_token_budget'
     | 'cli_scope'
     | 'voice_input_backend'
   > & { voice_input_enabled: boolean };
@@ -392,6 +396,7 @@ async function handleGetSettings(res: http.ServerResponse, gid: string, actorUse
       image_tag: cfg.image_tag,
       assistant_name: cfg.assistant_name,
       max_messages_per_prompt: cfg.max_messages_per_prompt,
+      soft_turn_token_budget: cfg.soft_turn_token_budget ?? null,
       cli_scope: cfg.cli_scope,
       voice_input_backend: cfg.voice_input_backend ?? null,
       voice_input_enabled: cfg.voice_input_enabled !== 0,
@@ -452,22 +457,7 @@ async function handlePatchSettings(
   // Distinguish "key absent" (skip) from "key present with null/empty"
   // (clear to null). The DB columns for provider/model/effort/image_tag/
   // assistant_name/max_messages_per_prompt/cli_scope all allow NULL.
-  const updates: Partial<
-    Pick<
-      ContainerConfigRow,
-      | 'provider'
-      | 'upstream_provider'
-      | 'model'
-      | 'small_model'
-      | 'effort'
-      | 'image_tag'
-      | 'assistant_name'
-      | 'max_messages_per_prompt'
-      | 'cli_scope'
-      | 'voice_input_backend'
-      | 'voice_input_enabled'
-    >
-  > = {};
+  const updates: ContainerConfigScalarUpdates = {};
   const isElevated = isOwner(actorUserId) || isGlobalAdmin(actorUserId);
 
   // Group name lives in agent_groups, not container_configs.
@@ -598,6 +588,13 @@ async function handlePatchSettings(
         throw new BadRequest('only owner or global admin may set cli_scope to "global"');
       }
       updates.cli_scope = v;
+    } else if (key === 'soft_turn_token_budget') {
+      try {
+        updates.soft_turn_token_budget = parseSoftTurnTokenBudget(raw);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        throw new BadRequest(error.message);
+      }
     } else if (key === 'max_messages_per_prompt') {
       if (isCleared) {
         updates.max_messages_per_prompt = null;

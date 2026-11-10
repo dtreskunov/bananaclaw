@@ -60,6 +60,43 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('authoritative conversation projection', () => {
+  it('projects reusable token totals and advisory state live, after settlement and on reload', () => {
+    const advisory = { threshold: 10, reportedTokens: 10, triggeredAt: 1, status: 'applied', appliedAt: 2, finishedAt: null };
+    db.prepare(`INSERT INTO turn_usage(id,turn_id,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reported_tokens,cost_source)
+      VALUES('usage','turn',5,3,2,0,10,'estimated')`).run();
+    const metadata = { turnId: 'turn', durationMs: 100, model: 'stub', usageId: 'usage',
+      status: 'partial', final: false, usageAdvisory: advisory };
+    db.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,0)')
+      .run('turn-metadata:turn', JSON.stringify(metadata));
+    const first = read();
+    expect(first.turns[0]).toMatchObject({
+      usage: [{ id: 'usage', value: { reported_tokens: 10, cost_source: 'estimated' } }],
+      metadata: { usageAdvisory: advisory },
+    });
+    db.prepare("UPDATE turn_usage SET input_tokens=7,reported_tokens=12 WHERE id='usage'").run();
+    expect(read().turns[0].usage[0].value.reported_tokens).toBe(12);
+    db.prepare("UPDATE session_state SET value=? WHERE key='turn-metadata:turn'")
+      .run(JSON.stringify({ ...metadata, status: 'final', final: true }));
+    putTurn(db, { ...turn, phase: 'settled', outcome: 'silent', ended_at: 1790640002000 });
+    const after = read();
+    expect(after.turns[0].usage).toHaveLength(1);
+    expect(after.turns[0].usage[0].value.reported_tokens).toBe(12);
+    expect(read()).toEqual(after);
+    const frame = {
+      kind: 'snapshot', protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+      streamId: 'usage-stats', revision: 0, conversation: after,
+    };
+    expect(parseConversationFrame(frame)).toEqual(frame);
+  });
+
+  it('keeps unavailable token totals null rather than reconstructing misleading legacy zeros', () => {
+    db.prepare("INSERT INTO turn_usage(id,turn_id,input_tokens,output_tokens,cost_source) VALUES('usage','turn',0,0,'unavailable')").run();
+    db.prepare('INSERT INTO session_state(key,value,updated_at) VALUES(?,?,0)').run(
+      'turn-metadata:turn', JSON.stringify({ turnId: 'turn', durationMs: 0, model: 'stub', usageId: 'usage',
+        status: 'partial', final: false, usageAdvisory: null }),
+    );
+    expect(read().turns[0].usage[0].value).toMatchObject({ reported_tokens: null, cost_source: 'unavailable' });
+  });
   it('uses a constant number of scoped queries as the conversation grows', () => {
     const history: ConversationMessage[] = [];
     for (let index = 0; index < 80; index++) {
@@ -178,7 +215,9 @@ describe('authoritative conversation projection', () => {
       1000,
     );
     const view = read();
-    expect(view.turns[0].usage[0].value).toEqual({ duration_ms: 5000, duration_api_ms: 1000 });
+    expect(view.turns[0].usage[0].value).toEqual({
+      duration_ms: 5000, duration_api_ms: 1000, reported_tokens: null, cost_source: null,
+    });
     const frame = {
       kind: 'snapshot',
       protocolVersion: CONVERSATION_PROTOCOL_VERSION,

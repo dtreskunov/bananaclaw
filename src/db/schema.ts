@@ -307,6 +307,9 @@ CREATE TABLE IF NOT EXISTS turn_usage (
   message_out_id      TEXT,
   turn_id             TEXT REFERENCES turns(id),
   cost_usd            REAL,
+  reported_tokens     INTEGER CHECK (reported_tokens IS NULL OR
+    (typeof(reported_tokens)='integer' AND reported_tokens BETWEEN 0 AND 9007199254740991)),
+  cost_source         TEXT CHECK (cost_source IS NULL OR cost_source IN ('reported','estimated','unavailable','mixed')),
   input_tokens        INTEGER,
   output_tokens       INTEGER,
   cache_read_tokens   INTEGER,

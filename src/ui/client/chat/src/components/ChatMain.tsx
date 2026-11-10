@@ -51,7 +51,7 @@ import {
 } from '../activity-trace-state';
 import { responseScrollTop, transcriptReadingTop } from '../turn-completion';
 import { activeTurnNotices, hasTurnStats, liveTurnActivity, turnRowView } from '../turn-row';
-import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, latestContextUsage, technicalSummary, type KnownContext } from '../technical-summary';
+import { formatContextPercent as fmtPct, formatUsageCost as fmtCost, latestContextUsage, technicalSummary, usageCostPresentation, type KnownContext } from '../technical-summary';
 import { inputStatePresentation } from '../input-state';
 import { SUGGESTED_ACTIONS, isFutureWorkMessage } from '../future-work';
 import { findEditBranchAnchorId } from '../edit-message';
@@ -511,8 +511,12 @@ function UsageContext({ context, partialTokens }: {
 }
 
 function UsageTokens({ u, live }: { u: Partial<TurnUsage>; live: boolean }) {
-  const count = (n: number | undefined) => (n !== undefined ? fmtTokUnit(n) : 'unavailable');
+  const count = (n: number | undefined) =>
+    n !== undefined && (n !== 0 || u.reported_tokens !== null) ? fmtTokUnit(n) : 'unavailable';
   return <>
+    <UsageRow label={live ? 'Reported tokens so far' : 'Reported tokens'}
+      value={u.reported_tokens == null ? 'unavailable' : fmtTokUnit(u.reported_tokens)}
+      title="Cumulative uncached input, cache reads/writes and output across model calls. Reasoning is included in output. Not remaining provider quota." />
     <UsageRow label={live ? 'Processing so far' : 'Turn processing'}
       value={`${count(u.input_tokens)} in \u00b7 ${count(u.output_tokens)} out`} />
     {u.reasoning_tokens ? <UsageRow label="Reasoning" value={fmtTokUnit(u.reasoning_tokens)} /> : null}
@@ -524,6 +528,7 @@ function UsageTokens({ u, live }: { u: Partial<TurnUsage>; live: boolean }) {
 }
 
 function UsageModel({ u, model, live, partial }: { u: Partial<TurnUsage>; model?: string | null; live: boolean; partial: boolean }) {
+  const cost = usageCostPresentation(u, partial);
   const reportedModel = u.model || model;
   const window = u.context_window !== undefined && Number.isFinite(u.context_window) && u.context_window > 0
     ? u.context_window : null;
@@ -531,7 +536,7 @@ function UsageModel({ u, model, live, partial }: { u: Partial<TurnUsage>; model?
     {reportedModel ? <span class="usage-row"><span>Model</span><strong title={reportedModel}>{shortModel(reportedModel)}</strong></span> : null}
     {window !== null ? <UsageRow label="Context size" value={`${fmtContextLimit(window)} tok`} /> : null}
     {u.num_turns ? <UsageRow label={live ? 'Model calls so far' : 'Model calls'} value={String(u.num_turns)} /> : null}
-    {u.cost_usd ? <UsageRow label={partial ? 'Reported cost' : 'Estimated cost'} value={fmtCost(u.cost_usd)} /> : null}
+    {cost && cost.usd !== 0 ? <UsageRow label={cost.label} value={fmtCost(cost.usd)} /> : null}
   </>;
 }
 

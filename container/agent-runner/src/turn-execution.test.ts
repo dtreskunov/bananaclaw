@@ -55,6 +55,41 @@ function expectOutputBeforeSettlement(): void {
     .every((event) => event.sequence < settled.sequence)).toBe(true);
 }
 
+it('wires configured usage guidance through the poll loop and publishes actual application with turn stats', async () => {
+  input();
+  const controller = new AbortController();
+  let guidance: { turnId: string; prompt: string } | undefined;
+  const configured: AgentProvider = {
+    supportsNativeSlashCommands: false,
+    isSessionInvalid: () => false,
+    query: () => ({
+      adviseUsage: value => { guidance = value; return true; },
+      push: () => false, end() {}, abort() {},
+      events: {
+        async *[Symbol.asyncIterator](): AsyncGenerator<ProviderEvent> {
+          yield { type: 'usage_call', data: { ...usage, reported_tokens: 15 } };
+          if (!guidance) throw new Error('Configured advisory did not reach provider');
+          yield { type: 'usage_advisory', turnId: guidance.turnId, status: 'applied', timestamp: Date.now() };
+          yield { type: 'result', text: '<message to="web">Progress saved.</message>' };
+        },
+      },
+    }),
+  };
+  const loop = runPollLoop({ provider: configured, providerName: 'native', cwd: process.cwd(),
+    softTurnTokenBudget: 15, signal: controller.signal });
+  try {
+    await until(() => !!getOutboundDb().prepare("SELECT 1 FROM turns WHERE phase='settled'").get());
+    const turn = getOutboundDb().prepare('SELECT id FROM turns').get() as { id: string };
+    expect(metadata(turn.id)).toMatchObject({
+      usageAdvisory: { threshold: 15, reportedTokens: 15, status: 'applied' },
+    });
+    expect(guidance?.prompt).toContain('end this turn and wait for the user');
+    expect(activitySteps().filter(step => step.kind === 'notification' &&
+      step.text === 'Soft turn token budget reached; agent asked to wrap up')).toHaveLength(1);
+    expect(getOutboundDb().prepare('SELECT reported_tokens FROM turn_usage').get()).toEqual({ reported_tokens: 15 });
+  } finally { controller.abort(); await loop; }
+});
+
 it('persists every call\'s model time across retries', async () => {
   const turn = beginTurn(route, []);
   recordCallUsage(turn, { ...usage, duration_api_ms: 100 });

@@ -14,6 +14,9 @@ The files in this directory are original design documents and developer referenc
 
 ## Design proposals
 
+- [Soft turn-usage advisory and reusable telemetry](soft-turn-usage-advisory-proposal.md):
+  opt-in native-runner wrap-up guidance based on shared usage statistics,
+  without hard task ceilings, approval flows, or provider-quota assumptions.
 - [Credential gateway plan of record](credential-gateway-agent-vault-fork-proposal.md):
   revision 7 adopts native AgentVault managed users, user-owned static/OAuth
   connections, explicit shared references and a top-level Credentials tab.

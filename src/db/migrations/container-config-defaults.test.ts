@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closeDb, getDb, initTestDb } from '../connection.js';
-import { agentVaultBackendGroups, ensureContainerConfig, getContainerConfig } from '../container-configs.js';
+import { agentVaultBackendGroups, ensureContainerConfig, getContainerConfig, updateContainerConfigScalars, parseSoftTurnTokenBudget } from '../container-configs.js';
+import { configFromDb } from '../../container-config.js';
+import { getAgentGroup } from '../agent-groups.js';
 import { usesAgentVault } from '../../modules/credentials/agent-vault-client.js';
 import { runMigrations } from './index.js';
 
@@ -28,9 +30,29 @@ describe('current container configuration defaults', () => {
       additional_mounts: '[]',
       voice_input_backend: null,
       voice_input_enabled: 1,
+      soft_turn_token_budget: null,
     });
     expect(getDb().prepare("SELECT name FROM sqlite_schema WHERE name='credential_connections'").get()).toBeUndefined();
   });
+
+    it('validates, materializes, clears and preserves the advisory policy', () => {
+      ensureContainerConfig('g');
+      updateContainerConfigScalars('g', { soft_turn_token_budget: 100 });
+      expect(configFromDb(getContainerConfig('g')!, getAgentGroup('g')!).softTurnTokenBudget).toBe(100);
+      runMigrations(getDb());
+      expect(getContainerConfig('g')?.soft_turn_token_budget).toBe(100);
+      updateContainerConfigScalars('g', { soft_turn_token_budget: null });
+      expect(configFromDb(getContainerConfig('g')!, getAgentGroup('g')!).softTurnTokenBudget).toBeUndefined();
+    });
+
+    it.each([0, -1, 1.5, false, 'no', ' ', Infinity, Number.MAX_SAFE_INTEGER + 1])(
+      'rejects invalid advisory threshold %s without modifying configuration', value => {
+        expect(() => parseSoftTurnTokenBudget(value)).toThrow('positive safe integer');
+        ensureContainerConfig('g');
+        expect(() => getDb().prepare('UPDATE container_configs SET soft_turn_token_budget=?').run(value)).toThrow();
+        expect(getContainerConfig('g')?.soft_turn_token_budget).toBeNull();
+      },
+    );
 
   it.each([null, 'onecli', 'unexpected'])(
     'rejects retired or invalid credential backend %j on insert and update',

@@ -18771,6 +18771,29 @@ function isReadCursor(value) {
   return cursor(value);
 }
 
+// ../../shared/conversation.ts
+function isTurnUsageAdvisory(value) {
+  if (!object(value) || Object.keys(value).length !== 6 || !integer(value.threshold) || value.threshold === 0 || !integer(value.reportedTokens) || Number(value.reportedTokens) < Number(value.threshold) || !integer(value.triggeredAt) || !(value.appliedAt === null || integer(value.appliedAt)) || !(value.finishedAt === null || integer(value.finishedAt))) return false;
+  switch (value.status) {
+    case "queued":
+      return value.appliedAt === null && value.finishedAt === null;
+    case "applied":
+      return value.appliedAt !== null && value.finishedAt === null;
+    case "skipped":
+      return value.appliedAt === null && value.finishedAt !== null;
+    default:
+      return false;
+  }
+}
+function otherAuthorName(author, userId, agentGroupId) {
+  if (!author) return void 0;
+  const own = "userId" in author ? author.userId === userId : author.agentGroupId === agentGroupId;
+  return own ? void 0 : author.displayName;
+}
+function messageAttribution(message2, userId, agentGroupId) {
+  return otherAuthorName(message2.author, userId, agentGroupId) ?? (message2.recipient ? `To ${message2.recipient.displayName}` : void 0);
+}
+
 // ../../shared/collection-patch.ts
 var CollectionPatchError = class extends Error {
   constructor() {
@@ -18980,6 +19003,8 @@ var ConversationProtocolError = class extends Error {
 };
 var strings = array(id);
 var usageFields = {
+  reported_tokens: nullable(integer),
+  cost_source: nullable(oneOf("reported", "estimated", "unavailable", "mixed")),
   cost_usd: number,
   input_tokens: number,
   output_tokens: number,
@@ -19069,7 +19094,8 @@ var turnFields = {
   metadata: shape({
     status: oneOf("provisional", "partial", "final", "unavailable"),
     model: nullable(text),
-    durationMs: nullable(number)
+    durationMs: nullable(number),
+    usageAdvisory: optional(nullable(isTurnUsageAdvisory))
   })
 };
 var turn = shape({ ...turnFields, activity: array(activityLine) });
@@ -24112,16 +24138,6 @@ function splitPendingInputs(messages) {
   return { transcript, queued };
 }
 
-// ../../shared/conversation.ts
-function otherAuthorName(author, userId, agentGroupId) {
-  if (!author) return void 0;
-  const own = "userId" in author ? author.userId === userId : author.agentGroupId === agentGroupId;
-  return own ? void 0 : author.displayName;
-}
-function messageAttribution(message2, userId, agentGroupId) {
-  return otherAuthorName(message2.author, userId, agentGroupId) ?? (message2.recipient ? `To ${message2.recipient.displayName}` : void 0);
-}
-
 // src/duration-format.ts
 function formatDuration(ms) {
   if (ms === null) return "";
@@ -24232,6 +24248,24 @@ function formatUsageCost(usd) {
   if (usd >= 0.01) return "$" + usd.toFixed(3);
   return "$" + usd.toFixed(4);
 }
+function usageCostPresentation(usage, partial) {
+  if (usage.cost_usd === void 0 || usage.cost_source === "unavailable") return null;
+  let label;
+  switch (usage.cost_source) {
+    case "reported":
+      label = "Reported cost";
+      break;
+    case "mixed":
+      label = "Mixed-source cost";
+      break;
+    case "estimated":
+      label = "Estimated cost";
+      break;
+    default:
+      label = partial ? "Reported cost" : "Estimated cost";
+  }
+  return { usd: usage.cost_usd, label };
+}
 function formatContextPercent(used, limit) {
   const pct = used / limit * 100;
   if (pct > 0 && pct < 1) return "<1%";
@@ -24247,7 +24281,7 @@ function technicalSummary({
   usage,
   context = latestContextUsage(usage)
 }) {
-  const costs = usage.map((record) => record.cost_usd);
+  const costs = usage.map((record) => usageCostPresentation(record, false)?.usd);
   const cost = costs.length && costs.every((value) => value !== void 0) ? costs.reduce((total, value) => total + value, 0) : null;
   return [
     elapsedMs === null ? "" : formatStopwatch(elapsedMs),
@@ -28604,8 +28638,16 @@ function UsageContext({ context, partialTokens }) {
   );
 }
 function UsageTokens({ u: u5, live }) {
-  const count = (n3) => n3 !== void 0 ? fmtTokUnit(n3) : "unavailable";
+  const count = (n3) => n3 !== void 0 && (n3 !== 0 || u5.reported_tokens !== null) ? fmtTokUnit(n3) : "unavailable";
   return /* @__PURE__ */ u4(k, { children: [
+    /* @__PURE__ */ u4(
+      UsageRow,
+      {
+        label: live ? "Reported tokens so far" : "Reported tokens",
+        value: u5.reported_tokens == null ? "unavailable" : fmtTokUnit(u5.reported_tokens),
+        title: "Cumulative uncached input, cache reads/writes and output across model calls. Reasoning is included in output. Not remaining provider quota."
+      }
+    ),
     /* @__PURE__ */ u4(
       UsageRow,
       {
@@ -28626,6 +28668,7 @@ function UsageTokens({ u: u5, live }) {
   ] });
 }
 function UsageModel({ u: u5, model, live, partial }) {
+  const cost = usageCostPresentation(u5, partial);
   const reportedModel = u5.model || model;
   const window2 = u5.context_window !== void 0 && Number.isFinite(u5.context_window) && u5.context_window > 0 ? u5.context_window : null;
   return /* @__PURE__ */ u4(k, { children: [
@@ -28635,7 +28678,7 @@ function UsageModel({ u: u5, model, live, partial }) {
     ] }) : null,
     window2 !== null ? /* @__PURE__ */ u4(UsageRow, { label: "Context size", value: `${fmtContextLimit(window2)} tok` }) : null,
     u5.num_turns ? /* @__PURE__ */ u4(UsageRow, { label: live ? "Model calls so far" : "Model calls", value: String(u5.num_turns) }) : null,
-    u5.cost_usd ? /* @__PURE__ */ u4(UsageRow, { label: partial ? "Reported cost" : "Estimated cost", value: formatUsageCost(u5.cost_usd) }) : null
+    cost && cost.usd !== 0 ? /* @__PURE__ */ u4(UsageRow, { label: cost.label, value: formatUsageCost(cost.usd) }) : null
   ] });
 }
 function AgentActionLabel({ label, title }) {
@@ -36451,6 +36494,7 @@ function SettingsTab({
     "image_tag",
     "assistant_name",
     "max_messages_per_prompt",
+    "soft_turn_token_budget",
     "model_params",
     "mcp_servers",
     "skills",
@@ -36861,6 +36905,28 @@ function SettingsTab({
               onInput: (e4) => {
                 const v5 = e4.currentTarget.value;
                 update("max_messages_per_prompt", v5 ? Number(v5) : null);
+              }
+            }
+          )
+        }
+      ),
+      /* @__PURE__ */ u4(
+        GroupAdminField,
+        {
+          label: "Soft turn token budget",
+          info: "Native provider only. After this many reported input, cache and output tokens, ask the agent to finish promptly or report progress and stop. This is guidance, not a hard limit or remaining-quota estimate. Blank disables it. Requires restart.",
+          children: /* @__PURE__ */ u4(
+            "input",
+            {
+              type: "number",
+              min: 1,
+              step: 1,
+              max: Number.MAX_SAFE_INTEGER,
+              value: draft.soft_turn_token_budget ?? "",
+              disabled: busy,
+              onInput: (e4) => {
+                const v5 = e4.currentTarget.value;
+                update("soft_turn_token_budget", v5 ? Number(v5) : null);
               }
             }
           )

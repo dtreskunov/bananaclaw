@@ -170,6 +170,31 @@ afterEach(() => {
   if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
 });
 
+describe('soft turn token budget settings', () => {
+  beforeEach(() => {
+    seedUser('web:owner');
+    seedGroup('budget-group', 'budget-group');
+    grantRole({ user_id: 'web:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: NOW() });
+    mockUserId = 'web:owner';
+  });
+
+  it('round-trips an opt-in threshold separately from generation parameters', async () => {
+    const response = await call('PATCH', '/api/groups/budget-group/admin/settings', { soft_turn_token_budget: 1000 });
+    expect(response.status()).toBe(200);
+    expect(response.body()).toMatchObject({ config: { soft_turn_token_budget: 1000 }, modelParams: {} });
+    expect((await call('PATCH', '/api/groups/budget-group/admin/settings', { soft_turn_token_budget: null })).body())
+      .toMatchObject({ config: { soft_turn_token_budget: null } });
+  });
+
+  it.each([0, -1, 1.5, false, 'invalid', ' ', Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid thresholds %s with a user-visible error', async value => {
+      const response = await call('PATCH', '/api/groups/budget-group/admin/settings', { soft_turn_token_budget: value });
+      expect(response.status()).toBe(400);
+      expect(response.body()).toMatchObject({ error: expect.stringContaining('positive safe integer') });
+    },
+  );
+});
+
 describe('GET /api/groups/:gid/admin/configured-model-providers', () => {
   beforeEach(() => {
     seedUser('web:owner');

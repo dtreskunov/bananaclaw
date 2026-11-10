@@ -19,6 +19,7 @@ import { transaction } from './db/transaction.js';
 import { encodeTimes } from './db/time.js';
 import { assertStorageVersion } from './db/storage-lifecycle.js';
 import { openOutboundDbRw } from './db/session-db.js';
+import { isTurnUsageAdvisory, type TurnUsageAdvisory } from './ui/shared/conversation.js';
 
 class DurableValidationError extends Error {}
 
@@ -53,6 +54,7 @@ export interface TurnMetadata {
   usageId: string | null;
   status: 'provisional' | 'partial' | 'final' | 'unavailable';
   final: boolean;
+  usageAdvisory?: TurnUsageAdvisory | null;
 }
 
 export function readTurnMetadata(db: Database.Database, turnId: string): TurnMetadata | undefined {
@@ -245,12 +247,14 @@ function applyState(db: Database.Database, payload: Record<string, unknown>): vo
     requireTurn(db, turnId);
     if (
       !value ||
-      !exactKeys(value, ['turnId', 'durationMs', 'model', 'usageId', 'status', 'final']) ||
+      !exactKeys(value, ['turnId', 'durationMs', 'model', 'usageId', 'status', 'final',
+        ...['usageAdvisory'].filter((key) => key in value)]) ||
       value.turnId !== turnId ||
       !nullableInteger(value.durationMs) ||
       !nullableText(value.model) ||
       !nullableText(value.usageId) ||
       typeof value.final !== 'boolean' ||
+      ('usageAdvisory' in value && value.usageAdvisory !== null && !isTurnUsageAdvisory(value.usageAdvisory)) ||
       !['provisional', 'partial', 'final', 'unavailable'].includes(String(value.status)) ||
       (!value.final && ['final', 'unavailable'].includes(String(value.status))) ||
       (value.final && value.status === 'provisional') ||
@@ -380,6 +384,8 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
     'max_output_tokens',
     'context_tokens',
     'timestamp',
+    'reported_tokens',
+    'cost_source',
   ];
   if (
     !exactKeys(payload, keys) ||
@@ -387,6 +393,8 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
     !nullableText(payload.turn_id) ||
     !nullableText(payload.message_out_id) ||
     !nullableNumber(payload.cost_usd) ||
+    !nullableInteger(payload.reported_tokens) ||
+    (payload.cost_source !== null && !['reported', 'estimated', 'unavailable', 'mixed'].includes(String(payload.cost_source))) ||
     !nullableInteger(payload.input_tokens) ||
     !nullableInteger(payload.output_tokens) ||
     !nullableInteger(payload.cache_read_tokens) ||
@@ -410,14 +418,15 @@ function applyUsage(db: Database.Database, payload: Record<string, unknown>): vo
   if (existing && existing.turn_id !== payload.turn_id) throw new DurableValidationError('immutable usage turn');
   db.prepare(
     `INSERT INTO turn_usage
-      (id, message_out_id, turn_id, cost_usd, input_tokens, output_tokens, cache_read_tokens,
+      (id, message_out_id, turn_id, cost_usd, reported_tokens, cost_source, input_tokens, output_tokens, cache_read_tokens,
        cache_write_tokens, reasoning_tokens, num_turns, duration_ms, duration_api_ms,
        model, context_window, max_output_tokens, context_tokens, timestamp)
-     VALUES (@id, @message_out_id, @turn_id, @cost_usd, @input_tokens, @output_tokens, @cache_read_tokens,
+     VALUES (@id, @message_out_id, @turn_id, @cost_usd, @reported_tokens, @cost_source, @input_tokens, @output_tokens, @cache_read_tokens,
        @cache_write_tokens, @reasoning_tokens, @num_turns, @duration_ms, @duration_api_ms,
        @model, @context_window, @max_output_tokens, @context_tokens, @timestamp)
      ON CONFLICT(id) DO UPDATE SET message_out_id=excluded.message_out_id,
        cost_usd=excluded.cost_usd, input_tokens=excluded.input_tokens,
+       reported_tokens=excluded.reported_tokens, cost_source=excluded.cost_source,
        output_tokens=excluded.output_tokens, cache_read_tokens=excluded.cache_read_tokens,
        cache_write_tokens=excluded.cache_write_tokens, reasoning_tokens=excluded.reasoning_tokens,
        num_turns=excluded.num_turns, duration_ms=excluded.duration_ms,

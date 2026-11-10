@@ -41,6 +41,7 @@ export interface ContainerConfigRow {
   image_tag: string | null;
   assistant_name: string | null;
   max_messages_per_prompt: number | null;
+  soft_turn_token_budget?: number | null;
   skills: string; // JSON: '"all"' | '["skill1","skill2"]'
   disabled_skills: string; // JSON: '["skill1"]' — deny-list, wins over `skills`
   mcp_servers: string; // JSON: Record<string, McpServerConfig>

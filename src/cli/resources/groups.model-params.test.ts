@@ -66,6 +66,19 @@ describe('groups config set-param / unset-param', () => {
     if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
   });
 
+  it('sets, reports and clears the native soft budget through config update', async () => {
+    seedGroup('budget');
+    const invoke = (value: string) => dispatch({
+      id: 'budget-request', command: 'groups-config-update',
+      args: { id: 'budget', 'soft-turn-token-budget': value },
+    }, { caller: 'host' });
+    expect(await invoke('1234')).toMatchObject({ ok: true, data: { soft_turn_token_budget: 1234 } });
+    expect(getContainerConfig('budget')?.model_params).toBe('{}');
+    expect(await invoke('')).toMatchObject({ ok: true, data: { soft_turn_token_budget: null } });
+    expect(await invoke('0')).toMatchObject({ ok: false });
+    expect(getContainerConfig('budget')?.soft_turn_token_budget).toBeNull();
+  });
+
   it('sets a numeric param parsed as JSON', async () => {
     seedGroup('ag-1');
     const resp = await dispatch(

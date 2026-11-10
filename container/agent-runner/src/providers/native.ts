@@ -18,6 +18,7 @@ import type {
   SteeringInput,
 } from './types.js';
 import { fingerprintToolInput } from './types.js';
+import { reportedTokenTotal } from './usage.js';
 import { nativeToolOutcome, toolActivityFields } from './tool-activity.js';
 import { resolveNativeModel, type NativeModel } from './native/catalog.js';
 import { inlineHistoryBytes, MAX_INLINE_BYTES, prepareNativeUserMessage } from './native/attachments.js';
@@ -108,7 +109,15 @@ function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
     outputTokens?: number;
     inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
     outputTokenDetails?: { reasoningTokens?: number };
+    raw?: Record<string, unknown>;
   };
+  // Some adapters fill absent counters with zero. Raw presence distinguishes
+  // measured zero from a provider that supplied an empty/incomplete usage object.
+  const measured = usage.raw === undefined
+    ? reportedTokenTotal(usage.inputTokens, usage.outputTokens)
+    : model.protocol === 'openai-chat'
+      ? reportedTokenTotal(usage.raw.prompt_tokens, usage.raw.completion_tokens)
+      : reportedTokenTotal(usage.raw.input_tokens, usage.raw.output_tokens);
   const totalInput = usage.inputTokens ?? 0;
   const cacheRead = usage.inputTokenDetails?.cacheReadTokens ?? 0;
   const cacheWrite = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
@@ -122,6 +131,10 @@ function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
       output * (model.outputCostPerMTok ?? 0)) /
     1_000_000;
   return {
+    reported_tokens: measured !== undefined
+      ? reportedTokenTotal(input, cacheRead, cacheWrite, output) : undefined,
+    cost_source: measured !== undefined && model.inputCostPerMTok !== undefined && model.outputCostPerMTok !== undefined
+      ? 'estimated' : 'unavailable',
     cost_usd: cost,
     input_tokens: input,
     output_tokens: output,
@@ -131,9 +144,7 @@ function callUsageFor(model: NativeModel, raw: unknown): CallUsage {
     model: model.wireId,
     context_window: model.contextWindow,
     max_output_tokens: model.maxOutputTokens,
-    context_tokens: typeof usage.inputTokens === 'number' && Number.isFinite(usage.inputTokens) && usage.inputTokens >= 0 &&
-      typeof usage.outputTokens === 'number' && Number.isFinite(usage.outputTokens) && usage.outputTokens >= 0
-      ? input + cacheRead + cacheWrite + output : undefined,
+    context_tokens: measured !== undefined ? reportedTokenTotal(input, cacheRead, cacheWrite, output) : undefined,
   };
 }
 
@@ -328,6 +339,8 @@ export class NativeProvider implements AgentProvider {
     let ended = false;
     let stoppedByUser = false;
     let active = false;
+    let pendingUsageAdvisory: { turnId: string; prompt: string } | null = null;
+    let lastUsageAdvisoryTurnId: string | null = null;
     let journal: NativeTurnJournal | undefined;
     const steering: SteeringInput[] = [];
     const acceptedSteering = new Set<string>();
@@ -436,11 +449,12 @@ export class NativeProvider implements AgentProvider {
               let silence: string | null = null;
               let checkpoint = journal.checkpoint;
               const appliedSteeringIds: string[] = [];
-              function recordCall({ usage, performance }: LanguageModelCallEndEvent, summary = false): void {
+              function recordCall({ callId, usage, performance }: LanguageModelCallEndEvent, summary = false): void {
                 // Stopping can make the SDK close a waiting stream with a synthetic, usage-less
                 // finish; that is not a report of the call.
                 if (abortController.signal.aborted && usage.inputTokens === undefined && usage.outputTokens === undefined) return;
                 const data = timedCallUsageFor(resolved, usage, performance.responseTimeMs);
+                data.id = callId;
                 // A summary call's prompt is the old history, not the conversation's context.
                 if (summary) data.context_tokens = undefined;
                 callUsages.push(data);
@@ -554,6 +568,13 @@ export class NativeProvider implements AgentProvider {
                   const plan = compactionPolicy.proactive();
                   if (plan) yield* compactContext(plan);
                 }
+                const applyingUsageAdvisory = pendingUsageAdvisory;
+                if (applyingUsageAdvisory) {
+                  const guidance: ModelMessage = { role: 'user', content: applyingUsageAdvisory.prompt };
+                  journal.appendGuidance(guidance);
+                  messages.push(guidance);
+                  pendingUsageAdvisory = null;
+                }
                 const requestContext = projectedContext();
                 if (!mediaRetry && !quarantineNoticeSent && quarantines.size &&
                     mediaKeys(messages).some(key => quarantines.has(key))) {
@@ -578,6 +599,7 @@ export class NativeProvider implements AgentProvider {
                 const requestMessages: ModelMessage[] = stepNudge
                   ? [...requestContext, { role: 'user', content: stepNudge }] : requestContext;
                 yield { type: 'model_request' };
+                abortController.signal.throwIfAborted();
                 const result = streamText({
                   model: requestModel, system,
                   messages: requestMessages,
@@ -586,7 +608,7 @@ export class NativeProvider implements AgentProvider {
                   // Own the boundary: SDK prepareStep cannot resume a text-only
                   // final step and may race ahead of the consumer's event loop.
                   stopWhen: isStepCount(1),
-                  ...(!turn.toolsDisabled && shouldRequireTodos(turn.text)
+                  ...(!turn.toolsDisabled && !applyingUsageAdvisory && shouldRequireTodos(turn.text)
                     ? {
                         prepareStep: ({ instructions }) =>
                           firstStep
@@ -614,6 +636,10 @@ export class NativeProvider implements AgentProvider {
 
                 // Start the resumed generation before yielding acknowledgements.
                 // New guidance offered in response then targets this running step.
+                if (applyingUsageAdvisory) yield {
+                  type: 'usage_advisory', turnId: applyingUsageAdvisory.turnId,
+                  status: 'applied', timestamp: Date.now(),
+                };
                 for (const id of appliedSteeringIds.splice(0)) yield { type: 'steering_applied', id };
                 let stepProducedOutput = false;
                 try {
@@ -765,6 +791,10 @@ export class NativeProvider implements AgentProvider {
               // No await or yield between closing acceptance and deciding the
               // final result; guidance arriving after this belongs to a later turn.
               active = false;
+              if (pendingUsageAdvisory) {
+                yield { type: 'usage_advisory', turnId: pendingUsageAdvisory.turnId, status: 'skipped', timestamp: Date.now() };
+                pendingUsageAdvisory = null;
+              }
               yield { type: 'checkpoint', ref: checkpoint };
               const result: Extract<ProviderEvent, { type: 'result' }> = {
                 type: 'result',
@@ -778,6 +808,10 @@ export class NativeProvider implements AgentProvider {
             } catch (error) {
               active = false;
               yield* flushCallUsage();
+              if (pendingUsageAdvisory) {
+                yield { type: 'usage_advisory', turnId: pendingUsageAdvisory.turnId, status: 'skipped', timestamp: Date.now() };
+                pendingUsageAdvisory = null;
+              }
               if (abortController.signal.aborted) {
                 if (journal) {
                   await journal.settle();
@@ -811,6 +845,14 @@ export class NativeProvider implements AgentProvider {
     };
 
     return {
+      adviseUsage(guidance): boolean {
+        if (!active || abortController.signal.aborted) return false;
+        if (lastUsageAdvisoryTurnId !== guidance.turnId) {
+          lastUsageAdvisoryTurnId = guidance.turnId;
+          pendingUsageAdvisory = guidance;
+        }
+        return true;
+      },
       stopTool(toolCallId: string): boolean {
         return active && !ended && !abortController.signal.aborted && (journal?.stopTool(toolCallId) ?? false);
       },

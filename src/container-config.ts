@@ -70,6 +70,7 @@ export interface ContainerConfig {
   assistantName?: string;
   agentGroupId?: string;
   maxMessagesPerPrompt?: number;
+  softTurnTokenBudget?: number;
   model?: string;
   smallModel?: string;
   effort?: string;
@@ -168,6 +169,7 @@ export function configFromDb(row: ContainerConfigRow, group: AgentGroup): Contai
     assistantName: row.assistant_name ?? group.name,
     agentGroupId: group.id,
     maxMessagesPerPrompt: row.max_messages_per_prompt ?? undefined,
+    softTurnTokenBudget: row.soft_turn_token_budget ?? undefined,
     model: row.model ?? resolveDefaultModel(provider),
     smallModel: row.small_model ?? undefined,
     effort: row.effort ?? envFallback('DEFAULT_EFFORT'),

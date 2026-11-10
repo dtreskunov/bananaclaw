@@ -4,7 +4,8 @@ The native runner reduces the cost of each model step, not the number of steps
 in a task. There is no economy mode, execution-token allowance or step ceiling.
 Long tasks continue until the provider finishes, the user cancels, or a genuine
 provider/context/tool failure prevents progress. Existing model selection and
-generation options are unchanged; there are no new tuning settings.
+generation options are unchanged. An optional soft turn-usage advisory asks the
+agent to wrap up without imposing an execution ceiling.
 
 ## Large tool results
 
@@ -88,6 +89,112 @@ Actual consumption remains in the existing turn-usage records, not a second
 request ledger. Raw input/cache/output token totals are not MiniMax's weighted
 plan quota; reasoning tokens are already part of output. Fewer steps are not
 a success metric: measure actual token use and task correctness.
+
+## Soft turn-usage advisory
+
+The native provider can receive one internal wrap-up instruction when a logical
+turn reaches its configured `soft_turn_token_budget`. The default is disabled.
+Set the threshold in Agent Settings, or use the host CLI:
+
+```bash
+# Example only: calibrate the threshold from this group's successful turns.
+ncl groups config update --id <group-id> --soft-turn-token-budget 1000000
+ncl groups restart --id <group-id>
+
+# Disable again; usage reporting remains enabled.
+ncl groups config update --id <group-id> --soft-turn-token-budget ""
+ncl groups restart --id <group-id>
+```
+
+The value is a positive safe integer or null/empty to disable, separate from
+`model_params`. The host materializes it as `softTurnTokenBudget` in
+`container.json`. Other providers report usage as before but do not implement
+the advisory; a configured unsupported provider logs a startup diagnostic.
+
+Consumption is cumulative uncached input + cache reads + cache writes + output
+across reported model calls, including summaries and corrective attempts.
+Reasoning is already part of output. Corrected call reports replace earlier
+values. Missing measurements make the complete total unavailable, not zero;
+legacy records are not backfilled with a guessed complete total.
+
+The native runner applies guidance between steps, after already-started tools
+settle. It asks the agent to finish promptly or send a progress report and end
+the turn, without starting more exploration, delegation or an automatic
+continuation. An already-ready final answer is delivered without an extra
+generation just to issue the warning. No tools are interrupted or replayed.
+A normal user follow-up can resume work; there is no approval or paused-task UI.
+The model may ignore guidance and a single request can overshoot the threshold.
+
+Usage snapshots continue through the existing session journal to the host,
+conversation API and live/historical UI even when the policy is disabled.
+The expanded token statistics show `reported_tokens`; `cost_source` distinguishes
+reported, estimated, mixed and unavailable cost. The compact usage summary keeps
+its existing elapsed/cost/context shape.
+
+These facts live on `turn_usage` itself, not a joined metadata side channel.
+One usage snapshot is computed per call report and reused for the advisory.
+Changing only advisory status writes metadata, not another usage update.
+The host and runner require storage v3 and session-link protocol v7. Existing
+stores require the offline cutover below. Runtime paths contain no schema
+upgrade, metadata backfill, or old-wire compatibility layer.
+
+Turn metadata records the advisory threshold, count at triggering, lifecycle
+(`queued`, `applied`, `skipped`) and timestamps. Queuing is not application;
+an activity notification appears only when guidance enters a model request.
+Cancelled, failed or abandoned turns retain their usage and mark unapplied
+guidance skipped. Disabling the policy does not remove history.
+
+See the [design and acceptance criteria](soft-turn-usage-advisory-proposal.md).
+These measurements are not weighted subscription quota or remaining allowance.
+
+## Offline cutover
+
+Perform this before deploying to a populated storage-v2 installation. Empty
+installs initialize v3 directly. Native-provider databases remain v1, search
+remains v2, and archive format remains v4.
+
+1. Retain the old deployed host build and agent source/image, then settle active
+   work and drain every runner journal using the old runtime. Stop this
+   installation's host and all its agent containers. Take a consistent private
+   backup, including provider history and workspaces. Do not mix snapshots taken
+   with different writers still running.
+2. From the stopped data directory, prepare separate rollback copies and
+   candidates. This tool checks the host socket and requires explicit
+   stopped-writer attestations; it never stops services or installs files:
+
+   ```bash
+   pnpm exec tsx scripts/backfill-turn-usage.ts \
+     --source /private/stopped-data \
+     --output /private/new-usage-cutover \
+     --host-stopped --runners-stopped
+   ```
+
+3. Require `manifest.json` to have `complete: true`. Verify every listed
+   candidate's SHA-256, storage version 3, SQLite integrity `ok`, and no FK
+   violations. Historical totals/provenance remain null unless explicit
+   measurements exist; no totals are guessed from old zeros. Any observed
+   explicit measurement is preserved offline, with missing host usage restored
+   only when its turn and output anchors match. Conflicts abort the cutover.
+4. With all writers still stopped, install the complete matching inventory:
+   central DB, every inbound/outbound DB, and every runner-state DB. Preserve
+   original ownership/permissions. Back up and remove obsolete SQLite sidecars
+   before replacing a main DB; never combine an old WAL with a new main file.
+   Keep unchanged native-provider history and workspaces paired with the
+   snapshot. Inbound queues, identities, message/turn IDs, delivery/read state,
+   and applied-event receipts are preserved.
+5. Deploy matching host, UI and runner source, then restart and verify normal
+   reads, the usage columns, queued delivery and a runner startup. Runner
+   journaling triggers are recreated from the current schema, not translated
+   during reads. The soft budget remains disabled unless explicitly configured.
+
+Do not install an incomplete candidate set. On failure keep writers stopped;
+the original source and rollback copies remain unchanged. Rollback requires
+restoring the entire paired inventory and old runtime, not one DB or just its
+version number. Preserve newer traffic separately before rolling back.
+
+Commit the cutover tool and its tests before use. After successful verification,
+retire them in a following commit and retain the archival commit and private
+backups. Do not move compatibility machinery back into runtime code.
 
 ## Private memory migration
 

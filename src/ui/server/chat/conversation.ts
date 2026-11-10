@@ -53,6 +53,8 @@ function rowsByTurn<T extends { turn_id: string | null }>(
 function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
   const value: Record<string, unknown> = {};
   for (const key of [
+    'reported_tokens',
+    'cost_source',
     'cost_usd',
     'input_tokens',
     'output_tokens',
@@ -67,7 +69,7 @@ function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
     'duration_ms',
     'duration_api_ms',
   ])
-    if (row[key] !== null && row[key] !== undefined) value[key] = row[key];
+    if (row[key] !== undefined && (row[key] !== null || key === 'reported_tokens' || key === 'cost_source')) value[key] = row[key];
   return value as Partial<ConversationUsage>;
 }
 
@@ -208,6 +210,7 @@ export function projectConversation(
         status,
         model: metadata?.model ?? usage.at(-1)?.value.model ?? null,
         durationMs,
+        ...(metadata?.usageAdvisory !== undefined ? { usageAdvisory: metadata.usageAdvisory } : {}),
       },
     });
   }

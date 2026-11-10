@@ -201,4 +201,9 @@ export class NativeTurnJournal {
     this.protectedInputs.add(ref);
     return true;
   }
+
+  appendGuidance(message: ModelMessage): void {
+    this.anchor = this.checkpoint = this.store.append(this.conversation, [message]);
+    this.protectedInputs.add(this.anchor);
+  }
 }

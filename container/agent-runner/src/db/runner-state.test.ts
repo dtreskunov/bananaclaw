@@ -41,6 +41,19 @@ describe('runner state journal', () => {
     ensureRunnerStateSchema(db);
     expect(db.prepare('SELECT COUNT(*) AS n FROM pending_runner_events').get()).toEqual(events);
   });
+
+  it('refuses pre-cutover stores without migrating schema or journal state', () => {
+    initTestSessionDb();
+    const db = getOutboundDb();
+    beginTurn({ channelType: 'web', platformId: 'chat', threadId: null, inReplyTo: null }, []);
+    db.exec('PRAGMA user_version=2');
+    const schema = db.prepare('SELECT * FROM sqlite_schema ORDER BY name').all();
+    const pending = db.prepare('SELECT * FROM pending_runner_events ORDER BY sequence').all();
+    expect(() => ensureRunnerStateSchema(db)).toThrow('storage version 2');
+    expect(db.prepare('SELECT * FROM sqlite_schema ORDER BY name').all()).toEqual(schema);
+    expect(db.prepare('SELECT * FROM pending_runner_events ORDER BY sequence').all()).toEqual(pending);
+  });
+
   it('journals every durable runner-owned table mutation in order', () => {
     initTestSessionDb();
     const db = getOutboundDb();

@@ -26,7 +26,7 @@ function pendingEventCount(): number {
 
 function acknowledge(socket: net.Socket, frame: TestFrame): void {
   if (frame.type === 'durable' && frame.eventId) {
-    socket.write(`${JSON.stringify({ v: 6, type: 'ack', eventId: frame.eventId })}\n`);
+    socket.write(`${JSON.stringify({ v: 7, type: 'ack', eventId: frame.eventId })}\n`);
   }
 }
 
@@ -92,12 +92,12 @@ describe('SessionSignalClient', () => {
       void client.start();
       await waitFor(() => sockets.length === 1 && lines.length > 0);
       for (const toolCallId of ['running', 'completed']) sockets[0].write(`${JSON.stringify({
-        v: 6, type: 'tool.stop', requestId: toolCallId, turnId: 'turn', toolCallId,
+        v: 7, type: 'tool.stop', requestId: toolCallId, turnId: 'turn', toolCallId,
       })}\n`);
       await waitFor(() => lines.filter((line) => JSON.parse(line).type === 'tool.stop.result').length === 2);
       expect(lines.map((line) => JSON.parse(line)).filter((frame) => frame.type === 'tool.stop.result')).toEqual([
-        { v: 6, type: 'tool.stop.result', requestId: 'running', result: 'accepted' },
-        { v: 6, type: 'tool.stop.result', requestId: 'completed', result: 'not_running' },
+        { v: 7, type: 'tool.stop.result', requestId: 'running', result: 'accepted' },
+        { v: 7, type: 'tool.stop.result', requestId: 'completed', result: 'not_running' },
       ]);
       expect(calls).toEqual(['turn/running', 'turn/completed']);
       expect(turnStops).toEqual([]);
@@ -148,7 +148,7 @@ describe('SessionSignalClient', () => {
     const lines: string[] = [];
     const server = await listen(socketPath, lines);
     server.on('connection', (socket) => {
-      if (sockets.length > 1) socket.write('{"v":6,"type":"host.ready"}\n');
+      if (sockets.length > 1) socket.write('{"v":7,"type":"host.ready"}\n');
     });
     const epoch = Date.now();
     const now = spyOn(Date, 'now').mockReturnValue(epoch);
@@ -186,7 +186,7 @@ describe('SessionSignalClient', () => {
         now.mockReturnValue(epoch + sequence * 4000);
         sockets[0].write(
           `${JSON.stringify({
-            v: 6,
+            v: 7,
             type: 'host.event',
             eventId: `sync-${sequence}`,
             sequence,
@@ -199,7 +199,7 @@ describe('SessionSignalClient', () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
       expect(sockets).toHaveLength(1);
       expect(acknowledged().map((frame) => frame.eventId)).toEqual(['sync-1', 'sync-2', 'sync-3']);
-      sockets[0].write('{"v":6,"type":"host.ready"}\n');
+      sockets[0].write('{"v":7,"type":"host.ready"}\n');
       await ready;
     } finally {
       client.stop();
@@ -212,7 +212,7 @@ describe('SessionSignalClient', () => {
     const socketPath = createSocketPath();
     const lines: string[] = [];
     const server = await listen(socketPath, lines, acknowledge);
-    server.on('connection', (socket) => socket.write('{"v":6,"type":"host.ready"}\n'));
+    server.on('connection', (socket) => socket.write('{"v":7,"type":"host.ready"}\n'));
     const client = new SessionSignalClient(socketPath);
     try {
       await client.start();
@@ -241,7 +241,7 @@ describe('SessionSignalClient', () => {
       if (socket === sockets[0]) socket.end();
       else {
         acknowledge(socket, frame);
-        socket.write('{"v":6,"type":"host.ready"}\n');
+        socket.write('{"v":7,"type":"host.ready"}\n');
       }
     });
     const client = new SessionSignalClient(socketPath);
@@ -268,7 +268,7 @@ describe('SessionSignalClient', () => {
       seen.push(frame.eventId);
       if (socket !== sockets[0]) acknowledge(socket, frame);
     });
-    server.on('connection', (socket) => socket.write('{"v":6,"type":"host.ready"}\n'));
+    server.on('connection', (socket) => socket.write('{"v":7,"type":"host.ready"}\n'));
     const epoch = Date.now();
     const now = spyOn(Date, 'now').mockReturnValue(epoch);
     const client = new SessionSignalClient(socketPath);
@@ -315,12 +315,12 @@ describe('SessionSignalClient', () => {
     const server = await listen(socketPath, [], (socket, frame) => {
       if (frame.type !== 'host.ack') return;
       acknowledgements.push(frame);
-      socket.write('{"v":6,"type":"host.ready"}\n');
+      socket.write('{"v":7,"type":"host.ready"}\n');
     });
     server.on('connection', (socket) => {
       socket.write(
         `${JSON.stringify({
-          v: 6,
+          v: 7,
           type: 'host.event',
           eventId: 'host-1',
           sequence: 1,
@@ -353,7 +353,7 @@ describe('SessionSignalClient', () => {
     const client = new SessionSignalClient(socketPath);
     await client.start();
 
-    expect(acknowledgements).toEqual([{ v: 6, type: 'host.ack', eventId: 'host-1' }]);
+    expect(acknowledgements).toEqual([{ v: 7, type: 'host.ack', eventId: 'host-1' }]);
     expect(getOutboundDb().prepare('SELECT id, content FROM messages_in').get()).toEqual({
       id: 'in-1',
       content: '{"text":"hello"}',
@@ -405,7 +405,7 @@ describe('SessionSignalClient', () => {
     try {
       void client.start();
       await waitFor(() => sockets.length > 0);
-      sockets[0].write('{"v":6,"type":"turn.stop","turnId":"active"}\n');
+      sockets[0].write('{"v":7,"type":"turn.stop","turnId":"active"}\n');
       await waitFor(() => ids.length > 0);
       expect(ids).toEqual(['active']);
       writeMessageOut({ id: 'stopped', kind: 'chat', content: '{"text":"Stopped by user."}' });
@@ -431,7 +431,7 @@ describe('SessionSignalClient', () => {
     await waitFor(() => pendingEventCount() === 0);
     const durable = lines.map((line) => JSON.parse(line)).find((frame) => frame.type === 'durable');
     expect(durable).toMatchObject({
-      v: 6,
+      v: 7,
       sequence: 1,
       event: {
         type: 'message.upsert',
@@ -466,7 +466,7 @@ describe('SessionSignalClient', () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(durableFrames()).toHaveLength(1);
 
-    sockets[0].write(`${JSON.stringify({ v: 6, type: 'ack', eventId: durableFrames()[0].eventId })}\n`);
+    sockets[0].write(`${JSON.stringify({ v: 7, type: 'ack', eventId: durableFrames()[0].eventId })}\n`);
     await waitFor(() => durableFrames().length === 2);
     expect(durableFrames().map((frame) => frame.sequence)).toEqual([1, 2]);
     client.stop();
@@ -506,7 +506,7 @@ describe('SessionSignalClient', () => {
       durableFrames++;
       socket.write(
         `${JSON.stringify({
-          v: 6,
+          v: 7,
           type: 'nack',
           eventId: frame.eventId,
           fatal: true,

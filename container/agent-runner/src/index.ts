@@ -139,6 +139,7 @@ async function main(): Promise<void> {
   await runPollLoop({
     provider,
     providerName,
+    softTurnTokenBudget: config.softTurnTokenBudget,
     cwd: CWD,
     systemContext: () => ({ instructions: instructions() }),
   });

@@ -2,9 +2,13 @@ import type { InputState } from './input-state.js';
 import type { ConversationApproval } from './approval.js';
 import type { ReadCursor } from './read-state.js';
 import type { EpochMs } from './time.js';
+import { integer, object } from './validation.js';
 
 /** Browser-safe, route-scoped host projection. No runner journal or routing IDs. */
 export interface ConversationUsage {
+  /** Cumulative reported processing, not context occupancy or remaining plan quota. */
+  reported_tokens?: number | null;
+  cost_source?: 'reported' | 'estimated' | 'unavailable' | 'mixed' | null;
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
@@ -18,6 +22,31 @@ export interface ConversationUsage {
   context_tokens?: number;
   duration_ms?: number;
   duration_api_ms?: number;
+}
+
+export interface TurnUsageAdvisory {
+  threshold: number;
+  reportedTokens: number;
+  triggeredAt: number;
+  status: 'queued' | 'applied' | 'skipped';
+  appliedAt: number | null;
+  finishedAt: number | null;
+}
+
+export function isTurnUsageAdvisory(value: unknown): value is TurnUsageAdvisory {
+  if (!object(value) ||
+      Object.keys(value).length !== 6 ||
+      !integer(value.threshold) || value.threshold === 0 ||
+      !integer(value.reportedTokens) || Number(value.reportedTokens) < Number(value.threshold) ||
+      !integer(value.triggeredAt) ||
+      !(value.appliedAt === null || integer(value.appliedAt)) ||
+      !(value.finishedAt === null || integer(value.finishedAt))) return false;
+  switch (value.status) {
+    case 'queued': return value.appliedAt === null && value.finishedAt === null;
+    case 'applied': return value.appliedAt !== null && value.finishedAt === null;
+    case 'skipped': return value.appliedAt === null && value.finishedAt !== null;
+    default: return false;
+  }
 }
 
 export type ConversationAuthor =
@@ -121,6 +150,7 @@ export interface ConversationTurn {
     status: 'provisional' | 'partial' | 'final' | 'unavailable';
     model: string | null;
     durationMs: number | null;
+    usageAdvisory?: TurnUsageAdvisory | null;
   };
 }
 

@@ -7,6 +7,7 @@ import { registerProvider } from './provider-registry.js';
 import { audioReferencePrompt, isAudioAttachment } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, CallUsage, FileAttachment, ForkContinuationInput, ModelLimits, ProviderEvent, ProviderOptions, QueryInput, QueryPushOptions, TurnUsage } from './types.js';
 import { fingerprintToolInput } from './types.js';
+import { reportedTokenTotal } from './usage.js';
 import { toolActivityFields } from './tool-activity.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { createModelCatalog, type RawLimits } from './model-catalog.js';
@@ -217,6 +218,8 @@ export function callUsageFromInfo(info: OpenCodeUsageInfo | undefined): CallUsag
   const { created, completed } = info.time ?? {};
   const durationMs = typeof created === 'number' && typeof completed === 'number' ? completed - created : NaN;
   return {
+    reported_tokens: reportedTokenTotal(info.tokens?.input, info.tokens?.output, cacheRead, cacheWrite),
+    cost_source: typeof info.cost === 'number' ? 'reported' : 'unavailable',
     cost_usd: info.cost ?? 0,
     input_tokens: input,
     output_tokens: output,

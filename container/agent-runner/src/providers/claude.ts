@@ -11,6 +11,7 @@ import { registerProvider } from './provider-registry.js';
 import { audioReferencePrompt } from './attachment-routing.js';
 import type { ActivityStep, AgentProvider, AgentQuery, CallUsage, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import { fingerprintToolInput } from './types.js';
+import { reportedTokenTotal } from './usage.js';
 import { builtinToolResultError, toolActivityFields } from './tool-activity.js';
 
 function log(msg: string): void {
@@ -294,6 +295,9 @@ interface ClaudeCall {
 function claudeCallUsage(call: ClaudeCall): CallUsage {
   return {
     id: call.id,
+    reported_tokens: reportedTokenTotal(call.usage.input_tokens, call.usage.output_tokens,
+      call.usage.cache_read_input_tokens ?? 0, call.usage.cache_creation_input_tokens ?? 0),
+    cost_source: call.costUsd !== undefined ? 'reported' : 'unavailable',
     model: call.model,
     cost_usd: call.costUsd ?? 0,
     input_tokens: call.usage.input_tokens ?? 0,

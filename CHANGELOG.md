@@ -4,6 +4,13 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+- **[BREAKING] Canonical turn usage and opt-in wrap-up guidance.** Host,
+  session and runner storage is v3 and runner links use protocol v7.
+  Usage facts live on usage records; advisory-only changes do not rewrite them.
+  Native groups can opt into a soft token budget without approvals or hard stops.
+  Existing installations must perform the [offline cutover](docs/usage-efficiency.md#offline-cutover)
+  before deploying. Normal runtime paths do not import old schemas or metadata.
+
 - **[BREAKING] Markdown reply links replace conversational question
   requests.** `[label](reply:)` controls send exactly their visible label.
   No separate payload or URL encoding is needed. Clicking sends the message;

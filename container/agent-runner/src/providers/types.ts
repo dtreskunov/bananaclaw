@@ -226,6 +226,8 @@ export interface QueryPushOptions {
 }
 
 export interface AgentQuery {
+  /** Queue internal wrap-up guidance without creating a user input or another turn. */
+  adviseUsage?(input: { turnId: string; prompt: string }): boolean;
   /** Queue guidance for a safe boundary in the active turn, without aborting it.
    * Acceptance is not ingestion: only steering_applied acknowledges ingestion.
    */
@@ -265,6 +267,9 @@ export interface SteeringInput {
  * reports. Values are per-turn deltas, not session-cumulative.
  */
 export interface TurnUsage {
+  /** Complete normalized input/cache/output total; absent when measurements are missing. */
+  reported_tokens?: number;
+  cost_source?: 'reported' | 'estimated' | 'unavailable' | 'mixed';
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
@@ -292,6 +297,15 @@ export interface TurnUsage {
  * TurnUsage snapshot so lossy host polling never has to reconstruct totals
  * from individual events. Calls without an `id` are always distinct. */
 export type CallUsage = Omit<TurnUsage, 'num_turns' | 'duration_ms'> & { id?: string };
+
+export interface TurnUsageAdvisory {
+  threshold: number;
+  reportedTokens: number;
+  triggeredAt: number;
+  status: 'queued' | 'applied' | 'skipped';
+  appliedAt: number | null;
+  finishedAt: number | null;
+}
 
 /**
  * One step of a turn's activity trace, in structured form. Providers emit
@@ -413,6 +427,7 @@ export interface ProviderReply {
 }
 
 export type ProviderEvent =
+  | { type: 'usage_advisory'; turnId: string; status: 'applied' | 'skipped'; timestamp: number }
   | { type: 'init'; continuation: string }
   | { type: 'steering_applied'; id: string }
   /** A model request is about to start (only from `reportsModelRequests` providers). */

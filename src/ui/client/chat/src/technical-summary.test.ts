@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { technicalSummary } from './technical-summary';
+import { technicalSummary, usageCostPresentation } from './technical-summary';
 
 describe('compact technical summary', () => {
+  it('uses the same cost availability and labels for compact and expanded statistics', () => {
+    expect(usageCostPresentation({ cost_source: 'reported' }, false)).toBeNull();
+    expect(usageCostPresentation({ cost_usd: 2, cost_source: 'unavailable' }, false)).toBeNull();
+    expect(usageCostPresentation({ cost_usd: 0, cost_source: 'reported' }, false))
+      .toEqual({ usd: 0, label: 'Reported cost' });
+    for (const partial of [false, true]) {
+      expect(usageCostPresentation({ cost_usd: 2, cost_source: 'reported' }, partial)?.label).toBe('Reported cost');
+      expect(usageCostPresentation({ cost_usd: 2, cost_source: 'estimated' }, partial)?.label).toBe('Estimated cost');
+      expect(usageCostPresentation({ cost_usd: 2, cost_source: 'mixed' }, partial)?.label).toBe('Mixed-source cost');
+      expect(usageCostPresentation({ cost_usd: 2 }, partial)?.label).toBe(partial ? 'Reported cost' : 'Estimated cost');
+      expect(usageCostPresentation({ cost_usd: 2, cost_source: null }, partial)?.label).toBe(partial ? 'Reported cost' : 'Estimated cost');
+    }
+  });
+  it('does not present an unavailable cost estimate as a measured price', () => {
+    expect(technicalSummary({ elapsedMs: null, usage: [{ cost_usd: 1, cost_source: 'unavailable' }] })).toBe('');
+  });
   it('matches the requested shape without model, token or model-call counts', () => {
     const value = {
       elapsedMs: 15_000,

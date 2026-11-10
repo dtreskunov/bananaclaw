@@ -72,7 +72,7 @@ async function outcome(frame: unknown): Promise<'accepted' | 'rejected'> {
   });
   const needed = (frame as Frame | null)?.type === 'heartbeat' ? 2 : 1;
   try {
-    socket.write(line(frame) + line({ v: 6, type: 'heartbeat' }));
+    socket.write(line(frame) + line({ v: 7, type: 'heartbeat' }));
     await waitFor(() => closed || beats >= needed);
     return closed ? 'rejected' : 'accepted';
   } finally {
@@ -82,13 +82,13 @@ async function outcome(frame: unknown): Promise<'accepted' | 'rejected'> {
 }
 
 function activity(step: unknown, extra: Frame = {}): Frame {
-  return { v: 6, type: 'activity', step, turnId: 'turn-1', ts: TS, ordinal: 0, timelinePosition: 100, ...extra };
+  return { v: 7, type: 'activity', step, turnId: 'turn-1', ts: TS, ordinal: 0, timelinePosition: 100, ...extra };
 }
 
 const TURN = { id: 'turn-1', status: 'running', channelType: 'web', platformId: 'group:agent-f', threadId: null };
 
 function turnState(turn: unknown, extra: Frame = {}): Frame {
-  return { v: 6, type: 'turn.state', turn, ...extra };
+  return { v: 7, type: 'turn.state', turn, ...extra };
 }
 
 const TOOL = { kind: 'tool', id: 'step-1', tool: 'Bash', status: 'running' };
@@ -166,10 +166,10 @@ describe('session link frame acceptance', () => {
   });
 
   const accepted: Array<[string, unknown]> = [
-    ['heartbeat', { v: 6, type: 'heartbeat' }],
-    ['activity.clear', { v: 6, type: 'activity.clear' }],
-    ['turn.resume', { v: 6, type: 'turn.resume' }],
-    ['turn.end', { v: 6, type: 'turn.end' }],
+    ['heartbeat', { v: 7, type: 'heartbeat' }],
+    ['activity.clear', { v: 7, type: 'activity.clear' }],
+    ['turn.resume', { v: 7, type: 'turn.resume' }],
+    ['turn.end', { v: 7, type: 'turn.end' }],
     ['turn.state null', turnState(null)],
     ['turn.state running', turnState(TURN)],
     ['turn.state stopping with thread', turnState({ ...TURN, status: 'stopping', threadId: 'thread-1' })],
@@ -241,40 +241,40 @@ describe('session link frame acceptance', () => {
     ['v 4', { v: 4, type: 'heartbeat' }],
     ['v 5', { v: 5, type: 'heartbeat' }],
     ['v string', { v: '4', type: 'heartbeat' }],
-    ['missing type', { v: 6 }],
-    ['numeric type', { v: 6, type: 42 }],
-    ['unknown type', { v: 6, type: 'bogus' }],
-    ['prototype type toString', { v: 6, type: 'toString' }],
-    ['prototype type constructor', { v: 6, type: 'constructor' }],
-    ['prototype type __proto__', { v: 6, type: '__proto__' }],
-    ['prototype type hasOwnProperty', { v: 6, type: 'hasOwnProperty' }],
+    ['missing type', { v: 7 }],
+    ['numeric type', { v: 7, type: 42 }],
+    ['unknown type', { v: 7, type: 'bogus' }],
+    ['prototype type toString', { v: 7, type: 'toString' }],
+    ['prototype type constructor', { v: 7, type: 'constructor' }],
+    ['prototype type __proto__', { v: 7, type: '__proto__' }],
+    ['prototype type hasOwnProperty', { v: 7, type: 'hasOwnProperty' }],
     ...(['heartbeat', 'activity.clear', 'turn.resume', 'turn.end'].map((type) => [
       `${type} extra key`,
-      { v: 6, type, extra: 1 },
+      { v: 7, type, extra: 1 },
     ]) as Array<[string, unknown]>),
-    ['host.ack without in-flight event', { v: 6, type: 'host.ack', eventId: 'e' }],
-    ['host.nack without in-flight event', { v: 6, type: 'host.nack', eventId: 'e', fatal: true, error: 'x' }],
-    ['durable missing event', { v: 6, type: 'durable', eventId: 'e', sequence: 1 }],
-    ['durable array event', { v: 6, type: 'durable', eventId: 'e', sequence: 1, event: [] }],
-    ['durable null event', { v: 6, type: 'durable', eventId: 'e', sequence: 1, event: null }],
+    ['host.ack without in-flight event', { v: 7, type: 'host.ack', eventId: 'e' }],
+    ['host.nack without in-flight event', { v: 7, type: 'host.nack', eventId: 'e', fatal: true, error: 'x' }],
+    ['durable missing event', { v: 7, type: 'durable', eventId: 'e', sequence: 1 }],
+    ['durable array event', { v: 7, type: 'durable', eventId: 'e', sequence: 1, event: [] }],
+    ['durable null event', { v: 7, type: 'durable', eventId: 'e', sequence: 1, event: null }],
     [
       'durable event extra key',
-      { v: 6, type: 'durable', eventId: 'e', sequence: 1, event: { type: 'x', payload: {}, extra: 1 } },
+      { v: 7, type: 'durable', eventId: 'e', sequence: 1, event: { type: 'x', payload: {}, extra: 1 } },
     ],
     [
       'durable event type number',
-      { v: 6, type: 'durable', eventId: 'e', sequence: 1, event: { type: 1, payload: {} } },
+      { v: 7, type: 'durable', eventId: 'e', sequence: 1, event: { type: 1, payload: {} } },
     ],
     [
       'durable fractional sequence',
-      { v: 6, type: 'durable', eventId: 'e', sequence: 1.5, event: { type: 'x', payload: {} } },
+      { v: 7, type: 'durable', eventId: 'e', sequence: 1.5, event: { type: 'x', payload: {} } },
     ],
-    ['durable numeric eventId', { v: 6, type: 'durable', eventId: 1, sequence: 1, event: { type: 'x', payload: {} } }],
+    ['durable numeric eventId', { v: 7, type: 'durable', eventId: 1, sequence: 1, event: { type: 'x', payload: {} } }],
     [
       'durable extra key',
-      { v: 6, type: 'durable', eventId: 'e', sequence: 1, event: { type: 'x', payload: {} }, extra: 1 },
+      { v: 7, type: 'durable', eventId: 'e', sequence: 1, event: { type: 'x', payload: {} }, extra: 1 },
     ],
-    ['turn.state missing turn', { v: 6, type: 'turn.state' }],
+    ['turn.state missing turn', { v: 7, type: 'turn.state' }],
     ['turn.state extra key', turnState(TURN, { extra: 1 })],
     ['turn.state array turn', turnState([])],
     ['turn.state string turn', turnState('turn-1')],
@@ -385,7 +385,7 @@ describe('session link frame acceptance', () => {
   ];
 
   const optionalTelemetry = rejected.filter(
-    ([, frame]) => isRecord(frame) && frame.v === 6 && frame.type === 'activity',
+    ([, frame]) => isRecord(frame) && frame.v === 7 && frame.type === 'activity',
   );
   it.each(optionalTelemetry)('warns and ignores %s without disconnecting', async (_name, frame) => {
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
@@ -481,7 +481,7 @@ describe('session link live state', () => {
       expect(lines.at(-1)).toMatchObject({ turnId: 'turn-2', ordinal: 50 });
       expect(lines[0].ordinal).toBe(3);
 
-      socket.write(line({ v: 6, type: 'activity.clear' }));
+      socket.write(line({ v: 7, type: 'activity.clear' }));
       await waitFor(() => getSessionTurnSignals(SESSION_ID).activity.length === 0);
     } finally {
       socket.destroy();
@@ -491,11 +491,11 @@ describe('session link live state', () => {
   it('turn.resume reopens an ended turn without emitting a signal', async () => {
     const socket = await connect();
     try {
-      socket.write(line({ v: 6, type: 'turn.end' }));
+      socket.write(line({ v: 7, type: 'turn.end' }));
       await waitFor(() => getSessionSignalTurnEndedAt(SESSION_ID) > 0);
       const kinds: string[] = [];
       const unsubscribe = onSessionSignal((_id, kind) => kinds.push(kind));
-      socket.write(line({ v: 6, type: 'turn.resume' }) + line({ v: 6, type: 'heartbeat' }));
+      socket.write(line({ v: 7, type: 'turn.resume' }) + line({ v: 7, type: 'heartbeat' }));
       await waitFor(() => kinds.includes('heartbeat'));
       unsubscribe();
       expect(getSessionSignalTurnEndedAt(SESSION_ID)).toBe(0);
@@ -542,7 +542,7 @@ describe('session link live state', () => {
       .map((value) => JSON.parse(value) as Frame)
       .find((frame) => frame.type === 'host.event')!;
 
-    socket.write(line({ v: 6, type: 'host.nack', eventId: event.eventId, fatal: true, error: 'no thanks' }));
+    socket.write(line({ v: 7, type: 'host.nack', eventId: event.eventId, fatal: true, error: 'no thanks' }));
     await waitFor(() => closed);
     expect(errorSpy).toHaveBeenCalledWith('Runner rejected host session event', {
       sessionId: SESSION_ID,
@@ -584,7 +584,7 @@ describe('session link live state', () => {
         .split('\n')
         .find((value) => value.includes('"host.event"'))!,
     ) as Frame;
-    socket.write(line({ v: 6, type: 'host.nack', eventId: event.eventId, ...fields }));
+    socket.write(line({ v: 7, type: 'host.nack', eventId: event.eventId, ...fields }));
     await waitFor(() => closed);
     expect(errorSpy).not.toHaveBeenCalledWith('Runner rejected host session event', expect.anything());
   });

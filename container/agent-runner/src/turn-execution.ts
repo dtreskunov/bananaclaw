@@ -3,8 +3,8 @@ import { getInboundDb, getOutboundDb } from './db/connection.js';
 import { getTurn, linkTurnInput, putTurn, type TurnOutcome, type TurnRow } from './db/turns.js';
 import { setTurnContext, waitForTurnTools, type TurnContext } from './current-batch.js';
 import type { RoutingContext } from './formatter.js';
-import type { CallUsage, TurnUsage } from './providers/types.js';
-import { accumulateCallUsage } from './providers/usage.js';
+import type { CallUsage, TurnUsage, TurnUsageAdvisory } from './providers/types.js';
+import { accumulateCallUsage, transitionUsageAdvisory } from './providers/usage.js';
 import { writeTurnUsage } from './db/turn-usage.js';
 import type { Database } from 'bun:sqlite';
 import { allocateTimelinePosition } from './db/timeline.js';
@@ -14,6 +14,7 @@ export interface TurnExecution extends TurnContext {
   routing: RoutingContext;
   /** Every reported model call of the turn, keyed by call id. */
   calls: Map<string, CallUsage>;
+  usage: Readonly<TurnUsage> | null;
   /** Calls reported since the provider's last result. */
   unreported: boolean;
   /** A provider attempt failed with unreported calls, so an in-flight call may be missing. */
@@ -26,6 +27,7 @@ export interface TurnExecution extends TurnContext {
   modelReady?: boolean;
   endedAt?: string;
   failure?: boolean;
+  usageAdvisory?: TurnUsageAdvisory;
 }
 
 /** One logical response, independent of provider attempts and corrective prompts. */
@@ -36,6 +38,7 @@ export function beginTurn(routing: RoutingContext, ids: string[], consumed = tru
     startedAt: new Date().toISOString(),
     routing,
     calls: new Map(),
+    usage: null,
     unreported: false,
     incomplete: false,
     limits: {},
@@ -75,13 +78,8 @@ export function turnDuration(context: TurnContext): number {
   return Math.max(0, end - Date.parse(context.startedAt));
 }
 
-export function turnUsage(context: TurnExecution): TurnUsage | null {
-  let total: TurnUsage | null = null;
-  for (const { id: _id, ...call } of context.calls.values()) total = accumulateCallUsage(total, call);
-  if (!total) return null;
-  total.context_window ??= context.limits.context_window;
-  total.max_output_tokens ??= context.limits.max_output_tokens;
-  return total;
+export function turnUsage(context: TurnExecution): Readonly<TurnUsage> | null {
+  return context.usage;
 }
 
 /** Record one model call; returns false when it replaced an earlier report of the same call. */
@@ -89,7 +87,16 @@ export function recordCallUsage(context: TurnExecution, data: CallUsage): boolea
   const id = data.id ?? randomUUID();
   const added = !context.calls.has(id);
   context.calls.set(id, data);
+  let usage: TurnUsage | null = null;
+  for (const { id: _id, ...call } of context.calls.values())
+    usage = accumulateCallUsage(usage, call);
+  if (usage) {
+    usage.context_window ??= context.limits.context_window;
+    usage.max_output_tokens ??= context.limits.max_output_tokens;
+  }
+  context.usage = usage;
   context.unreported = true;
+  persistTurnUsage(context);
   persistTurnMetadata(context, false);
   return added;
 }
@@ -101,6 +108,14 @@ export function completeUsageAttempt(context: TurnExecution, limits: TurnExecuti
     context_window: limits.context_window ?? context.limits.context_window,
     max_output_tokens: limits.max_output_tokens ?? context.limits.max_output_tokens,
   };
+  if (context.usage) {
+    context.usage = {
+      ...context.usage,
+      context_window: context.usage.context_window ?? context.limits.context_window,
+      max_output_tokens: context.usage.max_output_tokens ?? context.limits.max_output_tokens,
+    };
+  }
+  persistTurnUsage(context);
   persistTurnMetadata(context, false);
 }
 
@@ -110,22 +125,30 @@ export function finishUsageAttempt(context: TurnExecution): void {
   context.unreported = false;
 }
 
+function persistTurnUsage(context: TurnExecution): void {
+  if (!context.usage) return;
+  const output = getOutboundDb().prepare('SELECT id FROM messages_out WHERE turn_id = ? ORDER BY seq DESC LIMIT 1')
+    .get(context.turnId) as { id: string } | undefined;
+  writeTurnUsage(context.usageId, output?.id ?? null,
+    { ...context.usage, duration_ms: turnDuration(context) }, context.turnId);
+}
+
 export function persistTurnMetadata(context: TurnExecution, final: boolean): void {
   const db = getOutboundDb();
   const usage = turnUsage(context);
   const durationMs = turnDuration(context);
-  const output = db.prepare('SELECT id FROM messages_out WHERE turn_id = ? ORDER BY seq DESC LIMIT 1')
-    .get(context.turnId) as { id: string } | undefined;
-  if (final && output) {
-    db.prepare('UPDATE turn_activity SET message_out_id = ? WHERE turn_id = ? AND message_out_id IS NOT ?')
+  if (final) {
+    const output = db.prepare('SELECT id FROM messages_out WHERE turn_id = ? ORDER BY seq DESC LIMIT 1')
+      .get(context.turnId) as { id: string } | undefined;
+    if (output) db.prepare('UPDATE turn_activity SET message_out_id = ? WHERE turn_id = ? AND message_out_id IS NOT ?')
       .run(output.id, context.turnId, output.id);
   }
-  if (usage) writeTurnUsage(context.usageId, output?.id ?? null, { ...usage, duration_ms: durationMs }, context.turnId);
   const metadata = {
     turnId: context.turnId,
     durationMs,
     model: usage?.model ?? null,
     usageId: usage ? context.usageId : null,
+    usageAdvisory: context.usageAdvisory ?? null,
     status: final
       ? usage ? (context.incomplete || context.unreported ? 'partial' : 'final') : 'unavailable'
       : usage ? 'partial' : 'provisional',
@@ -170,7 +193,9 @@ export async function settleTurn(context: TurnExecution, outcome: Exclude<TurnOu
   db.transaction(() => {
     const row = getTurn(db, context.turnId)!;
     putTurn(db, { ...row, phase: 'settling' });
+    context.usageAdvisory = transitionUsageAdvisory(context.usageAdvisory, 'skipped', Date.parse(context.endedAt!));
     finishTurnActivity(db, context.turnId, context.failure ? 'failed' : outcome, context.endedAt!);
+    persistTurnUsage(context);
     persistTurnMetadata(context, true);
     putTurn(db, {
       ...row, phase: 'settled', outcome: context.failure ? 'failed' : outcome,
@@ -196,6 +221,7 @@ export function interruptAbandonedTurns(): void {
         .run(key, JSON.stringify({
           turnId: row.id, durationMs: metadata.durationMs ?? null,
           model: metadata.model ?? null, usageId: metadata.usageId ?? null,
+          usageAdvisory: transitionUsageAdvisory(metadata.usageAdvisory ?? undefined, 'skipped', toEpoch(endedAt)) ?? null,
           status: metadata.usageId ? 'partial' : 'unavailable', final: true,
         }), toEpoch(endedAt));
       putTurn(db, { ...row, phase: 'settled', outcome: 'interrupted', ended_at: endedAt });

@@ -33,8 +33,8 @@ import { indexMessage, deleteMessageFromIndex } from './search-index.js';
 import { INPUT_EDIT_PREFIX, INPUT_CANCEL_PREFIX, type EditedInput } from './pending-input-edit.js';
 import { openInboundDb } from './db/session-db.js';
 
-const PROTOCOL_VERSION = 6;
-export const SESSION_LINK_VERSION = 'v6';
+const PROTOCOL_VERSION = 7;
+export const SESSION_LINK_VERSION = 'v7';
 const MAX_LIVE_FRAME_BYTES = 16 * 1024;
 const MAX_FRAME_BYTES = Math.ceil((CONTAINER_MAX_OUTPUT_SIZE * 4) / 3) + 2 * 1024 * 1024;
 const MAX_FRAME_BYTES_PER_SECOND = 24 * 1024 * 1024;

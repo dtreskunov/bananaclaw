@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Conversation } from './conversation.js';
+import { isTurnUsageAdvisory, type Conversation } from './conversation.js';
 import {
   CONVERSATION_PROTOCOL_VERSION,
   diffConversation,
@@ -51,6 +51,18 @@ const update: ConversationUpdate = {
   changes: diffConversation(empty, next),
 };
 describe('conversation protocol', () => {
+  it('shares strict advisory validation with the host without accepting impossible lifecycle states', () => {
+    const queued = { threshold: 10, reportedTokens: 10, triggeredAt: 0, status: 'queued', appliedAt: null, finishedAt: null };
+    expect(isTurnUsageAdvisory(queued)).toBe(true);
+    expect(isTurnUsageAdvisory({ ...queued, status: 'applied', appliedAt: 1 })).toBe(true);
+    expect(isTurnUsageAdvisory({ ...queued, status: 'skipped', finishedAt: 1 })).toBe(true);
+    for (const fields of [
+      { threshold: 0 }, { threshold: 1.5 }, { reportedTokens: 9 }, { reportedTokens: '10' },
+      { triggeredAt: -1 }, { status: 'applied' }, { status: 'skipped' }, { status: 'other' },
+      { appliedAt: 1 }, { finishedAt: 1 }, { extra: true },
+      { status: 'applied', appliedAt: 1, finishedAt: 1 },
+    ]) expect(isTurnUsageAdvisory({ ...queued, ...fields })).toBe(false);
+  });
   it('rejects ambiguous or malformed sender and recipient identities', () => {
     const frame = (fields: object) => ({
       ...snapshot,

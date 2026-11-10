@@ -62,6 +62,7 @@ interface SettingsResponse {
     image_tag: string | null;
     assistant_name: string | null;
     max_messages_per_prompt: number | null;
+    soft_turn_token_budget?: number | null;
     cli_scope: string | null;
     voice_input_backend: string | null;
     voice_input_enabled: boolean;
@@ -432,6 +433,7 @@ function SettingsTab({
     'image_tag',
     'assistant_name',
     'max_messages_per_prompt',
+    'soft_turn_token_budget',
     'model_params',
     'mcp_servers',
     'skills',
@@ -865,6 +867,24 @@ function SettingsTab({
               onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => {
                 const v = e.currentTarget.value;
                 update('max_messages_per_prompt', v ? Number(v) : null);
+              }}
+            />
+          </Field>
+
+          <Field
+            label="Soft turn token budget"
+            info="Native provider only. After this many reported input, cache and output tokens, ask the agent to finish promptly or report progress and stop. This is guidance, not a hard limit or remaining-quota estimate. Blank disables it. Requires restart."
+          >
+            <input
+              type="number"
+              min={1}
+              step={1}
+              max={Number.MAX_SAFE_INTEGER}
+              value={draft.soft_turn_token_budget ?? ''}
+              disabled={busy}
+              onInput={(e: JSX.TargetedEvent<HTMLInputElement>) => {
+                const v = e.currentTarget.value;
+                update('soft_turn_token_budget', v ? Number(v) : null);
               }}
             />
           </Field>

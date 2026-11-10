@@ -23,6 +23,8 @@ import { NativeTurnJournal } from './native/turn-journal.js';
 import { fingerprintToolInput, type ProviderEvent, type TurnUsage } from './types.js';
 import { COMPACTION_INSTRUCTIONS } from './native/compaction.js';
 import { accumulateCallUsage } from './usage.js';
+import { beginTurn, recordCallUsage, settleTurn, turnUsage } from '../turn-execution.js';
+import { offerUsageAdvisory, recordUsageAdvisory } from '../query/usage-advisory.js';
 
 /** The runner's fold of a turn's per-call reports. */
 function turnTotal(events: ProviderEvent[]): TurnUsage | null {
@@ -58,7 +60,12 @@ let catalogModels: Record<string, unknown>;
 let contextOverflows: number;
 let overflowAfterTool: boolean;
 let rejectCompaction: boolean;
-type StubUsage = { prompt_tokens?: number; completion_tokens?: number };
+type StubUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  completion_tokens_details?: { reasoning_tokens?: number };
+};
 let scriptedUsage: StubUsage[];
 let compactionUsage: StubUsage;
 let scriptedCompactionTexts: string[];
@@ -342,6 +349,95 @@ afterEach(() => {
   delete process.env.NATIVE_SHARED_SKILLS_ROOT;
   delete process.env.NATIVE_LOCAL_SKILLS_ROOT;
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+describe('native soft usage advisory', () => {
+  async function run(threshold: number, stopBeforeAdvisory = false) {
+    const turn = beginTurn({ channelType: 'web', platformId: 'chat-1', threadId: null, inReplyTo: null }, []);
+    const query = new NativeProvider({ model: 'local/stub' }).query({ prompt: 'hello', cwd: root });
+    query.end();
+    const events: ProviderEvent[] = [];
+    for await (const event of query.events) {
+      events.push(event);
+      if (stopBeforeAdvisory && event.type === 'model_request' && turn.usageAdvisory?.status === 'queued')
+        query.abort('user');
+      if (event.type === 'usage_call') {
+        recordCallUsage(turn, event.data);
+        offerUsageAdvisory(turn, query, threshold);
+      } else if (event.type === 'usage_advisory') recordUsageAdvisory(turn, event);
+    }
+    return { turn, events };
+  }
+
+  it('uses shared accounting to inject one durable nudge after tools settle without replaying them', async () => {
+    scriptedToolCalls = [
+      ['bash', '{"command":"echo once >> once.txt"}'],
+      ['read', '{"path":"once.txt"}'],
+    ];
+    const { turn, events } = await run(13);
+    expect(requests).toHaveLength(3);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(JSON.stringify(requests[0].messages)).not.toContain('Turn usage advisory');
+    expect(JSON.stringify(requests[1].messages)).toContain('13 reported tokens');
+    expect(JSON.stringify(requests[1].messages)).toContain('wait for the user');
+    expect(events.filter(event => event.type === 'usage_advisory')).toEqual([
+      { type: 'usage_advisory', turnId: turn.turnId, status: 'applied', timestamp: expect.any(Number) },
+    ]);
+    expect(turnUsage(turn)?.reported_tokens).toBe(33);
+    expect(turn.usageAdvisory).toMatchObject({ status: 'applied', reportedTokens: 13, threshold: 13 });
+    const init = events.find(event => event.type === 'init');
+    if (init?.type !== 'init') throw new Error('Missing native continuation');
+    const store = new NativeStore();
+    try {
+      expect(store.messages(init.continuation).filter(message =>
+        message.role === 'user' && JSON.stringify(message.content).includes('Turn usage advisory'))).toHaveLength(1);
+      expect(store.appliedSteering(init.continuation, [turn.turnId])).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  it('skips guidance for an already final answer without another model generation', async () => {
+    const { turn, events } = await run(7);
+    expect(requests).toHaveLength(1);
+    expect(replyTexts(events)).toEqual([['hello from stub']]);
+    expect(turn.usageAdvisory).toMatchObject({ status: 'skipped', appliedAt: null });
+  });
+
+  it('does not claim application or start another call when cancelled at the advisory boundary', async () => {
+    scriptedToolCalls = [['bash', '{"command":"echo once >> once.txt"}']];
+    const { turn, events } = await run(13, true);
+    await settleTurn(turn, 'stopped');
+    expect(requests).toHaveLength(1);
+    expect(fs.readFileSync(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
+    expect(events.some(event => event.type === 'usage_advisory' && event.status === 'applied')).toBe(false);
+    expect(turn.usageAdvisory).toMatchObject({ status: 'skipped', appliedAt: null });
+  });
+
+  it.each([{}, { prompt_tokens: 4 }, { completion_tokens: 3 }])(
+    'does not turn missing provider usage %j into measured zero or inject guidance', async missing => {
+    scriptedUsage = [missing];
+    const { turn } = await run(1);
+    expect(turnUsage(turn)?.reported_tokens).toBeUndefined();
+    expect(turn.usageAdvisory).toBeUndefined();
+    expect(requests).toHaveLength(1);
+  });
+
+  it('keeps measured zero distinct from absent measurements', async () => {
+    scriptedUsage = [{ prompt_tokens: 0, completion_tokens: 0 }];
+    const { turn } = await run(1);
+    expect(turnUsage(turn)?.reported_tokens).toBe(0);
+    expect(turn.usageAdvisory).toBeUndefined();
+  });
+
+  it('reports cached and reasoning tokens without double counting either bucket', async () => {
+    scriptedUsage = [{
+      prompt_tokens: 1000, completion_tokens: 20,
+      prompt_tokens_details: { cached_tokens: 800 }, completion_tokens_details: { reasoning_tokens: 10 },
+    }];
+    const { turn } = await run(2000);
+    expect(turnUsage(turn)).toMatchObject({
+      input_tokens: 200, cache_read_tokens: 800, output_tokens: 20, reasoning_tokens: 10, reported_tokens: 1020,
+    });
+  });
 });
 
 describe('NativeProvider', () => {

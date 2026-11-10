@@ -1,4 +1,32 @@
-import type { CallUsage, TurnUsage } from './types.js';
+import type { CallUsage, TurnUsage, TurnUsageAdvisory } from './types.js';
+
+export function combineCostSources(
+  previous: TurnUsage['cost_source'],
+  next: TurnUsage['cost_source'],
+): TurnUsage['cost_source'] {
+  if (previous === 'unavailable' || next === 'unavailable') return 'unavailable';
+  if (previous === next) return next;
+  if (!previous || !next) return undefined;
+  return 'mixed';
+}
+
+export function transitionUsageAdvisory(
+  advisory: TurnUsageAdvisory | undefined,
+  status: 'applied' | 'skipped',
+  timestamp: number,
+): TurnUsageAdvisory | undefined {
+  if (advisory?.status !== 'queued') return advisory;
+  return { ...advisory, status,
+    appliedAt: status === 'applied' ? timestamp : null,
+    finishedAt: status === 'skipped' ? timestamp : null };
+}
+
+export function reportedTokenTotal(...buckets: unknown[]): number | undefined {
+  if (!buckets.every((value): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0))
+    return undefined;
+  const total = buckets.reduce((sum, value) => sum + value, 0);
+  return Number.isSafeInteger(total) ? total : undefined;
+}
 
 /** Add one complete turn/attempt total to a prior total. Billing fields and
  * call counts add; context occupancy and other metadata come from the newest
@@ -7,6 +35,8 @@ export function accumulateTurnUsage(total: TurnUsage | null, next: TurnUsage): T
   if (!total) return { ...next };
   return {
     ...next,
+    reported_tokens: reportedTokenTotal(total.reported_tokens, next.reported_tokens),
+    cost_source: combineCostSources(total.cost_source, next.cost_source),
     model: next.model || total.model,
     cost_usd: total.cost_usd + next.cost_usd,
     input_tokens: total.input_tokens + next.input_tokens,

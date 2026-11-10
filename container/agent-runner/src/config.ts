@@ -17,6 +17,7 @@ export interface RunnerConfig {
   groupName: string;
   agentGroupId: string;
   maxMessagesPerPrompt: number;
+  softTurnTokenBudget?: number;
   mcpServers: Record<string, McpServerConfig>;
   mcpAccess?: Array<{ server: string; resource_url: string; account_alias: string; status: 'ready' | 'blocked'; reason?: string }>;
   /** Slugs the host switched off. Only the live-scanned local root needs it. */
@@ -56,6 +57,7 @@ export function loadConfig(): RunnerConfig {
     groupName: (raw.groupName as string) || '',
     agentGroupId: (raw.agentGroupId as string) || '',
     maxMessagesPerPrompt: (raw.maxMessagesPerPrompt as number) || DEFAULT_MAX_MESSAGES,
+    softTurnTokenBudget: parseSoftTurnTokenBudget(raw.softTurnTokenBudget),
     mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
     mcpAccess: raw.mcpAccess as RunnerConfig['mcpAccess'],
     disabledSkills: Array.isArray(raw.disabledSkills)
@@ -68,6 +70,13 @@ export function loadConfig(): RunnerConfig {
   };
 
   return _config;
+}
+
+export function parseSoftTurnTokenBudget(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)
+    throw new Error('softTurnTokenBudget must be a positive safe integer');
+  return value;
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

@@ -3,7 +3,7 @@ import { getDb } from './connection.js';
 import { assertTimestampFields } from './validate-timestamps.js';
 import { recordHostChange } from './transaction.js';
 
-const SCALAR_COLUMNS = new Set([
+const SCALAR_FIELDS = [
   'provider',
   'upstream_provider',
   'model',
@@ -12,10 +12,13 @@ const SCALAR_COLUMNS = new Set([
   'image_tag',
   'assistant_name',
   'max_messages_per_prompt',
+  'soft_turn_token_budget',
   'cli_scope',
   'voice_input_backend',
   'voice_input_enabled',
-]);
+] as const satisfies readonly (keyof ContainerConfigRow)[];
+const SCALAR_COLUMNS = new Set<string>(SCALAR_FIELDS);
+export type ContainerConfigScalarUpdates = Partial<Pick<ContainerConfigRow, (typeof SCALAR_FIELDS)[number]>>;
 const JSON_COLUMNS = new Set([
   'skills',
   'disabled_skills',
@@ -46,16 +49,17 @@ export function createContainerConfig(config: ContainerConfigRow): void {
     .prepare(
       `INSERT INTO container_configs (
         agent_group_id, provider, model, effort, image_tag, assistant_name,
-        max_messages_per_prompt, skills, mcp_servers, packages_apt, packages_npm,
+        max_messages_per_prompt, soft_turn_token_budget, skills, mcp_servers, packages_apt, packages_npm,
         packages_pip, additional_mounts, model_params, voice_input_backend, voice_input_enabled, credential_backend, updated_at
       ) VALUES (
         @agent_group_id, @provider, @model, @effort, @image_tag, @assistant_name,
-        @max_messages_per_prompt, @skills, @mcp_servers, @packages_apt, @packages_npm,
+        @max_messages_per_prompt, @soft_turn_token_budget, @skills, @mcp_servers, @packages_apt, @packages_npm,
         @packages_pip, @additional_mounts, @model_params, @voice_input_backend, @voice_input_enabled, @credential_backend, @updated_at
       )`,
     )
     .run({
       ...config,
+      soft_turn_token_budget: parseSoftTurnTokenBudget(config.soft_turn_token_budget),
       voice_input_backend: config.voice_input_backend ?? null,
       voice_input_enabled: config.voice_input_enabled ?? 1,
       credential_backend: config.credential_backend ?? 'agent-vault',
@@ -77,22 +81,7 @@ export function ensureContainerConfig(agentGroupId: string): void {
 /** Update scalar fields on a config row. Only touches fields present in `updates`. */
 export function updateContainerConfigScalars(
   agentGroupId: string,
-  updates: Partial<
-    Pick<
-      ContainerConfigRow,
-      | 'provider'
-      | 'upstream_provider'
-      | 'model'
-      | 'small_model'
-      | 'effort'
-      | 'image_tag'
-      | 'assistant_name'
-      | 'max_messages_per_prompt'
-      | 'cli_scope'
-      | 'voice_input_backend'
-      | 'voice_input_enabled'
-    >
-  >,
+  updates: ContainerConfigScalarUpdates,
 ): void {
   const fields: string[] = [];
   const values: Record<string, unknown> = { agent_group_id: agentGroupId };
@@ -101,7 +90,7 @@ export function updateContainerConfigScalars(
     if (value !== undefined) {
       if (!SCALAR_COLUMNS.has(key)) throw new Error(`Invalid scalar column: ${key}`);
       fields.push(`${key} = @${key}`);
-      values[key] = value;
+      values[key] = key === 'soft_turn_token_budget' ? parseSoftTurnTokenBudget(value) : value;
     }
   }
   if (fields.length === 0) return;
@@ -113,6 +102,15 @@ export function updateContainerConfigScalars(
     .prepare(`UPDATE container_configs SET ${fields.join(', ')} WHERE agent_group_id = @agent_group_id`)
     .run(values);
   recordHostChange({ kind: 'configuration', groupId: agentGroupId });
+}
+
+export function parseSoftTurnTokenBudget(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof parsed !== 'number' || !Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error('soft_turn_token_budget must be a positive safe integer or empty to disable');
+  }
+  return parsed;
 }
 
 /** Overwrite a JSON column wholesale. Used for skills, mcp_servers, packages_*, additional_mounts, model_params. */

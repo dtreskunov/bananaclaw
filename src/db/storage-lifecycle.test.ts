@@ -60,6 +60,18 @@ describe('current storage contracts', () => {
     }
   });
 
+  it('refuses populated version-2 stores instead of doing an online cutover', () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(OUTBOUND_SCHEMA);
+      db.pragma('user_version=2');
+      const schema = db.prepare('SELECT * FROM sqlite_schema ORDER BY name').all();
+      expect(() => assertStorageVersion(db, 'outbound')).toThrow('docs/usage-efficiency.md#offline-cutover');
+      expect(db.pragma('user_version', { simple: true })).toBe(2);
+      expect(db.prepare('SELECT * FROM sqlite_schema ORDER BY name').all()).toEqual(schema);
+    } finally { db.close(); }
+  });
+
   it('writes direct integer host schemas and retains ISO strings in durable journals', () => {
     const inbound = new Database(':memory:');
     const outbound = new Database(':memory:');

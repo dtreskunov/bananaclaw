@@ -7,6 +7,7 @@ import type {
   ConversationTimelineRow,
 } from './conversation.js';
 import { isReadCursor } from './read-state.js';
+import { isTurnUsageAdvisory } from './conversation.js';
 import { isEpochMs, UI_TIMESTAMP_PROTOCOL_VERSION } from './time.js';
 import {
   applyCollection,
@@ -81,6 +82,8 @@ export class ConversationProtocolError extends Error {
 
 const strings = array(id);
 const usageFields = {
+  reported_tokens: nullable(integer),
+  cost_source: nullable(oneOf('reported', 'estimated', 'unavailable', 'mixed')),
   cost_usd: number,
   input_tokens: number,
   output_tokens: number,
@@ -175,6 +178,7 @@ const turnFields = {
     status: oneOf('provisional', 'partial', 'final', 'unavailable'),
     model: nullable(text),
     durationMs: nullable(number),
+    usageAdvisory: optional(nullable(isTurnUsageAdvisory)),
   }),
 };
 const turn = shape({ ...turnFields, activity: array(activityLine) });

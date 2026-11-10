@@ -320,6 +320,16 @@ Additional metadata uses the existing `session_state` table, not new columns:
 `partial`, and no usage report means `usageId=null` rather than fabricated
 tokens. Native billing uses one stable `turn_usage.id = 'tu-' + turn_id` across
 corrective/stale-session attempts. Historical usage IDs and totals are unchanged.
+`turn_usage.reported_tokens` is the nullable complete normalized input/cache/output
+total; `cost_source` is `reported|estimated|mixed|unavailable` or null when unknown.
+They are usage-record fields in storage, journals and the conversation API,
+independent of `turn-metadata:<id>`. The optional `usageAdvisory` in turn metadata
+records policy decisions only. Usage reports fold once into a shared snapshot;
+advisory transitions do not emit redundant usage events. Existing v2 stores
+require a stopped-writer [offline cutover](usage-efficiency.md#offline-cutover)
+to v3. Runtime never adds columns or translates prior metadata. Unknown historical
+measurements remain null; durable event identities and unrelated state remain
+unchanged.
 See [session-link.md](session-link.md#lifecycle-and-metadata) for lifecycle and
 post-commit hooks.
 

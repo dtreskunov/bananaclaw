@@ -8,7 +8,9 @@ or separate state record. Lists at the end of the message serve as follow-up
 choices too. The former suggestion tool and metadata pipeline are removed.
 Approvals remain explicit, separately authorized workflows.
 
-Central, host-session and runner-state stores require `PRAGMA user_version=2`.
+This completed cutover produced central, host-session and runner-state storage
+version 2. Current deployments additionally require the
+[turn-usage offline cutover](usage-efficiency.md#offline-cutover) to version 3.
 Native-provider stores remain version 1, search remains version 2, archives use
 format 4, and browser conversations use protocol 17. Empty stores initialize the
 current schemas directly. Populated older stores and unsupported archives are

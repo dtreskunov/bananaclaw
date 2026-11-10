@@ -121,7 +121,7 @@ async function connect(turnId: string) {
   socket.resume();
   socket.write(
     JSON.stringify({
-      v: 6,
+      v: 7,
       type: 'turn.state',
       turn: {
         id: turnId,
@@ -163,7 +163,7 @@ async function replay(frame: DurableRunnerFrame): Promise<void> {
       }
     };
     connection.on('data', receive);
-    connection.write(JSON.stringify({ v: 6, type: 'durable', ...frame }) + '\n');
+    connection.write(JSON.stringify({ v: 7, type: 'durable', ...frame }) + '\n');
   });
 }
 function browser(thread = 'thread') {
@@ -268,7 +268,9 @@ describe('host projector → ordered stream → browser reducer convergence', ()
     db.close();
     const client = browser();
     await client.converged();
-    expect(client.state.conversation.turns[0].usage).toEqual([{ id: 'partial-bill', value: { input_tokens: 17 } }]);
+    expect(client.state.conversation.turns[0].usage).toEqual([
+      { id: 'partial-bill', value: { input_tokens: 17, reported_tokens: null, cost_source: null } },
+    ]);
     expect(client.state.conversation.turns[0].metadata.status).toBe('partial');
   });
   it('settles a pending previous final under a successor, then replays after host restart without double billing', async () => {
@@ -294,6 +296,8 @@ describe('host projector → ordered stream → browser reducer convergence', ()
       turn_id: 'previous',
       timestamp: formatTimestamp(now),
       cost_usd: 0.25,
+      reported_tokens: 30,
+      cost_source: 'reported',
       input_tokens: 20,
       output_tokens: 10,
       cache_read_tokens: 0,
@@ -310,7 +314,7 @@ describe('host projector → ordered stream → browser reducer convergence', ()
     apply('turn.upsert', turn('successor'));
     socket!.write(
       JSON.stringify({
-        v: 6,
+        v: 7,
         type: 'turn.state',
         turn: {
           id: 'successor',

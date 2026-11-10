@@ -59,6 +59,7 @@ import { finalizeStoppedTurn, writeResponseRow, writeTurnNotice } from './query/
 import { DeliveryRecovery, type SuggestedAction } from './query/recovery.js';
 import { RunawayGuard } from './query/runaway-guard.js';
 import { SteeringSession } from './query/steering.js';
+import { offerUsageAdvisory, recordUsageAdvisory } from './query/usage-advisory.js';
 
 function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
@@ -69,6 +70,7 @@ function generateId(): string {
 }
 
 export interface PollLoopConfig {
+  softTurnTokenBudget?: number;
   provider: AgentProvider;
   /**
    * Name of the provider (e.g. "claude", "codex", "opencode"). Used to key
@@ -98,6 +100,8 @@ export interface PollLoopConfig {
  * 6. Loop
  */
 export async function runPollLoop(config: PollLoopConfig): Promise<void> {
+  if (config.softTurnTokenBudget !== undefined && config.providerName !== 'native')
+    log('Soft turn token budget is configured but only the native provider supports usage advisories');
   interruptAbandonedTurns();
   // Resume the agent's prior session from a previous container run if one
   // was persisted. The continuation is opaque to the poll-loop — the
@@ -415,6 +419,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             {
               provider: config.provider,
               persistContinuation: !isTaskOnly,
+              softTurnTokenBudget: config.softTurnTokenBudget,
               promptTracker,
               onBatchComplete: (completedIds, providerFailed) => {
                 const completedTaskIds = completedIds.filter((id) => taskAttemptIdSet.has(id));
@@ -781,6 +786,7 @@ async function tryAcknowledgeFailure(
     });
     const result = await processQuery(query, routing, [], config.providerName, undefined, '', undefined, {
       provider: config.provider,
+      softTurnTokenBudget: config.softTurnTokenBudget,
       persistContinuation: false,
       execution,
       deferFailureSettlement: true,
@@ -830,6 +836,7 @@ interface QueryResult {
  * reached from marked `FORK-HOOK:<name>` sites.
  */
 export interface ForkQueryOptions {
+  softTurnTokenBudget?: number;
   provider: AgentProvider;
   /**
    * False for one-shot calls (the in-turn ack): they run in a throwaway
@@ -844,7 +851,7 @@ export interface ForkQueryOptions {
 }
 
 /** Provider events still processed after the user stopped the turn. */
-const STOPPED_TURN_EVENTS = new Set(['init', 'progress', 'usage_call', 'checkpoint', 'steering_applied']);
+const STOPPED_TURN_EVENTS = new Set(['init', 'progress', 'usage_call', 'checkpoint', 'steering_applied', 'usage_advisory']);
 
 export async function processQuery(
   query: AgentQuery,
@@ -1224,8 +1231,18 @@ export async function processQuery(
         if (accounting.onUsageCall(event.data) && typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) {
           appendActivity({ kind: 'model', id: `model:${generateId()}`, durationMs: Math.round(ms) });
         }
+        if (!userStopped) offerUsageAdvisory(execution.current, query, fork.softTurnTokenBudget);
         break;
       }
+      case 'usage_advisory':
+        if (recordUsageAdvisory(execution.current, event) && event.status === 'applied') {
+          appendActivity({
+            kind: 'notification', id: `usage-advisory:${event.turnId}`,
+            text: 'Soft turn token budget reached; agent asked to wrap up',
+            detail: `${execution.current.usageAdvisory!.reportedTokens} reported tokens; threshold ${execution.current.usageAdvisory!.threshold}. Not remaining provider quota.`,
+          });
+        }
+        break;
       case 'checkpoint':
         accounting.checkpoint = event.ref;
         break;
