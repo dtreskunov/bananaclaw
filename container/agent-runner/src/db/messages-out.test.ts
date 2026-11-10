@@ -23,6 +23,39 @@ async function waitForFile(filePath: string): Promise<void> {
 }
 
 describe('writeMessageOut', () => {
+  it('creates per-turn, per-peer exchanges and reuses the recorded exchange for replies', async () => {
+    const { closeSessionDb, getInboundDb, getOutboundDb, initTestSessionDb } = await import('./connection.js');
+    const { writeMessageOut } = await import('./messages-out.js');
+    initTestSessionDb();
+    try {
+      getOutboundDb().exec(`INSERT INTO turns(id,phase,outcome,provenance)
+        VALUES('turn-1','running','pending','native'),('turn-2','running','pending','native'),
+          ('turn-3','running','pending','native'),('turn-4','running','pending','native')`);
+      const send = (id: string, peer: string, turn: string, replyTo: string | null = null) => writeMessageOut({
+        id, kind: 'chat', channel_type: 'agent', platform_id: peer, turn_id: turn,
+        in_reply_to: replyTo, content: JSON.stringify({ text: id }),
+      });
+      send('first', 'peer-b', 'turn-1');
+      send('file-followup', 'peer-b', 'turn-1');
+      send('other-peer', 'peer-c', 'turn-1');
+      send('new-request', 'peer-b', 'turn-2');
+      getInboundDb().prepare(`INSERT INTO messages_in(id,kind,timestamp,status,channel_type,platform_id,thread_id,content)
+        VALUES('peer-input','chat',0,'pending','agent','peer-b','a2a:original:peer-b','{}')`).run();
+      send('answer', 'peer-b', 'turn-3', 'peer-input');
+      send('new-delegation', 'peer-c', 'turn-3', 'peer-input');
+      getInboundDb().prepare("UPDATE messages_in SET thread_id=NULL WHERE id='peer-input'").run();
+      expect(() => send('missing-exchange', 'peer-b', 'turn-4', 'peer-input')).toThrow('without an exchange identity');
+      expect(getOutboundDb().prepare('SELECT id,thread_id FROM messages_out ORDER BY seq').all()).toEqual([
+        { id: 'first', thread_id: 'a2a:turn-1:peer-b' },
+        { id: 'file-followup', thread_id: 'a2a:turn-1:peer-b' },
+        { id: 'other-peer', thread_id: 'a2a:turn-1:peer-c' },
+        { id: 'new-request', thread_id: 'a2a:turn-2:peer-b' },
+        { id: 'answer', thread_id: 'a2a:original:peer-b' },
+        { id: 'new-delegation', thread_id: 'a2a:turn-3:peer-c' },
+      ]);
+    } finally { closeSessionDb(); }
+  });
+
   it('keeps the rollback journal beside the mounted runner database', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-runner-journal-'));
     roots.push(root);

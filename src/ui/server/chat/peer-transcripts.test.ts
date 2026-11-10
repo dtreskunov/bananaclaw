@@ -13,10 +13,12 @@ import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js'
 import { putTurn } from '../../../db/turns.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath, sessionDir } from '../../../session-manager.js';
 import { refreshThreadSummaries } from '../../../thread-summaries.js';
+import { closeSearchDb, indexMessage, initSearchDb } from '../../../search-index.js';
 import { handleChatRequest } from './chat.js';
 import { readConversation } from './conversation.js';
 import { resolveTurnContext } from './conversation-context.js';
 import { listThreadsForViewer, viewerHasContent } from './threads.js';
+import { peerConversationId } from '../../shared/peer-conversation.js';
 import {
   CONVERSATION_PROTOCOL_VERSION,
   diffConversation,
@@ -27,6 +29,10 @@ import {
 const root = path.resolve('.test-peer-transcripts');
 const now = 1794261600000;
 const viewer = '10000000-0000-4000-8000-000000000001';
+const exchangeId = 'a2a:request:b';
+const peerAId = peerConversationId('sa', exchangeId);
+const peerBId = peerConversationId('sb', exchangeId);
+const readPeerA = () => readConversation(viewer, 'a', peerAId, { channelType: 'agent', messagingGroupId: 'sa' });
 const handles: Database.Database[] = [];
 let aIn: Database.Database;
 let aOut: Database.Database;
@@ -85,44 +91,87 @@ beforeEach(() => {
   }
   [aIn, aOut, bIn, bOut] = handles;
   input(aIn, 'human', 'web', 'group:a', 'human');
-  output(aOut, 'sent-to-b', 'agent', 'b', null);
-  input(bIn, 'received-from-a', 'agent', 'a', null);
-  output(bOut, 'sent-to-a', 'agent', 'a', null);
-  input(aIn, 'received-from-b', 'agent', 'b', null);
+  output(aOut, 'sent-to-b', 'agent', 'b', exchangeId);
+  input(bIn, 'received-from-a', 'agent', 'a', exchangeId);
+  output(bOut, 'sent-to-a', 'agent', 'a', exchangeId);
+  input(aIn, 'received-from-b', 'agent', 'b', exchangeId);
   input(aIn, 'host-note', 'agent', 'a', null);
   input(bIn, 'private-human', 'web', 'private-platform', 'private-thread');
   output(bOut, 'private-reply', 'web', 'private-platform', 'private-thread');
-  input(handles[4], 'unrelated-peer', 'agent', 'b', null);
+  input(handles[4], 'unrelated-peer', 'agent', 'b', exchangeId);
   for (const session of ['sa', 'sb', 'other']) refreshThreadSummaries(session);
 });
 
 afterEach(() => {
+  closeSearchDb();
   for (const db of handles.splice(0)) db.close();
   closeDb();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe('peer-agent transcripts', () => {
-  it('includes sent and received peers in a dedicated thread with trusted user/agent attribution', async () => {
+  it('does not expose threadless messages as a special historical conversation', async () => {
+    input(aIn, 'threadless', 'agent', 'b', null);
+    refreshThreadSummaries('sa');
+    expect((await listThreadsForViewer(viewer, 'a')).some((thread) => thread.threadId === '__agent:sa')).toBe(false);
+    expect(resolveTurnContext(viewer, 'a', '__agent:sa', { channelType: 'agent', messagingGroupId: 'sa' })).toBeNull();
+    expect(readPeerA().messages.some((message) => message.id === 'threadless')).toBe(false);
+  });
+
+  it('lists each initiated exchange separately under Agents, including multiple exchanges from one human session', async () => {
+    for (const [thread, id] of [
+      ['a2a:request-1:b', 'one'],
+      ['a2a:request-2:b', 'two'],
+    ]) {
+      output(aOut, id, 'agent', 'b', thread);
+      input(aIn, `reply-${id}`, 'agent', 'b', thread);
+    }
+    refreshThreadSummaries('sa');
+    const threads = (await listThreadsForViewer(viewer, 'a')).filter(
+      (thread) => thread.channelType === 'agent' && thread.sessionId === 'sa',
+    );
+    expect(threads).toHaveLength(3);
+    for (const [thread, id] of [
+      ['a2a:request-1:b', 'one'],
+      ['a2a:request-2:b', 'two'],
+    ]) {
+      const peer = threads.find((entry) => entry.threadId === peerConversationId('sa', thread))!;
+      expect(peer).toMatchObject({ messageCount: 2, canSend: false, counterparty: 'Agent B' });
+      expect(
+        readConversation(viewer, 'a', peer.threadId, peer)
+          .messages.map((message) => message.id)
+          .sort(),
+      ).toEqual([id, `reply-${id}`].sort());
+    }
+    expect(readConversation(viewer, 'a', 'human').messages.map((message) => message.id)).toEqual(['human']);
+  });
+
+  it('separates peer traffic from a user-started thread without moving its journal records', async () => {
     const view = readConversation(viewer, 'a', 'human');
-    expect(view.messages.map((message) => message.id).sort()).toEqual(['human', 'received-from-b', 'sent-to-b']);
+    expect(view.messages.map((message) => message.id)).toEqual(['human']);
     expect(view.messages.find((message) => message.id === 'human')?.author).toEqual({
       userId: viewer,
       displayName: 'Viewer',
     });
-    expect(view.messages.find((message) => message.id === 'received-from-b')).toMatchObject({
+    const peer = readPeerA();
+    expect(peer.messages.find((message) => message.id === 'received-from-b')).toMatchObject({
       direction: 'in',
       author: { agentGroupId: 'b', displayName: 'Agent B' },
       canEditPending: false,
     });
-    expect(view.messages.find((message) => message.id === 'sent-to-b')).toMatchObject({
+    expect(peer.messages.find((message) => message.id === 'sent-to-b')).toMatchObject({
       direction: 'out',
       recipient: { agentGroupId: 'b', displayName: 'Agent B' },
     });
     const threads = await listThreadsForViewer(viewer, 'a');
-    expect(threads.find((thread) => thread.threadId === 'human')).toMatchObject({ messageCount: 3, canSend: true });
-    expect(threads.some((thread) => thread.threadId === '__agent:sa')).toBe(false);
-    expect(readConversation(viewer, 'a', 'other').messages.map((message) => message.id)).toEqual(['unrelated-peer']);
+    expect(threads.find((thread) => thread.threadId === 'human')).toMatchObject({ messageCount: 1, canSend: true });
+    expect(threads.find((thread) => thread.threadId === peerAId)).toMatchObject({
+      channelType: 'agent',
+      messageCount: 2,
+      counterparty: 'Agent B',
+    });
+    expect(readConversation(viewer, 'a', 'other').messages).toEqual([]);
+    expect(peer.messages.map((message) => message.id).sort()).toEqual(['received-from-b', 'sent-to-b']);
   });
 
   it('lists and opens both sides in an agent without a human channel, without exposing other routes', async () => {
@@ -130,8 +179,8 @@ describe('peer-agent transcripts', () => {
     const threads = await listThreadsForViewer(viewer, 'b');
     expect(threads).toEqual([
       expect.objectContaining({
-        threadId: '__agent:sb',
-        title: 'Agent messages',
+        threadId: peerBId,
+        title: expect.any(String),
         channelType: 'agent',
         messagingGroupId: 'sb',
         sessionId: 'sb',
@@ -158,7 +207,7 @@ describe('peer-agent transcripts', () => {
     refreshThreadSummaries('sb');
     expect((await listThreadsForViewer(viewer, 'b'))[0]).toMatchObject({ messageCount: 1 });
     expect(
-      readConversation(viewer, 'b', '__agent:sb', { channelType: 'agent', messagingGroupId: 'sb' }).messages.map(
+      readConversation(viewer, 'b', peerBId, { channelType: 'agent', messagingGroupId: 'sb' }).messages.map(
         (message) => message.id,
       ),
     ).toEqual(['sent-to-a']);
@@ -167,7 +216,7 @@ describe('peer-agent transcripts', () => {
   it('keeps peers out of unrelated routes in shared sessions and offers a separate peer transcript', async () => {
     getDb().prepare("UPDATE sessions SET thread_id=NULL WHERE id='sa'").run();
     expect(readConversation(viewer, 'a', 'human').messages.map((message) => message.id)).toEqual(['human']);
-    const peer = (await listThreadsForViewer(viewer, 'a')).find((thread) => thread.threadId === '__agent:sa')!;
+    const peer = (await listThreadsForViewer(viewer, 'a')).find((thread) => thread.threadId === peerAId)!;
     expect(peer).toMatchObject({ messageCount: 2, canSend: false });
     expect(
       readConversation(viewer, 'a', peer.threadId, peer)
@@ -178,17 +227,17 @@ describe('peer-agent transcripts', () => {
 
   it('rejects forged session/group combinations, missing context and revoked group membership', async () => {
     const peer = { channelType: 'agent', messagingGroupId: 'sb' };
-    expect(resolveTurnContext(viewer, 'a', '__agent:sb', peer)).toBeNull();
-    expect(resolveTurnContext(viewer, 'b', '__agent:sb')).toBeNull();
-    expect(resolveTurnContext(viewer, 'b', '__agent:sb', { ...peer, messagingGroupId: 'sa' })).toBeNull();
+    expect(resolveTurnContext(viewer, 'a', peerBId, peer)).toBeNull();
+    expect(resolveTurnContext(viewer, 'b', peerBId)).toBeNull();
+    expect(resolveTurnContext(viewer, 'b', peerBId, { ...peer, messagingGroupId: 'sa' })).toBeNull();
     getDb().prepare("DELETE FROM agent_group_members WHERE agent_group_id='b'").run();
-    expect(() => readConversation(viewer, 'b', '__agent:sb', peer)).toThrow('not accessible');
+    expect(() => readConversation(viewer, 'b', peerBId, peer)).toThrow('not accessible');
     await expect(listThreadsForViewer(viewer, 'b')).rejects.toThrow('access denied');
   });
 
   it('uses the peer ID if its name is unavailable, rather than trusting message content', () => {
     getDb().prepare("UPDATE agent_groups SET name='  ' WHERE id='b'").run();
-    const messages = readConversation(viewer, 'a', 'human').messages;
+    const messages = readPeerA().messages;
     expect(messages.find((message) => message.id === 'received-from-b')?.author).toEqual({
       agentGroupId: 'b',
       displayName: 'b',
@@ -205,7 +254,7 @@ describe('peer-agent transcripts', () => {
         id: `turn-${platform}`,
         origin_channel_type: 'agent',
         origin_platform_id: platform,
-        origin_thread_id: null,
+        origin_thread_id: exchangeId,
         origin_source_session_id: null,
         started_at: now,
         ended_at: now + 100,
@@ -216,7 +265,7 @@ describe('peer-agent transcripts', () => {
         imported_from_turn_id: null,
       });
     aOut.prepare("UPDATE messages_out SET turn_id='turn-b' WHERE id='sent-to-b'").run();
-    const initial = readConversation(viewer, 'a', 'human');
+    const initial = readPeerA();
     expect(initial.turns.map((turn) => turn.id)).toEqual(['turn-b']);
     const snapshot = reduceConversation(
       null,
@@ -232,8 +281,8 @@ describe('peer-agent transcripts', () => {
         ),
       ),
     );
-    input(aIn, 'followup-from-b', 'agent', 'b', null);
-    const current = readConversation(viewer, 'a', 'human');
+    input(aIn, 'followup-from-b', 'agent', 'b', exchangeId);
+    const current = readPeerA();
     const applied = reduceConversation(
       snapshot,
       parseConversationFrame(
@@ -261,7 +310,7 @@ describe('peer-agent transcripts', () => {
       id: 'peer-turn',
       origin_channel_type: 'agent',
       origin_platform_id: 'b',
-      origin_thread_id: null,
+      origin_thread_id: exchangeId,
       origin_source_session_id: null,
       started_at: now,
       ended_at: null,
@@ -274,22 +323,24 @@ describe('peer-agent transcripts', () => {
     aOut
       .prepare("UPDATE messages_out SET turn_id='peer-turn',content=? WHERE id='sent-to-b'")
       .run(JSON.stringify({ text: 'Final peer response', delivery_origin: 'response' }));
-    expect(readConversation(viewer, 'a', 'human').messages.some((message) => message.id === 'sent-to-b')).toBe(false);
+    expect(readPeerA().messages.some((message) => message.id === 'sent-to-b')).toBe(false);
     aOut.prepare("UPDATE turns SET phase='settled',outcome='replied',ended_at=? WHERE id='peer-turn'").run(now + 100);
-    expect(readConversation(viewer, 'a', 'human').messages.find((message) => message.id === 'sent-to-b')).toMatchObject(
-      { text: 'Final peer response', recipient: { agentGroupId: 'b', displayName: 'Agent B' } },
-    );
+    expect(readPeerA().messages.find((message) => message.id === 'sent-to-b')).toMatchObject({
+      text: 'Final peer response',
+      recipient: { agentGroupId: 'b', displayName: 'Agent B' },
+    });
   });
 
-  it('serves received peer attachments only from the authorized transcript', async () => {
+  it('scopes peer attachments and search links to their exchange', async () => {
     const file = 'inbox/peer-file/note.txt';
     fs.mkdirSync(path.join(sessionDir('b', 'sb'), 'inbox/peer-file'), { recursive: true });
     fs.writeFileSync(path.join(sessionDir('b', 'sb'), file), 'Peer attachment');
-    bIn.prepare("UPDATE messages_in SET content=? WHERE id='received-from-a'").run(
+    bIn.prepare("UPDATE messages_in SET content=?,thread_id=? WHERE id='received-from-a'").run(
       JSON.stringify({
         text: 'Attached',
         attachments: [{ name: 'note.txt', localPath: file, mimeType: 'text/plain' }],
       }),
+      exchangeId,
     );
     bIn.prepare("UPDATE messages_in SET content=? WHERE id='private-human'").run(
       JSON.stringify({
@@ -297,10 +348,25 @@ describe('peer-agent transcripts', () => {
         attachments: [{ name: 'private.txt', localPath: 'inbox/private.txt' }],
       }),
     );
-    const view = readConversation(viewer, 'b', '__agent:sb', { channelType: 'agent', messagingGroupId: 'sb' });
+    refreshThreadSummaries('sb');
+    const publicId = peerConversationId('sb', exchangeId);
+    const view = readConversation(viewer, 'b', publicId, { channelType: 'agent', messagingGroupId: 'sb' });
     const attachment = view.messages.find((message) => message.id === 'received-from-a')?.files?.[0];
     expect(attachment).toMatchObject({ filename: 'note.txt', size: 15 });
     expect(attachment?.url).toContain('?channel=agent&mg=sb');
+    initSearchDb();
+    for (const id of ['received-from-a', 'hidden-self-note'])
+      indexMessage({
+        id,
+        sessionId: 'sb',
+        agentGroupId: 'b',
+        messagingGroupId: null,
+        channelType: 'agent',
+        threadId: exchangeId,
+        direction: 'in',
+        timestamp: now,
+        text: 'searchable needle',
+      });
     const server = http.createServer((req, res) => {
       void handleChatRequest(req, res, new URL(req.url!, 'http://localhost').pathname, viewer);
     });
@@ -313,9 +379,17 @@ describe('peer-agent transcripts', () => {
       expect(response.status).toBe(200);
       expect(await response.text()).toBe('Peer attachment');
       const privateResponse = await fetch(
-        new URL('api/groups/b/chat/__agent%3Asb/attachments/inbox/private.txt?channel=agent&mg=sb', base),
+        new URL(
+          `api/groups/b/chat/${encodeURIComponent(publicId)}/attachments/inbox/private.txt?channel=agent&mg=sb`,
+          base,
+        ),
       );
       expect(privateResponse.status).toBe(404);
+      const search = await fetch(new URL('api/groups/b/chat/search?q=needle', base));
+      expect(search.status).toBe(200);
+      expect(await search.json()).toMatchObject({
+        results: [{ messageId: 'received-from-a', threadId: publicId, channelType: 'agent', messagingGroupId: 'sb' }],
+      });
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }

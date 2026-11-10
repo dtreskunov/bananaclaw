@@ -948,15 +948,21 @@ their sender attribution in both history and live updates.
 Peer-agent messages use the same sender labels as other users. Received messages
 name the sending agent; sent messages show **To &lt;agent name&gt;**. Identity comes
 from the journal's routing fields, never from names supplied in message text.
+The **Agents** channel groups peer exchanges separately from Web and Email.
 The Agents section header omits the aggregate peer-name subtitle; message
 attribution identifies each exchange's participants.
-Dedicated per-thread sessions include both sides of their peer exchanges in the
-original transcript. Shared or channel-less sessions instead expose a read-only
-**Agent messages** thread (`__agent:<sessionId>`, with channel `agent` and the
-session ID as its synthetic messaging context). Each agent's Threads view reads
-only that agent's own session journals. Peer threads exclude human-channel
-traffic, and shared-session peer exchanges are not copied into unrelated human
-threads. Peer messages support the normal attachment and reading controls, but
+Each newly initiated exchange gets its own thread; messages and files sent to
+one peer during the same initiating turn stay together. The recipient gets a
+dedicated session, not its newest human conversation. Replies retain the exact
+source session and exchange identity. The caller still consumes the reply in
+its original runtime context, but raw peer traffic appears only under Agents;
+human threads retain human-facing replies and summaries.
+
+Agents threads are read-only projections (`__agent:<sessionId>/<encodedExchangeId>`,
+with channel `agent` and the session ID as their synthetic messaging context).
+Each agent's Threads view reads only that agent's own exchange-tagged messages.
+Peer messages support search, the normal attachment and reading controls, and authorized approval
+cards, but
 are not editable human inputs or branch anchors. User and agent attribution,
 including approval bubbles, shares the same current-identity suppression rule.
 

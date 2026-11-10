@@ -7,6 +7,7 @@ import { openInboundDb, openOutboundDb, sessionDir } from '../../../session-mana
 import { summarizeTaskPrompt } from '../../../thread-summaries.js';
 import { getUser } from '../../../modules/permissions/db/users.js';
 import { getAgentGroup } from '../../../db/agent-groups.js';
+import { parsePeerConversationId } from '../../shared/peer-conversation.js';
 import { chatSdkHistoryContent } from '../../shared/readable-output.js';
 export { chatSdkHistoryContent } from '../../shared/readable-output.js';
 import { shortcodeToEmoji } from './emoji.js';
@@ -17,7 +18,13 @@ import fs from 'fs';
 import { parseInputState, type InputHandling, type InputState } from '../../shared/input-state.js';
 import { parseTimelinePosition, timelineSortKey } from '../../shared/timeline.js';
 import { inputStateKey, isCancelledInputContent } from '../../../input-timeline.js';
-import { isElevated, resolveTurnContext, viewerHandlesForChannel, type TurnContext } from './conversation-context.js';
+import {
+  conversationRouteFilter,
+  isElevated,
+  resolveTurnContext,
+  viewerHandlesForChannel,
+  type TurnContext,
+} from './conversation-context.js';
 export function parseInputHandling(value: unknown): InputHandling | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_input_handling');
@@ -151,16 +158,7 @@ export function readConversationHistory(
 
   const messages: ConversationMessage[] = [];
   const peerName = (id: string) => ({ agentGroupId: id, displayName: getAgentGroup(id)?.name?.trim() || id });
-  const route = `(channel_type = @channel AND thread_id IS @thread
-    AND platform_id IN (SELECT value FROM json_each(@platforms)))
-    OR (@peers = 1 AND channel_type = 'agent' AND platform_id != @groupId AND thread_id IS NULL)`;
-  const scope = {
-    channel: context.channelType,
-    thread: context.threadId,
-    platforms: JSON.stringify(context.platformIds),
-    peers: Number(context.peerMessagesFor === groupId),
-    groupId,
-  };
+  const { sql: route, params: scope } = conversationRouteFilter(context);
   const inDb = openInboundDb(groupId, sessionId);
   try {
     const outDb = openOutboundDb(groupId, sessionId);
@@ -448,9 +446,8 @@ export function encodedAttachmentUrl(groupId: string, threadId: string, localPat
     .split('/')
     .map((part) => encodeURIComponent(part))
     .join('/');
-  const query = threadId.startsWith('__agent:')
-    ? `?${new URLSearchParams({ channel: 'agent', mg: threadId.slice('__agent:'.length) })}`
-    : '';
+  const peer = parsePeerConversationId(threadId);
+  const query = peer ? `?${new URLSearchParams({ channel: 'agent', mg: peer.sessionId })}` : '';
   return `api/groups/${encodeURIComponent(groupId)}/chat/${encodeURIComponent(threadId)}/attachments/${encodedPath}${query}`;
 }
 

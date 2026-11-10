@@ -945,6 +945,16 @@ as one-way. A per-batch routing hint forbids inventing a reply address or
 substituting the session's human channel. This does not grant reverse access.
 Host-origin system messages retain their existing no-`from` formatting.
 
+New peer requests use a durable `a2a:<initiatingTurnId>:<peerGroupId>` thread
+identity (the outbound message ID replaces the turn ID for an out-of-turn send).
+The recipient receives a dedicated channel-less, per-thread session. Subsequent
+messages in the initiating turn share that exchange; replies inherit the inbound
+exchange ID and its exact `source_session_id`. A new request never borrows the
+recipient's latest human session, and agent-shared channel routing never borrows
+an isolated peer session. Replies require a recorded exchange identity and source
+session. Both sides are projected into the UI's Agents channel without copying
+messages between journals.
+
 Runner-generated terminal notices (`system_generated: true`), including provider
 errors and stopped-turn notices, are passive when forwarded to another agent.
 The host journals them as `trigger=0` and does not wake the recipient. They remain

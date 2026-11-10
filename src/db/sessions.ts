@@ -41,27 +41,23 @@ export function findSession(messagingGroupId: string, threadId: string | null): 
  */
 export function findSessionForAgent(
   agentGroupId: string,
-  messagingGroupId: string,
+  messagingGroupId: string | null,
   threadId: string | null,
 ): Session | undefined {
-  if (threadId) {
-    return getDb()
-      .prepare(
-        "SELECT * FROM sessions WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id = ? AND status = 'active'",
-      )
-      .get(agentGroupId, messagingGroupId, threadId) as Session | undefined;
-  }
   return getDb()
     .prepare(
-      "SELECT * FROM sessions WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NULL AND status = 'active'",
+      "SELECT * FROM sessions WHERE agent_group_id = ? AND messaging_group_id IS ? AND thread_id IS ? AND status = 'active'",
     )
-    .get(agentGroupId, messagingGroupId) as Session | undefined;
+    .get(agentGroupId, messagingGroupId, threadId) as Session | undefined;
 }
 
-/** Find an active session scoped to an agent group (ignoring messaging group). */
+/** Find a shareable active session, never an isolated channel-less peer exchange. */
 export function findSessionByAgentGroup(agentGroupId: string): Session | undefined {
   return getDb()
-    .prepare("SELECT * FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1")
+    .prepare(
+      `SELECT * FROM sessions WHERE agent_group_id = ? AND status = 'active'
+      AND (messaging_group_id IS NOT NULL OR thread_id IS NULL) ORDER BY created_at DESC LIMIT 1`,
+    )
     .get(agentGroupId) as Session | undefined;
 }
 

@@ -121,6 +121,21 @@ export function writeMessageOutWithConnections(
   inbound: Database,
 ): number {
   validateMessageContent(msg.content);
+  if (msg.channel_type === 'agent' && msg.platform_id && msg.kind !== 'system' && msg.thread_id == null) {
+    const origin = msg.in_reply_to ? inbound.prepare(
+      'SELECT channel_type, platform_id, thread_id FROM messages_in WHERE id = ?',
+    ).get(msg.in_reply_to) as { channel_type: string | null; platform_id: string | null; thread_id: string | null } | undefined
+      : undefined;
+    if (origin?.channel_type === 'agent' && origin.platform_id === msg.platform_id && !origin.thread_id) {
+      throw new Error('Cannot reply to a peer message without an exchange identity');
+    }
+    msg = {
+      ...msg,
+      thread_id: origin?.channel_type === 'agent' && origin.platform_id === msg.platform_id
+        ? origin.thread_id
+        : `a2a:${msg.turn_id ?? msg.id}:${msg.platform_id}`,
+    };
+  }
   outbound.exec('BEGIN IMMEDIATE');
   try {
     const content = JSON.stringify({

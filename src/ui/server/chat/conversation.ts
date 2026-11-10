@@ -14,7 +14,7 @@ import type {
   ConversationUsage,
 } from '../../shared/conversation.js';
 import { publicInboundMessageId, readConversationHistory } from './history.js';
-import { routeMatches, transcriptRouteMatches, type TurnContext } from './conversation-context.js';
+import { routeMatches, type TurnContext } from './conversation-context.js';
 import { renderedReadCursor } from './read-state.js';
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
@@ -69,7 +69,8 @@ function usageValue(row: Record<string, unknown>): Partial<ConversationUsage> {
     'duration_ms',
     'duration_api_ms',
   ])
-    if (row[key] !== undefined && (row[key] !== null || key === 'reported_tokens' || key === 'cost_source')) value[key] = row[key];
+    if (row[key] !== undefined && (row[key] !== null || key === 'reported_tokens' || key === 'cost_source'))
+      value[key] = row[key];
   return value as Partial<ConversationUsage>;
 }
 
@@ -104,7 +105,7 @@ export function projectConversation(
     if (message.turnId && !byId.has(message.turnId)) throw new Error('Missing conversation turn association');
   }
   const owns = (turn: TurnRow) =>
-    transcriptRouteMatches(context, turn.origin_channel_type, turn.origin_platform_id, turn.origin_thread_id);
+    routeMatches(context, turn.origin_channel_type, turn.origin_platform_id, turn.origin_thread_id);
   const unknown = (turn: TurnRow) =>
     turn.provenance !== 'native' && turn.origin_channel_type === null && turn.origin_platform_id === null;
   const messages: ConversationMessage[] = history
@@ -220,15 +221,11 @@ export function projectConversation(
     live &&
     turnIds.has(live.id) &&
     byId.get(live.id)?.phase !== 'settled' &&
-    transcriptRouteMatches(context, live.channelType, live.platformId, live.threadId)
+    routeMatches(context, live.channelType, live.platformId, live.threadId)
       ? live
       : null;
   const connected = signals.active.connected;
-  const actionable =
-    context.canSend &&
-    connected &&
-    !!active &&
-    routeMatches(context, active.channelType, active.platformId, active.threadId);
+  const actionable = context.canSend && connected && !!active;
   const view = {
     threadId,
     messages,

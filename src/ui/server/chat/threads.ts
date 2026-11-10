@@ -20,10 +20,12 @@ import {
   isElevated,
   platformIdFor,
   resolveTurnContext,
-  transcriptRouteMatches,
+  routeMatches,
   viewerHandlesForChannel,
 } from './conversation-context.js';
 import { conversationUnread } from './read-state.js';
+import { getAgentGroup } from '../../../db/agent-groups.js';
+import { peerConversationId } from '../../shared/peer-conversation.js';
 
 interface UserMessagingContext {
   messagingGroupId: string;
@@ -84,7 +86,7 @@ export function viewerHasContent(userId: string, agentGroupId: string): boolean 
   )
     return true;
   return getSessionsByAgentGroup(agentGroupId).some(
-    (session) => !!readSessionThreadSummary({ agentGroupId, sessionId: session.id }).peerMessages,
+    (session) => !!readSessionThreadSummary({ agentGroupId, sessionId: session.id }).peerConversations?.length,
   );
 }
 
@@ -216,17 +218,15 @@ function withExecutionActivity(userId: string, agentGroupId: string, threads: Th
     const unread = conversationUnread(userId, agentGroupId, context);
     const state = live.get(thread.sessionId)!;
     const current =
-      state.turn && transcriptRouteMatches(context, state.turn.channelType, state.turn.platformId, state.turn.threadId)
+      state.turn && routeMatches(context, state.turn.channelType, state.turn.platformId, state.turn.threadId)
         ? state.turn
         : null;
     const durable = saved
       .get(thread.sessionId)
-      ?.find((turn) => transcriptRouteMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null));
+      ?.find((turn) => routeMatches(context, turn.channel_type, turn.platform_id, turn.thread_id || null));
     const pending = queued
       .get(thread.sessionId)
-      ?.some((route) =>
-        transcriptRouteMatches(context, route.channel_type, route.platform_id, route.thread_id || null),
-      );
+      ?.some((route) => routeMatches(context, route.channel_type, route.platform_id, route.thread_id || null));
     const running =
       pending ||
       (current && !(durable?.id === current.id && durable.phase === 'settled')) ||
@@ -431,31 +431,18 @@ function collectThreadsForContexts(
   for (const session of sessions) {
     const cached = plans.findIndex((plan) => plan.session.id === session.id);
     const scan = cached >= 0 ? summaries[cached] : readSessionThreadSummary({ agentGroupId, sessionId: session.id });
-    if (!scan.peerMessages) continue;
-    const { messageCount, lastActivityAt } = scan.peerMessages;
-    const primary = out.find(
-      (thread) =>
-        thread.sessionId === session.id &&
-        thread.threadId === session.thread_id &&
-        thread.messagingGroupId === session.messaging_group_id,
-    );
-    if (primary) {
-      primary.messageCount += messageCount;
-      primary.lastActivityAt =
-        lastActivityAt === null
-          ? primary.lastActivityAt
-          : Math.max(primary.lastActivityAt ?? lastActivityAt, lastActivityAt);
-    } else {
+    for (const peer of scan.peerConversations ?? []) {
       out.push({
-        threadId: `__agent:${session.id}`,
+        threadId: peerConversationId(session.id, peer.threadId),
         sessionId: session.id,
         channelType: 'agent',
         messagingGroupId: session.id,
         platformId: agentGroupId,
         sessionMode: 'agent-shared',
-        title: 'Agent messages',
-        lastActivityAt,
-        messageCount,
+        title: peer.title,
+        counterparty: peer.peerIds.map((id) => getAgentGroup(id)?.name || id).join(', '),
+        lastActivityAt: peer.lastActivityAt,
+        messageCount: peer.messageCount,
         activity: 'idle',
       });
     }

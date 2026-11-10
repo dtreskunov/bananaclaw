@@ -26,9 +26,9 @@
     mod
   ));
 
-  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
+  // node_modules/path-to-regexp/dist/index.js
   var require_dist = __commonJS({
-    "../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
+    "node_modules/path-to-regexp/dist/index.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.PathError = exports.TokenData = void 0;
@@ -395,7 +395,7 @@
     }
   });
 
-  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
+  // node_modules/preact/dist/preact.module.js
   var n;
   var l;
   var u;
@@ -652,7 +652,7 @@
     return n3.__v.__b - l7.__v.__b;
   }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
+  // node_modules/preact/hooks/dist/hooks.module.js
   var t2;
   var r2;
   var u2;
@@ -751,7 +751,7 @@
     });
   }
 
-  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
+  // node_modules/@preact/signals-core/dist/signals-core.module.js
   var i3 = Symbol.for("preact-signals");
   function t3() {
     if (!(s3 > 1)) {
@@ -1142,7 +1142,7 @@
     return r4;
   }
 
-  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
+  // node_modules/@preact/signals/dist/signals.module.js
   var s4;
   var h3;
   var l4;
@@ -1361,6 +1361,21 @@
     return cursor(value);
   }
 
+  // ../../shared/conversation.ts
+  function isTurnUsageAdvisory(value) {
+    if (!object(value) || Object.keys(value).length !== 6 || !integer(value.threshold) || value.threshold === 0 || !integer(value.reportedTokens) || Number(value.reportedTokens) < Number(value.threshold) || !integer(value.triggeredAt) || !(value.appliedAt === null || integer(value.appliedAt)) || !(value.finishedAt === null || integer(value.finishedAt))) return false;
+    switch (value.status) {
+      case "queued":
+        return value.appliedAt === null && value.finishedAt === null;
+      case "applied":
+        return value.appliedAt !== null && value.finishedAt === null;
+      case "skipped":
+        return value.appliedAt === null && value.finishedAt !== null;
+      default:
+        return false;
+    }
+  }
+
   // ../../../time.ts
   function isEpochMs(value) {
     return typeof value === "number" && Number.isSafeInteger(value) && Math.abs(value) <= 864e13;
@@ -1477,9 +1492,11 @@
   }
 
   // ../../shared/conversation-protocol.ts
-  var CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 1;
+  var CONVERSATION_PROTOCOL_VERSION = UI_TIMESTAMP_PROTOCOL_VERSION + 2;
   var strings = array(id);
   var usageFields = {
+    reported_tokens: nullable(integer),
+    cost_source: nullable(oneOf("reported", "estimated", "unavailable", "mixed")),
     cost_usd: number,
     input_tokens: number,
     output_tokens: number,
@@ -1515,7 +1532,10 @@
       })
     ),
     canEditPending: optional(bool),
-    author: optional(shape({ userId: id, displayName: text })),
+    author: optional(
+      (value) => object(value) && text(value.displayName) && (id(value.userId) && value.agentGroupId === void 0 || id(value.agentGroupId) && value.userId === void 0)
+    ),
+    recipient: optional(shape({ agentGroupId: id, displayName: text })),
     deliveryOrigin: optional(oneOf("send_message", "send_file", "response")),
     systemGenerated: optional(bool),
     suggestedAction: optional(oneOf("continue", "retry", "report")),
@@ -1566,7 +1586,8 @@
     metadata: shape({
       status: oneOf("provisional", "partial", "final", "unavailable"),
       model: nullable(text),
-      durationMs: nullable(number)
+      durationMs: nullable(number),
+      usageAdvisory: optional(nullable(isTurnUsageAdvisory))
     })
   };
   var turn = shape({ ...turnFields, activity: array(activityLine) });
@@ -1854,7 +1875,8 @@
     if (sending || turns.some((turn4) => turn4.phase !== "settled")) return false;
     const index = messages2.findIndex((message3) => message3.id === messageId);
     const message2 = messages2[index];
-    if (!message2 || message2.direction !== "out" || message2.deliveryOrigin !== "response") return false;
+    if (!message2 || message2.direction !== "out" || message2.recipient || message2.deliveryOrigin !== "response")
+      return false;
     const turn3 = turns.find((candidate) => candidate.id === message2.turnId);
     return turn3?.phase === "settled" && turn3.outcome === "replied" && !messages2.slice(index + 1).some((next) => next.direction !== "event" && next.inputState?.status !== "cancelled");
   }
@@ -2392,7 +2414,7 @@
   // src/hash.ts
   var import_path_to_regexp = __toESM(require_dist(), 1);
 
-  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
+  // node_modules/marked/lib/marked.esm.js
   function M2() {
     return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
   }
@@ -3744,6 +3766,7 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
       if (!target || typeof target !== "object" || !("id" in target) || !text2(target.id) || ids.has(target.id))
         return false;
       ids.add(target.id);
+      if ("readCursor" in target && !isReadCursor(target.readCursor)) return false;
       if (!("origin" in target)) return false;
       const origin = target.origin;
       return !!origin && typeof origin === "object" && "agentGroupId" in origin && text2(origin.agentGroupId) && "threadId" in origin && text2(origin.threadId) && "channelType" in origin && text2(origin.channelType) && "messagingGroupId" in origin && text2(origin.messagingGroupId);
@@ -3850,7 +3873,6 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
   // src/attention-state.ts
   var attentionTargets = y2(null);
   var attentionError = y2(null);
-  var attentionSelection = y2(null);
 
   // src/credentials-navigation.ts
   var credentialsIntent = y2(null);
@@ -3858,7 +3880,14 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
     typeof location === "undefined" ? null : new URLSearchParams(location.search).get("access_request")
   );
 
-  // ../../../../../../home/denis/nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+  // src/activity-navigation.ts
+  var activitySelection = y2(null);
+  var activityNavigationPending = y2(null);
+
+  // src/transcript-reader.ts
+  var readerSelection = y2(null);
+
+  // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
   var f4 = 0;
   var i4 = Array.isArray;
   function u4(e4, t4, n3, o4, i5, u5) {
@@ -3880,7 +3909,7 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
       hideTimer = null;
     }
     toastMessage.value = message2;
-    if (message2.kind === "err" || message2.action) return;
+    if (message2.kind === "err" && !message2.transient || message2.action) return;
     hideTimer = setTimeout(() => {
       hideTimer = null;
       if (toastMessage.value?.id === message2.id) dismissToast();
@@ -3896,9 +3925,9 @@ Please report this to https://github.com/markedjs/marked.`, e4) {
       displayToast(message2, ms);
     }
   }
-  function showToast(text2, kind = "ok", ms = 1800) {
+  function showToast(text2, kind = "ok", ms = 1800, options = {}) {
     const id2 = nextId++;
-    enqueueToast({ id: id2, text: text2, kind }, ms);
+    enqueueToast({ id: id2, text: text2, kind, ...options }, ms);
     return id2;
   }
   function dismissToast() {

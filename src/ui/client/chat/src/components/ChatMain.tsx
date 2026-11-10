@@ -1891,6 +1891,9 @@ function ReadonlyBanner() {
   if (!channelType.value || channelType.value === 'web') {
     return <div class="readonly-banner">Read-only view — sending is unavailable for this thread.</div>;
   }
+  if (channelType.value === 'agent') {
+    return <div class="readonly-banner">Read-only agent conversation. Give the agent instructions in a Web thread.</div>;
+  }
   const meta = channelMeta(channelType.value);
   return <div class="readonly-banner">Read-only view — reply on {meta.label} to continue this thread.</div>;
 }

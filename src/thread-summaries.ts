@@ -54,6 +54,7 @@ interface OutboundSummary {
   count: number;
   last: number | null;
   latestAt?: number | null;
+  first?: { seq: number; title: string };
 }
 export interface SummaryTurn {
   id: string;
@@ -82,7 +83,9 @@ export interface SessionThreadSummary {
   totalCost: number;
   totalTokens: number;
   turnCount: number;
-  peerMessages?: { messageCount: number; lastActivityAt: number | null };
+  peerConversations?: {
+    threadId: string; peerIds: string[]; title: string; messageCount: number; lastActivityAt: number | null;
+  }[];
 }
 
 function parsedContent(content: string): unknown {
@@ -143,25 +146,26 @@ function title(text: string): string {
   );
 }
 function latest(values: (number | null)[]): number | null {
-  return values.reduce<number | null>((last, value) =>
-    value === null ? last : last === null ? value : Math.max(last, value), null);
+  return values.reduce<number | null>(
+    (last, value) => (value === null ? last : last === null ? value : Math.max(last, value)),
+    null,
+  );
 }
 
 function summarizeInbound(db: Database.Database, route: Route): InboundSummary {
   const params = [route.channel_type, route.platform_id, route.thread_id];
   const where = `channel_type = ? AND COALESCE(platform_id, '') = ? AND COALESCE(thread_id, '') = ?`;
-  const count =
-    db
-      .prepare(
-        `SELECT COUNT(*) AS count, MAX(timestamp) AS last,
+  const count = db
+    .prepare(
+      `SELECT COUNT(*) AS count, MAX(timestamp) AS last,
       MAX(CASE WHEN kind='task' AND status='completed' AND process_after IS NOT NULL
         THEN MAX(timestamp,process_after) ELSE timestamp END) AS latestAt,
       MIN(CASE WHEN status = 'pending' AND trigger = 1 AND kind != 'system'
         THEN CASE WHEN process_after IS NULL THEN 0
           ELSE process_after END END) AS pendingAt
       FROM messages_in WHERE ${where}`,
-      )
-      .get(...params) as Pick<InboundSummary, 'count' | 'last' | 'latestAt' | 'pendingAt'>;
+    )
+    .get(...params) as Pick<InboundSummary, 'count' | 'last' | 'latestAt' | 'pendingAt'>;
   const first = db
     .prepare(`SELECT seq, content, platform_id FROM messages_in WHERE ${where} ORDER BY seq LIMIT 5`)
     .all(...params) as { seq: number; content: string; platform_id: string }[];
@@ -216,30 +220,33 @@ function summarizeSource(db: Database.Database, source: SummaryRow['source'], ro
       )
       .get();
   if (route.kind === 'turn')
-    return (
-      db
-        .prepare(
-          `
+    return (db
+      .prepare(
+        `
     SELECT id, phase, started_at FROM turns WHERE COALESCE(origin_channel_type,'')=?
       AND COALESCE(origin_platform_id,'')=? AND COALESCE(origin_thread_id,'')=?
     ORDER BY started_at DESC, id DESC LIMIT 1
   `,
-        )
-        .get(route.channel_type, route.platform_id, route.thread_id) ?? null
-    ) as SummaryTurn | null;
+      )
+      .get(route.channel_type, route.platform_id, route.thread_id) ?? null) as SummaryTurn | null;
   if (source === 'inbound') return summarizeInbound(db, route);
-  return (
-    db
-      .prepare(
-        `
+  const summary = db
+    .prepare(
+      `
     SELECT COUNT(CASE WHEN kind IN ('chat','text') THEN 1 END) AS count,
       MAX(CASE WHEN kind IN ('chat','text') THEN timestamp END) AS last,
       MAX(timestamp) AS latestAt FROM messages_out
     WHERE COALESCE(channel_type,'')=? AND COALESCE(platform_id,'')=? AND COALESCE(thread_id,'')=?
   `,
-      )
-      .get(route.channel_type, route.platform_id, route.thread_id)
-  ) as OutboundSummary;
+    )
+    .get(route.channel_type, route.platform_id, route.thread_id) as OutboundSummary;
+  if (route.channel_type === 'agent' && summary.count > 0) {
+    const first = db.prepare(`SELECT seq,content FROM messages_out
+      WHERE channel_type='agent' AND platform_id=? AND COALESCE(thread_id,'')=? AND kind IN ('chat','text')
+      ORDER BY seq LIMIT 1`).get(route.platform_id, route.thread_id) as { seq: number; content: string };
+    summary.first = { seq: first.seq, title: fallbackTitle('agent', first.content) };
+  }
+  return summary;
 }
 
 export function assertThreadSummariesReady(): void {
@@ -314,9 +321,17 @@ export function refreshThreadSummaries(sessionId: string, dataDir = DATA_DIR): v
 
 export function reconcileThreadSummaries(groupId?: string, dataDir = DATA_DIR): void {
   assertThreadSummariesReady();
-  if (getDb().prepare(`SELECT 1 FROM thread_summaries s,json_tree(s.value) field
-    WHERE field.key IN ('last','nextRunAt','started_at') AND field.type NOT IN ('integer','null') LIMIT 1`).get())
-    throw new Error('Numeric thread summaries require offline backfill: pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped');
+  if (
+    getDb()
+      .prepare(
+        `SELECT 1 FROM thread_summaries s,json_tree(s.value) field
+    WHERE field.key IN ('last','nextRunAt','started_at') AND field.type NOT IN ('integer','null') LIMIT 1`,
+      )
+      .get()
+  )
+    throw new Error(
+      'Numeric thread summaries require offline backfill: pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped',
+    );
   const sessions = getDb()
     .prepare(`SELECT id FROM sessions${groupId ? ' WHERE agent_group_id=?' : ''}`)
     .all(...(groupId ? [groupId] : [])) as { id: string }[];
@@ -408,7 +423,9 @@ export function readSummaryTurns(sessionId: string): (Route & SummaryTurn)[] {
 
 function assertNumericSummaryTime(value: unknown): void {
   if (value !== null && !isEpochMs(value))
-    throw new Error('Numeric thread summaries require offline backfill: pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped');
+    throw new Error(
+      'Numeric thread summaries require offline backfill: pnpm exec tsx scripts/rebuild-thread-summaries.ts --host-stopped',
+    );
 }
 
 function readInboundSummary(row: SummaryRow): InboundSummary {
@@ -486,13 +503,20 @@ export function readSessionThreadSummary(spec: ThreadSummarySpec): SessionThread
       ? (JSON.parse(usage.value) as Pick<SessionThreadSummary, 'totalCost' | 'totalTokens' | 'turnCount'>)
       : { totalCost: 0, totalTokens: 0, turnCount: 0 }),
   };
-  const peers = [...inbound, ...outbound].filter((row) =>
-    row.channel_type === 'agent' && row.platform_id !== spec.agentGroupId && !row.thread_id);
-  const peerCount = peers.reduce((count, row) => count + row.data.count, 0);
-  if (peerCount) result.peerMessages = {
-    messageCount: peerCount,
-    lastActivityAt: latest(peers.map((row) => row.data.last)),
-  };
+  const peers = [...inbound, ...outbound].filter(
+    (row) => row.channel_type === 'agent' && row.platform_id !== spec.agentGroupId && !!row.thread_id && row.data.count > 0,
+  );
+  if (peers.length) result.peerConversations = [...new Set(peers.map((row) => row.thread_id))].map((threadId) => {
+    const exchange = peers.filter((row) => row.thread_id === threadId);
+    const first = exchange.flatMap((row) => row.data.first ? [row.data.first] : []).sort((a, b) => a.seq - b.seq)[0];
+    return {
+      threadId,
+      peerIds: [...new Set(exchange.map((row) => row.platform_id))],
+      title: first?.title ? title(first.title) : 'Agent conversation',
+      messageCount: exchange.reduce((count, row) => count + row.data.count, 0),
+      lastActivityAt: latest(exchange.map((row) => row.data.last)),
+    };
+  });
   const replies = (channel: string, thread: string) =>
     outbound.filter((row) => row.channel_type === channel && row.thread_id === thread);
   const addThread = (key: NonNullable<ThreadSummarySpec['thread']>, inputs: typeof inbound) => {

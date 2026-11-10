@@ -18,6 +18,7 @@ import {
   viewerHandlesForChannel,
 } from './conversation-context.js';
 import { encodedAttachmentUrl, parseInputHandling, readChatHistory } from './history.js';
+import { parsePeerConversationId } from '../../shared/peer-conversation.js';
 import crypto from 'crypto';
 import http from 'http';
 import { isEpochMs } from '../../shared/time.js';
@@ -737,11 +738,35 @@ export async function handleChatRequest(
         agentGroupId: m.groupId,
         conversations: buildViewerSearchConversations(visibleThreads),
       });
+      const peerThreads = new Map(
+        visibleThreads
+          .filter((thread) => thread.channelType === 'agent')
+          .flatMap((thread) => {
+            const peer = parsePeerConversationId(thread.threadId);
+            return peer ? [[JSON.stringify([thread.sessionId, peer.threadId]), thread] as const] : [];
+          }),
+      );
+      const peerMessages = new Map<string, Set<string>>();
       writeJson(res, 200, {
-        results: results.map((result) => ({
-          ...result,
-          timestamp: result.timestamp,
-        })),
+        results: results.flatMap((result) => {
+          if (result.channelType !== 'agent') return [result];
+          const thread = peerThreads.get(JSON.stringify([result.sessionId, result.threadId]));
+          if (!thread) return [];
+          let visible = peerMessages.get(thread.threadId);
+          if (!visible) {
+            visible = new Set(readChatHistory(userId, m.groupId, thread.threadId, thread).map((message) => message.id));
+            peerMessages.set(thread.threadId, visible);
+          }
+          return visible.has(result.messageId)
+            ? [
+                {
+                  ...result,
+                  threadId: thread.threadId,
+                  messagingGroupId: thread.messagingGroupId,
+                },
+              ]
+            : [];
+        }),
       });
     } catch (err) {
       log.warn('web chat search failed', { userId, groupId: m.groupId, query, err });
@@ -1263,12 +1288,15 @@ export function buildViewerSearchConversations(threads: ThreadSummary[]): Search
     // Threadless DMs share one session across multiple viewers and outbound
     // rows have no durable audience key in the index, so fail closed.
     if (thread.kind === 'dm' || thread.threadId.startsWith('__dm:')) continue;
-    const key = `${thread.sessionId}\0${thread.threadId}\0${thread.channelType}`;
+    const peer = parsePeerConversationId(thread.threadId);
+    if (thread.channelType === 'agent' && !peer) continue;
+    const threadId = peer ? peer.threadId : thread.threadId;
+    const key = JSON.stringify([thread.sessionId, threadId, thread.channelType]);
     if (seen.has(key)) continue;
     seen.add(key);
     scopes.push({
       sessionId: thread.sessionId,
-      threadId: thread.threadId,
+      threadId,
       channelType: thread.channelType,
     });
   }

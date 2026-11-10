@@ -20,6 +20,8 @@ import { registerApprovalHandler } from '../../../modules/approvals/primitive.js
 import { readConversation } from './conversation.js';
 import { readChatHistory } from './history.js';
 import { approvalOrigin } from './approval-transcript.js';
+import { peerConversationId } from '../../shared/peer-conversation.js';
+import { refreshThreadSummaries } from '../../../thread-summaries.js';
 import { createApprovalWorkflow, finishApprovalWorkflow } from '../../../modules/approvals/workflows.js';
 import {
   CONVERSATION_PROTOCOL_VERSION,
@@ -104,6 +106,28 @@ describe('retained approval transcript', () => {
     });
   });
 
+  it('keeps approvals in their originating Agents exchange rather than a human thread', () => {
+    const db = openInboundDb('g', 's');
+    try {
+      db.prepare(
+        "UPDATE messages_in SET channel_type='agent',platform_id='peer',thread_id='a2a:request' WHERE id='source'",
+      ).run();
+    } finally {
+      db.close();
+    }
+    refreshThreadSummaries('s');
+    request();
+    const threadId = peerConversationId('s', 'a2a:request');
+    const origin = { agentGroupId: 'g', channelType: 'agent', messagingGroupId: 's', threadId };
+    expect(approvalOrigin('owner', getApproval('approval')!)).toEqual(origin);
+    expect(readConversation('owner', 'g', threadId, origin).interactions[0]).toMatchObject({
+      id: 'approval',
+      title: 'Install tool',
+      origin,
+    });
+    expect(view().interactions).toEqual([]);
+    expect(readConversation('member', 'g', threadId, origin).interactions).toEqual([]);
+  });
   it('retains account-setup purpose and its responder after completion and reload', () => {
     request('request_access', { resource_url: 'https://api.example.com/', reason: 'Read the report' });
     createApprovalWorkflow('approval', 'account-setup');

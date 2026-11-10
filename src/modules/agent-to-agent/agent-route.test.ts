@@ -6,7 +6,13 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { isSafeAttachmentName, routeAgentMessage } from './agent-route.js';
 import { createDestination } from './db/agent-destinations.js';
 import { initTestDb, closeDb, runMigrations, createAgentGroup } from '../../db/index.js';
-import { createSession, updateSession } from '../../db/sessions.js';
+import {
+  createSession,
+  findSessionByAgentGroup,
+  getSession,
+  getSessionsByAgentGroup,
+  updateSession,
+} from '../../db/sessions.js';
 import { initSessionFolder, inboundDbPath, sessionDir, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { wakeContainer } from '../../container-runner.js';
@@ -44,6 +50,14 @@ function readInbound(agentGroupId: string, sessionId: string) {
   }>;
   db.close();
   return rows;
+}
+
+function readPeerInbound(groupId: string) {
+  return getSessionsByAgentGroup(groupId).flatMap((session) =>
+    readInbound(groupId, session.id)
+      .filter((row) => row.channel_type === 'agent' && row.platform_id !== groupId)
+      .map((row) => ({ ...row, sessionId: session.id })),
+  );
 }
 
 describe('isSafeAttachmentName', () => {
@@ -170,6 +184,68 @@ describe('routeAgentMessage return-path', () => {
     if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
   });
 
+  it('keeps an exchange together, separates the next request, and retains exact round-trip provenance', async () => {
+    const request = (id: string, thread: string) => ({
+      id,
+      platform_id: B,
+      thread_id: thread,
+      in_reply_to: null,
+      content: JSON.stringify({ text: id }),
+    });
+    const firstThread = 'a2a:turn-1:ag-B';
+    await routeAgentMessage(request('first', firstThread), S1);
+    await routeAgentMessage(request('file', firstThread), S1);
+    await routeAgentMessage(request('second', 'a2a:turn-2:ag-B'), S1);
+    const rows = readPeerInbound(B);
+    const first = rows.find((row) => JSON.parse(row.content).text === 'first')!;
+    const file = rows.find((row) => JSON.parse(row.content).text === 'file')!;
+    const second = rows.find((row) => JSON.parse(row.content).text === 'second')!;
+    expect(first.sessionId).toBe(file.sessionId);
+    expect(first.sessionId).not.toBe(second.sessionId);
+    expect(readInbound(B, SB.id)).toEqual([]);
+    expect(findSessionByAgentGroup(B)?.id).toBe(SB.id);
+    await expect(routeAgentMessage(request('wrong-source', firstThread), S2)).rejects.toThrow(
+      'belongs to another source session',
+    );
+    const receiver = getSession(first.sessionId)!;
+    await routeAgentMessage(
+      {
+        id: 'answer',
+        platform_id: A,
+        thread_id: firstThread,
+        in_reply_to: first.id,
+        content: '{"text":"Answer"}',
+      },
+      receiver,
+    );
+    const answer = readInbound(A, S1.id)[0];
+    expect(answer.source_session_id).toBe(receiver.id);
+    expect(readInbound(A, S2.id)).toEqual([]);
+    await routeAgentMessage(
+      {
+        id: 'ack',
+        platform_id: B,
+        thread_id: firstThread,
+        in_reply_to: answer.id,
+        content: '{"text":"Thanks"}',
+      },
+      S1,
+    );
+    expect(readInbound(B, receiver.id)).toHaveLength(3);
+    await expect(
+      routeAgentMessage(
+        {
+          id: 'wrong-thread',
+          platform_id: A,
+          thread_id: 'a2a:another',
+          in_reply_to: first.id,
+          content: '{"text":"Wrong exchange"}',
+        },
+        receiver,
+      ),
+    ).rejects.toThrow('does not match');
+  });
+
   it('forward direction: stamps source_session_id on the target inbound row', async () => {
     // A.S1 emits an outbound a2a to B.
     await routeAgentMessage(
@@ -182,7 +258,7 @@ describe('routeAgentMessage return-path', () => {
       S1,
     );
 
-    const bRows = readInbound(B, SB.id);
+    const bRows = readPeerInbound(B);
     expect(bRows).toHaveLength(1);
     expect(bRows[0].platform_id).toBe(A);
     expect(bRows[0].source_session_id).toBe(S1.id); // <- the return address
@@ -205,17 +281,19 @@ describe('routeAgentMessage return-path', () => {
         },
         S1,
       );
-    const rows = readInbound(B, SB.id);
+    const rows = readPeerInbound(B);
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.trigger === 0)).toBe(true);
     expect(rows.every((row) => row.source_session_id === S1.id)).toBe(true);
     expect(JSON.parse(rows[0].content)).toMatchObject({ text: 'Provider quota exhausted', system_generated: true });
     expect(wakeContainer).not.toHaveBeenCalled();
-    const targetDb = new Database(inboundDbPath(B, SB.id), { readonly: true });
-    try {
-      expect(countDueMessages(targetDb)).toBe(0);
-    } finally {
-      targetDb.close();
+    for (const row of rows) {
+      const targetDb = new Database(inboundDbPath(B, row.sessionId), { readonly: true });
+      try {
+        expect(countDueMessages(targetDb)).toBe(0);
+      } finally {
+        targetDb.close();
+      }
     }
   });
 
@@ -230,7 +308,7 @@ describe('routeAgentMessage return-path', () => {
       },
       S1,
     );
-    expect(readInbound(B, SB.id)[0].trigger).toBe(1);
+    expect(readPeerInbound(B)[0].trigger).toBe(1);
     expect(wakeContainer).toHaveBeenCalledOnce();
   });
 
@@ -248,7 +326,7 @@ describe('routeAgentMessage return-path', () => {
 
     // Capture the synthetic id the host stamped on B's inbound — that's what
     // B's container would reference as `in_reply_to` when replying.
-    const bRows = readInbound(B, SB.id);
+    const bRows = readPeerInbound(B);
     const yId = bRows[0].id;
 
     // B replies to that message.
@@ -259,7 +337,7 @@ describe('routeAgentMessage return-path', () => {
         content: JSON.stringify({ text: 'pong' }),
         in_reply_to: yId,
       },
-      SB,
+      getSession(bRows[0].sessionId)!,
     );
 
     const s1Rows = readInbound(A, S1.id);
@@ -272,7 +350,7 @@ describe('routeAgentMessage return-path', () => {
     expect(s2Rows).toHaveLength(0);
   });
 
-  it('routes an explicit group-level send through the normal agent-shared session policy', async () => {
+  it('routes a new peer request into a dedicated session instead of an existing user session', async () => {
     // No prior conversation. B initiates an a2a to A out of the blue.
     await routeAgentMessage(
       {
@@ -284,11 +362,17 @@ describe('routeAgentMessage return-path', () => {
       SB,
     );
 
-    // Group-level delivery uses the target agent's current shared session.
+    // Neither pre-existing session receives an unrelated peer request.
     const s1Rows = readInbound(A, S1.id);
     const s2Rows = readInbound(A, S2.id);
     expect(s1Rows).toHaveLength(0);
-    expect(s2Rows).toHaveLength(1);
+    expect(s2Rows).toHaveLength(0);
+    const peer = readPeerInbound(A);
+    expect(peer).toHaveLength(1);
+    expect(getSession(peer[0].sessionId)).toMatchObject({
+      messaging_group_id: null,
+      thread_id: 'a2a:msg-from-B-fresh:ag-A',
+    });
   });
 
   it('does not infer reply affinity for an unthreaded group-level send', async () => {
@@ -319,8 +403,8 @@ describe('routeAgentMessage return-path', () => {
     const s1Rows = readInbound(A, S1.id);
     const s2Rows = readInbound(A, S2.id);
     expect(s1Rows).toHaveLength(0);
-    expect(s2Rows).toHaveLength(1);
-    expect(JSON.parse(s2Rows[0].content).text).toBe('standing by');
+    expect(s2Rows).toHaveLength(0);
+    expect(JSON.parse(readPeerInbound(A)[0].content).text).toBe('standing by');
   });
 
   it('rejects a reply whose exact origin session is no longer active', async () => {
@@ -329,7 +413,7 @@ describe('routeAgentMessage return-path', () => {
       { id: 'msg-fwd', platform_id: B, content: JSON.stringify({ text: 'hello' }), in_reply_to: null },
       S1,
     );
-    const bRows = readInbound(B, SB.id);
+    const bRows = readPeerInbound(B);
     const inboundId = bRows[0].id;
 
     // Close S1 — simulates session cleanup or channel disconnect.
@@ -338,7 +422,7 @@ describe('routeAgentMessage return-path', () => {
     await expect(
       routeAgentMessage(
         { id: 'msg-reply-stale', platform_id: A, content: JSON.stringify({ text: 'reply' }), in_reply_to: inboundId },
-        SB,
+        getSession(bRows[0].sessionId)!,
       ),
     ).rejects.toThrow(`source session ${S1.id} is not active for ${A}`);
 
@@ -421,7 +505,7 @@ describe('routeAgentMessage return-path', () => {
       { id: 'msg-from-C', platform_id: B, content: JSON.stringify({ text: 'from C' }), in_reply_to: null },
       SC,
     );
-    const bRows = readInbound(B, SB.id);
+    const bRows = readPeerInbound(B);
     const cInboundId = bRows.find((r) => r.platform_id === C)!.id;
 
     // B explicitly targets A while the inherited reply reference belongs to
@@ -433,13 +517,14 @@ describe('routeAgentMessage return-path', () => {
         content: JSON.stringify({ text: 'misdirected' }),
         in_reply_to: cInboundId,
       },
-      SB,
+      getSession(bRows[0].sessionId)!,
     );
 
     const s1Rows = readInbound(A, S1.id);
     const s2Rows = readInbound(A, S2.id);
     expect(s1Rows).toHaveLength(0);
-    expect(s2Rows).toHaveLength(1);
+    expect(s2Rows).toHaveLength(0);
+    expect(readPeerInbound(A)).toHaveLength(1);
   });
 
   it('treats an inherited channel reply reference as a group-level send', async () => {
@@ -469,7 +554,8 @@ describe('routeAgentMessage return-path', () => {
     const s1Rows = readInbound(A, S1.id);
     const s2Rows = readInbound(A, S2.id);
     expect(s1Rows).toHaveLength(0);
-    expect(s2Rows).toHaveLength(1);
+    expect(s2Rows).toHaveLength(0);
+    expect(readPeerInbound(A)).toHaveLength(1);
   });
 
   it('self-message is allowed without a destination row', async () => {
@@ -503,7 +589,7 @@ describe('routeAgentMessage return-path', () => {
     await routeAgentMessage({ id: 'duplicate-ack', platform_id: B, content: sameContent, in_reply_to: null }, S1);
 
     // Suppressed — nothing reaches B.
-    expect(readInbound(B, SB.id)).toHaveLength(0);
+    expect(readPeerInbound(B)).toHaveLength(0);
   });
 
   it('byte-identical squelch: different content to the same peer goes through', async () => {
@@ -526,7 +612,7 @@ describe('routeAgentMessage return-path', () => {
       S1,
     );
 
-    const bRows = readInbound(B, SB.id);
+    const bRows = readPeerInbound(B);
     expect(bRows).toHaveLength(1);
     expect(JSON.parse(bRows[0].content).text).toBe('second thought, refined');
   });
@@ -552,13 +638,14 @@ describe('routeAgentMessage return-path', () => {
     }
     // BUG: all 40 messages go through — no cap, no throttle.
     // Once loop prevention lands, this should throw or reject after a threshold.
-    const bRows = readInbound(B, SB.id);
+    const bRows = readPeerInbound(B);
     const s1Rows = readInbound(A, S1.id);
     const s2Rows = readInbound(A, S2.id);
     expect(errors).toHaveLength(0);
     expect(bRows).toHaveLength(20);
-    expect(s1Rows.length + s2Rows.length).toBe(20);
-  });
+    expect(s1Rows.length + s2Rows.length).toBe(0);
+    expect(readPeerInbound(A)).toHaveLength(20);
+  }, 20_000);
 
   it('file forwarding: copies bytes from source outbox to target inbox', async () => {
     // Place a file in S1's outbox for the message.
@@ -576,7 +663,7 @@ describe('routeAgentMessage return-path', () => {
       S1,
     );
 
-    const bRows = readInbound(B, SB.id);
+    const bRows = readPeerInbound(B);
     expect(bRows).toHaveLength(1);
     const parsed = JSON.parse(bRows[0].content);
     expect(parsed.attachments).toHaveLength(1);
@@ -584,7 +671,7 @@ describe('routeAgentMessage return-path', () => {
     expect(parsed.attachments[0].type).toBe('file');
 
     // Verify actual file bytes were copied to the target inbox.
-    const targetPath = path.join(sessionDir(B, SB.id), parsed.attachments[0].localPath);
+    const targetPath = path.join(sessionDir(B, bRows[0].sessionId), parsed.attachments[0].localPath);
     expect(fs.existsSync(targetPath)).toBe(true);
     expect(fs.readFileSync(targetPath, 'utf-8')).toBe('fake-pdf-bytes');
   });
@@ -607,7 +694,7 @@ describe('routeAgentMessage return-path', () => {
       S1,
     );
 
-    const bRows = readInbound(B, SB.id);
+    const bRows = readPeerInbound(B);
     expect(bRows).toHaveLength(1);
     const parsed = JSON.parse(bRows[0].content);
     expect(parsed.attachments).toHaveLength(0);

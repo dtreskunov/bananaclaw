@@ -6,7 +6,7 @@ import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
 import { listThreadsForViewer } from './threads.js';
 import { readConversation } from './conversation.js';
-import { resolveTurnContext, routeMatches } from './conversation-context.js';
+import { conversationRouteFilter, resolveTurnContext, routeMatches } from './conversation-context.js';
 import {
   newestUnreadPublication,
   publicationReadCursor,
@@ -49,14 +49,15 @@ function readRouteTarget(
   if (kind === 'running') {
     const inbound = openInboundDb(groupId, context.sessionId);
     try {
+      const filter = conversationRouteFilter(context);
       const queued = inbound
         .prepare(
           `SELECT id FROM messages_in
-        WHERE channel_type=? AND thread_id IS ? AND platform_id IN (${context.platformIds.map(() => '?')})
+        WHERE ${filter.sql}
           AND status='pending' AND trigger=1 AND kind!='system'
-          AND (process_after IS NULL OR process_after<=?)`,
+          AND (process_after IS NULL OR process_after<=@now)`,
         )
-        .all(context.channelType, context.threadId, ...context.platformIds, Date.now()) as { id: string }[];
+        .all({ ...filter.params, now: Date.now() }) as { id: string }[];
       for (const row of queued) inputs.add(publicInboundMessageId(row.id, groupId));
     } finally {
       inbound.close();
@@ -96,12 +97,10 @@ function latestBounds(userId: string, groupId: string, threads: ThreadSummary[])
       const routes = summaries.get(thread.sessionId);
       // Unknown bounds disable pruning; the normal reader already handles every source kind.
       if (!routes) return [thread, Infinity];
+      const context = resolveTurnContext(userId, groupId, thread.threadId, thread);
       const times = routes
         .filter(
-          (route) =>
-            route.channel_type === thread.channelType &&
-            route.thread_id === (thread.kind === 'dm' ? '' : thread.threadId) &&
-            (thread.kind === 'dm' || route.platform_id === thread.platformId),
+          (route) => context && routeMatches(context, route.channel_type, route.platform_id, route.thread_id || null),
         )
         .map((route) => route.latestAt ?? -Infinity);
       return [thread, Math.max(bounds.get(thread.sessionId) ?? -Infinity, ...times)];

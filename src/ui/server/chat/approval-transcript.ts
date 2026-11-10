@@ -13,6 +13,7 @@ import { interactionRoute } from '../../../conversation-publications.js';
 import type { ApprovalOrigin, ConversationApproval } from '../../shared/approval.js';
 import { presentApproval } from './approval-presentation.js';
 import { resolveTurnContext, type TurnContext } from './conversation-context.js';
+import { peerConversationId } from '../../shared/peer-conversation.js';
 
 export function approvalOrigin(
   userId: string,
@@ -23,6 +24,21 @@ export function approvalOrigin(
   const mg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
   const route = interactionRoute(row);
   if (!route) return null;
+  if (
+    route.channel_type === 'agent' &&
+    route.platform_id &&
+    route.thread_id &&
+    route.platform_id !== session.agent_group_id
+  ) {
+    const threadId = peerConversationId(session.id, route.thread_id);
+    const origin = {
+      agentGroupId: session.agent_group_id,
+      threadId,
+      channelType: 'agent',
+      messagingGroupId: session.id,
+    };
+    return resolveTurnContext(userId, session.agent_group_id, threadId, origin) ? origin : null;
+  }
   let messagingGroupId = mg?.channel_type === route.channel_type && mg.platform_id === route.platform_id ? mg.id : null;
   if (!messagingGroupId) {
     const candidates = getDb()
@@ -91,10 +107,11 @@ export function projectApproval(userId: string, row: Approval): ConversationAppr
 }
 
 export function approvalTranscript(userId: string, groupId: string, context: TurnContext): ConversationApproval[] {
-  if (!context.sessionId || !hasAdminPrivilege(userId, groupId)) return [];
+  const sessionId = context.sessionId;
+  if (!sessionId || !hasAdminPrivilege(userId, groupId)) return [];
   const rows = queryInteractions<Approval>(
     "SELECT * FROM interactions WHERE session_id=? AND kind!='question' ORDER BY created_at,id",
-    context.sessionId,
+    sessionId,
   );
   return rows.flatMap((row) => {
     const approval = projectApproval(userId, row);
@@ -102,7 +119,10 @@ export function approvalTranscript(userId: string, groupId: string, context: Tur
     if (
       !origin ||
       origin.channelType !== context.channelType ||
-      origin.threadId !== (context.threadId ?? `__dm:${origin.messagingGroupId}`)
+      origin.threadId !==
+        (context.channelType === 'agent' && context.threadId
+          ? peerConversationId(sessionId, context.threadId)
+          : (context.threadId ?? `__dm:${origin.messagingGroupId}`))
     )
       return [];
     return [approval];
@@ -115,6 +135,7 @@ export function isRepresentedApprovalOutcome(
   context: TurnContext,
   content: string,
 ): boolean {
+  if (!context.sessionId) return false;
   let payload: unknown;
   try {
     payload = JSON.parse(content);
@@ -138,6 +159,9 @@ export function isRepresentedApprovalOutcome(
   return (
     !!origin &&
     origin.channelType === context.channelType &&
-    origin.threadId === (context.threadId ?? `__dm:${origin.messagingGroupId}`)
+    origin.threadId ===
+      (context.channelType === 'agent' && context.threadId
+        ? peerConversationId(context.sessionId, context.threadId)
+        : (context.threadId ?? `__dm:${origin.messagingGroupId}`))
   );
 }

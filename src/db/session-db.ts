@@ -499,11 +499,12 @@ export interface InboundReturnRoute {
   channel_type: string | null;
   platform_id: string | null;
   source_session_id: string | null;
+  thread_id: string | null;
 }
 
 /** Read the recorded provenance of an inbound row referenced by a reply. */
 export function getInboundReturnRoute(db: Database.Database, messageId: string): InboundReturnRoute | undefined {
   return db
-    .prepare('SELECT channel_type, platform_id, source_session_id FROM messages_in WHERE id = ?')
+    .prepare('SELECT channel_type, platform_id, source_session_id, thread_id FROM messages_in WHERE id = ?')
     .get(messageId) as InboundReturnRoute | undefined;
 }

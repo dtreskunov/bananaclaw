@@ -104,7 +104,7 @@ export function resolveSession(
     if (existing) {
       return { session: existing, created: false };
     }
-  } else if (messagingGroupId) {
+  } else if (messagingGroupId || (sessionMode === 'per-thread' && threadId)) {
     const lookupThreadId = sessionMode === 'shared' ? null : threadId;
     // Scope lookup by agent_group_id so fan-out to multiple agents in the
     // same chat doesn't accidentally deliver to the wrong agent's session.

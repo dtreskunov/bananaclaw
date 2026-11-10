@@ -163,6 +163,8 @@ export interface RoutableAgentMessage {
    * reply back to the originating session — see `resolveTargetSession`.
    */
   in_reply_to: string | null;
+  thread_id?: string | null;
+  turn_id?: string | null;
 }
 
 /**
@@ -173,9 +175,13 @@ export interface RoutableAgentMessage {
  * silently selecting another session can expose the reply in the wrong
  * conversation. An unthreaded send, or one whose inherited `in_reply_to`
  * points at a channel/other-agent message, is an explicit group-level send
- * and uses the target group's normal agent-shared session policy.
+ * and starts a dedicated peer exchange, never reusing a human session.
  */
-function resolveTargetSession(msg: RoutableAgentMessage, sourceSession: Session, targetAgentGroupId: string): Session {
+function resolveTargetSession(
+  msg: RoutableAgentMessage,
+  sourceSession: Session,
+  targetAgentGroupId: string,
+): { session: Session; threadId: string | null } {
   if (msg.in_reply_to) {
     const srcDb = openInboundDb(sourceSession.agent_group_id, sourceSession.id);
     try {
@@ -190,19 +196,45 @@ function resolveTargetSession(msg: RoutableAgentMessage, sourceSession: Session,
             `cannot route agent reply ${msg.id}: inbound ${msg.in_reply_to} has no recorded source session`,
           );
         }
+        if (!route.thread_id) {
+          throw new Error(`cannot route agent reply ${msg.id}: inbound request has no peer exchange identity`);
+        }
         const candidate = getSession(route.source_session_id);
         if (!candidate || candidate.agent_group_id !== targetAgentGroupId || candidate.status !== 'active') {
           throw new Error(
             `cannot route agent reply ${msg.id}: source session ${route.source_session_id} is not active for ${targetAgentGroupId}`,
           );
         }
-        return candidate;
+        if (msg.thread_id && msg.thread_id !== route.thread_id) {
+          throw new Error(`cannot route agent reply ${msg.id}: peer conversation does not match its inbound request`);
+        }
+        return { session: candidate, threadId: route.thread_id };
       }
     } finally {
       srcDb.close();
     }
   }
-  return resolveSession(targetAgentGroupId, null, null, 'agent-shared').session;
+  if (targetAgentGroupId === sourceSession.agent_group_id) {
+    return { session: resolveSession(targetAgentGroupId, null, null, 'agent-shared').session, threadId: null };
+  }
+  const threadId = msg.thread_id ?? `a2a:${msg.turn_id ?? msg.id}:${targetAgentGroupId}`;
+  const { session, created } = resolveSession(targetAgentGroupId, null, threadId, 'per-thread');
+  if (!created) {
+    const db = openInboundDb(targetAgentGroupId, session.id);
+    try {
+      const owner = db
+        .prepare(
+          "SELECT platform_id,source_session_id FROM messages_in WHERE channel_type='agent' AND thread_id=? ORDER BY seq LIMIT 1",
+        )
+        .get(threadId) as { platform_id: string; source_session_id: string | null } | undefined;
+      if (owner?.platform_id !== sourceSession.agent_group_id || owner.source_session_id !== sourceSession.id) {
+        throw new Error(`cannot route agent message ${msg.id}: peer exchange belongs to another source session`);
+      }
+    } finally {
+      db.close();
+    }
+  }
+  return { session, threadId };
 }
 
 export async function routeAgentMessage(msg: RoutableAgentMessage, session: Session): Promise<void> {
@@ -251,7 +283,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     outDb.close();
   }
 
-  const targetSession = resolveTargetSession(msg, session, targetAgentGroupId);
+  const { session: targetSession, threadId } = resolveTargetSession(msg, session, targetAgentGroupId);
   const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const content: unknown = JSON.parse(msg.content);
   const passive =
@@ -274,7 +306,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     timestamp: Date.now(),
     platformId: session.agent_group_id,
     channelType: 'agent',
-    threadId: null,
+    threadId,
     content: forwardedContent,
     sourceSessionId: session.id,
     trigger: passive ? 0 : 1,

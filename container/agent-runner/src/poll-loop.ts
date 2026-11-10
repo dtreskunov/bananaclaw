@@ -1703,6 +1703,9 @@ function resolveDeliveryRouting(
   if (channelType === routing.channelType && platformId === routing.platformId) {
     return { platformId, channelType, threadId: routing.threadId, inReplyTo: routing.inReplyTo };
   }
+  if (channelType === 'agent') {
+    return { platformId, channelType, threadId: null, inReplyTo: routing.inReplyTo };
+  }
   const destRouting = resolveDestinationThread(channelType, platformId);
   return {
     platformId,
@@ -1731,7 +1734,7 @@ function isDuplicateSendMessage(dest: DestinationEntry, body: string, routing: R
     if (
       row.platform_id !== resolved.platformId ||
       row.channel_type !== resolved.channelType ||
-      row.thread_id !== resolved.threadId
+      (row.thread_id !== resolved.threadId && !(resolved.channelType === 'agent' && resolved.threadId === null))
     )
       return false;
     try {

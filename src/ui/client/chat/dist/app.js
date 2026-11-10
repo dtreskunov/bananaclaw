@@ -29955,6 +29955,9 @@ function ReadonlyBanner() {
   if (!channelType.value || channelType.value === "web") {
     return /* @__PURE__ */ u4("div", { class: "readonly-banner", children: "Read-only view \u2014 sending is unavailable for this thread." });
   }
+  if (channelType.value === "agent") {
+    return /* @__PURE__ */ u4("div", { class: "readonly-banner", children: "Read-only agent conversation. Give the agent instructions in a Web thread." });
+  }
   const meta = channelMeta(channelType.value);
   return /* @__PURE__ */ u4("div", { class: "readonly-banner", children: [
     "Read-only view \u2014 reply on ",
