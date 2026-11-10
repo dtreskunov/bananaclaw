@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js
+// node_modules/path-to-regexp/dist/index.js
 var require_dist = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/path-to-regexp/dist/index.js"(exports) {
+  "node_modules/path-to-regexp/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PathError = exports.TokenData = void 0;
@@ -393,9 +393,9 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js
+// node_modules/highlight.js/lib/core.js
 var require_core = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/core.js"(exports, module) {
+  "node_modules/highlight.js/lib/core.js"(exports, module) {
     function deepFreeze(obj) {
       if (obj instanceof Map) {
         obj.clear = obj.delete = obj.set = function() {
@@ -1931,9 +1931,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js
+// node_modules/highlight.js/lib/languages/xml.js
 var require_xml = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/xml.js"(exports, module) {
     function xml(hljs) {
       const regex = hljs.regex;
       const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -2162,9 +2162,9 @@ var require_xml = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js
+// node_modules/highlight.js/lib/languages/bash.js
 var require_bash = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/bash.js"(exports, module) {
     function bash(hljs) {
       const regex = hljs.regex;
       const VAR = {};
@@ -2561,9 +2561,9 @@ var require_bash = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js
+// node_modules/highlight.js/lib/languages/c.js
 var require_c = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/c.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/c.js"(exports, module) {
     function c4(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -2860,9 +2860,9 @@ var require_c = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js
+// node_modules/highlight.js/lib/languages/cpp.js
 var require_cpp = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/cpp.js"(exports, module) {
     function cpp(hljs) {
       const regex = hljs.regex;
       const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -3408,9 +3408,9 @@ var require_cpp = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js
+// node_modules/highlight.js/lib/languages/csharp.js
 var require_csharp = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/csharp.js"(exports, module) {
     function csharp(hljs) {
       const BUILT_IN_KEYWORDS = [
         "bool",
@@ -3813,9 +3813,9 @@ var require_csharp = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js
+// node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/css.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/css.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -4755,9 +4755,9 @@ var require_css = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js
+// node_modules/highlight.js/lib/languages/markdown.js
 var require_markdown = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/markdown.js"(exports, module) {
     function markdown(hljs) {
       const regex = hljs.regex;
       const INLINE_HTML = {
@@ -4992,9 +4992,9 @@ var require_markdown = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js
+// node_modules/highlight.js/lib/languages/diff.js
 var require_diff = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/diff.js"(exports, module) {
     function diff(hljs) {
       const regex = hljs.regex;
       return {
@@ -5050,9 +5050,9 @@ var require_diff = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js
+// node_modules/highlight.js/lib/languages/ruby.js
 var require_ruby = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ruby.js"(exports, module) {
     function ruby(hljs) {
       const regex = hljs.regex;
       const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -5468,9 +5468,9 @@ var require_ruby = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js
+// node_modules/highlight.js/lib/languages/go.js
 var require_go = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/go.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/go.js"(exports, module) {
     function go(hljs) {
       const LITERALS = [
         "true",
@@ -5627,9 +5627,9 @@ var require_go = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js
+// node_modules/highlight.js/lib/languages/graphql.js
 var require_graphql = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/graphql.js"(exports, module) {
     function graphql(hljs) {
       const regex = hljs.regex;
       const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -5702,9 +5702,9 @@ var require_graphql = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js
+// node_modules/highlight.js/lib/languages/ini.js
 var require_ini = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/ini.js"(exports, module) {
     function ini(hljs) {
       const regex = hljs.regex;
       const NUMBERS = {
@@ -5823,9 +5823,9 @@ var require_ini = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js
+// node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/java.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/java.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -6082,9 +6082,9 @@ var require_java = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js
+// node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/javascript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -6788,9 +6788,9 @@ var require_javascript = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js
+// node_modules/highlight.js/lib/languages/json.js
 var require_json = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/json.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/json.js"(exports, module) {
     function json(hljs) {
       const ATTRIBUTE = {
         className: "attr",
@@ -6833,9 +6833,9 @@ var require_json = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js
+// node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/kotlin.js"(exports, module) {
     var decimalDigits = "[0-9](_*[0-9])*";
     var frac = `\\.(${decimalDigits})`;
     var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -7093,9 +7093,9 @@ var require_kotlin = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js
+// node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/less.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/less.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -8116,9 +8116,9 @@ var require_less = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js
+// node_modules/highlight.js/lib/languages/lua.js
 var require_lua = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/lua.js"(exports, module) {
     function lua(hljs) {
       const OPENING_LONG_BRACKET = "\\[=*\\[";
       const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -8182,9 +8182,9 @@ var require_lua = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js
+// node_modules/highlight.js/lib/languages/makefile.js
 var require_makefile = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/makefile.js"(exports, module) {
     function makefile(hljs) {
       const VARIABLE = {
         className: "variable",
@@ -8258,9 +8258,9 @@ var require_makefile = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js
+// node_modules/highlight.js/lib/languages/perl.js
 var require_perl = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/perl.js"(exports, module) {
     function perl(hljs) {
       const regex = hljs.regex;
       const KEYWORDS = [
@@ -8748,9 +8748,9 @@ var require_perl = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js
+// node_modules/highlight.js/lib/languages/objectivec.js
 var require_objectivec = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/objectivec.js"(exports, module) {
     function objectivec(hljs) {
       const API_CLASS = {
         className: "built_in",
@@ -8996,9 +8996,9 @@ var require_objectivec = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js
+// node_modules/highlight.js/lib/languages/php.js
 var require_php = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php.js"(exports, module) {
     function php(hljs) {
       const regex = hljs.regex;
       const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -9602,9 +9602,9 @@ var require_php = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js
+// node_modules/highlight.js/lib/languages/php-template.js
 var require_php_template = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/php-template.js"(exports, module) {
     function phpTemplate(hljs) {
       return {
         name: "PHP template",
@@ -9653,9 +9653,9 @@ var require_php_template = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js
+// node_modules/highlight.js/lib/languages/plaintext.js
 var require_plaintext = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/plaintext.js"(exports, module) {
     function plaintext(hljs) {
       return {
         name: "Plain text",
@@ -9670,9 +9670,9 @@ var require_plaintext = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js
+// node_modules/highlight.js/lib/languages/python.js
 var require_python = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python.js"(exports, module) {
     function python(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -10090,9 +10090,9 @@ var require_python = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js
+// node_modules/highlight.js/lib/languages/python-repl.js
 var require_python_repl = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/python-repl.js"(exports, module) {
     function pythonRepl(hljs) {
       return {
         aliases: ["pycon"],
@@ -10120,9 +10120,9 @@ var require_python_repl = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js
+// node_modules/highlight.js/lib/languages/r.js
 var require_r = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/r.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/r.js"(exports, module) {
     function r4(hljs) {
       const regex = hljs.regex;
       const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -10335,9 +10335,9 @@ var require_r = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js
+// node_modules/highlight.js/lib/languages/rust.js
 var require_rust = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/rust.js"(exports, module) {
     function rust(hljs) {
       const regex = hljs.regex;
       const RAW_IDENTIFIER = /(r#)?/;
@@ -10653,9 +10653,9 @@ var require_rust = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js
+// node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/scss.js"(exports, module) {
     var MODES = (hljs) => {
       return {
         IMPORTANT: {
@@ -11580,9 +11580,9 @@ var require_scss = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js
+// node_modules/highlight.js/lib/languages/shell.js
 var require_shell = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/shell.js"(exports, module) {
     function shell(hljs) {
       return {
         name: "Shell Session",
@@ -11609,9 +11609,9 @@ var require_shell = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js
+// node_modules/highlight.js/lib/languages/sql.js
 var require_sql = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/sql.js"(exports, module) {
     function sql(hljs) {
       const regex = hljs.regex;
       const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -12257,9 +12257,9 @@ var require_sql = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js
+// node_modules/highlight.js/lib/languages/swift.js
 var require_swift = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/swift.js"(exports, module) {
     function source(re) {
       if (!re) return null;
       if (typeof re === "string") return re;
@@ -13137,9 +13137,9 @@ var require_swift = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js
+// node_modules/highlight.js/lib/languages/yaml.js
 var require_yaml = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/yaml.js"(exports, module) {
     function yaml(hljs) {
       const LITERALS = "true false yes no null";
       const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -13343,9 +13343,9 @@ var require_yaml = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js
+// node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/typescript.js"(exports, module) {
     var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
     var KEYWORDS = [
       "as",
@@ -14162,9 +14162,9 @@ var require_typescript = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js
+// node_modules/highlight.js/lib/languages/vbnet.js
 var require_vbnet = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/vbnet.js"(exports, module) {
     function vbnet(hljs) {
       const regex = hljs.regex;
       const CHARACTER = {
@@ -14300,9 +14300,9 @@ var require_vbnet = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js
+// node_modules/highlight.js/lib/languages/wasm.js
 var require_wasm = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
+  "node_modules/highlight.js/lib/languages/wasm.js"(exports, module) {
     function wasm(hljs) {
       hljs.regex;
       const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -14426,9 +14426,9 @@ var require_wasm = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js
+// node_modules/highlight.js/lib/common.js
 var require_common = __commonJS({
-  "../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/lib/common.js"(exports, module) {
+  "node_modules/highlight.js/lib/common.js"(exports, module) {
     var hljs = require_core();
     hljs.registerLanguage("xml", require_xml());
     hljs.registerLanguage("bash", require_bash());
@@ -14472,7 +14472,7 @@ var require_common = __commonJS({
   }
 });
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/dist/preact.module.js
+// node_modules/preact/dist/preact.module.js
 var n;
 var l;
 var u;
@@ -14734,7 +14734,7 @@ n = v.slice, l = { __e: function(n3, l7, u5, t4) {
   return n3.__v.__b - l7.__v.__b;
 }, P.__r = 0, f = /(PointerCapture)$|Capture$/i, c = 0, s = O(false), a = O(true), h = 0;
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/hooks/dist/hooks.module.js
+// node_modules/preact/hooks/dist/hooks.module.js
 var t2;
 var r2;
 var u2;
@@ -14882,7 +14882,7 @@ function D2(n3, t4) {
   return "function" == typeof t4 ? t4(n3) : t4;
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals-core/dist/signals-core.module.js
+// node_modules/@preact/signals-core/dist/signals-core.module.js
 var i3 = Symbol.for("preact-signals");
 function t3() {
   if (!(s3 > 1)) {
@@ -15273,7 +15273,7 @@ function j3(i5, t4) {
   return r4;
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/@preact/signals/dist/signals.module.js
+// node_modules/@preact/signals/dist/signals.module.js
 var s4;
 var h4;
 var l4;
@@ -16644,7 +16644,7 @@ function resetActivityTraceView() {
 // src/hash.ts
 var import_path_to_regexp = __toESM(require_dist(), 1);
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/marked/lib/marked.esm.js
+// node_modules/marked/lib/marked.esm.js
 function M2() {
   return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
 }
@@ -20505,7 +20505,7 @@ function alignReaderMessage(viewport, message2) {
   return viewport.scrollTop;
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
+// node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
 var f4 = 0;
 var i4 = Array.isArray;
 function u4(e4, t4, n3, o4, i5, u5) {
@@ -23568,7 +23568,7 @@ function ThreadsRail() {
   );
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/preact/compat/dist/compat.module.js
+// node_modules/preact/compat/dist/compat.module.js
 function g7(n3, t4) {
   for (var e4 in t4) n3[e4] = t4[e4];
   return n3;
@@ -30906,7 +30906,7 @@ function PrivateWebView({ groupId: groupId3, path, title, fragment }) {
   ) });
 }
 
-// ../../../../../nanoclaw-v2/src/ui/client/chat/node_modules/highlight.js/es/common.js
+// node_modules/highlight.js/es/common.js
 var import_common = __toESM(require_common(), 1);
 var common_default = import_common.default;
 
@@ -36544,6 +36544,7 @@ function SettingsTab({
   const [draftSkills, setDraftSkills] = h2([]);
   const [draftDisabledSkills, setDraftDisabledSkills] = h2([]);
   const [busy, setBusy] = h2(false);
+  const [rebuilding, setRebuilding] = h2(false);
   const [images, setImages] = h2(null);
   async function refresh() {
     setBusy(true);
@@ -36669,19 +36670,14 @@ function SettingsTab({
   }
   const pending4 = changedFields();
   const changed = pending4.size > 0;
-  const voiceOnlyChange = pending4.size > 0 && [...pending4].every((field) => field === "voice_input_backend" || field === "voice_input_enabled");
   const needsRestart = [...pending4].some((f5) => RESTART_REQUIRING_FIELDS.has(f5));
   const imageRebuildNeeded = pending4.has("image_tag") && draft.image_tag != null && !!images && !images.images.some((i5) => i5.value === draft.image_tag);
   const packagesChanged = pending4.has("packages_apt") || pending4.has("packages_npm") || pending4.has("packages_pip");
   const providerChangedWithCustomImage = pending4.has("provider") && draft.image_tag != null;
   const needsRebuild = imageRebuildNeeded || packagesChanged || providerChangedWithCustomImage;
-  const [confirmOpen, setConfirmOpen] = h2(false);
-  const [rebuildChecked, setRebuildChecked] = h2(false);
   const [archiveOpen, setArchiveOpen] = h2(false);
   const [archiveConfirm, setArchiveConfirm] = h2("");
   const [archiveBusy, setArchiveBusy] = h2(false);
-  const effectiveRebuild = !voiceOnlyChange && (needsRebuild || rebuildChecked);
-  const effectiveRestart = needsRestart || effectiveRebuild;
   const thinkingChanged = ["provider", "model", "effort"].some((field) => pending4.has(field));
   const canSave = changed && (!thinkingChanged || !thinkingLevelError(
     effectiveProvider,
@@ -36691,15 +36687,32 @@ function SettingsTab({
   y2(() => {
     onActions({ refresh, apply, busy, canSave });
     return () => onActions(null);
-  }, [busy, canSave, needsRestart, needsRebuild]);
+  }, [
+    busy,
+    canSave,
+    data,
+    draft,
+    draftName,
+    siteEnabled,
+    siteSlug,
+    emailEnabled,
+    emailSlug,
+    draftModelParams,
+    draftPackages,
+    draftMcpServers,
+    draftSkills,
+    draftDisabledSkills,
+    images
+  ]);
   function apply() {
-    if (!canSave) return;
-    setRebuildChecked(false);
-    setConfirmOpen(true);
+    void doApply();
   }
-  async function doApply() {
-    if (!draft) return;
+  async function doApply(forceRebuild = false) {
+    if (!draft || busy || (changed ? !canSave : !forceRebuild)) return;
+    const effectiveRebuild = needsRebuild || forceRebuild;
+    const effectiveRestart = needsRestart || effectiveRebuild;
     setBusy(true);
+    setRebuilding(effectiveRebuild);
     try {
       const JSON_FIELDS = /* @__PURE__ */ new Set([
         "model_params",
@@ -36794,15 +36807,15 @@ function SettingsTab({
       }
       if (effectiveRestart) {
         showToast(
-          `${effectiveRebuild ? "Image rebuilt. " : ""}Saved \u2014 ${restarted === 0 ? "changes apply when the agent next starts." : "changes apply after current responses finish."}`
+          `${effectiveRebuild ? "Image rebuilt. " : ""}${changed ? "Saved \u2014 changes" : "Changes"} apply ${restarted === 0 ? "when the agent next starts." : "after current responses finish."}`
         );
       } else {
         showToast("Saved.");
       }
-      setConfirmOpen(false);
       onClose();
     } finally {
       setBusy(false);
+      setRebuilding(false);
     }
   }
   async function doArchive() {
@@ -37001,16 +37014,27 @@ function SettingsTab({
         }
       ) }),
       /* @__PURE__ */ u4(GroupAdminField, { label: "Image tag", children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
-        /* @__PURE__ */ u4(
-          Combobox,
-          {
-            value: draft.image_tag,
-            options: imageOptions,
-            placeholder: data.defaults.image_tag ? `default: ${data.defaults.image_tag}` : "pick an image",
-            disabled: busy,
-            onChange: (v5) => update("image_tag", v5)
-          }
-        ),
+        /* @__PURE__ */ u4("div", { class: "group-admin-image-actions", children: [
+          /* @__PURE__ */ u4(
+            Combobox,
+            {
+              value: draft.image_tag,
+              options: imageOptions,
+              placeholder: data.defaults.image_tag ? `default: ${data.defaults.image_tag}` : "pick an image",
+              disabled: busy,
+              onChange: (v5) => update("image_tag", v5)
+            }
+          ),
+          /* @__PURE__ */ u4(Tooltip, { text: "Save pending changes and rebuild the container image. This can take minutes. Active responses finish before sessions restart.", children: /* @__PURE__ */ u4(
+            "button",
+            {
+              type: "button",
+              disabled: busy || changed && !canSave,
+              onClick: () => void doApply(true),
+              children: rebuilding ? "Rebuilding\u2026" : "Rebuild image"
+            }
+          ) })
+        ] }),
         selectedImg ? /* @__PURE__ */ u4("div", { class: "group-admin-selected-info", children: [
           /* @__PURE__ */ u4("div", { class: "selected-title", children: [
             selectedImg.label,
@@ -37220,56 +37244,11 @@ function SettingsTab({
         onCatalogChanged: refreshAvailableSkills
       }
     ) : null,
-    /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending4.size} unsaved change${pending4.size === 1 ? "" : "s"}. Click Save (\u2713) above to review and apply.` : "No unsaved changes." }) }),
-    confirmOpen ? /* @__PURE__ */ u4(
-      MobileDialog,
-      {
-        title: "Apply changes",
-        onClose: () => setConfirmOpen(false),
-        closeDisabled: busy,
-        maxWidth: "440px",
-        className: "ga-confirm-modal",
-        children: [
-          /* @__PURE__ */ u4("div", { class: "settings-body", children: [
-            /* @__PURE__ */ u4("p", { class: "group-admin-help", style: "margin-bottom:12px", children: [
-              pending4.size,
-              " setting",
-              pending4.size === 1 ? "" : "s",
-              " will be saved:",
-              " ",
-              /* @__PURE__ */ u4("code", { children: [...pending4].join(", ") })
-            ] }),
-            effectiveRestart ? /* @__PURE__ */ u4("p", { class: "group-admin-help", role: "status", children: "Changes apply automatically after active responses finish and are committed. Idle sessions restart immediately. No agent reply is generated." }) : null,
-            /* @__PURE__ */ u4("div", { class: "ga-confirm-options", children: /* @__PURE__ */ u4("label", { class: "group-admin-check", children: [
-              /* @__PURE__ */ u4(
-                "input",
-                {
-                  type: "checkbox",
-                  checked: effectiveRebuild,
-                  disabled: busy || voiceOnlyChange || needsRebuild,
-                  onChange: (e4) => setRebuildChecked(e4.target.checked)
-                }
-              ),
-              /* @__PURE__ */ u4("span", { children: [
-                "Rebuild image",
-                needsRebuild ? " (required)" : ""
-              ] }),
-              /* @__PURE__ */ u4(
-                Tooltip,
-                {
-                  text: "Rebuild the container image before its deferred restart.\nRequired when the chosen image tag does not exist locally, packages changed, or the provider changed while using a custom image. Otherwise optional.\nA rebuild takes minutes, not seconds, and never interrupts an active response.",
-                  children: /* @__PURE__ */ u4("span", { class: "info-icon", "aria-label": "More info", children: "i" })
-                }
-              )
-            ] }) })
-          ] }),
-          /* @__PURE__ */ u4(MobileDialogFooter, { className: "ga-confirm-foot", children: [
-            /* @__PURE__ */ u4("button", { type: "button", disabled: busy, onClick: () => setConfirmOpen(false), children: "Cancel" }),
-            /* @__PURE__ */ u4("button", { type: "button", class: "primary", disabled: busy, onClick: doApply, children: busy ? "Applying\u2026" : effectiveRebuild ? "Save & rebuild" : "Save" })
-          ] })
-        ]
-      }
-    ) : null,
+    /* @__PURE__ */ u4("div", { class: "settings-row group-admin-actions", style: "margin-top:16px", children: /* @__PURE__ */ u4("p", { class: "group-admin-help", children: changed ? `${pending4.size} unsaved change${pending4.size === 1 ? "" : "s"}. Click Save (\u2713) above to apply.` : "No unsaved changes." }) }),
+    needsRestart || needsRebuild ? /* @__PURE__ */ u4("p", { class: "group-admin-help", role: "status", children: [
+      needsRebuild ? "Saving will rebuild the image; this can take minutes. " : "",
+      "Changes apply automatically after active responses finish and are committed. Idle sessions restart immediately. No agent reply is generated."
+    ] }) : null,
     archiveOpen ? /* @__PURE__ */ u4(
       MobileDialog,
       {

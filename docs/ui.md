@@ -2256,12 +2256,17 @@ Saving runtime settings (provider, model, effort, image, MCP servers, skills or
 packages) automatically schedules a silent restart. There is no **Restart
 sessions** checkbox: active responses finish and commit their journals before
 the runner exits, while idle sessions can restart immediately. Stopped sessions
-load the changes on their next start. The save confirmation and toast describe
-deferred application rather than claiming the sessions already restarted.
+load the changes on their next start. Save applies directly without a
+confirmation dialog; an inline notice and toast describe deferred application
+rather than claiming the sessions already restarted. Archive and unsaved-change
+discard confirmations remain.
 
-Image rebuilding is automatic and cannot be unchecked when required by package
+Image rebuilding is automatic when required by package
 changes, an unavailable image tag, or a provider change with a custom image.
-Otherwise **Rebuild image** remains optional. A failed rebuild does not schedule
+The **Rebuild image** button beside **Image tag** in Settings saves any pending
+edits and rebuilds, even when no settings have changed. It uses the same
+validation as Save and is disabled while applying changes. A failed rebuild
+does not schedule
 a restart; a failed restart request leaves the edited form available for retry.
 Host-only settings, including voice input and CLI scope, do not restart sessions
 unless an optional image rebuild was explicitly requested. Restarts initiated

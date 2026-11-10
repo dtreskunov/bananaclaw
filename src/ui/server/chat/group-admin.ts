@@ -857,7 +857,7 @@ function cleanPackageList(label: string, raw: unknown): string[] {
  * PATCH /packages — full replacement of each provided package list.
  * Body: `{ apt?: string[]; npm?: string[]; pip?: string[] }`. Lists omitted
  * from the body are left unchanged. Image rebuild required to take effect
- * — the UI confirm dialog defaults rebuild=on when packages change.
+ * — the UI automatically rebuilds when saving package changes.
  */
 async function handlePatchPackages(
   req: http.IncomingMessage,

@@ -31,6 +31,20 @@
   gap: 4px;
 }
 
+.group-admin-image-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--field-gap);
+  flex-wrap: wrap;
+}
+.group-admin-image-actions > .combobox {
+  flex: 1;
+  min-width: 120px;
+}
+.group-admin-image-actions button {
+  white-space: nowrap;
+}
+
 .group-admin-thinking .thinking-level-slider-label {
   display: none;
 }
@@ -91,12 +105,6 @@
   opacity: 0.6;
 }
 
-/* Apply-confirmation dialog (restart / rebuild) */
-.ga-confirm-options {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .ga-confirm-warn {
   margin: 12px 0 0;
   padding: 6px 10px;

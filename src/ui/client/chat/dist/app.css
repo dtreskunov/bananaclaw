@@ -7112,6 +7112,19 @@ body.private-web-page,
   flex-direction: column;
   gap: 4px;
 }
+.group-admin-image-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--field-gap);
+  flex-wrap: wrap;
+}
+.group-admin-image-actions > .combobox {
+  flex: 1;
+  min-width: 120px;
+}
+.group-admin-image-actions button {
+  white-space: nowrap;
+}
 .group-admin-thinking .thinking-level-slider-label {
   display: none;
 }
@@ -7167,11 +7180,6 @@ body.private-web-page,
 }
 .group-admin-check input[disabled] ~ span {
   opacity: 0.6;
-}
-.ga-confirm-options {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 .ga-confirm-warn {
   margin: 12px 0 0;

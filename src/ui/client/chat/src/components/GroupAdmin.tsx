@@ -338,6 +338,7 @@ function SettingsTab({
   const [draftSkills, setDraftSkills] = useState<string[] | 'all'>([]);
   const [draftDisabledSkills, setDraftDisabledSkills] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
   const [images, setImages] = useState<ImagesResponse | null>(null);
 
   async function refresh(): Promise<void> {
@@ -476,9 +477,6 @@ function SettingsTab({
 
   const pending = changedFields();
   const changed = pending.size > 0;
-  const voiceOnlyChange =
-    pending.size > 0 &&
-    [...pending].every((field) => field === 'voice_input_backend' || field === 'voice_input_enabled');
   const needsRestart = [...pending].some((f) => RESTART_REQUIRING_FIELDS.has(f));
   const imageRebuildNeeded =
     pending.has('image_tag') &&
@@ -488,13 +486,9 @@ function SettingsTab({
   const packagesChanged = pending.has('packages_apt') || pending.has('packages_npm') || pending.has('packages_pip');
   const providerChangedWithCustomImage = pending.has('provider') && draft.image_tag != null;
   const needsRebuild = imageRebuildNeeded || packagesChanged || providerChangedWithCustomImage;
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [rebuildChecked, setRebuildChecked] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState('');
   const [archiveBusy, setArchiveBusy] = useState(false);
-  const effectiveRebuild = !voiceOnlyChange && (needsRebuild || rebuildChecked);
-  const effectiveRestart = needsRestart || effectiveRebuild;
   const thinkingChanged = ['provider', 'model', 'effort'].some((field) => pending.has(field));
   const canSave = changed && (!thinkingChanged || !thinkingLevelError(
     effectiveProvider, draft.model ?? defaultModel, draft.effort ?? data.defaults.effort,
@@ -503,17 +497,21 @@ function SettingsTab({
   useEffect(() => {
     onActions({ refresh, apply, busy, canSave });
     return () => onActions(null);
-  }, [busy, canSave, needsRestart, needsRebuild]);
+  }, [
+    busy, canSave, data, draft, draftName, siteEnabled, siteSlug, emailEnabled, emailSlug,
+    draftModelParams, draftPackages, draftMcpServers, draftSkills, draftDisabledSkills, images,
+  ]);
 
   function apply(): void {
-    if (!canSave) return;
-    setRebuildChecked(false);
-    setConfirmOpen(true);
+    void doApply();
   }
 
-  async function doApply(): Promise<void> {
-    if (!draft) return;
+  async function doApply(forceRebuild = false): Promise<void> {
+    if (!draft || busy || (changed ? !canSave : !forceRebuild)) return;
+    const effectiveRebuild = needsRebuild || forceRebuild;
+    const effectiveRestart = needsRestart || effectiveRebuild;
     setBusy(true);
+    setRebuilding(effectiveRebuild);
     try {
       const JSON_FIELDS = new Set([
         'model_params',
@@ -610,17 +608,17 @@ function SettingsTab({
       }
       if (effectiveRestart) {
         showToast(
-          `${effectiveRebuild ? 'Image rebuilt. ' : ''}Saved — ${
-            restarted === 0 ? 'changes apply when the agent next starts.' : 'changes apply after current responses finish.'
+          `${effectiveRebuild ? 'Image rebuilt. ' : ''}${changed ? 'Saved — changes' : 'Changes'} apply ${
+            restarted === 0 ? 'when the agent next starts.' : 'after current responses finish.'
           }`,
         );
       } else {
         showToast('Saved.');
       }
-      setConfirmOpen(false);
       onClose();
     } finally {
       setBusy(false);
+      setRebuilding(false);
     }
   }
 
@@ -818,13 +816,24 @@ function SettingsTab({
           </Field>
           <Field label="Image tag">
             <div class="group-admin-stack">
-              <Combobox
-                value={draft.image_tag}
-                options={imageOptions}
-                placeholder={data.defaults.image_tag ? `default: ${data.defaults.image_tag}` : 'pick an image'}
-                disabled={busy}
-                onChange={(v) => update('image_tag', v)}
-              />
+              <div class="group-admin-image-actions">
+                <Combobox
+                  value={draft.image_tag}
+                  options={imageOptions}
+                  placeholder={data.defaults.image_tag ? `default: ${data.defaults.image_tag}` : 'pick an image'}
+                  disabled={busy}
+                  onChange={(v) => update('image_tag', v)}
+                />
+                <Tooltip text="Save pending changes and rebuild the container image. This can take minutes. Active responses finish before sessions restart.">
+                  <button
+                    type="button"
+                    disabled={busy || (changed && !canSave)}
+                    onClick={() => void doApply(true)}
+                  >
+                    {rebuilding ? 'Rebuilding…' : 'Rebuild image'}
+                  </button>
+                </Tooltip>
+              </div>
               {selectedImg ? (
                 <div class="group-admin-selected-info">
                   <div class="selected-title">
@@ -1056,60 +1065,16 @@ function SettingsTab({
       <div class="settings-row group-admin-actions" style="margin-top:16px">
         <p class="group-admin-help">
           {changed
-            ? `${pending.size} unsaved change${pending.size === 1 ? '' : 's'}. Click Save (✓) above to review and apply.`
+            ? `${pending.size} unsaved change${pending.size === 1 ? '' : 's'}. Click Save (✓) above to apply.`
             : 'No unsaved changes.'}
         </p>
       </div>
-
-      {confirmOpen ? (
-        <MobileDialog
-          title="Apply changes"
-          onClose={() => setConfirmOpen(false)}
-          closeDisabled={busy}
-          maxWidth="440px"
-          className="ga-confirm-modal"
-        >
-          <div class="settings-body">
-            <p class="group-admin-help" style="margin-bottom:12px">
-              {pending.size} setting{pending.size === 1 ? '' : 's'} will be saved:{' '}
-              <code>{[...pending].join(', ')}</code>
-            </p>
-            {effectiveRestart ? (
-              <p class="group-admin-help" role="status">
-                Changes apply automatically after active responses finish and are committed.
-                Idle sessions restart immediately. No agent reply is generated.
-              </p>
-            ) : null}
-            <div class="ga-confirm-options">
-              <label class="group-admin-check">
-                <input
-                  type="checkbox"
-                  checked={effectiveRebuild}
-                  disabled={busy || voiceOnlyChange || needsRebuild}
-                  onChange={(e) => setRebuildChecked((e.target as HTMLInputElement).checked)}
-                />
-                <span>Rebuild image{needsRebuild ? ' (required)' : ''}</span>
-                <Tooltip
-                  text={
-                    'Rebuild the container image before its deferred restart.\nRequired when the chosen image tag does not exist locally, packages changed, or the provider changed while using a custom image. Otherwise optional.\nA rebuild takes minutes, not seconds, and never interrupts an active response.'
-                  }
-                >
-                  <span class="info-icon" aria-label="More info">
-                    i
-                  </span>
-                </Tooltip>
-              </label>
-            </div>
-          </div>
-          <MobileDialogFooter className="ga-confirm-foot">
-            <button type="button" disabled={busy} onClick={() => setConfirmOpen(false)}>
-              Cancel
-            </button>
-            <button type="button" class="primary" disabled={busy} onClick={doApply}>
-              {busy ? 'Applying…' : effectiveRebuild ? 'Save & rebuild' : 'Save'}
-            </button>
-          </MobileDialogFooter>
-        </MobileDialog>
+      {needsRestart || needsRebuild ? (
+        <p class="group-admin-help" role="status">
+          {needsRebuild ? 'Saving will rebuild the image; this can take minutes. ' : ''}
+          Changes apply automatically after active responses finish and are committed.
+          Idle sessions restart immediately. No agent reply is generated.
+        </p>
       ) : null}
 
       {archiveOpen ? (
