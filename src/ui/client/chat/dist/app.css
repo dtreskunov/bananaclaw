@@ -3103,6 +3103,11 @@ nav.tab-bar-strip.group-strip {
 .chat-main .usage-row-model-time > strong {
   color: var(--activity-model-time);
 }
+.chat-main .usage-row-context {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
 .chat-main .turn-technical-details {
   display: flex;
   flex-direction: column;

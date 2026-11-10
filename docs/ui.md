@@ -1011,7 +1011,7 @@ shown only when every usage report includes cost; context is the latest reported
 valid context/window pair, not cumulative billed tokens. Context is read from
 the same usage record as the token and model-call counts, which the runner
 rewrites after every model call, so it updates live with them. The tokens
-column shows **Context utilization** (`54.8k tok · 5%`: the latest call's whole
+column shows a visually separated **Latest context** (`54.8k tok · 5%`: the latest call's whole
 prompt plus its reply, and its share of the window); the model column shows the
 window itself as **Context size** (`1M tok`). An incomplete or invalid
 report retains the latest known valid measurement, and a report without a
@@ -1144,8 +1144,16 @@ not the provider attempt's duration. Providers and older records without
 isolated timing explicitly show **unavailable** for model and other time, never
 substituting wall time or zero. Model, Tools and Other rows that would show
 **0.0s** are omitted; Total is always shown.
-The tokens column shows input and output processing (`55.0k tok in · 485 tok out`), then reasoning, cache
-read and cache write when non-zero, then context (`55.4k tok / 1M tok (6%)`).
+The tokens column shows **Total**, **Input** (`164.4k tok · 67% cached`), and
+**Output** (`485 tok · 10% reasoning`), cumulative across all model calls.
+Input includes uncached input, cache reads and cache writes; the cached share
+counts only cache reads, not cache writes. Reasoning is already included in
+output. Percentages use unrounded counts and are omitted when unavailable or
+their denominator is zero. Hover hints retain exact counts and the input
+cache read/write breakdown. Live rows append **so far**, and partial reports
+retain their warning. **Latest context** (`55.4k tok · 6%`) follows a divider;
+it is the latest call's occupancy, not a cumulative processing total, and does
+not repeat the context size from the model column.
 The model column shows the model, context size, the model-call count, and cost
 (**Estimated cost**, or **Reported cost** for partial usage) only when it is
 non-zero; zero or missing cost is omitted.

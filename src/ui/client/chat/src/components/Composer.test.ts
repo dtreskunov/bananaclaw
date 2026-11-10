@@ -1850,7 +1850,7 @@ describe('main composer pending edits', () => {
     hooks.cursor = 0;
     find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
     const inline = renderUsageDetails(row);
-    expect(usageRow(inline, 'Context utilization')).toBe(expected ? `16.0k tok \u00b7 ${expected}` : '16.0k tok');
+    expect(usageRow(inline, 'Latest context')).toBe(expected ? `16.0k tok \u00b7 ${expected}` : '16.0k tok');
     expect(usageRow(inline, 'Context size')).toBe(window ? '20.0k tok' : undefined);
     expect(usageRow(inline, 'Estimated cost')).toBe('$0.012');
   });
@@ -2482,6 +2482,7 @@ describe('inline activity metrics', () => {
                 id: 'usage',
                 value: {
                   cost_usd: 0,
+                  reported_tokens: 164_885,
                   input_tokens: 55_000,
                   output_tokens: 485,
                   reasoning_tokens: 50,
@@ -2515,14 +2516,187 @@ describe('inline activity metrics', () => {
       '3.0s',
       '2.0s',
     ]);
-    expect(usageRow(columns[1], 'Turn processing')).toBe('55.0k tok in \u00b7 485 tok out');
-    expect(usageRow(columns[1], 'Reasoning')).toBe('50 tok');
-    expect(usageRow(columns[1], 'Cache read')).toBe('109.4k tok');
-    expect(usageRow(columns[1], 'Cache write')).toBeUndefined();
-    expect(usageRow(columns[1], 'Context utilization')).toBe('55.4k tok \u00b7 6%');
+    expect(usageRow(columns[1], 'Total')).toBe('164.9k tok');
+    expect(usageRow(columns[1], 'Input')).toBe('164.4k tok \u00b7 67% cached');
+    expect(usageRow(columns[1], 'Output')).toBe('485 tok \u00b7 10% reasoning');
+    for (const label of [
+      'Reported tokens',
+      'Turn processing',
+      'Reasoning',
+      'Cache read',
+      'Cache write',
+      'Context utilization',
+    ]) {
+      expect(usageRow(columns[1], label)).toBeUndefined();
+    }
+    expect(usageRow(columns[1], 'Latest context')).toBe('55.4k tok \u00b7 6%');
+    const tokens = findComponent(columns[1], 'UsageTokens');
+    const [total, input, output, context] = tokens.type(tokens.props).props.children;
+    expect(total.props.title).toContain('164,885 tok');
+    expect(total.props.title).toContain('Reasoning is included in output');
+    expect(input.props.title).toContain('Uncached: 55,000 tok; cache read: 109,400 tok; cache write: 0 tok');
+    expect(output.props.title).toContain('485 tok. Includes reasoning: 50 tok');
+    const contextRow = context.type(context.props);
+    expect(contextRow.props.kind).toBe('context');
+    expect(contextRow.type(contextRow.props).props.class).toBe('usage-row usage-row-context');
     expect(usageRow(columns[2], 'Context size')).toBe('1M tok');
     expect(usageRow(columns[2], 'Model calls')).toBe('3');
     expect(usageRow(columns[2], 'Estimated cost')).toBeUndefined();
+  });
+
+  it.each([
+    {
+      name: 'large cumulative counts',
+      value: {
+        reported_tokens: 6_982_300,
+        input_tokens: 366_600,
+        cache_read_tokens: 6_548_000,
+        cache_write_tokens: 0,
+        output_tokens: 67_700,
+        reasoning_tokens: 50_300,
+      },
+      expected: ['7.0M tok', '6.9M tok \u00b7 95% cached', '67.7k tok \u00b7 74% reasoning'],
+    },
+    {
+      name: 'cache writes included in input but not hits',
+      value: {
+        reported_tokens: 410,
+        input_tokens: 100,
+        cache_read_tokens: 200,
+        cache_write_tokens: 100,
+        output_tokens: 10,
+        reasoning_tokens: 5,
+      },
+      expected: ['410 tok', '400 tok \u00b7 50% cached', '10 tok \u00b7 50% reasoning'],
+    },
+    {
+      name: 'percentages calculated before rounding',
+      value: { input_tokens: 3, cache_read_tokens: 1, cache_write_tokens: 1, output_tokens: 3, reasoning_tokens: 1 },
+      expected: ['unavailable', '5 tok \u00b7 20% cached', '3 tok \u00b7 33% reasoning'],
+    },
+    {
+      name: 'small positive shares',
+      value: {
+        input_tokens: 999,
+        cache_read_tokens: 1,
+        cache_write_tokens: 0,
+        output_tokens: 1000,
+        reasoning_tokens: 1,
+      },
+      expected: ['unavailable', '1.0k tok \u00b7 <1% cached', '1.0k tok \u00b7 <1% reasoning'],
+    },
+    {
+      name: 'reported zero shares',
+      value: {
+        reported_tokens: 110,
+        input_tokens: 100,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        output_tokens: 10,
+        reasoning_tokens: 0,
+      },
+      expected: ['110 tok', '100 tok \u00b7 0% cached', '10 tok \u00b7 0% reasoning'],
+    },
+    {
+      name: 'fully cached input and all-reasoning output',
+      value: {
+        input_tokens: 0,
+        cache_read_tokens: 100,
+        cache_write_tokens: 0,
+        output_tokens: 10,
+        reasoning_tokens: 10,
+      },
+      expected: ['unavailable', '100 tok \u00b7 100% cached', '10 tok \u00b7 100% reasoning'],
+    },
+    {
+      name: 'zero denominators',
+      value: {
+        reported_tokens: 0,
+        input_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        output_tokens: 0,
+        reasoning_tokens: 0,
+      },
+      expected: ['0 tok', '0 tok', '0 tok'],
+    },
+    {
+      name: 'missing reasoning',
+      value: { input_tokens: 100, cache_read_tokens: 0, cache_write_tokens: 0, output_tokens: 10 },
+      expected: ['unavailable', '100 tok \u00b7 0% cached', '10 tok'],
+    },
+    {
+      name: 'missing cache read',
+      value: { input_tokens: 100, cache_write_tokens: 0, output_tokens: 10 },
+      expected: ['unavailable', 'unavailable', '10 tok'],
+    },
+    {
+      name: 'missing cache write',
+      value: { input_tokens: 100, cache_read_tokens: 50, output_tokens: 10 },
+      expected: ['unavailable', 'unavailable', '10 tok'],
+    },
+    {
+      name: 'missing uncached input',
+      value: { cache_read_tokens: 50, cache_write_tokens: 0, output_tokens: 10 },
+      expected: ['unavailable', 'unavailable', '10 tok'],
+    },
+    {
+      name: 'missing output',
+      value: { input_tokens: 100, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 5 },
+      expected: ['unavailable', '100 tok \u00b7 0% cached', 'unavailable'],
+    },
+    {
+      name: 'unavailable zero accounting',
+      value: {
+        reported_tokens: null,
+        input_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        output_tokens: 0,
+        reasoning_tokens: 0,
+      },
+      expected: ['unavailable', 'unavailable', 'unavailable'],
+    },
+    {
+      name: 'unavailable zero subsets of positive accounting',
+      value: {
+        reported_tokens: null,
+        input_tokens: 100,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        output_tokens: 10,
+        reasoning_tokens: 0,
+      },
+      expected: ['unavailable', '100 tok', '10 tok'],
+    },
+    {
+      name: 'no token accounting',
+      value: {},
+      expected: ['unavailable', 'unavailable', 'unavailable'],
+    },
+  ])('renders compact token rows for $name', ({ value, expected }) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    applyConversationFrame(
+      testSnapshot({
+        turns: [
+          {
+            ...testTurn,
+            phase: 'settled',
+            outcome: 'silent',
+            metadata: { status: 'final', model: 'model', durationMs: 1000 },
+            usage: [{ id: 'usage', value }],
+          },
+        ],
+      }),
+      'thread',
+    );
+    const row = renderResponseStatusRow();
+    const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+    const usage = findComponent(info.type(info.props), 'UsageMeta');
+    find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+    const tokens = find(renderUsageDetails(row), 'section', 'Tokens');
+    expect(['Total', 'Input', 'Output'].map((label) => usageRow(tokens, label))).toEqual(expected);
+    expect(usageRow(tokens, 'Latest context')).toBeUndefined();
   });
 
   it.each(['provisional', 'partial'] as const)('only retains the partial warning for %s accounting', (accounting) => {
@@ -2559,6 +2733,11 @@ describe('inline activity metrics', () => {
     const inline = renderUsageDetails(row);
     expect(find(inline, 'span', 'Usage reported so far; awaiting final totals.')).toBeUndefined();
     expect(!!find(inline, 'span', 'Partial usage report; final totals may be higher.')).toBe(accounting === 'partial');
+    const tokens = find(inline, 'section', 'Tokens');
+    expect(usageRow(tokens, 'Total so far')).toBe('unavailable');
+    expect(usageRow(tokens, 'Input so far')).toBe('100 tok \u00b7 0% cached');
+    expect(usageRow(tokens, 'Output so far')).toBe('10 tok');
+    expect(usageRow(tokens, 'Total')).toBeUndefined();
   });
 
   it.each([false, true])('keeps metrics and trace independent (recorded activity=%s)', (recorded) => {

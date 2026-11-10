@@ -506,22 +506,29 @@ function UsageContext({ context, partialTokens }: {
     : partialTokens !== undefined && Number.isFinite(partialTokens) && partialTokens >= 0 ? partialTokens : undefined;
   if (contextTokens === undefined) return null;
   const detail = `${fmtTokUnit(contextTokens)}${context ? ` \u00b7 ${fmtPct(contextTokens, context.context_window)}` : ''}`;
-  return <UsageRow label="Context utilization" value={detail}
+  return <UsageRow label="Latest context" value={detail} kind="context"
     title="Context in use after the latest model call: its whole prompt plus its reply" />;
 }
 
 function UsageTokens({ u, live }: { u: Partial<TurnUsage>; live: boolean }) {
-  const count = (n: number | undefined) =>
-    n !== undefined && (n !== 0 || u.reported_tokens !== null) ? fmtTokUnit(n) : 'unavailable';
+  const count = (n: number | undefined, exact = false) =>
+    n !== undefined && (n !== 0 || u.reported_tokens !== null)
+      ? exact ? `${n.toLocaleString('en-US')} tok` : fmtTokUnit(n) : 'unavailable';
+  const input = u.input_tokens !== undefined && u.cache_read_tokens !== undefined && u.cache_write_tokens !== undefined
+    ? u.input_tokens + u.cache_read_tokens + u.cache_write_tokens : undefined;
+  const share = (part: number | undefined, total: number | undefined, label: string) =>
+    part !== undefined && (part !== 0 || u.reported_tokens !== null) && total !== undefined && total > 0
+      ? ` \u00b7 ${fmtPct(part, total)} ${label}` : '';
   return <>
-    <UsageRow label={live ? 'Reported tokens so far' : 'Reported tokens'}
+    <UsageRow label={live ? 'Total so far' : 'Total'}
       value={u.reported_tokens == null ? 'unavailable' : fmtTokUnit(u.reported_tokens)}
-      title="Cumulative uncached input, cache reads/writes and output across model calls. Reasoning is included in output. Not remaining provider quota." />
-    <UsageRow label={live ? 'Processing so far' : 'Turn processing'}
-      value={`${count(u.input_tokens)} in \u00b7 ${count(u.output_tokens)} out`} />
-    {u.reasoning_tokens ? <UsageRow label="Reasoning" value={fmtTokUnit(u.reasoning_tokens)} /> : null}
-    {u.cache_read_tokens ? <UsageRow label="Cache read" value={fmtTokUnit(u.cache_read_tokens)} /> : null}
-    {u.cache_write_tokens ? <UsageRow label="Cache write" value={fmtTokUnit(u.cache_write_tokens)} /> : null}
+      title={`Cumulative input and output across all model calls: ${count(u.reported_tokens ?? undefined, true)}. Repeated and cached input is counted each time. Reasoning is included in output. Not remaining provider quota.`} />
+    <UsageRow label={live ? 'Input so far' : 'Input'}
+      value={`${count(input)}${share(u.cache_read_tokens, input, 'cached')}`}
+      title={`Cumulative input across all model calls. Uncached: ${count(u.input_tokens, true)}; cache read: ${count(u.cache_read_tokens, true)}; cache write: ${count(u.cache_write_tokens, true)}. Cached percentage is cache reads divided by all input; cache writes are not cache hits.`} />
+    <UsageRow label={live ? 'Output so far' : 'Output'}
+      value={`${count(u.output_tokens)}${share(u.reasoning_tokens, u.output_tokens, 'reasoning')}`}
+      title={`Cumulative output across all model calls: ${count(u.output_tokens, true)}. Includes reasoning: ${count(u.reasoning_tokens, true)}.`} />
     <UsageContext context={latestContextUsage([u])}
       partialTokens={u.context_window === undefined ? u.context_tokens : undefined} />
   </>;

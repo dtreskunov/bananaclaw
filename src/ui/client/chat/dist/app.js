@@ -28600,33 +28600,42 @@ function UsageContext({ context, partialTokens }) {
   return /* @__PURE__ */ u4(
     UsageRow,
     {
-      label: "Context utilization",
+      label: "Latest context",
       value: detail,
+      kind: "context",
       title: "Context in use after the latest model call: its whole prompt plus its reply"
     }
   );
 }
 function UsageTokens({ u: u5, live }) {
-  const count = (n3) => n3 !== void 0 && (n3 !== 0 || u5.reported_tokens !== null) ? fmtTokUnit(n3) : "unavailable";
+  const count = (n3, exact = false) => n3 !== void 0 && (n3 !== 0 || u5.reported_tokens !== null) ? exact ? `${n3.toLocaleString("en-US")} tok` : fmtTokUnit(n3) : "unavailable";
+  const input = u5.input_tokens !== void 0 && u5.cache_read_tokens !== void 0 && u5.cache_write_tokens !== void 0 ? u5.input_tokens + u5.cache_read_tokens + u5.cache_write_tokens : void 0;
+  const share = (part, total, label) => part !== void 0 && (part !== 0 || u5.reported_tokens !== null) && total !== void 0 && total > 0 ? ` \xB7 ${formatContextPercent(part, total)} ${label}` : "";
   return /* @__PURE__ */ u4(k, { children: [
     /* @__PURE__ */ u4(
       UsageRow,
       {
-        label: live ? "Reported tokens so far" : "Reported tokens",
+        label: live ? "Total so far" : "Total",
         value: u5.reported_tokens == null ? "unavailable" : fmtTokUnit(u5.reported_tokens),
-        title: "Cumulative uncached input, cache reads/writes and output across model calls. Reasoning is included in output. Not remaining provider quota."
+        title: `Cumulative input and output across all model calls: ${count(u5.reported_tokens ?? void 0, true)}. Repeated and cached input is counted each time. Reasoning is included in output. Not remaining provider quota.`
       }
     ),
     /* @__PURE__ */ u4(
       UsageRow,
       {
-        label: live ? "Processing so far" : "Turn processing",
-        value: `${count(u5.input_tokens)} in \xB7 ${count(u5.output_tokens)} out`
+        label: live ? "Input so far" : "Input",
+        value: `${count(input)}${share(u5.cache_read_tokens, input, "cached")}`,
+        title: `Cumulative input across all model calls. Uncached: ${count(u5.input_tokens, true)}; cache read: ${count(u5.cache_read_tokens, true)}; cache write: ${count(u5.cache_write_tokens, true)}. Cached percentage is cache reads divided by all input; cache writes are not cache hits.`
       }
     ),
-    u5.reasoning_tokens ? /* @__PURE__ */ u4(UsageRow, { label: "Reasoning", value: fmtTokUnit(u5.reasoning_tokens) }) : null,
-    u5.cache_read_tokens ? /* @__PURE__ */ u4(UsageRow, { label: "Cache read", value: fmtTokUnit(u5.cache_read_tokens) }) : null,
-    u5.cache_write_tokens ? /* @__PURE__ */ u4(UsageRow, { label: "Cache write", value: fmtTokUnit(u5.cache_write_tokens) }) : null,
+    /* @__PURE__ */ u4(
+      UsageRow,
+      {
+        label: live ? "Output so far" : "Output",
+        value: `${count(u5.output_tokens)}${share(u5.reasoning_tokens, u5.output_tokens, "reasoning")}`,
+        title: `Cumulative output across all model calls: ${count(u5.output_tokens, true)}. Includes reasoning: ${count(u5.reasoning_tokens, true)}.`
+      }
+    ),
     /* @__PURE__ */ u4(
       UsageContext,
       {
