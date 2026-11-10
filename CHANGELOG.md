@@ -11,6 +11,11 @@ All notable changes to NanoClaw will be documented in this file.
   Existing installations must perform the [offline cutover](docs/usage-efficiency.md#offline-cutover)
   before deploying. Normal runtime paths do not import old schemas or metadata.
 
+- **Completed turn-usage cutover cleanup.** The offline tool and conversion
+  tests are archived at `311e2db37cedb092620edb1fda57abd48bc29067` and retired
+  after verification. Runtime remains v3 with runner links v7; private rollback
+  backups remain. See [older installations and rollback](docs/usage-efficiency.md#offline-cutover).
+
 - **[BREAKING] Markdown reply links replace conversational question
   requests.** `[label](reply:)` controls send exactly their visible label.
   No separate payload or URL encoding is needed. Clicking sends the message;

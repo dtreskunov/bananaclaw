@@ -217,6 +217,8 @@ before deployment. Host/session/runner stores require v3 and runner links v7;
 normal runtime paths have no schema upgrades, metadata backfills, or legacy
 usage decoders. The one-time tool prepares verified candidates and rollback
 copies, requires drained runner journals, preserves any explicit measurements,
-and leaves unknown historical values null. Commit the tool before the cutover,
-then retire it after successful verification while keeping its Git history and
-private rollback inventory.
+and leaves unknown historical values null. The verified local cutover is complete;
+the tool and its tests are archived at
+`311e2db37cedb092620edb1fda57abd48bc29067` and retired from the current tree.
+The private rollback inventory remains. Normal runtime has no compatibility
+layer or backfill code.

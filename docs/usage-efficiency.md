@@ -149,9 +149,14 @@ These measurements are not weighted subscription quota or remaining allowance.
 
 ## Offline cutover
 
-Perform this before deploying to a populated storage-v2 installation. Empty
-installs initialize v3 directly. Native-provider databases remain v1, search
-remains v2, and archive format remains v4.
+The local cutover is complete and verified. The one-time tool and its conversion
+tests are archived at Git revision `311e2db37cedb092620edb1fda57abd48bc29067` and
+retired from the current tree. Runtime contains only v3 schemas and version
+checks, not a converter or compatibility decoder. Private rollback backups remain.
+
+Older populated storage-v2 installations must perform this cutover before
+deployment. Empty installs initialize v3 directly. Native-provider databases
+remain v1, search remains v2, and archive format remains v4.
 
 1. Retain the old deployed host build and agent source/image, then settle active
    work and drain every runner journal using the old runtime. Stop this
@@ -163,6 +168,9 @@ remains v2, and archive format remains v4.
    stopped-writer attestations; it never stops services or installs files:
 
    ```bash
+   git worktree add --detach ../nanoclaw-usage-cutover 311e2db37cedb092620edb1fda57abd48bc29067
+   cd ../nanoclaw-usage-cutover
+   pnpm install --frozen-lockfile
    pnpm exec tsx scripts/backfill-turn-usage.ts \
      --source /private/stopped-data \
      --output /private/new-usage-cutover \
@@ -192,9 +200,9 @@ the original source and rollback copies remain unchanged. Rollback requires
 restoring the entire paired inventory and old runtime, not one DB or just its
 version number. Preserve newer traffic separately before rolling back.
 
-Commit the cutover tool and its tests before use. After successful verification,
-retire them in a following commit and retain the archival commit and private
-backups. Do not move compatibility machinery back into runtime code.
+The archived commit retains the tested cutover tool; do not restore it or move
+compatibility machinery into ordinary runtime paths. Preserve the private
+backup inventory and the matching old runtime for rollback.
 
 ## Private memory migration
 
