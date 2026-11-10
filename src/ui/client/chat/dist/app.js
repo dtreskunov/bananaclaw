@@ -20360,12 +20360,6 @@ var SyncConnection = class {
 // src/attention-state.ts
 var attentionTargets = y3(null);
 var attentionError = y3(null);
-var attentionSelection = y3(null);
-var navigationSequence = 0;
-function selectAttention(id2, navigate = false) {
-  if (!navigate && attentionSelection.value?.id === id2) return;
-  attentionSelection.value = { id: id2, navigation: navigate ? ++navigationSequence : 0 };
-}
 function matchesAttentionLocation(target, location3) {
   const origin = target.origin;
   return origin.agentGroupId === location3.agentGroupId && origin.threadId === location3.threadId && origin.channelType === (location3.channelType || "web") && (origin.messagingGroupId === location3.messagingGroupId || origin.channelType === "web" && location3.messagingGroupId === null);
@@ -20426,15 +20420,16 @@ function openChat() {
 // src/activity-navigation.ts
 var activitySelection = y3(null);
 var activityNavigationPending = y3(null);
-var sequence = 0;
 var requestSequence = 0;
 function beginActivityNavigation(scope) {
   const request = ++requestSequence;
+  activitySelection.value = null;
   activityNavigationPending.value = { request, scope };
   return request;
 }
 function cancelActivityNavigation() {
   requestSequence++;
+  activitySelection.value = null;
   activityNavigationPending.value = null;
 }
 function isCurrentActivityNavigation(request) {
@@ -20457,7 +20452,7 @@ function isActivityNavigating(scope) {
   return typeof source !== "string" && scope.threadId === source.threadId && (scope.channelType || "web") === (source.channelType || "web") && (!scope.messagingGroupId || !source.messagingGroupId || scope.messagingGroupId === source.messagingGroupId);
 }
 function selectActivity(target) {
-  activitySelection.value = { target, navigation: ++sequence };
+  activitySelection.value = { target, request: requestSequence };
 }
 
 // src/transcript-reader.ts
@@ -21365,7 +21360,6 @@ function clearSearch() {
 }
 function clearChat(preserveActivityNavigation = false) {
   if (!preserveActivityNavigation) cancelActivityNavigation();
-  activitySelection.value = null;
   resetConversation();
   resetTurnState();
   voice.detach();
@@ -21841,31 +21835,11 @@ function failActivityNavigation(navigation, error, subject) {
   showToast(`Could not open ${subject}: ${error.message}`, "err", 5e3, { transient: error.message === "HTTP 404" });
   return false;
 }
-async function navigateAttention(scope) {
-  const targets = attentionTargets.value;
-  if (!targets?.length || attentionError.value) return false;
-  const target = [...targets].reverse().find(
-    (target2) => typeof scope === "string" ? target2.origin.agentGroupId === scope : matchesAttentionLocation(target2, scope)
-  );
-  if (!target) return false;
-  const navigation = beginActivityNavigation(scope);
-  activitySelection.value = null;
-  selectAttention(target.id, true);
-  try {
-    return await openActivityTarget(
-      {
-        origin: target.origin,
-        anchor: { kind: "interaction", id: target.id },
-        ...target.readCursor ? { readCursor: target.readCursor } : {}
-      },
-      navigation
-    ) !== null;
-  } catch (error) {
-    return failActivityNavigation(navigation, error, "input request");
-  }
-}
 async function navigateActivity(scope, status, unread = false) {
-  if (status.waiting) return navigateAttention(scope);
+  const waiting = status.waiting ? attentionTargets.value?.slice().reverse().find(
+    (target) => typeof scope === "string" ? target.origin.agentGroupId === scope : matchesAttentionLocation(target, scope)
+  ) : void 0;
+  if (status.waiting && (!waiting || attentionError.value)) return false;
   const navigation = beginActivityNavigation(scope);
   const gid = typeof scope === "string" ? scope : scope.agentGroupId;
   if (!gid) {
@@ -21873,9 +21847,8 @@ async function navigateActivity(scope, status, unread = false) {
     showToast("Could not open activity source: no agent selected.", "err", 5e3, { transient: true });
     return false;
   }
-  const generation2 = refs.chatGeneration;
   try {
-    const local = !unread && status.activity === "running" ? pendingActivitySends(
+    const local = !waiting && !unread && status.activity === "running" ? pendingActivitySends(
       gid,
       typeof scope === "string" ? void 0 : {
         threadId: scope.threadId ?? "",
@@ -21886,7 +21859,13 @@ async function navigateActivity(scope, status, unread = false) {
       void 0
     ) : void 0;
     let target;
-    if (local) {
+    if (waiting) {
+      target = {
+        origin: waiting.origin,
+        anchor: { kind: "interaction", id: waiting.id },
+        ...waiting.readCursor ? { readCursor: waiting.readCursor } : {}
+      };
+    } else if (local) {
       target = {
         origin: { agentGroupId: gid, threadId: local.threadId, channelType: "web", messagingGroupId: "" },
         anchor: { kind: "message", id: local.messageId }
@@ -21901,16 +21880,13 @@ async function navigateActivity(scope, status, unread = false) {
       }
       target = await api(`api/groups/${encodeURIComponent(gid)}/activity-target?${query}`);
     }
-    if (generation2 !== refs.chatGeneration || !isCurrentActivityNavigation(navigation)) {
-      finishActivityNavigation(navigation);
-      return false;
-    }
+    if (!isCurrentActivityNavigation(navigation)) return false;
     const selectedTarget = await openActivityTarget(target, navigation, !!local);
     if (!selectedTarget) return false;
     selectActivity(selectedTarget);
     return true;
   } catch (error) {
-    return failActivityNavigation(navigation, error, "activity source");
+    return failActivityNavigation(navigation, error, status.waiting ? "input request" : "activity source");
   }
 }
 var fileSearchGeneration = 0;
@@ -24827,10 +24803,7 @@ function attachJumpReadTracking(log, element, target) {
 
 // src/components/AttentionFocus.tsx
 function AttentionFocus() {
-  const targets = attentionTargets.value;
-  const activity = activitySelection.value;
-  const pendingTarget = activityNavigationPending.value?.target;
-  const selection = activity ?? attentionSelection.value;
+  const selection = activitySelection.value;
   const handled = A2(null);
   const location3 = {
     agentGroupId: groupId.value,
@@ -24838,33 +24811,30 @@ function AttentionFocus() {
     channelType: channelType.value,
     messagingGroupId: messagingGroupId.value
   };
-  const selected = activity ? { id: activity.target.anchor.id, origin: activity.target.origin, readCursor: activity.target.readCursor } : targets?.find((target) => target.id === attentionSelection.value?.id) ?? (pendingTarget && pendingTarget.anchor.id === attentionSelection.value?.id ? { id: pendingTarget.anchor.id, origin: pendingTarget.origin, readCursor: pendingTarget.readCursor } : void 0);
+  const selected = selection?.target;
   const snapshot = conversationState.value;
   const ready = chatReady.value;
-  const finish = () => {
-    const pending4 = activityNavigationPending.peek();
-    if (pending4?.target && selected && pending4.target.anchor.id === selected.id && matchesAttentionLocation({
-      id: pending4.target.anchor.id,
-      origin: pending4.target.origin
-    }, location3)) finishActivityNavigation(pending4.request);
-  };
-  y2(() => () => {
-    if (handled.current?.selection === selection) {
-      handled.current.stopRead?.();
-      handled.current.stopRead = void 0;
-    }
-  }, [selection, location3.agentGroupId, location3.threadId, location3.channelType, location3.messagingGroupId]);
+  y2(
+    () => () => {
+      if (handled.current?.selection === selection) {
+        handled.current.stopRead?.();
+        handled.current.stopRead = void 0;
+      }
+    },
+    [selection, location3.agentGroupId, location3.threadId, location3.channelType, location3.messagingGroupId]
+  );
   y2(() => {
-    if (!selection?.navigation || !selected || handled.current?.selection === selection || !matchesAttentionLocation(selected, location3))
+    if (!selection || !selected || handled.current?.selection === selection || !matchesAttentionLocation(selected, location3))
       return;
     const frame2 = requestAnimationFrame(() => {
-      const target = activity ? document.querySelector(`#chat-log [data-msg-id="${CSS.escape(selected.id)}"]`) : document.getElementById(`attention-${selected.id}`);
+      if (!isCurrentActivityNavigation(selection.request)) return;
+      const target = document.querySelector(`#chat-log [data-msg-id="${CSS.escape(selected.anchor.id)}"]`);
       if (!target) {
-        if ((activity || pendingTarget) && ready) {
+        if (ready) {
           handled.current = { selection };
-          console.warn("Activity source is no longer in the transcript", selected.id);
+          console.warn("Activity source is no longer in the transcript", selected.anchor.id);
           showToast("This activity source is no longer available.", "err", 5e3, { transient: true });
-          finish();
+          finishActivityNavigation(selection.request);
         }
         return;
       }
@@ -24874,22 +24844,22 @@ function AttentionFocus() {
       target.scrollIntoView({ block: "center", behavior: "auto" });
       target.focus({ preventScroll: true });
       highlightMessage(target);
-      finish();
+      finishActivityNavigation(selection.request);
       if (selected.readCursor && location3.agentGroupId && location3.threadId) {
         const log = target.closest("#chat-log");
-        if (log) handled.current.stopRead = attachJumpReadTracking(log, target, {
-          groupId: location3.agentGroupId,
-          threadId: location3.threadId,
-          channelType: location3.channelType || "web",
-          messagingGroupId: location3.messagingGroupId,
-          cursor: selected.readCursor
-        });
+        if (log)
+          handled.current.stopRead = attachJumpReadTracking(log, target, {
+            groupId: location3.agentGroupId,
+            threadId: location3.threadId,
+            channelType: location3.channelType || "web",
+            messagingGroupId: location3.messagingGroupId,
+            cursor: selected.readCursor
+          });
       }
     });
     return () => cancelAnimationFrame(frame2);
   }, [
     selection,
-    selected,
     location3.agentGroupId,
     location3.threadId,
     location3.channelType,
@@ -25271,26 +25241,26 @@ function useCredentialResource(url) {
   const [data, setData] = h2(null);
   const [error, setError] = h2("");
   const [loading, setLoading] = h2(true);
-  const sequence2 = A2(0);
+  const sequence = A2(0);
   async function refresh() {
-    const request = ++sequence2.current;
+    const request = ++sequence.current;
     setLoading(true);
     setError("");
     try {
       const result = await credentialRequest(url);
-      if (request === sequence2.current) setData(result);
+      if (request === sequence.current) setData(result);
     } catch (error2) {
       if (!(error2 instanceof CredentialsError || error2 instanceof TypeError)) throw error2;
-      if (request === sequence2.current) setError(errorMessage(error2));
+      if (request === sequence.current) setError(errorMessage(error2));
     } finally {
-      if (request === sequence2.current) setLoading(false);
+      if (request === sequence.current) setLoading(false);
     }
   }
   y2(() => {
     setData(null);
     void refresh();
     return () => {
-      sequence2.current++;
+      sequence.current++;
     };
   }, [url]);
   return { data, error, loading, refresh };
@@ -26728,30 +26698,30 @@ function OAuthScopePicker({
   const [discovery, setDiscovery] = h2({ key: "", loading: false, data: null, error: "" });
   const [retry, setRetry] = h2(0);
   const [draft, setDraft] = h2("");
-  const sequence2 = A2(0);
+  const sequence = A2(0);
   const initialized2 = A2(/* @__PURE__ */ new Set());
   y2(() => {
-    const request = ++sequence2.current;
+    const request = ++sequence.current;
     const controller = new AbortController();
     if (!key) {
       setDiscovery({ key, loading: false, data: null, error: "" });
       return () => {
-        sequence2.current++;
+        sequence.current++;
         controller.abort();
       };
     }
     setDiscovery({ key, loading: true, data: null, error: "" });
     const timer2 = setTimeout(() => {
       void credentialRequest(credentialsPath("/scopes"), "POST", JSON.parse(key), controller.signal).then((data) => {
-        if (sequence2.current === request) setDiscovery({ key, loading: false, data, error: "" });
+        if (sequence.current === request) setDiscovery({ key, loading: false, data, error: "" });
       }).catch((error) => {
         if (controller.signal.aborted) return;
         if (!(error instanceof CredentialsError || error instanceof TypeError)) throw error;
-        if (sequence2.current === request) setDiscovery({ key, loading: false, data: null, error: errorMessage(error) });
+        if (sequence.current === request) setDiscovery({ key, loading: false, data: null, error: errorMessage(error) });
       });
     }, 500);
     return () => {
-      sequence2.current++;
+      sequence.current++;
       clearTimeout(timer2);
       controller.abort();
     };
@@ -27751,7 +27721,6 @@ function ApprovalBubble({ approval: approval2, busy, onRespond, reference }) {
       id: `attention-${approval2.id}`,
       "data-attention-target": approval2.id,
       tabIndex: -1,
-      onFocus: () => selectAttention(approval2.id),
       from,
       timestamp: approval2.resolvedAt ?? approval2.createdAt,
       children: approval2.kind === "confirmation" ? /* @__PURE__ */ u4(ApprovalCard, { approval: approval2, busy, onRespond }) : access ? /* @__PURE__ */ u4(AccessRequestCard, { request: approval2, disabled: busy || status === "applying" }) : /* @__PURE__ */ u4(AccountRequestSummary, { request: approval2 })

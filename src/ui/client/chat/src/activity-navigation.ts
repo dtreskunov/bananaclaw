@@ -2,23 +2,24 @@ import { signal } from '@preact/signals';
 import type { ActivityTarget } from '../../../shared/activity-target';
 import type { AttentionLocation } from './attention-state';
 
-export const activitySelection = signal<{ target: ActivityTarget; navigation: number } | null>(null);
+export const activitySelection = signal<{ target: ActivityTarget; request: number } | null>(null);
 export const activityNavigationPending = signal<{
   request: number;
   scope: string | AttentionLocation;
   target?: ActivityTarget;
 } | null>(null);
-let sequence = 0;
 let requestSequence = 0;
 
 export function beginActivityNavigation(scope: string | AttentionLocation): number {
   const request = ++requestSequence;
+  activitySelection.value = null;
   activityNavigationPending.value = { request, scope };
   return request;
 }
 
 export function cancelActivityNavigation(): void {
   requestSequence++;
+  activitySelection.value = null;
   activityNavigationPending.value = null;
 }
 
@@ -51,5 +52,5 @@ export function isActivityNavigating(scope: string | AttentionLocation): boolean
 }
 
 export function selectActivity(target: ActivityTarget): void {
-  activitySelection.value = { target, navigation: ++sequence };
+  activitySelection.value = { target, request: requestSequence };
 }

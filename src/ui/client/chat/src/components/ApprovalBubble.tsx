@@ -6,7 +6,6 @@ import { AccessRequestCard, AccountRequestSummary } from './AccessRequestCard';
 import type { ConversationApproval } from '../../../../shared/approval';
 import { otherAuthorName } from '../../../../shared/conversation';
 import { currentUserId, groupId } from '../state';
-import { selectAttention } from '../attention-state';
 
 type Props = Omit<ComponentProps<typeof ApprovalCard>, 'approval'> & { approval: ConversationApproval; reference?: boolean };
 
@@ -24,7 +23,6 @@ export function ApprovalBubble({ approval, busy, onRespond, reference }: Props) 
     id={`attention-${approval.id}`}
     data-attention-target={approval.id}
     tabIndex={-1}
-    onFocus={() => selectAttention(approval.id)}
     from={from} timestamp={approval.resolvedAt ?? approval.createdAt}>
     {approval.kind === 'confirmation'
       ? <ApprovalCard approval={approval} busy={busy} onRespond={onRespond} />

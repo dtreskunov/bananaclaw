@@ -1,13 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AttentionTarget } from '../../../shared/attention';
 import { isAttentionTargets } from '../../../shared/attention';
-import {
-  attentionSelection,
-  attentionTargets,
-  groupAttentionCount,
-  threadAttentionCount,
-  selectAttention,
-} from './attention-state';
+import { attentionTargets, groupAttentionCount, threadAttentionCount } from './attention-state';
 
 const targets: AttentionTarget[] = [
   {
@@ -30,7 +24,6 @@ const targets: AttentionTarget[] = [
 const location = { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm' };
 afterEach(() => {
   attentionTargets.value = null;
-  attentionSelection.value = null;
 });
 
 describe('one canonical attention snapshot', () => {
@@ -52,16 +45,6 @@ describe('one canonical attention snapshot', () => {
     expect(isAttentionTargets([targets[1], targets[1]])).toBe(false);
     expect(isAttentionTargets([{ id: 'bad', origin: null }])).toBe(false);
     expect(isAttentionTargets([{ id: 'missing-origin', agentGroupId: 'g' }])).toBe(false);
-  });
-  it('tracks manual focus without re-requesting focus and keeps navigation intents monotonic', () => {
-    selectAttention('a', true);
-    const first = attentionSelection.value!;
-    selectAttention('a');
-    expect(attentionSelection.value).toBe(first);
-    selectAttention('b');
-    expect(attentionSelection.value).toEqual({ id: 'b', navigation: 0 });
-    selectAttention('a', true);
-    expect(attentionSelection.value!.navigation).toBeGreaterThan(first.navigation);
   });
   it('validates optional publication cursors on waiting targets', () => {
     expect(

@@ -6,7 +6,7 @@ import type { ReadCursor } from '../../shared/read-state.js';
 import type { Conversation } from '../../shared/conversation.js';
 import { resolveTurnContext, type TurnContext } from './conversation-context.js';
 
-interface Publication {
+export interface Publication {
   position: number;
   key: string;
   session_id: string;

@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   activityNavigationPending,
+  activitySelection,
   beginActivityNavigation,
   cancelActivityNavigation,
   finishActivityNavigation,
   isActivityNavigating,
   isCurrentActivityNavigation,
   setActivityDestination,
+  selectActivity,
 } from './activity-navigation';
 
 const origin = { agentGroupId: 'g', threadId: 't', channelType: 'web', messagingGroupId: 'm' };
@@ -35,7 +37,9 @@ describe('immediate navigation feedback', () => {
   });
   it('invalidates delayed results when the user cancels or navigates normally', () => {
     const request = beginActivityNavigation('g');
+    selectActivity({ origin, anchor: { kind: 'message', id: 'old' } });
     cancelActivityNavigation();
+    expect(activitySelection.value).toBeNull();
     expect(isCurrentActivityNavigation(request)).toBe(false);
     expect(isActivityNavigating('g')).toBe(false);
   });

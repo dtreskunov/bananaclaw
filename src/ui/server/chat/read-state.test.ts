@@ -31,6 +31,8 @@ import { putTurn, linkTurnInput } from '../../../db/turns.js';
 import * as conversationReader from './conversation.js';
 import * as threadReader from './threads.js';
 import * as sessionReader from '../../../session-manager.js';
+import * as readStateReader from './read-state.js';
+import * as conversationContext from './conversation-context.js';
 
 const root = path.resolve('.test-read-state');
 let input: Database.Database, output: Database.Database;
@@ -83,6 +85,33 @@ function unread(user = 'viewer', thread = 'a') {
 }
 
 describe('durable viewer unread state', () => {
+  it('reuses the indexed group unread publication instead of querying it again', async () => {
+    message('source');
+    const findAgain = vi.spyOn(readStateReader, 'newestUnreadPublication');
+    expect(await readActivityTarget('viewer', 'g', 'unread')).toMatchObject({
+      anchor: { kind: 'message', id: 'source' },
+      readCursor: cursor(),
+    });
+    expect(findAgain).not.toHaveBeenCalled();
+  });
+
+  it.each(['session', 'platform', 'thread'] as const)(
+    'rejects a selected unread row outside the current %s',
+    async (reason) => {
+      message('source');
+      const context = resolveTurnContext('viewer', 'g', 'a');
+      if (!context) throw new Error('Expected authorized route');
+      const stale =
+        reason === 'session'
+          ? { ...context, sessionId: 'another-session' }
+          : reason === 'platform'
+            ? { ...context, platformIds: ['another-platform'] }
+            : { ...context, threadId: 'another-thread' };
+      vi.spyOn(conversationContext, 'resolveTurnContext').mockReturnValue(stale);
+      expect(await readActivityTarget('viewer', 'g', 'unread')).toBeNull();
+    },
+  );
+
   it('does not enumerate the agent or hydrate history when resolving a scoped unread source', async () => {
     message('source');
     const list = vi.spyOn(threadReader, 'listThreadsForViewer');

@@ -9,7 +9,8 @@ vi.mock('./api', async (original) => ({
 }));
 import { api, postJson } from './api';
 import { clearChat, runSync, respondInteraction, navigateAttention } from './actions';
-import { attentionError, attentionSelection, attentionTargets } from './attention-state';
+import { attentionError, attentionTargets } from './attention-state';
+import { activitySelection, selectActivity } from './activity-navigation';
 import { groupId, threadId, channelType, messagingGroupId } from './state';
 import { testThread } from './conversation-test-fixtures';
 import { installSyncFixture } from './sync-action-test-fixtures';
@@ -28,7 +29,7 @@ beforeEach(async () => {
   messagingGroupId.value = null;
   sync = await installSyncFixture();
   attentionTargets.value = [target];
-  attentionSelection.value = null;
+  activitySelection.value = null;
   attentionError.value = null;
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -36,7 +37,6 @@ afterEach(() => {
   clearChat();
   sync.dispose();
   attentionTargets.value = null;
-  attentionSelection.value = null;
   attentionError.value = null;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -106,11 +106,11 @@ describe('authoritative attention refresh', () => {
       target,
       { ...target, id: 'second' },
     ];
-    attentionSelection.value = { id: 'second', navigation: 0 };
+    selectActivity({ origin: target.origin, anchor: { kind: 'interaction', id: 'second' } });
     expect(await navigateAttention('g')).toBe(true);
-    expect(attentionSelection.value?.id).toBe('second');
+    expect(activitySelection.value?.target.anchor.id).toBe('second');
     expect(await navigateAttention('g')).toBe(true);
-    expect(attentionSelection.value?.id).toBe('second');
+    expect(activitySelection.value?.target.anchor.id).toBe('second');
     expect(postJson).not.toHaveBeenCalled();
     expect(api).not.toHaveBeenCalled();
     expect(attentionTargets.value).toHaveLength(3);
@@ -129,7 +129,7 @@ describe('authoritative attention refresh', () => {
       older,
       newest,
     ];
-    attentionSelection.value = { id: older.id, navigation: 0 };
+    selectActivity({ origin: older.origin, anchor: { kind: 'interaction', id: older.id } });
     expect(
       await navigateAttention({
         agentGroupId: 'g',
@@ -138,7 +138,7 @@ describe('authoritative attention refresh', () => {
         messagingGroupId: 'm',
       }),
     ).toBe(true);
-    expect(attentionSelection.value?.id).toBe(newest.id);
+    expect(activitySelection.value?.target.anchor.id).toBe(newest.id);
     expect(api).not.toHaveBeenCalled();
     expect(postJson).not.toHaveBeenCalled();
   });
@@ -152,7 +152,7 @@ describe('authoritative attention refresh', () => {
         messagingGroupId: 'm',
       }),
     ).toBe(false);
-    expect(attentionSelection.value).toBeNull();
+    expect(activitySelection.value).toBeNull();
     expect(api).not.toHaveBeenCalled();
     expect(postJson).not.toHaveBeenCalled();
   });
@@ -182,13 +182,13 @@ describe('authoritative attention refresh', () => {
   it.each([null, []])('does not navigate without known pending requests: %s', async (targets) => {
     attentionTargets.value = targets;
     expect(await navigateAttention('g')).toBe(false);
-    expect(attentionSelection.value).toBeNull();
+    expect(activitySelection.value).toBeNull();
   });
   it('does not navigate to another agent or act on a stale attention snapshot', async () => {
     expect(await navigateAttention('missing')).toBe(false);
     attentionError.value = 'Offline';
     expect(await navigateAttention('g')).toBe(false);
-    expect(attentionSelection.value).toBeNull();
+    expect(activitySelection.value).toBeNull();
     expect(api).not.toHaveBeenCalled();
   });
 });

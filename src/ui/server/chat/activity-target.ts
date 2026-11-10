@@ -6,21 +6,34 @@ import { canAccessAgentGroup } from '../../../modules/permissions/access.js';
 import { hasAdminPrivilege } from '../../../modules/permissions/db/user-roles.js';
 import { listThreadsForViewer } from './threads.js';
 import { readConversation } from './conversation.js';
-import { resolveTurnContext } from './conversation-context.js';
-import { newestUnreadPublication, publicationReadCursor, unreadPublicationsForGroup } from './read-state.js';
+import { resolveTurnContext, routeMatches } from './conversation-context.js';
+import {
+  newestUnreadPublication,
+  publicationReadCursor,
+  unreadPublicationsForGroup,
+  type Publication,
+} from './read-state.js';
 import { openInboundDb } from '../../../session-manager.js';
 import { publicInboundMessageId } from './history.js';
 import { readSummaryActivityBounds } from '../../../thread-summaries.js';
 
 type Candidate = { target: ActivityTarget; order: number };
 
-function readRouteTarget(userId: string, origin: ApprovalOrigin, kind: ActivityNavigationKind): Candidate | null {
+function readRouteTarget(
+  userId: string,
+  origin: ApprovalOrigin,
+  kind: ActivityNavigationKind,
+  knownUnread?: Publication,
+): Candidate | null {
   const { agentGroupId: groupId, threadId } = origin;
   const context = resolveTurnContext(userId, groupId, threadId, origin);
   if (!context?.sessionId) return null;
   if (kind === 'unread') {
-    const publication = newestUnreadPublication(userId, groupId, context);
-    return publication
+    const publication = knownUnread ?? newestUnreadPublication(userId, groupId, context);
+    return publication &&
+      publication.session_id === context.sessionId &&
+      routeMatches(context, publication.channel_type, publication.platform_id, publication.thread_id || null) &&
+      (publication.kind !== 'approval' || hasAdminPrivilege(userId, groupId))
       ? {
           order: publication.position,
           target: {
@@ -137,6 +150,7 @@ export async function readActivityTarget(
           messagingGroupId: thread.messagingGroupId,
         },
         kind,
+        publication,
       );
       if (result) return result.target;
     }

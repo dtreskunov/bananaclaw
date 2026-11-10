@@ -147,6 +147,8 @@ above the bottom. Newer publications and other threads remain unread; reading
 an approval never resolves it.
 Unavailable sources produce an error instead of opening an unrelated message.
 There is no floating attention control.
+Messages and requests share one captured jump intent, so resolving a pending
+request while its conversation loads does not discard the jump or its read cursor.
 
 Non-waiting sources resolve on demand through
 `GET /api/groups/:group/activity-target?kind=unread|running|latest`, optionally

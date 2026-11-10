@@ -5,7 +5,7 @@ vi.mock('./components/Toast', () => ({ showToast: vi.fn() }));
 import { api } from './api';
 import { clearChat, navigateActivity, openChat } from './actions';
 import { activitySelection, activityNavigationPending, finishActivityNavigation } from './activity-navigation';
-import { attentionError, attentionSelection, attentionTargets } from './attention-state';
+import { attentionError, attentionTargets } from './attention-state';
 import { groupId, threadId, channelType, messagingGroupId, drawerOpen, pendingWebSends, searchOpen } from './state';
 import { testThread, testWebSubmission } from './conversation-test-fixtures';
 import { installSyncFixture } from './sync-action-test-fixtures';
@@ -26,7 +26,6 @@ beforeEach(async () => {
   sync = await installSyncFixture();
   attentionTargets.value = [];
   attentionError.value = null;
-  attentionSelection.value = null;
   vi.mocked(api).mockResolvedValue(destination);
 });
 afterEach(() => {
@@ -34,7 +33,6 @@ afterEach(() => {
   sync.dispose();
   pendingWebSends.value = [];
   searchOpen.value = false;
-  attentionSelection.value = null;
   attentionTargets.value = null;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -109,9 +107,10 @@ describe('indicator source navigation', () => {
       expect(activitySelection.value?.target).toEqual(destination);
       expect(searchOpen.value).toBe(false);
       expect(drawerOpen.threads.value).toBe(false);
-      const first = activitySelection.value?.navigation;
+      const first = activitySelection.value;
       expect(await navigateActivity(scope, { activity }, unread)).toBe(true);
-      expect(activitySelection.value?.navigation).toBeGreaterThan(first!);
+      expect(activitySelection.value).not.toBe(first);
+      expect(activitySelection.value?.request).toBeGreaterThan(first!.request);
     },
   );
 
@@ -157,7 +156,7 @@ describe('indicator source navigation', () => {
       { id: 'new', origin: destination.origin },
     ];
     expect(await navigateActivity('g', { activity: 'running', waiting: true }, true)).toBe(true);
-    expect(attentionSelection.value?.id).toBe('new');
+    expect(activitySelection.value?.target.anchor).toEqual({ kind: 'interaction', id: 'new' });
     expect(api).not.toHaveBeenCalled();
   });
 

@@ -65,19 +65,12 @@ import {
 } from './conversation-state';
 import type { GlobalSyncState } from '../../../shared/sync';
 import { SyncConnection } from './sync-connection';
-import {
-  attentionError,
-  matchesAttentionLocation,
-  type AttentionLocation,
-  attentionTargets,
-  selectAttention,
-} from './attention-state';
+import { attentionError, matchesAttentionLocation, type AttentionLocation, attentionTargets } from './attention-state';
 import { openChat as openChatView } from './credentials-navigation';
 import type { InteractionResponse } from '../../../shared/conversation';
 import type { ActivityStatus, ChatStartResponse } from '../../../shared/thread';
 import type { ActivityNavigationKind, ActivityTarget } from '../../../shared/activity-target';
 import {
-  activitySelection,
   selectActivity,
   beginActivityNavigation,
   cancelActivityNavigation,
@@ -439,7 +432,6 @@ export function clearSearch(): void {
 // ── chat ────────────────────────────────────────────────────────────
 export function clearChat(preserveActivityNavigation = false): void {
   if (!preserveActivityNavigation) cancelActivityNavigation();
-  activitySelection.value = null;
   resetConversation();
   resetTurnState();
   voice.detach();
@@ -1061,32 +1053,8 @@ function failActivityNavigation(
   return false;
 }
 
-export async function navigateAttention(scope: string | AttentionLocation): Promise<boolean> {
-  const targets = attentionTargets.value;
-  if (!targets?.length || attentionError.value) return false;
-  const target = [...targets]
-    .reverse()
-    .find((target) =>
-      typeof scope === 'string' ? target.origin.agentGroupId === scope : matchesAttentionLocation(target, scope),
-    );
-  if (!target) return false;
-  const navigation = beginActivityNavigation(scope);
-  activitySelection.value = null;
-  selectAttention(target.id, true);
-  try {
-    return (
-      (await openActivityTarget(
-        {
-          origin: target.origin,
-          anchor: { kind: 'interaction', id: target.id },
-          ...(target.readCursor ? { readCursor: target.readCursor } : {}),
-        },
-        navigation,
-      )) !== null
-    );
-  } catch (error) {
-    return failActivityNavigation(navigation, error, 'input request');
-  }
+export function navigateAttention(scope: string | AttentionLocation): Promise<boolean> {
+  return navigateActivity(scope, { activity: 'idle', waiting: true });
 }
 
 export async function navigateActivity(
@@ -1094,7 +1062,15 @@ export async function navigateActivity(
   status: ActivityStatus,
   unread = false,
 ): Promise<boolean> {
-  if (status.waiting) return navigateAttention(scope);
+  const waiting = status.waiting
+    ? attentionTargets.value
+        ?.slice()
+        .reverse()
+        .find((target) =>
+          typeof scope === 'string' ? target.origin.agentGroupId === scope : matchesAttentionLocation(target, scope),
+        )
+    : undefined;
+  if (status.waiting && (!waiting || attentionError.value)) return false;
   const navigation = beginActivityNavigation(scope);
   const gid = typeof scope === 'string' ? scope : scope.agentGroupId;
   if (!gid) {
@@ -1102,10 +1078,9 @@ export async function navigateActivity(
     showToast('Could not open activity source: no agent selected.', 'err', 5000, { transient: true });
     return false;
   }
-  const generation = refs.chatGeneration;
   try {
     const local =
-      !unread && status.activity === 'running'
+      !waiting && !unread && status.activity === 'running'
         ? pendingActivitySends(
             gid,
             typeof scope === 'string'
@@ -1120,7 +1095,13 @@ export async function navigateActivity(
           )
         : undefined;
     let target: ActivityTarget;
-    if (local) {
+    if (waiting) {
+      target = {
+        origin: waiting.origin,
+        anchor: { kind: 'interaction', id: waiting.id },
+        ...(waiting.readCursor ? { readCursor: waiting.readCursor } : {}),
+      };
+    } else if (local) {
       target = {
         origin: { agentGroupId: gid, threadId: local.threadId, channelType: 'web', messagingGroupId: '' },
         anchor: { kind: 'message', id: local.messageId },
@@ -1135,16 +1116,13 @@ export async function navigateActivity(
       }
       target = await api<ActivityTarget>(`api/groups/${encodeURIComponent(gid)}/activity-target?${query}`);
     }
-    if (generation !== refs.chatGeneration || !isCurrentActivityNavigation(navigation)) {
-      finishActivityNavigation(navigation);
-      return false;
-    }
+    if (!isCurrentActivityNavigation(navigation)) return false;
     const selectedTarget = await openActivityTarget(target, navigation, !!local);
     if (!selectedTarget) return false;
     selectActivity(selectedTarget);
     return true;
   } catch (error) {
-    return failActivityNavigation(navigation, error, 'activity source');
+    return failActivityNavigation(navigation, error, status.waiting ? 'input request' : 'activity source');
   }
 }
 

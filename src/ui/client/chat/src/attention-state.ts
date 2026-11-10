@@ -3,14 +3,6 @@ import type { AttentionTarget } from '../../../shared/attention';
 
 export const attentionTargets = signal<AttentionTarget[] | null>(null);
 export const attentionError = signal<string | null>(null);
-export const attentionSelection = signal<{ id: string; navigation: number } | null>(null);
-let navigationSequence = 0;
-
-export function selectAttention(id: string, navigate = false): void {
-  if (!navigate && attentionSelection.value?.id === id) return;
-  attentionSelection.value = { id, navigation: navigate ? ++navigationSequence : 0 };
-}
-
 export interface AttentionLocation {
   agentGroupId: string | null;
   threadId: string | null;
@@ -18,7 +10,10 @@ export interface AttentionLocation {
   messagingGroupId: string | null;
 }
 
-export function matchesAttentionLocation(target: AttentionTarget, location: AttentionLocation): boolean {
+export function matchesAttentionLocation(
+  target: Pick<AttentionTarget, 'origin'>,
+  location: AttentionLocation,
+): boolean {
   const origin = target.origin;
   return (
     origin.agentGroupId === location.agentGroupId &&
