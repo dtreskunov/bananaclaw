@@ -23,6 +23,7 @@ it('forwards cancellation to the actual Claude SDK and closes the settled query'
       },
     }) as unknown as ReturnType<typeof sdk.query>;
   });
+
   try {
     const query = new ClaudeProvider().query({
       prompt: 'cancel me',
@@ -45,4 +46,23 @@ it('forwards cancellation to the actual Claude SDK and closes the settled query'
   } finally {
     sdkQuery.mockRestore();
   }
+});
+
+it('scopes thinking overrides to one SDK query and resumes later queries at the agent default', () => {
+  const sdkQuery = spyOn(sdk, 'query').mockImplementation(() => {
+    const events = (async function* () {})();
+    return Object.assign(events, { close() {} }) as unknown as ReturnType<typeof sdk.query>;
+  });
+  try {
+    const provider = new ClaudeProvider({ effort: 'low' });
+    const overridden = provider.query({ prompt: 'Deep', cwd: process.cwd(), thinkingLevel: 'high' });
+    overridden.end();
+    const normal = provider.query({ prompt: 'Normal', cwd: process.cwd(), continuation: 'preserved-session' });
+    normal.end();
+    expect(sdkQuery.mock.calls[0][0].options?.effort).toBe('high');
+    expect(sdkQuery.mock.calls[1][0].options?.effort).toBe('low');
+    expect(sdkQuery.mock.calls[1][0].options?.resume).toBe('preserved-session');
+    expect(() => provider.query({ prompt: 'Bad', cwd: process.cwd(), thinkingLevel: 'none' }))
+      .toThrow('Unsupported Claude thinking level');
+  } finally { sdkQuery.mockRestore(); }
 });

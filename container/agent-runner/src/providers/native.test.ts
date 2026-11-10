@@ -441,6 +441,22 @@ describe('native soft usage advisory', () => {
 });
 
 describe('NativeProvider', () => {
+  it.each(['openai-chat', 'anthropic-messages'] as const)(
+    'keeps one-message thinking overrides and agent defaults separate on %s', async protocol => {
+      process.env.NATIVE_PROTOCOL = protocol;
+      const provider = new NativeProvider({ model: 'local/MiniMax-M3.1-Flash', effort: 'low' });
+      const query = provider.query({ prompt: 'Deep', cwd: root, thinkingLevel: 'high' });
+      query.end();
+      const events: ProviderEvent[] = [];
+      for await (const event of query.events) events.push(event);
+      expect(events.filter(event => event.type === 'error')).toEqual([]);
+      expect(requests[0][protocol === 'openai-chat' ? 'reasoning_effort' : 'output_config'])
+        .toEqual(protocol === 'openai-chat' ? 'high' : { effort: 'high' });
+      await collect(provider);
+      expect(requests[1][protocol === 'openai-chat' ? 'reasoning_effort' : 'output_config'])
+        .toEqual(protocol === 'openai-chat' ? 'low' : { effort: 'low' });
+    },
+  );
   it.each((['openai-chat', 'anthropic-messages'] as const).flatMap(protocol =>
     ['low', 'medium', 'high', 'xhigh', 'max'].map(effort => [protocol, effort] as const),
   ))(

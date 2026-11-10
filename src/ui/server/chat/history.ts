@@ -238,6 +238,7 @@ export function readConversationHistory(
               timestamp: r.timestamp,
               text,
               files: parsed.files,
+              ...(parsed.thinkingLevel ? { thinkingLevel: parsed.thinkingLevel } : {}),
               author,
               canEditPending:
                 r.channel_type === WEB_CHANNEL_TYPE &&
@@ -458,7 +459,7 @@ function parseInboundContent(
   includeAttachmentUrls = false,
   sessionId?: string,
 ):
-  | (Pick<ConversationMessage, 'text' | 'files'> & {
+  | (Pick<ConversationMessage, 'text' | 'files' | 'thinkingLevel'> & {
       viaWeb?: boolean;
     })
   | null {
@@ -523,6 +524,7 @@ function parseInboundContent(
         : undefined;
       return {
         text,
+        ...(typeof o.thinkingLevel === 'string' ? { thinkingLevel: o.thinkingLevel } : {}),
         files: files && files.length > 0 ? files : undefined,
         viaWeb: o?._via === 'web' || undefined,
       };

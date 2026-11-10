@@ -16,6 +16,7 @@ import type { AgentProvider, AgentQuery } from '../providers/types.js';
 import { signalTurnState } from '../session-link.js';
 import { steeringDisposition, writeInputState } from '../steering.js';
 import { associateInput, type TurnExecution } from '../turn-execution.js';
+import { messageThinkingLevel } from './thinking.js';
 
 export class SteeringSession {
   /** Accepted by the provider, not yet applied, keyed by input ID. */
@@ -71,6 +72,11 @@ export class SteeringSession {
       const candidates = getSteeringCandidates(activeTurnRouting, [...this.inputs.keys(), ...this.declined]);
       if (candidates.length === 0) break;
       for (const message of candidates) {
+        if (messageThinkingLevel(message) !== undefined) {
+          this.declined.add(message.id);
+          writeInputState({ messageId: message.id, status: 'queued', queuedForNextTurn: true });
+          continue;
+        }
         const disposition = steeringDisposition(message, activeTurnRouting, turnId, true);
         if (disposition.status !== 'steering') {
           this.declined.add(message.id);

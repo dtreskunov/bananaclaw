@@ -4561,6 +4561,93 @@ nav.tab-bar-strip.group-strip {
   padding-block: max(var(--composer-min-padding-block), calc((var(--control-action-size, 28px) + 2 * var(--composer-control-inset) - 1lh) / 2));
 }
 
+/* src/components/ThinkingDial.css */
+.composer-input-wrap.has-thinking textarea {
+  padding-right: calc(3 * (var(--control-action-size) + 4px) + var(--composer-control-inset));
+}
+.composer-input-wrap.has-thinking.multi-line textarea {
+  padding-right: 8px;
+}
+.chat-main .composer-input-wrap.has-thinking.voice-listening:not(.multi-line) textarea {
+  padding-right: calc(2 * var(--control-action-size) + 80px + var(--composer-control-inset));
+}
+.chat-main .has-thinking #chat-mic {
+  right: calc(2 * (var(--control-action-size) + 4px) + var(--composer-control-inset));
+}
+.thinking-dial {
+  position: absolute;
+  right: calc(var(--control-action-size) + 4px + var(--composer-control-inset));
+  bottom: var(--composer-control-inset);
+}
+.thinking-dial-trigger {
+  width: var(--control-action-size);
+  height: var(--control-action-size);
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.thinking-dial-trigger svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.thinking-dial-trigger.overridden {
+  color: var(--focus-ring);
+}
+.thinking-dial-trigger:hover:not(:disabled) {
+  background: var(--wash);
+}
+.thinking-dial-trigger:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.thinking-dial-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 140px;
+  z-index: 50;
+  background: var(--surface);
+  color: var(--surface-fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 24px var(--shadow-color);
+}
+.thinking-dial-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  min-height: var(--menu-item-min-height, 32px);
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.thinking-dial-menu button:hover,
+.thinking-dial-menu button:focus-visible {
+  background: var(--wash);
+}
+.thinking-dial-menu [aria-checked=true] {
+  font-weight: 600;
+  color: var(--focus-ring);
+}
+@media (max-width: 720px) {
+  .thinking-dial-trigger {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
 /* src/components/ReplySuggestion.css */
 .reply-suggestion {
   display: inline-flex;

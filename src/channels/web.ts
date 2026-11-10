@@ -40,6 +40,7 @@ export async function submitWebInbound(args: {
   text: string;
   clientMessageId?: string;
   inputHandling?: InputHandling;
+  thinkingLevel?: string;
   attachments?: { filename: string; contentType?: string; data: string /* base64 */ }[];
 }): Promise<string> {
   if (!setupCallbacks) throw new Error('web channel not initialized');
@@ -52,6 +53,7 @@ export async function submitWebInbound(args: {
     senderId: args.userId,
   };
   if (args.inputHandling) contentPayload.inputHandling = args.inputHandling;
+  if (args.thinkingLevel !== undefined) contentPayload.thinkingLevel = args.thinkingLevel;
   if (args.attachments && args.attachments.length > 0) {
     // Shape matches what `extractAttachmentFiles` / `deriveAttachmentName`
     // expects: `name` (filename), `mimeType`, `data` (base64).

@@ -78,6 +78,13 @@ CREATE INDEX idx_messages_in_series ON messages_in(series_id);
 
 Content shapes: see [api-details.md §Session DB Schema Details](api-details.md#session-db-schema-details).
 
+Web chat content may include `thinkingLevel` (`low`, `medium`, `high`, `xhigh`,
+`max`, or `none` where the model supports it). This optional per-message
+override travels in the existing content journal, survives retries and
+text-only pending edits, and is omitted when using the agent default. It owns
+a separate turn, never changes an active turn's settings, and does not update
+`container_configs.effort`.
+
 `sender_user_id` is canonical attribution when the host can resolve the sender to a current user. `sender_identity` preserves the observed namespaced identity (for example, `telegram:123`) even when no canonical user link exists. Either may be `NULL`; missing provenance remains explicitly unknown and is never reconstructed from `content` by the agent-runner.
 
 For agent-to-agent rows, `source_session_id` is an exact return route. A reply to that agent must use the recorded active session or fail. Unthreaded messages and explicitly targeted sends whose inherited reply reference came from another origin are group-level sends and use the target agent group's normal `agent-shared` session policy.

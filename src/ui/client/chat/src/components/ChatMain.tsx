@@ -26,6 +26,9 @@ import { requestConfirm } from './PromptModal';
 import { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording, hasGetUserMedia } from '../recorder';
 import { voice, voiceBrowserReason } from '../voice-audio';
 import { ComposerInput, setVoiceTextareaText, useComposerTextarea } from './ComposerInput';
+import { ThinkingDial } from './ThinkingDial';
+import { thinkingLevelLabel } from '../../../../shared/thinking-levels';
+import { composerThinking } from '../state';
 import { ActiveTurnStopButton } from './ActiveTurnStopButton';
 import { ToolStopButton } from './ToolStopButton';
 import { toolStopRequest } from '../stop-tool';
@@ -847,6 +850,9 @@ function Message(
   const midTurnUpdate = m.deliveryOrigin === 'send_message' &&
     !!conversationState.value?.conversation.turns.some((turn) => turn.id === m.turnId && turn.phase !== 'settled');
   const metadata = <>
+    {m.thinkingLevel ? <span class="input-state-caption" title="Thinking override for this message">
+      Thinking: {thinkingLevelLabel(m.thinkingLevel)}
+    </span> : null}
     {inputPresentation ? <span class="input-state-caption" role="status">{inputPresentation.caption}</span> : null}
     {submission?.status === 'sending' && !m.hideInitialQueuedCaption
       ? <span class="input-state-caption" role="status">Sending{'\u2026'}</span> : null}
@@ -1678,8 +1684,13 @@ export function Composer() {
   const groupName = groups.value.find((group) => group.id === gid)?.name || 'the agent';
   const tid = threadId.value;
   const target = `${gid}:${tid}:composer`;
+  const thinking = composerThinking.value;
+  const thinkingLevel = thinking?.target === target ? thinking.level : undefined;
+  const thinkingCapability = conversationState.value?.conversation.capabilities.thinking;
+  const hasThinking = isWeb && (!!thinkingCapability?.levels.length || thinkingLevel !== undefined);
   const channel = channelType.value;
   const mg = messagingGroupId.value;
+  useEffect(() => { composerThinking.value = null; }, [target, channel, mg]);
   const voiceState = voice.state.value;
   const activeVoice = voiceState.target === target;
   const voiceLocked = activeVoice && (voiceState.phase !== 'error' || voiceState.sending);
@@ -1702,6 +1713,8 @@ export function Composer() {
       || channelType.value !== channel || messagingGroupId.value !== mg
       || (isWeb && !chatReady.value)) return false;
     const text = (inputRef.current?.value || '').trim();
+    const choice = composerThinking.peek();
+    const submittedThinking = isWeb && choice?.target === target ? choice.level : undefined;
     const files = pending.value.slice();
     if (!text && files.length === 0) return false;
     const pins = pinnedContext.value;
@@ -1726,7 +1739,8 @@ export function Composer() {
         if (pinnedContext.value === pins) clearPinnedContext();
         if (isMobile.value) document.getElementById('chat-log')?.focus({ preventScroll: true });
       };
-      const sent = await sendChat(fullText, files, { onSubmitted: clearSubmittedDraft });
+      const sent = await sendChat(fullText, files, { onSubmitted: clearSubmittedDraft,
+        ...(submittedThinking ? { thinkingLevel: submittedThinking } : {}) });
       if (!sent || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return false;
       clearSubmittedDraft();
       return true;
@@ -1828,6 +1842,7 @@ export function Composer() {
         </button>
       )}
         <ComposerInput
+          className={hasThinking && !edit.editing ? 'has-thinking' : ''}
           inputRef={inputRef}
           multiLine={multiLine}
           listening={activeVoice && voiceState.phase === 'listening'}
@@ -1861,6 +1876,14 @@ export function Composer() {
             configured: voiceInput.value.ready, unavailable,
             disabled: edit.editing || composerDisabled || isRecording.value,
           }}
+          beforeSend={hasThinking && !edit.editing ? <ThinkingDial
+            key={target}
+            levels={thinkingCapability?.levels ?? []}
+            defaultLevel={thinkingCapability?.defaultLevel ?? null}
+            value={thinkingLevel}
+            disabled={composerDisabled || composerSendInFlight.value || voiceState.sending || isRecording.value}
+            onChange={level => { composerThinking.value = level ? { target, level, chosenAt: Date.now() } : null; }}
+          /> : null}
           send={{
             id: 'chat-send',
             label: edit.editing ? edit.state?.busy ? 'Saving…' : edit.state?.retry ? 'Retry save' : 'Save edit' : 'Send',

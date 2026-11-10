@@ -318,6 +318,84 @@ describe('tool-scoped Stop endpoint', () => {
 });
 
 describe('native steering submissions', () => {
+  it('advertises model-supported thinking to members without exposing admin settings', () => {
+    getDb()
+      .prepare(
+        "INSERT INTO container_configs (agent_group_id, provider, model, effort, updated_at) VALUES ('agent', 'native', 'minimax/MiniMax-M3.1-Flash', 'medium', ?)",
+      )
+      .run(NOW);
+    const view = readConversation('web:member', 'agent', 'thread-1', OVERRIDE);
+    expect(view.capabilities.thinking).toEqual({
+      levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultLevel: 'medium',
+    });
+  });
+
+  it('accepts a queued thinking override but rejects invalid values and steering before storing input', async () => {
+    getDb()
+      .prepare(
+        "INSERT INTO container_configs (agent_group_id, provider, model, updated_at) VALUES ('agent', 'native', 'minimax/MiniMax-M3.1-Flash', ?)",
+      )
+      .run(NOW);
+    expect(
+      (await stop({ kind: 'send', body: { text: 'Deep', thinkingLevel: 'high', inputHandling: { mode: 'queue' } } }))
+        .status,
+    ).toBe(200);
+    expect(signal.submit).toHaveBeenLastCalledWith(expect.objectContaining({ thinkingLevel: 'high' }));
+    signal.submit.mockClear();
+    for (const thinkingLevel of ['none', 'off', true, null, {}, ['high']]) {
+      expect((await stop({ kind: 'send', body: { text: 'Invalid', thinkingLevel } })).status).toBe(400);
+    }
+    expect(
+      (
+        await stop({
+          kind: 'send',
+          body: {
+            text: 'Invalid steer',
+            thinkingLevel: 'high',
+            inputHandling: { mode: 'steer', turnId: TURN.id },
+          },
+        })
+      ).status,
+    ).toBe(400);
+    expect(signal.submit).not.toHaveBeenCalled();
+  });
+
+  it('preserves thinking metadata on multipart submissions', async () => {
+    getDb()
+      .prepare(
+        "INSERT INTO container_configs (agent_group_id, provider, model, updated_at) VALUES ('agent', 'native', 'minimax/MiniMax-M3.1-Flash', ?)",
+      )
+      .run(NOW);
+    const multipart =
+      '--test-boundary\r\nContent-Disposition: form-data; name="text"\r\n\r\nFile\r\n' +
+      '--test-boundary\r\nContent-Disposition: form-data; name="thinkingLevel"\r\n\r\nlow\r\n' +
+      '--test-boundary\r\nContent-Disposition: form-data; name="file"; filename="note.txt"\r\nContent-Type: text/plain\r\n\r\nhello\r\n' +
+      '--test-boundary--\r\n';
+    expect((await stop({ kind: 'send', multipart })).status).toBe(200);
+    expect(signal.submit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        thinkingLevel: 'low',
+        attachments: [expect.objectContaining({ filename: 'note.txt' })],
+      }),
+    );
+  });
+
+  it('projects durable thinking metadata after reload', () => {
+    writeSessionMessage('agent', 'session-1', {
+      id: 'thinking-input',
+      kind: 'chat',
+      channelType: 'web',
+      platformId: 'group:agent',
+      threadId: 'thread-1',
+      timestamp: NOW,
+      content: JSON.stringify({ text: 'Request', thinkingLevel: 'high' }),
+    });
+    expect(readChatHistory('web:member', 'agent', 'thread-1', OVERRIDE)).toContainEqual(
+      expect.objectContaining({ id: 'thinking-input', thinkingLevel: 'high' }),
+    );
+  });
+
   const handling = { mode: 'steer', turnId: TURN.id };
   const send = (inputHandling: unknown = handling, options: Parameters<typeof stop>[0] = {}) =>
     stop({

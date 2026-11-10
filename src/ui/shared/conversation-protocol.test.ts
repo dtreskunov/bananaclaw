@@ -51,17 +51,56 @@ const update: ConversationUpdate = {
   changes: diffConversation(empty, next),
 };
 describe('conversation protocol', () => {
+  it('round-trips optional thinking capabilities and durable message levels through snapshots and patches', () => {
+    const view: Conversation = {
+      ...next,
+      capabilities: { ...empty.capabilities, thinking: { levels: ['low', 'high'], defaultLevel: 'low' } },
+      messages: next.messages.map((message) =>
+        message.direction === 'in' ? { ...message, thinkingLevel: 'high' } : message,
+      ),
+    };
+    const changes = diffConversation(empty, view);
+    const patched = reduceConversation(snapshot, parseConversationFrame({ ...update, changes }));
+    expect(patched.conversation).toEqual(view);
+    expect(parseConversationFrame({ ...snapshot, conversation: view })).toMatchObject({ conversation: view });
+    expect(() =>
+      parseConversationFrame({
+        ...snapshot,
+        conversation: {
+          ...view,
+          messages: [{ ...view.messages[0], thinkingLevel: 'invalid' }],
+        },
+      }),
+    ).toThrow('invalid_frame');
+  });
+
   it('shares strict advisory validation with the host without accepting impossible lifecycle states', () => {
-    const queued = { threshold: 10, reportedTokens: 10, triggeredAt: 0, status: 'queued', appliedAt: null, finishedAt: null };
+    const queued = {
+      threshold: 10,
+      reportedTokens: 10,
+      triggeredAt: 0,
+      status: 'queued',
+      appliedAt: null,
+      finishedAt: null,
+    };
     expect(isTurnUsageAdvisory(queued)).toBe(true);
     expect(isTurnUsageAdvisory({ ...queued, status: 'applied', appliedAt: 1 })).toBe(true);
     expect(isTurnUsageAdvisory({ ...queued, status: 'skipped', finishedAt: 1 })).toBe(true);
     for (const fields of [
-      { threshold: 0 }, { threshold: 1.5 }, { reportedTokens: 9 }, { reportedTokens: '10' },
-      { triggeredAt: -1 }, { status: 'applied' }, { status: 'skipped' }, { status: 'other' },
-      { appliedAt: 1 }, { finishedAt: 1 }, { extra: true },
+      { threshold: 0 },
+      { threshold: 1.5 },
+      { reportedTokens: 9 },
+      { reportedTokens: '10' },
+      { triggeredAt: -1 },
+      { status: 'applied' },
+      { status: 'skipped' },
+      { status: 'other' },
+      { appliedAt: 1 },
+      { finishedAt: 1 },
+      { extra: true },
       { status: 'applied', appliedAt: 1, finishedAt: 1 },
-    ]) expect(isTurnUsageAdvisory({ ...queued, ...fields })).toBe(false);
+    ])
+      expect(isTurnUsageAdvisory({ ...queued, ...fields })).toBe(false);
   });
   it('rejects ambiguous or malformed sender and recipient identities', () => {
     const frame = (fields: object) => ({

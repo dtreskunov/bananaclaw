@@ -13,6 +13,7 @@ import type {
   ToastMessage,
   PendingFile,
   PendingWebSend,
+  ThinkingChoice,
   PendingApprovalDto,
   ChannelMetaEntry,
   SearchResult,
@@ -81,6 +82,7 @@ export const activeTurn = signal<ActiveTurn | null>(null);
 export const turnConnected = signal(false);
 export const stopRequest = signal<{ turnId: string; busy: boolean; error: string } | null>(null);
 export const pendingWebSends: Signal<PendingWebSend[]> = signal([]);
+export const composerThinking = signal<ThinkingChoice | null>(null);
 export const pending: Signal<PendingFile[]> = signal<PendingFile[]>([]);
 
 // Search

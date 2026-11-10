@@ -2154,6 +2154,30 @@ It appears once even when the change also schedules post-restart verification.
 Sessionless approvals do not offer this field because they have
 no originating conversation; the server rejects a non-empty message for them.
 
+### Next-message thinking dial
+
+Supported web conversations show a borderless dial icon beside Send. It uses
+the same model-reviewed levels as Agent Settings. Tap to choose **Agent default**
+or a supported level; the icon is muted for Default and accent-colored for an
+override. Its tooltip names the level and says **next message**. Keyboard users
+can open with Enter/Space or Arrow Down, navigate with arrows/Home/End, and close
+with Escape. The menu also closes on an outside click or focus change.
+
+The selection applies to one submitted message, including file attachments and
+dictation, not the agent's configuration or other conversations. It resets after
+the host accepts that message; a failed submission keeps the selection and its
+immutable Retry packet. Retrying preserves the message ID and level. A newer
+selection is not cleared by an older retry. Navigating to another conversation
+resets the draft override. The message's metadata retains its selected level
+after reload; text-only pending-message edits do not change it.
+
+When the agent is busy, an overridden message queues for a distinct turn rather
+than steering the active turn. Adjacent messages with their own override or
+Default are not merged into that turn. Changing levels resumes the existing
+conversation in a fresh provider query at a settled boundary, with no container
+restart. Unsupported providers/models and external-channel composers do not
+show the dial. MiniMax cannot disable thinking, so it has no Off choice.
+
 ### Applying Agent Settings
 
 The **Models** tab places **Thinking level** directly below **Model**. It is an

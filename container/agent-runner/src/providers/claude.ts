@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query as sdkQuery, type EffortLevel, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { appendActivity } from '../db/session-state.js';
@@ -16,6 +16,12 @@ import { builtinToolResultError, toolActivityFields } from './tool-activity.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
+}
+
+function claudeEffort(value: string | undefined): EffortLevel | undefined {
+  if (value === undefined || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max')
+    return value;
+  throw new Error(`Unsupported Claude thinking level: ${value}`);
 }
 
 // ── Model parameters (model_params bag) ────────────────────────────────
@@ -567,8 +573,7 @@ export class ClaudeProvider implements AgentProvider {
         disallowedTools: SDK_DISALLOWED_TOOLS,
         env: this.env,
         model: this.model,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        effort: this.effort as any,
+        effort: claudeEffort(input.thinkingLevel ?? this.effort),
         ...(thinking ? { thinking } : {}),
         // In rootless-podman-on-LXC we run as --user=0:0 so host bind mounts
         // are accessible. Claude Code refuses bypassPermissions as root, so

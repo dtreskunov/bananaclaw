@@ -24,6 +24,14 @@ const present = (submissions: PendingWebSend[], view: Conversation | null = null
   submissionPresentation(rows, submissions, view, 'group', 'thread');
 
 describe('web submission presentation', () => {
+  it('retains the chosen level in the local bubble and failed retry packet', () => {
+    const submission = { ...send, thinkingLevel: 'high' };
+    expect(present([submission])[0]).toMatchObject({ message: { thinkingLevel: 'high' } });
+    expect(withWebSendState(submission, { status: 'failed', error: 'Offline' })).toMatchObject({
+      thinkingLevel: 'high',
+    });
+  });
+
   it('immediately shows the local message and a single Starting response row without canonical records', () => {
     const view = testSnapshot().conversation;
     const before = JSON.stringify(view);
@@ -65,9 +73,16 @@ describe('web submission presentation', () => {
     const retained = reconcileWebSubmissions([submission], view, 'group');
     expect(retained).toEqual([withWebSendState(submission, { status: 'accepted' })]);
     expect(present(retained, view, [{ kind: 'message', message }])).toEqual([{ kind: 'message', message }]);
-    expect(reconcileWebSubmissions(retained, testSnapshot({
-      messages: [message], turns: [{ ...testTurn, inputIds: [message.id] }],
-    }).conversation, 'group')).toEqual([]);
+    expect(
+      reconcileWebSubmissions(
+        retained,
+        testSnapshot({
+          messages: [message],
+          turns: [{ ...testTurn, inputIds: [message.id] }],
+        }).conversation,
+        'group',
+      ),
+    ).toEqual([]);
   });
 
   it('never hides genuine queued follow-ups or starts a second response behind an active turn', () => {

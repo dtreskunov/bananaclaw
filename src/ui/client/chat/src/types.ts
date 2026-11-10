@@ -181,12 +181,19 @@ export interface PendingFile {
 }
 
 export interface ChatSendPacket {
+  readonly thinkingLevel?: string;
   readonly clientMessageId: string;
   readonly text: string;
   readonly files: readonly PendingFile[];
   readonly timestamp: EpochMs;
   readonly inputHandling?: InputHandling;
   readonly startsResponse: boolean;
+}
+
+export interface ThinkingChoice {
+  target: string;
+  level: string;
+  chosenAt: number;
 }
 
 export type WebSendState = { status: 'sending' | 'accepted'; error?: never } | { status: 'failed'; error: string };

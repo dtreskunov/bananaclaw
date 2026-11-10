@@ -16,6 +16,7 @@ import type {
 import { publicInboundMessageId, readConversationHistory } from './history.js';
 import { routeMatches, type TurnContext } from './conversation-context.js';
 import { renderedReadCursor } from './read-state.js';
+import { conversationThinking } from './thinking.js';
 
 type Signals = ReturnType<typeof getSessionTurnSignals>;
 
@@ -265,6 +266,9 @@ export function readConversation(
       getSessionTurnSignals(context.sessionId ?? ''),
       approvalTranscript(userId, groupId, context),
     );
+    if (context.canSend && context.channelType === 'web') {
+      view.capabilities.thinking = conversationThinking(groupId);
+    }
     return { ...view, readCursor: renderedReadCursor(userId, groupId, context, view) };
   } finally {
     outDb?.close();

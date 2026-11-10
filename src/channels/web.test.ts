@@ -96,4 +96,25 @@ describe('shared web chat', () => {
     expect(onInboundEvent.mock.calls[0][0].message.idempotent).toBe(true);
     expect(onInboundEvent.mock.calls[0][0].message.content).not.toContain('applied');
   });
+
+  it('journals a thinking override with stable retry identity', async () => {
+    const onInboundEvent = vi.fn();
+    await adapter.setup({ onInbound: vi.fn(), onInboundEvent, onMetadata: vi.fn(), onAction: vi.fn() });
+    const args = {
+      userId: 'member',
+      senderDisplayName: 'Member',
+      platformId: 'group:agent',
+      threadId: 'thread',
+      text: 'Deep request',
+      thinkingLevel: 'high',
+      clientMessageId: 'thinking-client-id',
+    };
+    expect(await submitWebInbound(args)).toBe('web-thinking-client-id');
+    expect(await submitWebInbound(args)).toBe('web-thinking-client-id');
+    expect(onInboundEvent.mock.calls[0][0].message).toMatchObject({
+      idempotent: true,
+      content: JSON.stringify({ text: 'Deep request', sender: 'Member', senderId: 'member', thinkingLevel: 'high' }),
+    });
+    expect(onInboundEvent.mock.calls[1][0].message.content).toBe(onInboundEvent.mock.calls[0][0].message.content);
+  });
 });

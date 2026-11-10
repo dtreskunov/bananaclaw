@@ -16,6 +16,7 @@ import {
   chatReloadRequired,
   chatStatus,
   pendingWebSends,
+  composerThinking,
   groupId,
   threadId,
   channelType,
@@ -30,7 +31,7 @@ import { adoptSubmissionTraces, inheritActivityPanels, resetActivityTraceView } 
 import { completedResponseId } from './turn-completion';
 import type { ChatMessage, Thread, TranscriptRow } from './types';
 import type { ActivityStatus } from '../../../shared/thread';
-import { reconcileWebSubmissions } from './web-submissions';
+import { reconcileWebSubmissions, thinkingChoiceAccepted } from './web-submissions';
 
 export const conversationState = signal<ConversationSnapshot | null>(null);
 export const completedResponse = signal<string | null>(null);
@@ -186,6 +187,17 @@ export function applyConversationFrame(raw: unknown, expectedThreadId: string): 
     if (frame.kind === 'update') {
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
+    }
+    if (
+      pendingWebSends.value.some(
+        (send) =>
+          send.groupId === groupId.value &&
+          send.threadId === view.threadId &&
+          thinkingChoiceAccepted(composerThinking.value, send) &&
+          view.messages.some((message) => message.direction === 'in' && message.id === send.messageId),
+      )
+    ) {
+      composerThinking.value = null;
     }
     pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, view, groupId.value);
     refs.seenIds = new Set(view.messages.map((m) => `${m.direction}:${m.id}`));
