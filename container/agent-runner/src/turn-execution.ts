@@ -150,7 +150,7 @@ export function persistTurnMetadata(context: TurnExecution, final: boolean): voi
     model: usage?.model ?? null,
     usageId: usage ? context.usageId : null,
     usageAdvisory: context.usageAdvisory ?? null,
-    ...(context.thinkingLevel !== undefined ? { thinkingLevel: context.thinkingLevel } : {}),
+    thinkingLevel: context.thinkingLevel,
     status: final
       ? usage ? (context.incomplete || context.unreported ? 'partial' : 'final') : 'unavailable'
       : usage ? 'partial' : 'provisional',
