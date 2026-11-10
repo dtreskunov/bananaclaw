@@ -264,14 +264,18 @@ One-shot and recurring tasks use the same tables — no separate scheduler.
 
 **Recurring:** Same, plus a `recurrence` cron expression. After the host marks a row as handled/delivered, if `recurrence` is set, it inserts a new row with `process_after`/`deliver_after` advanced to the next cron occurrence. Next time is computed from the scheduled time (not wall clock) to prevent drift.
 
-**Host sweep** (every ~60s across all session DBs):
+**Host maintenance and delivery** (every ~60s over eligible session candidates):
 
-- `messages_in WHERE status = 'pending' AND (process_after IS NULL OR process_after <= now())` → wake agent
-- `messages_in WHERE status = 'processing' AND status_changed < (now - stale_threshold)` → stale detection, increment tries, reset to pending with backoff
-- `messages_out WHERE delivered = 0 AND (deliver_after IS NULL OR deliver_after <= now())` → deliver
+- Wake agents for due, wake-eligible pending input.
+- Reconcile processing acknowledgements and check running-container liveness.
+- Deliver due outbound messages without delivery receipts.
 - After completing/delivering a row with `recurrence`, insert next occurrence
 
-**Active container poll** (~1s) checks the same conditions but only for sessions with running containers.
+Startup inspects active sessions once to reconstruct in-memory candidates.
+Committed changes invalidate affected sessions; future eligibility is cached
+without opening databases each tick. Quiet sessions leave the candidate maps.
+Runner commits trigger immediate delivery through the session link, not a
+one-second outbound poll.
 
 **Agent-runner creates schedules** by writing messages_in (to itself) or messages_out (reminders/notifications) with `process_after` and optionally `recurrence`.
 
@@ -538,10 +542,12 @@ The host computes this — not the agent-runner. When the host detects a stale `
 
 ### Host Polling
 
-Two tiers:
-
-- **Active containers (~1s)**: Poll session DBs for new messages_out rows to deliver
-- **All sessions (~60s)**: Sweep all session DBs for due `process_after` / `deliver_after` timestamps, handle recurrence
+Committed session-link events trigger immediate delivery and processing
+reconciliation. The existing maintenance and delivery timers run every ~60s,
+but inspect only eligible candidates: changed sessions, due deadlines, retries,
+recovery work, and running-container liveness. Startup reconstructs eligibility
+once from host-owned stores. Quiet or not-yet-due session databases are not
+reopened each minute. See [session-link recovery](session-link.md#recovery-after-a-runner-exits).
 
 ## Flexibility Model
 
@@ -847,9 +853,9 @@ stopped → running → idle → stopped
             idle → running (new message while warm)
 ```
 
-- **stopped**: No container. Swept at 60s for due scheduled messages.
-- **running**: Actively processing. Polled at 1s for messages_out.
-- **idle**: Done processing, container still warm (up to 30 min timeout). Polled at 1s so new messages are picked up quickly.
+- **stopped**: No container. Known scheduled or retry work is checked when eligible; quiet sessions are not polled.
+- **running**: Actively processing. Session-link commits trigger delivery; maintenance checks liveness every ~60s.
+- **idle**: Done processing, container still warm (up to 30 min timeout). New input and session-link events drive work; maintenance retains liveness checks.
 - After idle timeout → host kills container → stopped.
 
 ## Agent-Runner Architecture

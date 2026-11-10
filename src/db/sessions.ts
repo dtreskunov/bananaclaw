@@ -15,7 +15,7 @@ export function createSession(session: Session): void {
        VALUES (@id, @agent_group_id, @messaging_group_id, @thread_id, @agent_provider, @status, @container_status, @last_active, @created_at)`,
     )
     .run(session);
-  recordHostChange({ kind: 'sessions', groupId: session.agent_group_id });
+  recordHostChange({ kind: 'sessions', sessionId: session.id, groupId: session.agent_group_id });
 }
 
 export function getSession(id: string): Session | undefined {
@@ -93,7 +93,7 @@ export function updateSession(
     .prepare(`UPDATE sessions SET ${fields.join(', ')} WHERE id = @id`)
     .run(values);
   const session = getSession(id);
-  if (session) recordHostChange({ kind: 'sessions', groupId: session.agent_group_id });
+  if (session) recordHostChange({ kind: 'sessions', sessionId: id, groupId: session.agent_group_id });
 }
 
 export class SessionApprovalCancellationRequiredError extends Error {

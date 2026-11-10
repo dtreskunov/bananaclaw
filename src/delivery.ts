@@ -8,12 +8,13 @@
  *   - New commits wake delivery immediately; a 60s scan recovers interrupted delivery
  */
 import type Database from 'better-sqlite3';
+import { setImmediate } from 'node:timers/promises';
 
-import { getActiveSessions, getSession } from './db/sessions.js';
+import { getSession } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
-import { getDueOutboundMessages, markDelivered, markDeliveryFailed } from './db/session-db.js';
+import { getDueOutboundMessages, getNextOutboundDeliveryAt, markDelivered, markDeliveryFailed } from './db/session-db.js';
 import { log } from './log.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles, writeSessionMessage } from './session-manager.js';
 import { extractOutboundText, indexMessage } from './search-index.js';
@@ -21,6 +22,7 @@ import { setTypingAdapter } from './modules/typing/index.js';
 import type { DeliveryContext, OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 import { notifySessionHostState, onSessionDurableMessage } from './session-link.js';
+import { SessionCandidates } from './session-candidates.js';
 
 const SWEEP_POLL_MS = 60_000;
 const MAX_DELIVERY_ATTEMPTS = 3;
@@ -72,6 +74,8 @@ export interface ChannelDeliveryAdapter {
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;
 let sweepPolling = false;
+let sweepTimer: ReturnType<typeof setTimeout> | undefined;
+const candidates = new SessionCandidates();
 
 /**
  * Callbacks fired when the delivery adapter is first set (and again if it's
@@ -115,6 +119,7 @@ export function setDeliveryAdapter(adapter: ChannelDeliveryAdapter): void {
 /** Start the sweep poll loop (~60s). */
 export function startSweepDeliveryPoll(): void {
   if (sweepPolling) return;
+  candidates.start();
   sweepPolling = true;
   pollSweep();
 }
@@ -123,15 +128,16 @@ async function pollSweep(): Promise<void> {
   if (!sweepPolling) return;
 
   try {
-    const sessions = getActiveSessions();
-    for (const session of sessions) {
+    for (const session of candidates.due()) {
+      if (!sweepPolling) break;
       await deliverSessionMessages(session);
+      await setImmediate();
     }
   } catch (err) {
     log.error('Sweep delivery poll error', { err });
   }
 
-  setTimeout(pollSweep, SWEEP_POLL_MS);
+  if (sweepPolling) sweepTimer = setTimeout(pollSweep, SWEEP_POLL_MS);
 }
 
 export async function deliverSessionMessages(session: Session): Promise<void> {
@@ -147,27 +153,24 @@ export async function deliverSessionMessages(session: Session): Promise<void> {
       dirtyDeliveries.delete(session.id);
       await drainSession(session);
     } while (dirtyDeliveries.delete(session.id));
+  } catch (err) {
+    log.error('Session delivery inspection failed; retaining candidate for retry', { sessionId: session.id, err });
   } finally {
     inflightDeliveries.delete(session.id);
   }
 }
 
 async function drainSession(session: Session): Promise<void> {
+  const token = candidates.token(session.id);
   const agentGroup = getAgentGroup(session.agent_group_id);
-  if (!agentGroup) return;
+  if (!agentGroup) throw new Error(`Agent group not found: ${session.agent_group_id}`);
 
-  let outDb: Database.Database;
-  let inDb: Database.Database;
+  const outDb = openOutboundDb(agentGroup.id, session.id);
+  let inDb: Database.Database | null = null;
+
   try {
-    outDb = openOutboundDb(agentGroup.id, session.id);
     inDb = openInboundDb(agentGroup.id, session.id);
-  } catch {
-    return; // DBs might not exist yet
-  }
-
-  try {
     const undelivered = getDueOutboundMessages(outDb, inDb.name);
-    if (undelivered.length === 0) return;
 
     for (const msg of undelivered) {
       try {
@@ -234,9 +237,10 @@ async function drainSession(session: Session): Promise<void> {
         }
       }
     }
+    candidates.inspected(session.id, token, getNextOutboundDeliveryAt(outDb, inDb.name));
   } finally {
     outDb.close();
-    inDb.close();
+    inDb?.close();
   }
 }
 
@@ -526,4 +530,6 @@ async function handleSystemAction(
 
 export function stopDeliveryPolls(): void {
   sweepPolling = false;
+  clearTimeout(sweepTimer);
+  candidates.stop();
 }

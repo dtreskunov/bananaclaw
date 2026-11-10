@@ -14,6 +14,9 @@ The files in this directory are original design documents and developer referenc
 
 ## Design proposals
 
+- [Reducing idle host CPU consumption](idle-cpu-proposal.md): measured
+  housekeeping costs, no-op invalidation fixes, and candidate filtering for
+  existing maintenance loops with startup reconciliation.
 - [Soft turn-usage advisory and reusable telemetry](soft-turn-usage-advisory-proposal.md):
   opt-in native-runner wrap-up guidance based on shared usage statistics,
   without hard task ceilings, approval flows, or provider-quota assumptions.

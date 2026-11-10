@@ -29,6 +29,7 @@ import {
 } from './session-link.js';
 import { inboundDbPath, initSessionFolder, outboundDbPath } from './session-manager.js';
 import { insertMessage } from './db/session-db.js';
+import { insertTask } from './modules/scheduling/db.js';
 import Database from 'better-sqlite3';
 import { onHostChange, type HostChange } from './host-changes.js';
 
@@ -1070,6 +1071,41 @@ describe('session signal link', () => {
     } finally {
       db.close();
     }
+  });
+
+  it('flushes a committed task without waiting for a sweep or another runner frame', async () => {
+    const socket = await connect();
+    let received = '';
+    socket.on('data', (chunk) => { received += String(chunk); });
+    await waitFor(() => received.includes('"type":"host.ready"'));
+    const db = new Database(inboundDbPath(AGENT_GROUP_ID, SESSION_ID));
+    try {
+      insertTask(db, {
+        id: 'scheduled',
+        processAfter: Date.now() + 60_000,
+        recurrence: null,
+        platformId: null,
+        channelType: null,
+        threadId: null,
+        content: '{"prompt":"scheduled work"}',
+      });
+    } finally {
+      db.close();
+    }
+    await waitFor(() => received.includes('"type":"host.event"'));
+    const floor = parsedFrames(received).find((frame) => frame.type === 'host.event')!;
+    socket.write(`${JSON.stringify({ v: 7, type: 'host.ack', eventId: floor.eventId })}\n`);
+    await waitFor(() => received.includes('"type":"message.upsert"'));
+    expect(parsedFrames(received)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'host.event',
+        event: expect.objectContaining({
+          type: 'message.upsert',
+          payload: expect.objectContaining({ id: 'scheduled' }),
+        }),
+      }),
+    ]));
+    socket.destroy();
   });
 
   it('replays a host event until the runner acknowledges its local commit', async () => {

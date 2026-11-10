@@ -28,8 +28,9 @@
  */
 import type Database from 'better-sqlite3';
 import fs from 'fs';
+import { setImmediate } from 'node:timers/promises';
 
-import { getActiveSessions, getSession } from './db/sessions.js';
+import { getSession } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import {
   countDueMessages,
@@ -37,6 +38,7 @@ import {
   getContainerState,
   getMessageForRetry,
   getMessageRouting,
+  getNextInboundWorkAt,
   getProcessingClaims,
   insertOutboundBounce,
   markMessageFailed,
@@ -46,11 +48,12 @@ import {
 } from './db/session-db.js';
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath } from './session-manager.js';
-import { getSessionSignalLastSeenAt, getSessionSignalServerStartedAt, notifySessionHostState } from './session-link.js';
+import { getSessionSignalLastSeenAt, getSessionSignalServerStartedAt } from './session-link.js';
 import { onSessionDurableProcessing } from './session-link.js';
 import { MAX_DECLARED_TOOL_TIMEOUT_MS } from './session-link-durable.js';
 import { isContainerRunning, killContainer, recoverStoppedSession, wakeContainer } from './container-runner.js';
 import { needsStoppedRunnerRecovery } from './session-recovery.js';
+import { SessionCandidates } from './session-candidates.js';
 import type { Session } from './types.js';
 
 const SWEEP_INTERVAL_MS = 60_000;
@@ -118,6 +121,8 @@ export function decideStuckAction(args: {
 }
 
 let running = false;
+let sweepTimer: ReturnType<typeof setTimeout> | undefined;
+const candidates = new SessionCandidates();
 const sessionSweeps = new Map<string, Promise<void>>();
 const dirtySessionSweeps = new Set<string>();
 
@@ -149,57 +154,54 @@ export function _requestSessionSweepForTesting(session: Session): Promise<void> 
 
 export function startHostSweep(): void {
   if (running) return;
+  candidates.start();
   running = true;
   sweep();
 }
 
 export function stopHostSweep(): void {
   running = false;
+  clearTimeout(sweepTimer);
+  candidates.stop();
 }
 
 async function sweep(): Promise<void> {
   if (!running) return;
 
   try {
-    const sessions = getActiveSessions();
-    for (const session of sessions) {
-      await requestSessionSweep(session);
+    for (const session of candidates.due()) {
+      if (!running) break;
+      try {
+        await requestSessionSweep(session);
+      } catch (err) {
+        log.error('Host session sweep failed; retaining candidate for retry', { sessionId: session.id, err });
+      }
+      await setImmediate();
     }
   } catch (err) {
     log.error('Host sweep error', { err });
   }
 
-  setTimeout(sweep, SWEEP_INTERVAL_MS);
+  if (running) sweepTimer = setTimeout(sweep, SWEEP_INTERVAL_MS);
 }
 
 async function sweepSession(session: Session): Promise<void> {
+  const token = candidates.token(session.id);
   const agentGroup = getAgentGroup(session.agent_group_id);
-  if (!agentGroup) return;
+  if (!agentGroup) throw new Error(`Agent group not found: ${session.agent_group_id}`);
   const inPath = inboundDbPath(agentGroup.id, session.id);
-  if (!fs.existsSync(inPath)) return;
+  if (!fs.existsSync(inPath)) throw new Error(`Session inbound database is missing: ${session.id}`);
 
-  let inDb: Database.Database;
+  const inDb = openInboundDb(agentGroup.id, session.id);
   let outDb: Database.Database | null = null;
-  try {
-    inDb = openInboundDb(agentGroup.id, session.id);
-  } catch {
-    return;
-  }
 
   try {
     outDb = openOutboundDb(agentGroup.id, session.id);
-  } catch {
-    // outbound.db might not exist yet (container hasn't started)
-  }
-
-  try {
-    if (!isContainerRunning(session.id) && needsStoppedRunnerRecovery(session)) {
+    if (!isContainerRunning(session.id) && needsStoppedRunnerRecovery(session, outDb)) {
       if (!(await recoverStoppedSession(session))) return;
     }
     // 1. Sync processing_ack → messages_in status
-    if (outDb) {
-      syncProcessingAcks(inDb, outDb);
-    }
+    syncProcessingAcks(inDb, outDb);
 
     // 2. Wake a container if work is due and nothing is running. Ordered
     // before the crashed-container cleanup so a fresh container gets a chance
@@ -224,7 +226,7 @@ async function sweepSession(session: Session): Promise<void> {
     // had a chance to clear stale processing_ack rows from a previous crash
     // yet. Without this grace period, stale claims cause an immediate
     // spawn-kill loop.
-    if (alive && outDb && !justWoke) {
+    if (alive && !justWoke) {
       enforceRunningContainerSla(inDb, outDb, session, agentGroup.id);
     }
 
@@ -232,7 +234,7 @@ async function sweepSession(session: Session): Promise<void> {
     // Only fires when wake in step 2 didn't pick up the work (no due messages,
     // or wake failed). resetStuckProcessingRows itself is idempotent — it
     // skips messages already scheduled for a future retry.
-    if (!alive && outDb) {
+    if (!alive) {
       resetStuckProcessingRows(inDb, outDb, session, 'container not running');
     }
 
@@ -241,10 +243,12 @@ async function sweepSession(session: Session): Promise<void> {
     const { handleRecurrence } = await import('./modules/scheduling/recurrence.js');
     await handleRecurrence(inDb, session, outDb);
     // MODULE-HOOK:scheduling-recurrence:end
+    const needsChecks = isContainerRunning(session.id) ||
+      needsStoppedRunnerRecovery(getSession(session.id) ?? session, outDb);
+    candidates.inspected(session.id, token, needsChecks ? 0 : getNextInboundWorkAt(inDb));
   } finally {
     inDb.close();
     outDb?.close();
-    notifySessionHostState(session.id);
   }
 }
 
@@ -314,6 +318,7 @@ function resetStuckProcessingRows(
   writableOutDb?: Database.Database,
 ): void {
   const claims = getProcessingClaims(outDb);
+  if (claims.length === 0) return;
   const now = Date.now();
   // User-facing messages that were permanently abandoned this pass. The host
   // is the only actor that can speak for them — the container that would have

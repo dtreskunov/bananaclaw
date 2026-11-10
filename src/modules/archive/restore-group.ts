@@ -13,7 +13,7 @@ import { getDb, hasTable } from '../../db/connection.js';
 import { getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
 import type { ArchiveDump } from './archive-group.js';
-import { transaction } from '../../db/transaction.js';
+import { recordHostChange, transaction } from '../../db/transaction.js';
 import { INSTANT_COLUMNS } from '../../db/time.js';
 import { assertTimestampFields } from '../../db/validate-timestamps.js';
 
@@ -178,6 +178,7 @@ export function restoreAgentGroup(folderArg: string, opts: RestoreOptions = {}):
         counts.interactions += 1;
       }
     }
+    recordHostChange({ kind: 'sessions', groupId: group.id });
   });
   tx();
 

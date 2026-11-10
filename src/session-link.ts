@@ -8,7 +8,7 @@ import { activityEpoch } from './db/time.js';
 export interface HostActivityLine { ts: number; text: string }
 import { CONTAINER_MAX_OUTPUT_SIZE, DATA_DIR } from './config.js';
 import { log } from './log.js';
-import { publishHostChange } from './host-changes.js';
+import { onHostChange, publishHostChange } from './host-changes.js';
 import { applyDurableRunnerEvent, type DurableApplyResult } from './session-link-durable.js';
 import {
   isAny,
@@ -243,6 +243,12 @@ export function notifySessionHostState(sessionId: string): void {
   const entry = servers.get(sessionId);
   if (entry) flushHostEvents(sessionId, entry);
 }
+
+onHostChange((change) => {
+  if (change.kind !== 'sessions' || !change.sessionId) return;
+  const entry = servers.get(change.sessionId);
+  if (entry) flushHostEvents(change.sessionId, entry);
+});
 
 function decodeDurablePayload(eventType: string, value: unknown): unknown {
   if (eventType !== 'message.upsert') return value;

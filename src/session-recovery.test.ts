@@ -57,6 +57,8 @@ describe('needsStoppedRunnerRecovery', () => {
   it('does not repeatedly recover completed sessions or create missing runner storage', () => {
     expect(needsStoppedRunnerRecovery(session)).toBe(false);
     fs.unlinkSync(runnerStateDbPath(session.agent_group_id, session.id));
-    expect(needsStoppedRunnerRecovery({ ...session, container_status: 'running' })).toBe(false);
+    expect(() => needsStoppedRunnerRecovery({ ...session, container_status: 'running' })).toThrow(
+      'runner-state database is missing',
+    );
   });
 });

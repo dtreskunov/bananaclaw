@@ -24,9 +24,22 @@ retried by the sweep. A 45-second timeout stops the recovery container; if the
 runtime cannot confirm the stop, the session remains locked rather than risking
 a second writer.
 
+At host startup, the maintenance and delivery workers inspect active sessions
+once to reconstruct their in-memory candidate maps. Their existing 60-second
+timers subsequently inspect only changed, due, retrying, or running work.
+Future eligibility is cached without keeping session databases open; quiet
+historical sessions leave the candidate maps. Failed inspections and recovery
+attempts remain retryable rather than being classified as idle.
+
+Committed mutations invalidate the relevant session, and host input mutations
+flush the pending host-event journal through the existing socket transport.
+No new durable queue, storage format, or runner protocol is introduced. Direct
+out-of-band SQLite edits require a host restart to reconstruct eligibility;
+normal CLI, UI, and runner mutation paths invalidate it automatically.
+
 Rebuild and restart the host after installing this change. Existing stopped
-sessions are recovered by the next sweep without sending another user message;
-no image rebuild is needed because fresh runner source is mounted.
+sessions are recovered during startup inspection without sending another user
+message; no image rebuild is needed because fresh runner source is mounted.
 
 ## Capability boundary
 
@@ -234,8 +247,9 @@ is rejected. Tool-origin and system messages can wake delivery
 immediately. `batch.persisted` follows each fully persisted logical result and
 wakes processing reconciliation only after its task attempts and completion
 acknowledgements are final. This boundary does not wait for a warm provider query
-to close. A 60-second host scan recovers messages committed immediately before a
-host crash; routine one-second outbound polling is gone.
+to close. Startup inspection rediscovers messages committed immediately before a
+host crash; the 60-second delivery timer retries known pending work. Quiet
+session databases are not polled, and routine one-second outbound polling is gone.
 
 ### Lifecycle and metadata
 

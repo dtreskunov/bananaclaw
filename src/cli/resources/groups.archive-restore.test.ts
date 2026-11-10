@@ -48,6 +48,7 @@ import {
   createSession,
 } from '../../db/index.js';
 import { dispatch } from '../dispatch.js';
+import { SessionCandidates } from '../../session-candidates.js';
 import './groups.js';
 import './approvals.js';
 import { createApproval, getApproval, updateApprovalStatus } from '../../db/approvals.js';
@@ -332,12 +333,22 @@ describe('ncl groups archive ↔ restore round trip', () => {
     ).run(refs.sessionId, NOW(), refs.userId);
     const approval = db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get();
 
-    await archive(refs.id);
-    const r = await restore('rt-sess', true);
-    expect(r.ok).toBe(true);
+    await Promise.resolve();
+    const candidates = new SessionCandidates();
+    candidates.start();
+    try {
+      candidates.inspected(refs.sessionId, candidates.token(refs.sessionId), null);
+      await archive(refs.id);
+      expect([...candidates.due()]).toEqual([]);
+      const r = await restore('rt-sess', true);
+      expect(r.ok).toBe(true);
 
-    expect(db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id)).toEqual(seededSession);
-    expect(db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get()).toEqual(approval);
+      expect(db.prepare('SELECT * FROM sessions WHERE agent_group_id = ?').get(refs.id)).toEqual(seededSession);
+      expect(db.prepare("SELECT * FROM interactions WHERE id='retained-approval'").get()).toEqual(approval);
+      expect([...candidates.due()].map((session) => session.id)).toEqual([refs.sessionId]);
+    } finally {
+      candidates.stop();
+    }
   });
 
   it('restores numeric archive dates without losing epoch zero or null', async () => {

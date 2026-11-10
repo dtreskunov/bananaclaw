@@ -292,15 +292,31 @@ export function countDueMessages(db: Database.Database): number {
   ).count;
 }
 
+export function getNextInboundWorkAt(db: Database.Database): number | null {
+  if (db.prepare("SELECT 1 FROM messages_in WHERE status = 'completed' AND recurrence IS NOT NULL LIMIT 1").get()) {
+    return 0;
+  }
+  return db
+    .prepare(
+      `SELECT MIN(COALESCE(process_after, 0)) FROM messages_in
+       WHERE status = 'pending' AND trigger = 1 AND kind != 'system'`,
+    )
+    .pluck()
+    .get() as number | null;
+}
+
 export function markMessageFailed(db: Database.Database, messageId: string): void {
-  db.prepare("UPDATE messages_in SET status = 'failed' WHERE id = ?").run(messageId);
+  const result = db
+    .prepare("UPDATE messages_in SET status = 'failed' WHERE id = ? AND status != 'failed'")
+    .run(messageId);
+  if (result.changes > 0) recordSessionDatabaseChange(db);
 }
 
 export function retryWithBackoff(db: Database.Database, messageId: string, backoffSec: number): void {
-  db.prepare('UPDATE messages_in SET tries = tries + 1, process_after = ? WHERE id = ?').run(
-    Date.now() + backoffSec * 1000,
-    messageId,
-  );
+  const result = db
+    .prepare('UPDATE messages_in SET tries = tries + 1, process_after = ? WHERE id = ?')
+    .run(Date.now() + backoffSec * 1000, messageId);
+  if (result.changes > 0) recordSessionDatabaseChange(db);
 }
 
 export function getMessageForRetry(
@@ -379,8 +395,8 @@ export function syncProcessingAcks(inDb: Database.Database, outDb: Database.Data
     for (const { message_id } of completed) {
       if (updateStmt.run(message_id).changes > 0) transitioned.push(message_id);
     }
+    if (transitioned.length > 0) recordSessionDatabaseChange(inDb);
   })();
-  recordSessionDatabaseChange(inDb);
   return transitioned;
 }
 
@@ -414,7 +430,9 @@ export function getProcessingClaims(outDb: Database.Database): ProcessingClaim[]
  * running (we just killed it). Returns the number of rows deleted.
  */
 export function deleteOrphanProcessingClaims(outDb: Database.Database): number {
-  return outDb.prepare("DELETE FROM processing_ack WHERE status = 'processing'").run().changes;
+  const { changes } = outDb.prepare("DELETE FROM processing_ack WHERE status = 'processing'").run();
+  if (changes > 0) recordSessionDatabaseChange(outDb);
+  return changes;
 }
 
 export interface ContainerState {
@@ -466,6 +484,23 @@ export function getDueOutboundMessages(db: Database.Database, receiptsPath: stri
          ORDER BY timestamp ASC, id ASC`,
       )
       .all(Date.now()) as OutboundMessage[];
+  } finally {
+    db.exec('DETACH DATABASE delivery_receipts');
+  }
+}
+
+export function getNextOutboundDeliveryAt(db: Database.Database, receiptsPath: string): number | null {
+  db.prepare('ATTACH DATABASE ? AS delivery_receipts').run(receiptsPath);
+  try {
+    return db
+      .prepare(
+        `SELECT MIN(COALESCE(deliver_after, 0)) FROM messages_out m
+         WHERE NOT EXISTS (
+           SELECT 1 FROM delivery_receipts.delivered d WHERE d.message_out_id=m.id
+         )`,
+      )
+      .pluck()
+      .get() as number | null;
   } finally {
     db.exec('DETACH DATABASE delivery_receipts');
   }

@@ -9,9 +9,11 @@ import { parseTimestamp } from '../time.js';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 
-import { countDueMessages } from './session-db.js';
+import { countDueMessages, getNextInboundWorkAt, syncProcessingAcks } from './session-db.js';
+import { transaction } from './transaction.js';
+import { onHostChange } from '../host-changes.js';
 
 const TEST_DIR = path.resolve('.test-session-db');
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
@@ -63,11 +65,80 @@ afterEach(() => {
 });
 
 describe('countDueMessages', () => {
+  it('caches only wake-eligible input and unfinished recurrence work', () => {
+    const db = freshMessagesInDb();
+    try {
+      addRow(db, { id: 'context', seq: 2, kind: 'chat', trigger: 0 });
+      addRow(db, { id: 'system', seq: 4, kind: 'system' });
+      expect(getNextInboundWorkAt(db)).toBeNull();
+      addRow(db, { id: 'future', seq: 6, kind: 'task', processAfter: '2999-01-01T00:00:00Z' });
+      expect(getNextInboundWorkAt(db)).toBe(Date.parse('2999-01-01T00:00:00Z'));
+      db.exec("UPDATE messages_in SET status='completed',recurrence='invalid-cron' WHERE id='future'");
+      expect(getNextInboundWorkAt(db)).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it('counts a pending trigger=1 chat message', () => {
     const db = freshMessagesInDb();
     addRow(db, { id: 'm1', seq: 2, kind: 'chat' });
     expect(countDueMessages(db)).toBe(1);
     db.close();
+  });
+
+  describe('syncProcessingAcks', () => {
+    it('publishes actual transitions once and leaves completion history quiet', async () => {
+      const input = freshMessagesInDb();
+      const output = new Database(':memory:');
+      const listener = vi.fn();
+      const off = onHostChange(listener);
+      try {
+        addRow(input, { id: 'done', seq: 2, kind: 'chat', status: 'completed' });
+        addRow(input, { id: 'new', seq: 4, kind: 'chat' });
+        output.exec(`CREATE TABLE processing_ack(message_id TEXT, status TEXT);
+          INSERT INTO processing_ack VALUES ('done','completed'), ('new','failed'), ('missing','completed');`);
+
+        expect(syncProcessingAcks(input, output)).toEqual(['new']);
+        expect(listener).not.toHaveBeenCalled();
+        await Promise.resolve();
+        expect(listener).toHaveBeenCalledTimes(1);
+        listener.mockClear();
+
+        expect(syncProcessingAcks(input, output)).toEqual([]);
+        await Promise.resolve();
+        expect(listener).not.toHaveBeenCalled();
+      } finally {
+        off();
+        input.close();
+        output.close();
+      }
+    });
+
+    it('does not publish an acknowledgement transition rolled back by its caller', async () => {
+      const input = freshMessagesInDb();
+      const output = new Database(':memory:');
+      const listener = vi.fn();
+      const off = onHostChange(listener);
+      try {
+        addRow(input, { id: 'new', seq: 2, kind: 'chat' });
+        output.exec(`CREATE TABLE processing_ack(message_id TEXT, status TEXT);
+          INSERT INTO processing_ack VALUES ('new','completed');`);
+        expect(() =>
+          transaction(input, () => {
+            syncProcessingAcks(input, output);
+            throw new Error('rollback');
+          })(),
+        ).toThrow('rollback');
+        await Promise.resolve();
+        expect(listener).not.toHaveBeenCalled();
+        expect(input.prepare("SELECT status FROM messages_in WHERE id='new'").pluck().get()).toBe('pending');
+      } finally {
+        off();
+        input.close();
+        output.close();
+      }
+    });
   });
 
   it('counts an interactive response as wake-eligible', () => {
