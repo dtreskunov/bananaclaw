@@ -288,7 +288,30 @@ beforeEach(() => {
 });
 
 describe('main composer pending edits', () => {
-  it('shows a supported thinking dial beside Send, captures its selection, and hides it during text-only edits', async () => {
+  it('hides unsupported thinking controls and never submits a stale hidden override', async () => {
+    applyConversationFrame(
+      testSnapshot({
+        capabilities: {
+          canSend: true,
+          stop: false,
+          steer: false,
+          editInput: false,
+          cancelInput: false,
+          thinking: { levels: [], defaultLevel: null },
+        },
+      }),
+      'thread',
+    );
+    composerThinking.value = { target: 'group:thread:composer', level: 'high', chosenAt: 0 };
+    render();
+    expect(findComponent(tree, 'ComposerPlusMenu').props.thinking).toBeUndefined();
+    vi.mocked(sendChat).mockResolvedValue(false);
+    find(tree, 'form').props.onSubmit({ preventDefault() {} });
+    await vi.waitFor(() => expect(sendChat).toHaveBeenCalledOnce());
+    expect(sendChat).toHaveBeenCalledWith(expect.any(String), expect.any(Array), { onSubmitted: expect.any(Function) });
+  });
+
+  it('puts supported thinking controls in the plus menu and hides them during text-only edits', async () => {
     applyConversationFrame(
       testSnapshot({
         capabilities: {
@@ -303,13 +326,15 @@ describe('main composer pending edits', () => {
       'thread',
     );
     render();
-    const dial = findComponent(tree, 'ThinkingDial');
-    expect(dial.props.levels).toEqual(['low', 'medium', 'high']);
-    expect(dial.props.defaultLevel).toBe('medium');
-    expect(findComponent(tree, 'ComposerInput').props.className).toBe('has-thinking');
-    dial.props.onChange('high');
+    const menu = findComponent(tree, 'ComposerPlusMenu');
+    expect(menu.props.thinking.levels).toEqual(['low', 'medium', 'high']);
+    expect(menu.props.thinking.value).toBe('medium');
+    expect(composerThinking.value).toBeNull();
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(findComponent(tree, 'ComposerInput').props.className).toBeUndefined();
+    menu.props.thinking.onChange('high');
     render();
-    expect(findComponent(tree, 'ThinkingDial').props.value).toBe('high');
+    expect(findComponent(tree, 'ComposerPlusMenu').props.thinking.value).toBe('high');
     vi.mocked(sendChat).mockResolvedValue(false);
     find(tree, 'form').props.onSubmit({ preventDefault() {} });
     await vi.waitFor(() => expect(sendChat).toHaveBeenCalledOnce());
@@ -319,11 +344,15 @@ describe('main composer pending edits', () => {
       expect.objectContaining({ thinkingLevel: 'high' }),
     );
     await vi.waitFor(() => expect(composerSendInFlight.value).toBe(false));
+    composerThinking.value = null;
+    render();
+    expect(findComponent(tree, 'ComposerPlusMenu').props.thinking.value).toBe('medium');
+    expect(composerThinking.value).toBeNull();
     chatMessages.value = [message];
     activeTurn.value = { id: 'turn', status: 'running', supportsInputEditing: true, supportsInputCancellation: true };
     turnConnected.value = true;
     open();
-    expect(findComponent(tree, 'ThinkingDial')).toBeUndefined();
+    expect(findComponent(tree, 'ComposerPlusMenu').props.thinking).toBeUndefined();
   });
 
   it('warms on non-empty composition, but not mount, focus, whitespace, or pending edits', () => {

@@ -23,7 +23,7 @@ import { McpServersSection, type McpProbeResultDto, type McpServerConfigDto } fr
 import { ModelParamsEditor } from './GroupAdminModelParams';
 import { PackagesSection } from './GroupAdminPackages';
 import { SkillsSection, type AvailableSkillDto } from './GroupAdminSkills';
-import { ThinkingLevelSelect } from './ThinkingLevelSelect';
+import { ThinkingLevelField } from './ThinkingLevelField';
 import { thinkingLevelError } from '../../../../shared/thinking-levels';
 
 type Tab = 'models' | 'settings' | 'packages' | 'mcp' | 'skills' | 'credentials' | 'members' | 'roles' | 'destinations';
@@ -702,7 +702,7 @@ function SettingsTab({
                 // Model ids are provider-specific, so carrying the old pick over
                 // would save an id the new provider can't resolve.
                 setDraft((d) =>
-                  d ? { ...d, provider: v, model: null, small_model: null, upstream_provider: null } : d,
+                  d ? { ...d, provider: v, model: null, small_model: null, upstream_provider: null, effort: null } : d,
                 );
               }}
             />
@@ -722,10 +722,14 @@ function SettingsTab({
               disabled={busy}
               apiBasePath={apiPath(gid, '')}
               outputModality="text"
-              onChange={(v) => update('model', v)}
+              onChange={(model) => setDraft(current => current ? {
+                ...current,
+                model,
+                effort: thinkingLevelError(effectiveProvider, model ?? defaultModel, current.effort) ? null : current.effort,
+              } : current)}
             />
           </Field>
-          <ThinkingLevelSelect
+          <ThinkingLevelField
             provider={effectiveProvider}
             model={draft.model ?? defaultModel}
             value={draft.effort}

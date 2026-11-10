@@ -487,8 +487,8 @@ describe('NativeProvider', () => {
     },
   );
 
-  it('sends Off as reasoning_effort none only for a supported OpenAI model', async () => {
-    const events = await collect(new NativeProvider({ model: 'local/gpt-5.1', effort: 'none' }));
+  it.each(['gpt-5.1', 'gpt-5.4'])('sends Off as reasoning_effort none for supported OpenAI model %s', async model => {
+    const events = await collect(new NativeProvider({ model: `local/${model}`, effort: 'none' }));
     expect(events.filter(event => event.type === 'error')).toEqual([]);
     expect(requests[0].reasoning_effort).toBe('none');
   });

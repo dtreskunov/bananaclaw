@@ -2154,21 +2154,29 @@ It appears once even when the change also schedules post-restart verification.
 Sessionless approvals do not offer this field because they have
 no originating conversation; the server rejects a non-empty message for them.
 
-### Next-message thinking dial
+### Next-message thinking slider
 
-Supported web conversations show a borderless dial icon beside Send. It uses
-the same model-reviewed levels as Agent Settings. Tap to choose **Agent default**
-or a supported level; the icon is muted for Default and accent-colored for an
-override. Its tooltip names the level and says **next message**. Keyboard users
-can open with Enter/Space or Arrow Down, navigate with arrows/Home/End, and close
-with Escape. The menu also closes on an outside click or focus change.
+Supported web conversations show a compact **Thinking** slider at the bottom of
+the composer's **+** popover, below the attachment actions. There is no separate
+dial beside Send. The same compact slider is used in Agent Settings: **Thinking**
+on the left, the current level on the right, and only supported levels along the
+track. There is no Default/Auto stop or reset control. It initializes from the
+effective agent setting without storing an override until the user moves it.
+The composer's
+slider tooltip says **Next message only**, and tuning it leaves the popover open.
+
+Keyboard users can open **+** with Enter/Space, Tab to the slider and use the
+native range controls (arrows/Home/End). Escape closes the popover and returns
+focus to **+**. An outside click or focus change also closes it. The slider
+announces the level name rather than a numeric position.
 
 The selection applies to one submitted message, including file attachments and
 dictation, not the agent's configuration or other conversations. It resets after
 the host accepts that message; a failed submission keeps the selection and its
 immutable Retry packet. Retrying preserves the message ID and level. A newer
 selection is not cleared by an older retry. Navigating to another conversation
-resets the draft override. The message's metadata retains its selected level
+resets the draft override, and successful sends return the slider to the agent's
+setting. The message's metadata retains its selected level
 after reload; text-only pending-message edits do not change it.
 
 When the agent is busy, an overridden message queues for a distinct turn rather
@@ -2176,29 +2184,48 @@ than steering the active turn. Adjacent messages with their own override or
 Default are not merged into that turn. Changing levels resumes the existing
 conversation in a fresh provider query at a settled boundary, with no container
 restart. Unsupported providers/models and external-channel composers do not
-show the dial. MiniMax cannot disable thinking, so it has no Off choice.
+show the slider; changing to an unsupported model clears a stale draft override.
+Agent Settings still shows a disabled slider for unsupported models. MiniMax
+cannot disable thinking, so it has no Off choice.
+
+Initial values use explicit agent effort, then `DEFAULT_EFFORT`, then reviewed
+API defaults. For example, MiniMax M3.1 Flash defaults to Maximum and GPT-5.1,
+GPT-5.2 and GPT-5.4 default to Off. Claude's API normally defaults to High
+(Opus/Haiku 5.5 use Medium). These API defaults are not assumed for the
+Claude SDK, which can read its own saved settings. When the initial value is
+unknown, the control shows an em dash and no thumb until the user selects an
+actual level; it never silently initializes to Low.
+Reviewed values come from the [MiniMax thinking contract](https://platform.minimax.io/docs/guides/text-generation#thinking),
+[OpenAI model pages](https://developers.openai.com/api/docs/models), and
+[Claude API effort documentation](https://platform.claude.com/docs/en/build-with-claude/effort).
 
 ### Applying Agent Settings
 
-The **Models** tab places **Thinking level** directly below **Model**. It is an
+The **Models** tab places **Thinking** directly below **Model**. It is an
 agent-wide default, stored in the existing `effort` field, not a per-message
 override or a token limit. Higher levels can improve difficult answers at the
 cost of latency and token usage.
 
-The dropdown offers only reviewed levels for the selected provider/model.
+The shared slider offers only reviewed levels for the selected provider/model.
 MiniMax M3.1 Flash offers Low, Medium, High, Extra high and Maximum; it cannot
 turn thinking off. **Off** appears only for models supporting `none`. Unknown
-models and providers without an implemented effort mapping offer only Default.
-Unsupported saved values stay visible with a warning until explicitly changed;
+models and providers without an implemented effort mapping show a disabled slider.
+Unsupported saved values stay visible with a warning, but are not added as slider stops;
 the UI, settings API and CLI reject unsupported combinations.
 Unrelated settings edits send only changed fields and do not require changing
 an existing unsupported thinking level.
 
-**Default** clears the agent override and inherits `DEFAULT_EFFORT` when set,
-otherwise leaving the provider's default untouched. The inherited value is
-shown in the dropdown. If the fleet default is unsupported for the selected
-model, choose an explicit supported level or update `DEFAULT_EFFORT`.
+The inherited setting is shown as its actual level, not labelled Default.
+Opening Agent Settings does not persist that initial value. Moving the slider
+saves an explicit agent setting through the usual Apply flow.
+To restore inheritance operationally, use `ncl groups config update --id <id> --effort ''`;
+there is no separate UI control. If the fleet default is unsupported for the
+selected model, choose an explicit supported level or update `DEFAULT_EFFORT`.
 Advanced token-based thinking budgets remain in Model parameters for Claude.
+Changing providers clears provider-specific thinking overrides. Changing models
+keeps a saved level only if the new model supports it; otherwise it returns to
+inheritance as part of the same Apply request, so a disabled control does not
+block switching to an unsupported model.
 
 Saving runtime settings (provider, model, effort, image, MCP servers, skills or
 packages) automatically schedules a silent restart. There is no **Restart

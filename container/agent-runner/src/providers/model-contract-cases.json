@@ -15,7 +15,7 @@
       { "modelId": "gpt-5.2", "levels": ["none", "low", "medium", "high", "xhigh"] },
       { "modelId": "gpt-5.2-pro", "levels": [] },
       { "modelId": "gpt-5.3-codex", "levels": [] },
-      { "modelId": "gpt-5.4", "levels": ["low", "medium", "high", "xhigh"] },
+      { "modelId": "gpt-5.4", "levels": ["none", "low", "medium", "high", "xhigh"] },
       { "modelId": "gpt-4.1", "levels": [] },
       { "modelId": "o1", "levels": ["low", "medium", "high"] },
       { "modelId": "o1-mini", "levels": [] },

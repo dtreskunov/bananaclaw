@@ -1,7 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { thinkingLevelError, thinkingLevelLabel, thinkingLevels } from './thinking-levels.js';
+import { defaultThinkingLevel, thinkingLevelError, thinkingLevelLabel, thinkingLevels } from './thinking-levels.js';
 
 describe('thinking levels', () => {
+  it.each([
+    ['minimax/MiniMax-M3.1-Flash', 'max'],
+    ['minimax-coding-plan/MiniMax-M3.1-Flash-Preview', 'max'],
+    ['openai/gpt-5', 'medium'],
+    ['openai/gpt-5-mini', 'medium'],
+    ['openai/o3-mini', 'medium'],
+    ['openai/gpt-5.1', 'none'],
+    ['openai/gpt-5.2', 'none'],
+    ['openai/gpt-5.4-2026-03-05', 'none'],
+    ['anthropic/claude-opus-4-6', 'high'],
+    ['anthropic/claude-opus-5-5', 'medium'],
+    ['anthropic/claude-sonnet-5-5', 'high'],
+    ['local/unknown', null],
+  ])('initializes %s to its reviewed API default %s', (model, expected) => {
+    expect(defaultThinkingLevel('native', model)).toBe(expected);
+    if (expected !== null) expect(thinkingLevels('native', model)).toContain(expected);
+  });
+
+  it('does not assume API defaults for SDK-owned settings or unsupported providers/models', () => {
+    expect(defaultThinkingLevel('claude', 'claude-opus-4-6')).toBeNull();
+    expect(defaultThinkingLevel('opencode', 'openai/gpt-5')).toBeNull();
+    expect(defaultThinkingLevel('native', 'gpt-5')).toBeNull();
+    expect(defaultThinkingLevel('native', null)).toBeNull();
+  });
+
   it('does not offer controls for unsupported providers, unknown models or noncanonical native IDs', () => {
     for (const provider of ['opencode', 'mock', null]) expect(thinkingLevels(provider, 'openai/gpt-5')).toEqual([]);
     expect(thinkingLevels('native', 'gpt-5')).toEqual([]);

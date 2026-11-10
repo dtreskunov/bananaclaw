@@ -23902,8 +23902,7 @@ function ComposerInput({
   listening,
   className = "",
   hidden = false,
-  controls,
-  beforeSend
+  controls
 }) {
   return /* @__PURE__ */ u4(
     "div",
@@ -23914,7 +23913,6 @@ function ComposerInput({
         /* @__PURE__ */ u4("textarea", { ...textarea, ref: inputRef, rows, onKeyDown: send ? onComposerKeyDown : void 0 }),
         controls,
         voice2 ? /* @__PURE__ */ u4(VoiceButton, { ...voice2 }) : null,
-        beforeSend,
         send ? /* @__PURE__ */ u4(
           "button",
           {
@@ -23948,7 +23946,7 @@ function thinkingLevels(provider, model) {
     if (/^gpt-5\.[12](?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) {
       return id2.startsWith("gpt-5.2") ? ["none", ...STANDARD, "xhigh"] : ["none", ...STANDARD];
     }
-    if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return [...STANDARD, "xhigh"];
+    if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return ["none", ...STANDARD, "xhigh"];
   }
   if (/^claude-(?:opus-4-[78]|(?:opus|sonnet)-5(?:-5)?|haiku-5-5)(?:-\d{8})?$/.test(id2)) return EXTENDED;
   if (/^claude-(?:opus|sonnet)-4-6(?:-\d{8})?$/.test(id2)) return [...STANDARD, "max"];
@@ -23956,108 +23954,25 @@ function thinkingLevels(provider, model) {
     return STANDARD;
   return [];
 }
+function defaultThinkingLevel(provider, model) {
+  const levels = thinkingLevels(provider, model);
+  if (provider !== "native" || !model || levels.length === 0) return null;
+  const id2 = model.slice(model.indexOf("/") + 1);
+  if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(id2)) return "max";
+  if (id2.startsWith("claude-")) return /^claude-(?:opus|haiku)-5-5(?:-\d{8})?$/.test(id2) ? "medium" : "high";
+  return levels.includes("none") ? "none" : "medium";
+}
 function thinkingLevelError(provider, model, effort) {
   if (effort == null || effort === "") return null;
   const levels = thinkingLevels(provider, model);
   if (typeof effort === "string" && levels.includes(effort)) return null;
-  return levels.length ? `Thinking level must be one of: ${levels.join(", ")} for ${model}.` : `Configurable thinking is not supported for ${provider ?? "this provider"}/${model ?? "the default model"}. Choose Default.`;
+  return levels.length ? `Thinking level must be one of: ${levels.join(", ")} for ${model}.` : `Configurable thinking is not supported for ${provider ?? "this provider"}/${model ?? "the default model"}. Clear the effort override or choose a supported model.`;
 }
 function thinkingLevelLabel(level) {
   if (level === "none") return "Off";
   if (level === "xhigh") return "Extra high";
   if (level === "max") return "Maximum";
   return level.charAt(0).toUpperCase() + level.slice(1);
-}
-
-// src/components/ThinkingDial.tsx
-function ThinkingDial({
-  levels,
-  defaultLevel,
-  value,
-  disabled,
-  onChange
-}) {
-  const [open, setOpen] = h2(false);
-  const root = A2(null);
-  const trigger = A2(null);
-  const label = value ? `${thinkingLevelLabel(value)}${levels.includes(value) ? "" : " (unsupported)"} \xB7 next message` : `Agent default${defaultLevel ? ` (${thinkingLevelLabel(defaultLevel)})` : ""}`;
-  const close = () => {
-    setOpen(false);
-    trigger.current?.focus();
-  };
-  y2(() => {
-    if (!open || disabled) return;
-    (root.current?.querySelector('[aria-checked="true"]') ?? root.current?.querySelector('[role="menuitemradio"]'))?.focus();
-    const outside = (event) => {
-      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
-  }, [open, disabled]);
-  return /* @__PURE__ */ u4(
-    "div",
-    {
-      class: "thinking-dial",
-      ref: root,
-      onBlur: (event) => {
-        if (event.relatedTarget instanceof Node && !root.current?.contains(event.relatedTarget)) setOpen(false);
-      },
-      onKeyDown: (event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          close();
-          return;
-        }
-        if (!open || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const items = Array.from(root.current?.querySelectorAll('[role="menuitemradio"]') ?? []);
-        const current = items.findIndex((item) => item === document.activeElement);
-        const index = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-        items[index]?.focus();
-      },
-      children: [
-        /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            ref: trigger,
-            class: `thinking-dial-trigger${value ? " overridden" : ""}`,
-            title: `Thinking: ${label}`,
-            "aria-label": `Thinking: ${label}`,
-            "aria-haspopup": "menu",
-            "aria-expanded": open && !disabled,
-            disabled,
-            onClick: () => setOpen((current) => !current),
-            onKeyDown: (event) => {
-              if (event.key === "ArrowDown" && !open) {
-                event.preventDefault();
-                event.stopPropagation();
-                setOpen(true);
-              }
-            },
-            children: /* @__PURE__ */ u4("svg", { viewBox: "0 0 16 16", "aria-hidden": "true", children: [
-              /* @__PURE__ */ u4("path", { d: "M2 12V9a6 6 0 0 1 12 0v3M3.5 9H2m12 0h-1.5M8 3v1.5M4 5l1 1m7-1-1 1M8 10l3-3" }),
-              /* @__PURE__ */ u4("circle", { cx: "8", cy: "10", r: "1" })
-            ] })
-          }
-        ),
-        open && !disabled ? /* @__PURE__ */ u4("div", { class: "thinking-dial-menu flush-menu-panel", role: "menu", "aria-label": "Thinking for next message", children: [void 0, ...levels].map((level) => /* @__PURE__ */ u4(
-          "button",
-          {
-            type: "button",
-            role: "menuitemradio",
-            "aria-checked": value === level,
-            onClick: () => {
-              onChange(level);
-              close();
-            },
-            children: level ? thinkingLevelLabel(level) : "Agent default"
-          },
-          level ?? "default"
-        )) }) : null
-      ]
-    }
-  );
 }
 
 // src/components/TurnStopButton.tsx
@@ -24505,6 +24420,47 @@ function editBranchActionExplanation(hasAnchor) {
   return hasAnchor ? "Start a new branch immediately before this message and copy its text into the composer for editing.\n\nNothing is sent until you review and send the edited text. The original thread and message stay unchanged. Workspace files and the agent\u2019s memory remain shared." : "This is the first conversational message, so there is no earlier point to branch from. A new blank web thread will open with this message copied into the composer.\n\nNothing is sent until you review and send the edited text. The original thread and message stay unchanged.";
 }
 
+// src/components/ThinkingLevelSlider.tsx
+function ThinkingLevelSlider({ levels, value, disabled, onChange }) {
+  const index = value === null ? -1 : levels.indexOf(value);
+  const unresolved = index < 0;
+  const locked = disabled || levels.length === 0;
+  const caption = value === null ? "\u2014" : `${thinkingLevelLabel(value)}${unresolved ? " (unsupported)" : ""}`;
+  const description = levels.length === 0 ? "Not supported by this model." : value === null ? "Initial setting unavailable. Choose a level." : caption;
+  return /* @__PURE__ */ u4("label", { class: `thinking-level-slider${unresolved ? " unresolved" : ""}`, title: description, children: [
+    /* @__PURE__ */ u4("span", { class: "thinking-level-slider-heading", children: [
+      /* @__PURE__ */ u4("span", { children: "Thinking" }),
+      /* @__PURE__ */ u4("span", { class: "thinking-level-slider-value", children: caption })
+    ] }),
+    /* @__PURE__ */ u4(
+      "input",
+      {
+        type: "range",
+        min: 0,
+        max: Math.max(1, levels.length - 1),
+        step: 1,
+        value: Math.max(0, index),
+        disabled: locked,
+        "aria-label": "Thinking",
+        "aria-valuetext": description,
+        onInput: (event) => onChange(levels[event.currentTarget.valueAsNumber]),
+        onPointerUp: (event) => {
+          if (unresolved && !locked) onChange(levels[event.currentTarget.valueAsNumber]);
+        },
+        onKeyDown: (event) => {
+          if (!unresolved || locked) return;
+          if (["Home", "End", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+            event.preventDefault();
+            onChange(
+              levels[event.key === "End" ? levels.length - 1 : ["ArrowRight", "ArrowUp"].includes(event.key) ? Math.min(1, levels.length - 1) : 0]
+            );
+          }
+        }
+      }
+    )
+  ] });
+}
+
 // src/components/ComposerPlusMenu.tsx
 function ComposerPlusMenu({
   disabled,
@@ -24513,64 +24469,84 @@ function ComposerPlusMenu({
   showQuickCapture,
   onUploadFile,
   onQuickCapture,
-  onRecordAudio
+  onRecordAudio,
+  thinking
 }) {
   const [open, setOpen] = h2(false);
+  const expanded = open && !disabled;
   const wrapRef = A2(null);
+  const triggerRef = A2(null);
   y2(() => {
-    if (!open) return void 0;
+    if (!expanded) return void 0;
+    wrapRef.current?.querySelector(".composer-plus-item")?.focus();
     const onDoc = (ev) => {
-      if (wrapRef.current && !wrapRef.current.contains(ev.target)) setOpen(false);
+      if (ev.target instanceof Node && !wrapRef.current?.contains(ev.target)) setOpen(false);
     };
     const onKey = (ev) => {
-      if (ev.key === "Escape") setOpen(false);
+      if (ev.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
-    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("pointerdown", onDoc);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("pointerdown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [expanded]);
   const pick = (fn2) => (ev) => {
     ev.stopPropagation();
     setOpen(false);
+    triggerRef.current?.focus();
     fn2();
   };
-  return /* @__PURE__ */ u4("div", { class: "composer-plus" + (open ? " open" : ""), ref: wrapRef, children: [
-    /* @__PURE__ */ u4(
-      "button",
-      {
-        type: "button",
-        id: "chat-attach",
-        class: "composer-plus-trigger",
-        title: title || "Add\u2026",
-        "aria-label": "Add",
-        "aria-haspopup": "menu",
-        "aria-expanded": open,
-        disabled,
-        onClick: (ev) => {
-          ev.stopPropagation();
-          setOpen((o4) => !o4);
-        },
-        children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
-      }
-    ),
-    open ? /* @__PURE__ */ u4("div", { class: "composer-plus-panel flush-menu-panel", role: "menu", children: [
-      showQuickCapture ? /* @__PURE__ */ u4("button", { type: "button", class: "composer-plus-item", role: "menuitem", onClick: pick(onQuickCapture), children: [
-        /* @__PURE__ */ u4("span", { class: "ico", children: "\u{1F4F7}" }),
-        /* @__PURE__ */ u4("span", { class: "lbl", children: "Take photo" })
-      ] }) : null,
-      /* @__PURE__ */ u4("button", { type: "button", class: "composer-plus-item", role: "menuitem", onClick: pick(onUploadFile), children: [
-        /* @__PURE__ */ u4("span", { class: "ico", children: "\u{1F4CE}" }),
-        /* @__PURE__ */ u4("span", { class: "lbl", children: "Upload file" })
-      ] }),
-      showRecordAudio ? /* @__PURE__ */ u4("button", { type: "button", class: "composer-plus-item", role: "menuitem", onClick: pick(onRecordAudio), children: [
-        /* @__PURE__ */ u4("span", { class: "ico", children: "\u{1F399}\uFE0F" }),
-        /* @__PURE__ */ u4("span", { class: "lbl", children: "Record audio attachment" })
-      ] }) : null
-    ] }) : null
-  ] });
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: "composer-plus" + (expanded ? " open" : ""),
+      ref: wrapRef,
+      onBlur: (event) => {
+        if (event.relatedTarget instanceof Node && !wrapRef.current?.contains(event.relatedTarget)) setOpen(false);
+      },
+      children: [
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            id: "chat-attach",
+            ref: triggerRef,
+            class: "composer-plus-trigger",
+            title: title || "Add\u2026",
+            "aria-label": "Add",
+            "aria-haspopup": "dialog",
+            "aria-expanded": expanded,
+            disabled,
+            onClick: (ev) => {
+              ev.stopPropagation();
+              setOpen((o4) => !o4);
+            },
+            children: /* @__PURE__ */ u4("span", { class: "plus-glyph", "aria-hidden": "true", children: "+" })
+          }
+        ),
+        expanded ? /* @__PURE__ */ u4("div", { class: "composer-plus-panel flush-menu-panel", role: "dialog", "aria-label": "Add to message", children: [
+          showQuickCapture ? /* @__PURE__ */ u4("button", { type: "button", class: "composer-plus-item", onClick: pick(onQuickCapture), children: [
+            /* @__PURE__ */ u4("span", { class: "ico", children: "\u{1F4F7}" }),
+            /* @__PURE__ */ u4("span", { class: "lbl", children: "Take photo" })
+          ] }) : null,
+          /* @__PURE__ */ u4("button", { type: "button", class: "composer-plus-item", onClick: pick(onUploadFile), children: [
+            /* @__PURE__ */ u4("span", { class: "ico", children: "\u{1F4CE}" }),
+            /* @__PURE__ */ u4("span", { class: "lbl", children: "Upload file" })
+          ] }),
+          showRecordAudio ? /* @__PURE__ */ u4("button", { type: "button", class: "composer-plus-item", onClick: pick(onRecordAudio), children: [
+            /* @__PURE__ */ u4("span", { class: "ico", children: "\u{1F399}\uFE0F" }),
+            /* @__PURE__ */ u4("span", { class: "lbl", children: "Record audio attachment" })
+          ] }) : null,
+          thinking ? /* @__PURE__ */ u4("div", { class: "composer-plus-thinking", title: "Next message only", children: /* @__PURE__ */ u4(ThinkingLevelSlider, { ...thinking }) }) : null
+        ] }) : null
+      ]
+    }
+  );
 }
 
 // src/components/QuickCapture.tsx
@@ -29920,7 +29896,11 @@ function Composer() {
   const thinking = composerThinking.value;
   const thinkingLevel = thinking?.target === target ? thinking.level : void 0;
   const thinkingCapability = conversationState.value?.conversation.capabilities.thinking;
-  const hasThinking = isWeb && (!!thinkingCapability?.levels.length || thinkingLevel !== void 0);
+  const hasThinking = isWeb && !!thinkingCapability?.levels.length;
+  y2(() => {
+    const choice = composerThinking.peek();
+    if (choice?.target === target && !thinkingCapability?.levels.includes(choice.level)) composerThinking.value = null;
+  }, [target, thinkingCapability]);
   const channel = channelType.value;
   const mg = messagingGroupId.value;
   y2(() => {
@@ -29947,7 +29927,7 @@ function Composer() {
     if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg || isWeb && !chatReady.value) return false;
     const text2 = (inputRef.current?.value || "").trim();
     const choice = composerThinking.peek();
-    const submittedThinking = isWeb && choice?.target === target ? choice.level : void 0;
+    const submittedThinking = isWeb && choice?.target === target && conversationState.peek()?.conversation.capabilities.thinking?.levels.includes(choice.level) ? choice.level : void 0;
     const files = pending.value.slice();
     if (!text2 && files.length === 0) return false;
     const pins = pinnedContext.value;
@@ -30085,7 +30065,6 @@ function Composer() {
           /* @__PURE__ */ u4(
             ComposerInput,
             {
-              className: hasThinking && !edit.editing ? "has-thinking" : "",
               inputRef,
               multiLine,
               listening: activeVoice && voiceState.phase === "listening",
@@ -30114,8 +30093,17 @@ function Composer() {
                   onQuickCapture: () => setQuickCapture(true),
                   onRecordAudio: () => {
                     startAudioAttachRecording().catch(console.error);
-                  }
-                }
+                  },
+                  thinking: hasThinking && !edit.editing ? {
+                    levels: thinkingCapability?.levels ?? [],
+                    value: thinkingLevel ?? thinkingCapability?.defaultLevel ?? null,
+                    disabled: composerDisabled || composerSendInFlight.value || voiceState.sending || isRecording.value,
+                    onChange: (level) => {
+                      composerThinking.value = { target, level, chosenAt: Date.now() };
+                    }
+                  } : void 0
+                },
+                target
               ),
               voice: {
                 target,
@@ -30126,19 +30114,6 @@ function Composer() {
                 unavailable,
                 disabled: edit.editing || composerDisabled || isRecording.value
               },
-              beforeSend: hasThinking && !edit.editing ? /* @__PURE__ */ u4(
-                ThinkingDial,
-                {
-                  levels: thinkingCapability?.levels ?? [],
-                  defaultLevel: thinkingCapability?.defaultLevel ?? null,
-                  value: thinkingLevel,
-                  disabled: composerDisabled || composerSendInFlight.value || voiceState.sending || isRecording.value,
-                  onChange: (level) => {
-                    composerThinking.value = level ? { target, level, chosenAt: Date.now() } : null;
-                  }
-                },
-                target
-              ) : null,
               send: {
                 id: "chat-send",
                 label: edit.editing ? edit.state?.busy ? "Saving\u2026" : edit.state?.retry ? "Retry save" : "Save edit" : "Send",
@@ -36393,8 +36368,8 @@ function SkillsSection({
   ] });
 }
 
-// src/components/ThinkingLevelSelect.tsx
-function ThinkingLevelSelect({
+// src/components/ThinkingLevelField.tsx
+function ThinkingLevelField({
   provider,
   model,
   value,
@@ -36405,31 +36380,22 @@ function ThinkingLevelSelect({
   const levels = thinkingLevels(provider, model);
   const error = thinkingLevelError(provider, model, value ?? defaultEffort);
   return /* @__PURE__ */ u4(
-    GroupAdminField,
+    "div",
     {
-      label: "Thinking level",
-      info: "Agent-wide default for all conversations. More thinking may improve difficult answers, but increases latency and token usage. Saving schedules a restart after active responses finish.",
-      children: /* @__PURE__ */ u4("div", { class: "group-admin-stack", children: [
+      class: "group-admin-stack",
+      title: "Agent-wide setting. Saving schedules a restart after active responses finish.",
+      children: [
         /* @__PURE__ */ u4(
-          "select",
+          ThinkingLevelSlider,
           {
-            "aria-label": "Thinking level",
-            value: value ?? "",
-            disabled: busy || levels.length === 0 && value === null,
-            onChange: (event) => onChange(event.currentTarget.value || null),
-            children: [
-              /* @__PURE__ */ u4("option", { value: "", children: defaultEffort ? `Default (inherited: ${thinkingLevelLabel(defaultEffort)})` : "Default (provider setting)" }),
-              value && !levels.includes(value) ? /* @__PURE__ */ u4("option", { value, disabled: true, children: [
-                value,
-                " (unsupported)"
-              ] }) : null,
-              levels.map((level) => /* @__PURE__ */ u4("option", { value: level, children: thinkingLevelLabel(level) }, level))
-            ]
+            levels,
+            value: value ?? defaultEffort ?? defaultThinkingLevel(provider, model),
+            disabled: busy,
+            onChange
           }
         ),
-        levels.length === 0 ? /* @__PURE__ */ u4("p", { class: "group-admin-help", children: "This model/provider has no reviewed thinking-level control." }) : null,
         error ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", role: "alert", children: error }) : null
-      ] })
+      ]
     }
   );
 }
@@ -36977,7 +36943,7 @@ function SettingsTab({
                 onChange: (v5) => {
                   if (v5 === draft.provider) return;
                   setDraft(
-                    (d5) => d5 ? { ...d5, provider: v5, model: null, small_model: null, upstream_provider: null } : d5
+                    (d5) => d5 ? { ...d5, provider: v5, model: null, small_model: null, upstream_provider: null, effort: null } : d5
                   );
                 }
               }
@@ -36996,11 +36962,15 @@ function SettingsTab({
           disabled: busy,
           apiBasePath: apiPath(gid, ""),
           outputModality: "text",
-          onChange: (v5) => update("model", v5)
+          onChange: (model) => setDraft((current) => current ? {
+            ...current,
+            model,
+            effort: thinkingLevelError(effectiveProvider, model ?? defaultModel, current.effort) ? null : current.effort
+          } : current)
         }
       ) }),
       /* @__PURE__ */ u4(
-        ThinkingLevelSelect,
+        ThinkingLevelField,
         {
           provider: effectiveProvider,
           model: draft.model ?? defaultModel,

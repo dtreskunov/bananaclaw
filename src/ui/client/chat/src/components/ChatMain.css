@@ -649,6 +649,10 @@
   border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px var(--shadow-color);
 }
+.chat-main .composer-plus-thinking {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px 6px;
+}
 .chat-main .composer-plus-item {
   display: flex;
   align-items: center;

@@ -318,6 +318,29 @@ describe('tool-scoped Stop endpoint', () => {
 });
 
 describe('native steering submissions', () => {
+  it('advertises the documented model default without persisting an effort override', () => {
+    getDb()
+      .prepare(
+        "INSERT INTO container_configs (agent_group_id, provider, model, updated_at) VALUES ('agent', 'native', 'minimax/MiniMax-M3.1-Flash', ?)",
+      )
+      .run(NOW);
+    vi.stubEnv('DEFAULT_EFFORT', '');
+    try {
+      expect(readConversation('web:member', 'agent', 'thread-1', OVERRIDE).capabilities.thinking?.defaultLevel).toBe(
+        'max',
+      );
+      expect(getDb().prepare("SELECT effort FROM container_configs WHERE agent_group_id = 'agent'").get()).toEqual({
+        effort: null,
+      });
+      vi.stubEnv('DEFAULT_EFFORT', 'low');
+      expect(readConversation('web:member', 'agent', 'thread-1', OVERRIDE).capabilities.thinking?.defaultLevel).toBe(
+        'low',
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('advertises model-supported thinking to members without exposing admin settings', () => {
     getDb()
       .prepare(

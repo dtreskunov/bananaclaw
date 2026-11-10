@@ -11,7 +11,7 @@ export function nativeThinkingLevels(modelId: string): readonly string[] {
   if (/^gpt-5\.[12](?:-\d{4}-\d{2}-\d{2})?$/.test(modelId)) {
     return modelId.startsWith('gpt-5.2') ? ['none', ...STANDARD, 'xhigh'] : ['none', ...STANDARD];
   }
-  if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(modelId)) return [...STANDARD, 'xhigh'];
+  if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(modelId)) return ['none', ...STANDARD, 'xhigh'];
   if (/^claude-(?:opus-4-[78]|(?:opus|sonnet)-5(?:-5)?|haiku-5-5)(?:-\d{8})?$/.test(modelId)) return EXTENDED;
   if (/^claude-(?:opus|sonnet)-4-6(?:-\d{8})?$/.test(modelId)) return [...STANDARD, 'max'];
   if (/^claude-opus-4-5(?:-\d{8})?$/.test(modelId)) return STANDARD;
