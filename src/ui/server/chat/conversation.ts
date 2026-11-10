@@ -212,6 +212,7 @@ export function projectConversation(
         status,
         model: metadata?.model ?? usage.at(-1)?.value.model ?? null,
         durationMs,
+        ...(metadata?.thinkingLevel !== undefined ? { thinkingLevel: metadata.thinkingLevel } : {}),
         ...(metadata?.usageAdvisory !== undefined ? { usageAdvisory: metadata.usageAdvisory } : {}),
       },
     });

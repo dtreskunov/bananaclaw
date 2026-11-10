@@ -435,6 +435,7 @@ function fmtContextLimit(tokens: number): string {
 }
 
 type UsageProps = {
+  thinkingLevel?: string;
   ownerId: string; summary: string; records: ConversationTurn['usage']; model: string | null;
   live: boolean; partial: boolean; wallElapsedMs: number | null; modelElapsedMs: number | null; toolElapsedMs: number;
 };
@@ -468,7 +469,7 @@ function UsageRow({ label, value, title, kind }: { label: string; value: string;
   return <span class={`usage-row${kind ? ` usage-row-${kind}` : ''}`} title={title}><span>{label}</span><strong>{value}</strong></span>;
 }
 
-function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, modelElapsedMs, toolElapsedMs }: Omit<UsageProps, 'summary'>) {
+function UsageDetails({ ownerId, records, model, thinkingLevel, live, partial, wallElapsedMs, modelElapsedMs, toolElapsedMs }: Omit<UsageProps, 'summary'>) {
   const reports = records.length ? records : [{ id: 'usage', value: {} }];
   const otherMs = wallElapsedMs !== null && modelElapsedMs !== null
     ? Math.max(0, wallElapsedMs - toolElapsedMs - modelElapsedMs) : null;
@@ -493,7 +494,7 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
         <section class="usage-column" aria-label="Model">
           {reports.map((record, index) => <div class="usage-report" key={record.id}>
             {heading(index)}
-            <UsageModel u={record.value} model={model} live={live} partial={partial} />
+            <UsageModel u={record.value} model={model} thinkingLevel={thinkingLevel} live={live} partial={partial} />
           </div>)}
         </section>
       </div>
@@ -536,13 +537,15 @@ function UsageTokens({ u, live }: { u: Partial<TurnUsage>; live: boolean }) {
   </>;
 }
 
-function UsageModel({ u, model, live, partial }: { u: Partial<TurnUsage>; model?: string | null; live: boolean; partial: boolean }) {
+function UsageModel({ u, model, thinkingLevel, live, partial }: { u: Partial<TurnUsage>; model?: string | null; thinkingLevel?: string; live: boolean; partial: boolean }) {
   const cost = usageCostPresentation(u, partial);
   const reportedModel = u.model || model;
   const window = u.context_window !== undefined && Number.isFinite(u.context_window) && u.context_window > 0
     ? u.context_window : null;
   return <>
     {reportedModel ? <span class="usage-row"><span>Model</span><strong title={reportedModel}>{shortModel(reportedModel)}</strong></span> : null}
+    {thinkingLevel ? <UsageRow label="Thinking" value={thinkingLevelLabel(thinkingLevel)}
+      title="Thinking setting used for this turn; not a measured token budget." /> : null}
     {window !== null ? <UsageRow label="Context size" value={`${fmtContextLimit(window)} tok`} /> : null}
     {u.num_turns ? <UsageRow label={live ? 'Model calls so far' : 'Model calls'} value={String(u.num_turns)} /> : null}
     {cost && cost.usd !== 0 ? <UsageRow label={cost.label} value={fmtCost(cost.usd)} /> : null}
@@ -1133,7 +1136,7 @@ function turnUsage(turn: ConversationTurn, ownerId: string, now: number): UsageP
   const records = view.usage;
   const usage = records.map(record => record.value);
   return {
-    ownerId, records, model: view.model,
+    ownerId, records, model: view.model, thinkingLevel: turn.metadata.thinkingLevel,
     summary: technicalSummary({ elapsedMs: live ? null : view.elapsedMs, usage }),
     wallElapsedMs: view.elapsedMs, modelElapsedMs: view.modelCallMs, toolElapsedMs: view.toolCallMs, live,
     partial: turn.metadata.status === 'partial',

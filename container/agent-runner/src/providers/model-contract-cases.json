@@ -3,6 +3,19 @@
 
   "thinking": {
     "_": "Reviewed thinking controls only, not a guess based on a reasoning boolean. Native Chat uses reasoning_effort; Anthropic Messages uses output_config.effort. Unknown models retain provider defaults.",
+    "defaults": [
+      { "modelId": "MiniMax-M3.1-Flash", "level": "max" },
+      { "modelId": "MiniMax-M3.1-Flash-Preview", "level": "max" },
+      { "modelId": "gpt-5", "level": "medium" },
+      { "modelId": "o3-mini", "level": "medium" },
+      { "modelId": "gpt-5.1", "level": "none" },
+      { "modelId": "gpt-5.2", "level": "none" },
+      { "modelId": "gpt-5.4", "level": "none" },
+      { "modelId": "claude-opus-4-6", "level": "high" },
+      { "modelId": "claude-opus-5-5", "level": "medium" },
+      { "modelId": "claude-sonnet-5-5", "level": "high" },
+      { "modelId": "unknown", "level": null }
+    ],
     "cases": [
       { "modelId": "MiniMax-M3.1-Flash", "levels": ["low", "medium", "high", "xhigh", "max"] },
       { "modelId": "MiniMax-M3.1-Flash-Preview", "levels": ["low", "medium", "high", "xhigh", "max"] },

@@ -8,6 +8,7 @@ import type {
 } from './conversation.js';
 import { isReadCursor } from './read-state.js';
 import { isTurnUsageAdvisory } from './conversation.js';
+import { isThinkingLevel } from './thinking-levels.js';
 import { isEpochMs, UI_TIMESTAMP_PROTOCOL_VERSION } from './time.js';
 import {
   applyCollection,
@@ -119,7 +120,7 @@ const message = shape({
     }),
   ),
   canEditPending: optional(bool),
-  thinkingLevel: optional(oneOf('none', 'low', 'medium', 'high', 'xhigh', 'max')),
+  thinkingLevel: optional(isThinkingLevel),
   author: optional(
     (value) =>
       object(value) &&
@@ -180,6 +181,7 @@ const turnFields = {
     model: nullable(text),
     durationMs: nullable(number),
     usageAdvisory: optional(nullable(isTurnUsageAdvisory)),
+    thinkingLevel: optional(isThinkingLevel),
   }),
 };
 const turn = shape({ ...turnFields, activity: array(activityLine) });

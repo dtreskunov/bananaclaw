@@ -96,7 +96,11 @@ export interface TurnRowView {
 }
 
 export function hasTurnStats(turn: ConversationTurn, view: TurnRowView): boolean {
-  return view.usage.length > 0 || (turn.phase === 'settled' && (view.elapsedMs !== null || !!view.model));
+  return (
+    !!turn.metadata.thinkingLevel ||
+    view.usage.length > 0 ||
+    (turn.phase === 'settled' && (view.elapsedMs !== null || !!view.model))
+  );
 }
 
 function toolCallMs(turn: ConversationTurn, now: number): number {

@@ -37,7 +37,7 @@ import {
 } from './current-batch.js';
 import {
   beginTurn, associateInput, finishUsageAttempt, interruptAbandonedTurns,
-  markTurnStopping, settleTurn, type TurnExecution,
+  markTurnStopping, persistTurnMetadata, settleTurn, type TurnExecution,
 } from './turn-execution.js';
 import {
   formatMessages,
@@ -887,6 +887,11 @@ export async function processQuery(
   const markModelReady = (): void => {
     if (execution.current.modelReady) return;
     execution.current.modelReady = true;
+    const thinkingLevel = query.thinkingLevel;
+    if (thinkingLevel !== undefined) {
+      execution.current.thinkingLevel = thinkingLevel;
+      persistTurnMetadata(execution.current, false);
+    }
     appendActivity({ kind: 'model', id: `model:ready:${execution.current.turnId}`, durationMs: 0 });
   };
   // Assigned from the event handler closure; the assertion keeps TypeScript

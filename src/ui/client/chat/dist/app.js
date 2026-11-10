@@ -18796,6 +18796,52 @@ function messageAttribution(message2, userId, agentGroupId) {
   return otherAuthorName(message2.author, userId, agentGroupId) ?? (message2.recipient ? `To ${message2.recipient.displayName}` : void 0);
 }
 
+// ../../shared/thinking-levels.ts
+var STANDARD = ["low", "medium", "high"];
+var EXTENDED = [...STANDARD, "xhigh", "max"];
+function isThinkingLevel(value) {
+  return typeof value === "string" && ["none", ...EXTENDED].includes(value);
+}
+function thinkingLevels(provider, model) {
+  if (!model || provider !== "claude" && provider !== "native") return [];
+  if (provider === "native" && model.indexOf("/") <= 0) return [];
+  const id2 = provider === "native" ? model.slice(model.indexOf("/") + 1) : model;
+  if (provider === "native") {
+    if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(id2)) return EXTENDED;
+    if (/^(?:o1|o3(?:-mini)?|o4-mini)(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
+    if (/^gpt-5(?:-mini|-nano)?(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
+    if (/^gpt-5\.[12](?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) {
+      return id2.startsWith("gpt-5.2") ? ["none", ...STANDARD, "xhigh"] : ["none", ...STANDARD];
+    }
+    if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return ["none", ...STANDARD, "xhigh"];
+  }
+  if (/^claude-(?:opus-4-[78]|(?:opus|sonnet)-5(?:-5)?|haiku-5-5)(?:-\d{8})?$/.test(id2)) return EXTENDED;
+  if (/^claude-(?:opus|sonnet)-4-6(?:-\d{8})?$/.test(id2)) return [...STANDARD, "max"];
+  if (/^claude-opus-4-5(?:-\d{8})?$/.test(id2) || provider === "claude" && /^(?:opus|sonnet)$/.test(id2))
+    return STANDARD;
+  return [];
+}
+function defaultThinkingLevel(provider, model) {
+  const levels = thinkingLevels(provider, model);
+  if (provider !== "native" || !model || levels.length === 0) return null;
+  const id2 = model.slice(model.indexOf("/") + 1);
+  if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(id2)) return "max";
+  if (id2.startsWith("claude-")) return /^claude-(?:opus|haiku)-5-5(?:-\d{8})?$/.test(id2) ? "medium" : "high";
+  return levels.includes("none") ? "none" : "medium";
+}
+function thinkingLevelError(provider, model, effort) {
+  if (effort == null || effort === "") return null;
+  const levels = thinkingLevels(provider, model);
+  if (typeof effort === "string" && levels.includes(effort)) return null;
+  return levels.length ? `Thinking level must be one of: ${levels.join(", ")} for ${model}.` : `Configurable thinking is not supported for ${provider ?? "this provider"}/${model ?? "the default model"}. Clear the effort override or choose a supported model.`;
+}
+function thinkingLevelLabel(level) {
+  if (level === "none") return "Off";
+  if (level === "xhigh") return "Extra high";
+  if (level === "max") return "Maximum";
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
 // ../../shared/collection-patch.ts
 var CollectionPatchError = class extends Error {
   constructor() {
@@ -19042,7 +19088,7 @@ var message = shape({
     })
   ),
   canEditPending: optional(bool),
-  thinkingLevel: optional(oneOf("none", "low", "medium", "high", "xhigh", "max")),
+  thinkingLevel: optional(isThinkingLevel),
   author: optional(
     (value) => object(value) && text(value.displayName) && (id(value.userId) && value.agentGroupId === void 0 || id(value.agentGroupId) && value.userId === void 0)
   ),
@@ -19098,7 +19144,8 @@ var turnFields = {
     status: oneOf("provisional", "partial", "final", "unavailable"),
     model: nullable(text),
     durationMs: nullable(number),
-    usageAdvisory: optional(nullable(isTurnUsageAdvisory))
+    usageAdvisory: optional(nullable(isTurnUsageAdvisory)),
+    thinkingLevel: optional(isThinkingLevel)
   })
 };
 var turn = shape({ ...turnFields, activity: array(activityLine) });
@@ -23932,49 +23979,6 @@ function ComposerInput({
   );
 }
 
-// ../../shared/thinking-levels.ts
-var STANDARD = ["low", "medium", "high"];
-var EXTENDED = [...STANDARD, "xhigh", "max"];
-function thinkingLevels(provider, model) {
-  if (!model || provider !== "claude" && provider !== "native") return [];
-  if (provider === "native" && model.indexOf("/") <= 0) return [];
-  const id2 = provider === "native" ? model.slice(model.indexOf("/") + 1) : model;
-  if (provider === "native") {
-    if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(id2)) return EXTENDED;
-    if (/^(?:o1|o3(?:-mini)?|o4-mini)(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
-    if (/^gpt-5(?:-mini|-nano)?(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
-    if (/^gpt-5\.[12](?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) {
-      return id2.startsWith("gpt-5.2") ? ["none", ...STANDARD, "xhigh"] : ["none", ...STANDARD];
-    }
-    if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return ["none", ...STANDARD, "xhigh"];
-  }
-  if (/^claude-(?:opus-4-[78]|(?:opus|sonnet)-5(?:-5)?|haiku-5-5)(?:-\d{8})?$/.test(id2)) return EXTENDED;
-  if (/^claude-(?:opus|sonnet)-4-6(?:-\d{8})?$/.test(id2)) return [...STANDARD, "max"];
-  if (/^claude-opus-4-5(?:-\d{8})?$/.test(id2) || provider === "claude" && /^(?:opus|sonnet)$/.test(id2))
-    return STANDARD;
-  return [];
-}
-function defaultThinkingLevel(provider, model) {
-  const levels = thinkingLevels(provider, model);
-  if (provider !== "native" || !model || levels.length === 0) return null;
-  const id2 = model.slice(model.indexOf("/") + 1);
-  if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(id2)) return "max";
-  if (id2.startsWith("claude-")) return /^claude-(?:opus|haiku)-5-5(?:-\d{8})?$/.test(id2) ? "medium" : "high";
-  return levels.includes("none") ? "none" : "medium";
-}
-function thinkingLevelError(provider, model, effort) {
-  if (effort == null || effort === "") return null;
-  const levels = thinkingLevels(provider, model);
-  if (typeof effort === "string" && levels.includes(effort)) return null;
-  return levels.length ? `Thinking level must be one of: ${levels.join(", ")} for ${model}.` : `Configurable thinking is not supported for ${provider ?? "this provider"}/${model ?? "the default model"}. Clear the effort override or choose a supported model.`;
-}
-function thinkingLevelLabel(level) {
-  if (level === "none") return "Off";
-  if (level === "xhigh") return "Extra high";
-  if (level === "max") return "Maximum";
-  return level.charAt(0).toUpperCase() + level.slice(1);
-}
-
 // src/components/TurnStopButton.tsx
 function TurnStopButton({ turn: turn2, connected, busy, error, onStop }) {
   const stopping = !error && (busy || turn2?.status === "stopping");
@@ -24259,7 +24263,7 @@ function activeTurnNotices(turn2, connected, stop) {
   return notices;
 }
 function hasTurnStats(turn2, view) {
-  return view.usage.length > 0 || turn2.phase === "settled" && (view.elapsedMs !== null || !!view.model);
+  return !!turn2.metadata.thinkingLevel || view.usage.length > 0 || turn2.phase === "settled" && (view.elapsedMs !== null || !!view.model);
 }
 function toolCallMs(turn2, now) {
   const live = turn2.phase !== "settled";
@@ -28718,7 +28722,7 @@ function UsageRow({ label, value, title, kind }) {
     /* @__PURE__ */ u4("strong", { children: value })
   ] });
 }
-function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, modelElapsedMs, toolElapsedMs }) {
+function UsageDetails({ ownerId, records, model, thinkingLevel, live, partial, wallElapsedMs, modelElapsedMs, toolElapsedMs }) {
   const reports = records.length ? records : [{ id: "usage", value: {} }];
   const otherMs = wallElapsedMs !== null && modelElapsedMs !== null ? Math.max(0, wallElapsedMs - toolElapsedMs - modelElapsedMs) : null;
   const heading = (index) => reports.length > 1 ? /* @__PURE__ */ u4("strong", { class: "usage-subheading", children: [
@@ -28747,7 +28751,7 @@ function UsageDetails({ ownerId, records, model, live, partial, wallElapsedMs, m
       ] }, record.id)) }),
       /* @__PURE__ */ u4("section", { class: "usage-column", "aria-label": "Model", children: reports.map((record, index) => /* @__PURE__ */ u4("div", { class: "usage-report", children: [
         heading(index),
-        /* @__PURE__ */ u4(UsageModel, { u: record.value, model, live, partial })
+        /* @__PURE__ */ u4(UsageModel, { u: record.value, model, thinkingLevel, live, partial })
       ] }, record.id)) })
     ] })
   ] });
@@ -28804,7 +28808,7 @@ function UsageTokens({ u: u5, live }) {
     )
   ] });
 }
-function UsageModel({ u: u5, model, live, partial }) {
+function UsageModel({ u: u5, model, thinkingLevel, live, partial }) {
   const cost = usageCostPresentation(u5, partial);
   const reportedModel = u5.model || model;
   const window2 = u5.context_window !== void 0 && Number.isFinite(u5.context_window) && u5.context_window > 0 ? u5.context_window : null;
@@ -28813,6 +28817,14 @@ function UsageModel({ u: u5, model, live, partial }) {
       /* @__PURE__ */ u4("span", { children: "Model" }),
       /* @__PURE__ */ u4("strong", { title: reportedModel, children: shortModel(reportedModel) })
     ] }) : null,
+    thinkingLevel ? /* @__PURE__ */ u4(
+      UsageRow,
+      {
+        label: "Thinking",
+        value: thinkingLevelLabel(thinkingLevel),
+        title: "Thinking setting used for this turn; not a measured token budget."
+      }
+    ) : null,
     window2 !== null ? /* @__PURE__ */ u4(UsageRow, { label: "Context size", value: `${fmtContextLimit(window2)} tok` }) : null,
     u5.num_turns ? /* @__PURE__ */ u4(UsageRow, { label: live ? "Model calls so far" : "Model calls", value: String(u5.num_turns) }) : null,
     cost && cost.usd !== 0 ? /* @__PURE__ */ u4(UsageRow, { label: cost.label, value: formatUsageCost(cost.usd) }) : null
@@ -29365,6 +29377,7 @@ function turnUsage(turn2, ownerId, now) {
     ownerId,
     records,
     model: view.model,
+    thinkingLevel: turn2.metadata.thinkingLevel,
     summary: technicalSummary({ elapsedMs: live ? null : view.elapsedMs, usage }),
     wallElapsedMs: view.elapsedMs,
     modelElapsedMs: view.modelCallMs,

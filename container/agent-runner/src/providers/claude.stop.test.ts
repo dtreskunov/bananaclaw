@@ -57,8 +57,13 @@ it('scopes thinking overrides to one SDK query and resumes later queries at the 
     const provider = new ClaudeProvider({ effort: 'low' });
     const overridden = provider.query({ prompt: 'Deep', cwd: process.cwd(), thinkingLevel: 'high' });
     overridden.end();
+    expect(overridden.thinkingLevel).toBe('high');
     const normal = provider.query({ prompt: 'Normal', cwd: process.cwd(), continuation: 'preserved-session' });
     normal.end();
+    expect(normal.thinkingLevel).toBe('low');
+    const unknown = new ClaudeProvider().query({ prompt: 'SDK default', cwd: process.cwd() });
+    expect(unknown.thinkingLevel).toBeUndefined();
+    unknown.end();
     expect(sdkQuery.mock.calls[0][0].options?.effort).toBe('high');
     expect(sdkQuery.mock.calls[1][0].options?.effort).toBe('low');
     expect(sdkQuery.mock.calls[1][0].options?.resume).toBe('preserved-session');

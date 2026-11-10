@@ -85,6 +85,7 @@ describe('applyDurableRunnerEvent', () => {
       reported_tokens: 25688, cost_source: 'estimated' });
     const metadata = {
       turnId: turn.id, durationMs: 1000, model: 'stub', usageId: 'usage-timing', status: 'partial', final: false,
+      thinkingLevel: 'high',
       usageAdvisory: { threshold: 10000, reportedTokens: 25688, triggeredAt: 100, status: 'applied', appliedAt: 110, finishedAt: null },
     };
     const payload = (value: typeof metadata) => ({
@@ -102,7 +103,7 @@ describe('applyDurableRunnerEvent', () => {
       apply(4, 'state.upsert', payload(final));
       apply(5, 'turn.upsert', { ...turn, phase: 'settled', outcome: 'silent', ended_at: '2026-10-06T05:45:00.000Z' });
       expect(readTurnMetadata(db, turn.id)).toMatchObject({
-        status: 'final', final: true, usageAdvisory: metadata.usageAdvisory,
+        status: 'final', final: true, usageAdvisory: metadata.usageAdvisory, thinkingLevel: 'high',
       });
       expect(log.warn).not.toHaveBeenCalled();
     } finally { db.close(); }
@@ -216,6 +217,14 @@ describe('applyDurableRunnerEvent', () => {
     ['missing usage turn', 'usage.persist', { ...timingPayload(null), turn_id: 'missing' }, 'unknown turn'],
     ['null activity', 'activity.persist', null, 'invalid telemetry payload'],
     ['invalid activity fields', 'activity.persist', {}, 'invalid activity.persist payload'],
+    [
+      'invalid thinking level', 'state.upsert', {
+        key: 'turn-metadata:optional-turn',
+        value: JSON.stringify({ turnId: 'optional-turn', durationMs: 0, model: null, usageId: null,
+          status: 'provisional', final: false, thinkingLevel: 'invalid' }),
+        updated_at: '2026-09-01T00:00:00.000Z',
+      }, 'invalid turn metadata',
+    ],
     [
       'malformed metadata JSON',
       'state.upsert',

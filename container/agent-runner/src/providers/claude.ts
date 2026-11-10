@@ -556,6 +556,7 @@ export class ClaudeProvider implements AgentProvider {
     const instructions = input.systemContext?.instructions;
 
     const thinking = paramsToClaudeThinking(this.modelParams);
+    const effort = claudeEffort(input.thinkingLevel ?? this.effort);
 
     const sdkResult = sdkQuery({
       prompt: stream,
@@ -573,7 +574,7 @@ export class ClaudeProvider implements AgentProvider {
         disallowedTools: SDK_DISALLOWED_TOOLS,
         env: this.env,
         model: this.model,
-        effort: claudeEffort(input.thinkingLevel ?? this.effort),
+        effort,
         ...(thinking ? { thinking } : {}),
         // In rootless-podman-on-LXC we run as --user=0:0 so host bind mounts
         // are accessible. Claude Code refuses bypassPermissions as root, so
@@ -759,6 +760,7 @@ export class ClaudeProvider implements AgentProvider {
     }
 
     return {
+      thinkingLevel: effort,
       push: (msg, files, options) => {
         if (ended || aborted || options?.tools === 'disabled') return false;
         promptAt ??= Date.now();
