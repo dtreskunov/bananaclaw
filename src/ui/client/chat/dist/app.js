@@ -24429,7 +24429,7 @@ function ThinkingLevelSlider({ levels, value, disabled, onChange }) {
   const description = levels.length === 0 ? "Not supported by this model." : value === null ? "Initial setting unavailable. Choose a level." : caption;
   return /* @__PURE__ */ u4("label", { class: `thinking-level-slider${unresolved ? " unresolved" : ""}`, title: description, children: [
     /* @__PURE__ */ u4("span", { class: "thinking-level-slider-heading", children: [
-      /* @__PURE__ */ u4("span", { children: "Thinking" }),
+      /* @__PURE__ */ u4("span", { class: "thinking-level-slider-label", children: "Thinking" }),
       /* @__PURE__ */ u4("span", { class: "thinking-level-slider-value", children: caption })
     ] }),
     /* @__PURE__ */ u4(
@@ -36380,11 +36380,11 @@ function ThinkingLevelField({
   const levels = thinkingLevels(provider, model);
   const error = thinkingLevelError(provider, model, value ?? defaultEffort);
   return /* @__PURE__ */ u4(
-    "div",
+    GroupAdminField,
     {
-      class: "group-admin-stack",
-      title: "Agent-wide setting. Saving schedules a restart after active responses finish.",
-      children: [
+      label: "Thinking",
+      info: "Agent-wide thinking setting for all conversations. More thinking may improve difficult answers, but increases latency and token usage. Saving schedules a restart after active responses finish.",
+      children: /* @__PURE__ */ u4("div", { class: "group-admin-stack group-admin-thinking", children: [
         /* @__PURE__ */ u4(
           ThinkingLevelSlider,
           {
@@ -36395,7 +36395,7 @@ function ThinkingLevelField({
           }
         ),
         error ? /* @__PURE__ */ u4("p", { class: "ga-confirm-warn", role: "alert", children: error }) : null
-      ]
+      ] })
     }
   );
 }

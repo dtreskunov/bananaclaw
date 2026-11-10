@@ -22,7 +22,7 @@ export function ThinkingLevelSlider({ levels, value, disabled, onChange }: Think
   return (
     <label class={`thinking-level-slider${unresolved ? ' unresolved' : ''}`} title={description}>
       <span class="thinking-level-slider-heading">
-        <span>Thinking</span>
+        <span class="thinking-level-slider-label">Thinking</span>
         <span class="thinking-level-slider-value">{caption}</span>
       </span>
       <input

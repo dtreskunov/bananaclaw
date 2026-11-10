@@ -7122,6 +7122,9 @@ body.private-web-page,
   flex-direction: column;
   gap: 4px;
 }
+.group-admin-thinking .thinking-level-slider-label {
+  display: none;
+}
 .group-admin-selected-info {
   padding: 8px 10px;
   border: 1px solid var(--border);

@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import { defaultThinkingLevel, thinkingLevelError, thinkingLevels } from '../../../../shared/thinking-levels';
 import { ThinkingLevelSlider } from './ThinkingLevelSlider';
+import { GroupAdminField as Field } from './GroupAdminField';
 
 export function ThinkingLevelField({
   provider,
@@ -20,21 +21,23 @@ export function ThinkingLevelField({
   const levels = thinkingLevels(provider, model);
   const error = thinkingLevelError(provider, model, value ?? defaultEffort);
   return (
-    <div
-      class="group-admin-stack"
-      title="Agent-wide setting. Saving schedules a restart after active responses finish."
+    <Field
+      label="Thinking"
+      info="Agent-wide thinking setting for all conversations. More thinking may improve difficult answers, but increases latency and token usage. Saving schedules a restart after active responses finish."
     >
-      <ThinkingLevelSlider
-        levels={levels}
-        value={value ?? defaultEffort ?? defaultThinkingLevel(provider, model)}
-        disabled={busy}
-        onChange={onChange}
-      />
-      {error ? (
-        <p class="ga-confirm-warn" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
+      <div class="group-admin-stack group-admin-thinking">
+        <ThinkingLevelSlider
+          levels={levels}
+          value={value ?? defaultEffort ?? defaultThinkingLevel(provider, model)}
+          disabled={busy}
+          onChange={onChange}
+        />
+        {error ? (
+          <p class="ga-confirm-warn" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Field>
   );
 }

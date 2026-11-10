@@ -2205,6 +2205,11 @@ The **Models** tab places **Thinking** directly below **Model**. It is an
 agent-wide default, stored in the existing `effort` field, not a per-message
 override or a token limit. Higher levels can improve difficult answers at the
 cost of latency and token usage.
+The label uses the standard first column; the level and slider occupy only the
+second control column, stacking below the label on mobile. The composer keeps
+its compact Thinking/level header unchanged.
+An **i** tooltip beside the admin label explains the agent-wide scope,
+quality/latency/token-use tradeoff, and deferred restart.
 
 The shared slider offers only reviewed levels for the selected provider/model.
 MiniMax M3.1 Flash offers Low, Medium, High, Extra high and Maximum; it cannot

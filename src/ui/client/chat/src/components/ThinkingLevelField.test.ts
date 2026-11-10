@@ -2,6 +2,7 @@ import { toChildArray, isValidElement } from 'preact';
 import { describe, expect, it, vi } from 'vitest';
 import { ThinkingLevelField } from './ThinkingLevelField';
 import { ThinkingLevelSlider } from './ThinkingLevelSlider';
+import { GroupAdminField } from './GroupAdminField';
 
 const defaults = {
   provider: 'native',
@@ -14,24 +15,39 @@ const defaults = {
 
 function render(overrides: Partial<Parameters<typeof ThinkingLevelField>[0]> = {}) {
   const field = ThinkingLevelField({ ...defaults, ...overrides });
-  const children = toChildArray(field.props.children);
-  return { field, children, slider: field.props.children[0] };
+  const children = toChildArray(field.props.children.props.children);
+  return { field, children, slider: field.props.children.props.children[0] };
 }
 
 describe('ThinkingLevelField', () => {
   it('uses the shared slider for the agent-wide default and retains restart guidance', () => {
     const onChange = vi.fn();
     const { field, slider } = render({ onChange, defaultEffort: 'high' });
-    expect(field.props.title).toContain('Agent-wide');
-    expect(field.props.title).toContain('restart');
+    expect(field.props.info).toContain('Agent-wide');
+    expect(field.props.info).toContain('latency and token usage');
+    expect(field.props.info).toContain('restart');
     expect(slider.type).toBe(ThinkingLevelSlider);
     expect(slider.props).toMatchObject({
       levels: ['low', 'medium', 'high', 'xhigh', 'max'],
       value: 'high',
       disabled: false,
     });
+
     slider.props.onChange('low');
     expect(onChange.mock.calls).toEqual([['low']]);
+  });
+
+  it('uses the standard admin label and control columns around the slider', () => {
+    const { field } = render();
+    expect(field.type).toBe(GroupAdminField);
+    expect(field.props.label).toBe('Thinking');
+    expect(field.props.info).toBeTruthy();
+    const layout = GroupAdminField(field.props);
+    const [label, control] = layout.props.children;
+    expect(label.props.class).toBe('group-admin-label');
+    expect(control.props.class).toBe('group-admin-control');
+    expect(control.props.children).toBe(field.props.children);
+    expect(control.props.children.props.class).toContain('group-admin-thinking');
   });
 
   it('shows model defaults without writing an agent override on mount and keeps saved effort first', () => {
