@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { defaultThinkingLevel, thinkingLevelError, thinkingLevelLabel, thinkingLevels } from './thinking-levels.js';
+import {
+  defaultThinkingLevel,
+  isThinkingLevel,
+  thinkingLevelError,
+  thinkingLevelLabel,
+  thinkingLevels,
+} from './thinking-levels.js';
 
 describe('thinking levels', () => {
+  it('validates recorded levels without accepting unknown/default values', () => {
+    for (const level of ['none', 'low', 'medium', 'high', 'xhigh', 'max']) expect(isThinkingLevel(level)).toBe(true);
+    for (const level of [undefined, null, '', 'default', 'invalid', 1, true])
+      expect(isThinkingLevel(level)).toBe(false);
+  });
   it.each([
     ['minimax/MiniMax-M3.1-Flash', 'max'],
     ['minimax-coding-plan/MiniMax-M3.1-Flash-Preview', 'max'],

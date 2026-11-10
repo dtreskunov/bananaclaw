@@ -41,7 +41,7 @@ import {
   noReplyReason,
 } from './native/reply.js';
 import { DeferredMcpTools, mcpToolSearchMode } from './native/tool-search.js';
-import { nativeThinkingOptions } from './native/thinking.js';
+import { nativeDefaultThinkingLevel, nativeThinkingOptions } from './native/thinking.js';
 import { boundToolResults, finishedToolReceipts } from './native/tool-results.js';
 
 function log(message: string): void {
@@ -333,6 +333,7 @@ export class NativeProvider implements AgentProvider {
   }
 
   query(input: QueryInput): AgentQuery {
+    let thinkingLevel: string | undefined;
     type Pending = { text: string; files?: FileAttachment[]; toolsDisabled?: boolean };
     const pending: Pending[] = [{ text: input.prompt, files: input.files }];
     let wake: (() => void) | null = null;
@@ -405,6 +406,7 @@ export class NativeProvider implements AgentProvider {
               abortController.signal.throwIfAborted();
               const resolved = await resolveNativeModel(configuredModel);
               const thinkingOptions = nativeThinkingOptions(resolved, input.thinkingLevel ?? options.effort);
+              thinkingLevel = input.thinkingLevel ?? options.effort ?? nativeDefaultThinkingLevel(resolved.modelId);
               const miniMaxFlash = /^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(resolved.modelId);
               const conversation = continuation;
               abortController.signal.throwIfAborted();
@@ -847,6 +849,7 @@ export class NativeProvider implements AgentProvider {
     };
 
     return {
+      get thinkingLevel() { return thinkingLevel; },
       adviseUsage(guidance): boolean {
         if (!active || abortController.signal.aborted) return false;
         if (lastUsageAdvisoryTurnId !== guidance.turnId) {

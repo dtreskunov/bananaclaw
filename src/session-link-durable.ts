@@ -20,6 +20,7 @@ import { encodeTimes } from './db/time.js';
 import { assertStorageVersion } from './db/storage-lifecycle.js';
 import { openOutboundDbRw } from './db/session-db.js';
 import { isTurnUsageAdvisory, type TurnUsageAdvisory } from './ui/shared/conversation.js';
+import { isThinkingLevel } from './ui/shared/thinking-levels.js';
 
 class DurableValidationError extends Error {}
 
@@ -48,6 +49,7 @@ export interface DurableApplyResult {
 }
 
 export interface TurnMetadata {
+  thinkingLevel?: string;
   turnId: string;
   durationMs: number | null;
   model: string | null;
@@ -248,13 +250,14 @@ function applyState(db: Database.Database, payload: Record<string, unknown>): vo
     if (
       !value ||
       !exactKeys(value, ['turnId', 'durationMs', 'model', 'usageId', 'status', 'final',
-        ...['usageAdvisory'].filter((key) => key in value)]) ||
+        ...['usageAdvisory', 'thinkingLevel'].filter((key) => key in value)]) ||
       value.turnId !== turnId ||
       !nullableInteger(value.durationMs) ||
       !nullableText(value.model) ||
       !nullableText(value.usageId) ||
       typeof value.final !== 'boolean' ||
       ('usageAdvisory' in value && value.usageAdvisory !== null && !isTurnUsageAdvisory(value.usageAdvisory)) ||
+      ('thinkingLevel' in value && !isThinkingLevel(value.thinkingLevel)) ||
       !['provisional', 'partial', 'final', 'unavailable'].includes(String(value.status)) ||
       (!value.final && ['final', 'unavailable'].includes(String(value.status))) ||
       (value.final && value.status === 'provisional') ||

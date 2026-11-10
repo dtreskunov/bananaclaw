@@ -1,6 +1,10 @@
 const STANDARD = ['low', 'medium', 'high'] as const;
 const EXTENDED = [...STANDARD, 'xhigh', 'max'] as const;
 
+export function isThinkingLevel(value: unknown): value is string {
+  return typeof value === 'string' && ['none', ...EXTENDED].includes(value);
+}
+
 /** Mirrored in the isolated runner; both sides assert model-contract-cases.json. */
 export function thinkingLevels(provider: string | null, model: string | null): readonly string[] {
   if (!model || (provider !== 'claude' && provider !== 'native')) return [];

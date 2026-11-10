@@ -449,6 +449,7 @@ describe('NativeProvider', () => {
       query.end();
       const events: ProviderEvent[] = [];
       for await (const event of query.events) events.push(event);
+      expect(query.thinkingLevel).toBe('high');
       expect(events.filter(event => event.type === 'error')).toEqual([]);
       expect(requests[0][protocol === 'openai-chat' ? 'reasoning_effort' : 'output_config'])
         .toEqual(protocol === 'openai-chat' ? 'high' : { effort: 'high' });
@@ -478,7 +479,11 @@ describe('NativeProvider', () => {
   it.each(['openai-chat', 'anthropic-messages'] as const)(
     'preserves default MiniMax request shapes on %s', async protocol => {
       process.env.NATIVE_PROTOCOL = protocol;
-      const events = await collect(new NativeProvider({ model: 'local/MiniMax-M3.1-Flash' }));
+      const query = new NativeProvider({ model: 'local/MiniMax-M3.1-Flash' }).query({ prompt: 'Hello', cwd: root });
+      query.end();
+      const events: ProviderEvent[] = [];
+      for await (const event of query.events) events.push(event);
+      expect(query.thinkingLevel).toBe('max');
       expect(events.filter(event => event.type === 'error')).toEqual([]);
       expect(requests).toHaveLength(1);
       expect(requests[0].reasoning_effort).toBeUndefined();

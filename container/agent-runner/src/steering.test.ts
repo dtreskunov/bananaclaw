@@ -47,6 +47,12 @@ async function until(predicate: () => boolean): Promise<void> {
   throw new Error('Timed out waiting for steering state');
 }
 
+function savedLevel(id: string): string | undefined {
+  const row = getOutboundDb().prepare('SELECT value FROM session_state WHERE key=?')
+    .get(`turn-metadata:${id}`) as { value: string } | undefined;
+  return row ? JSON.parse(row.value).thinkingLevel : undefined;
+}
+
 function steeringActivity() {
   return getOutboundDb().prepare(`
     SELECT turn_id, message_out_id, ordinal, timeline_position,
@@ -216,16 +222,42 @@ it('applies steering to the existing batch without claiming queued or other-conv
   } finally { await h.stop(loop); }
 });
 
-it('resumes fresh queries for thinking changes without restarting or altering the active turn', async () => {
+it('captures query thinking again for a warm follow-up without opening a new query', async () => {
+  getInboundDb().exec(
+    "INSERT INTO destinations (name, type, channel_type, platform_id) VALUES ('web-test', 'channel', 'web', 'room')",
+  );
+  insert('initial');
+  const pushed: string[] = [];
+  const h = harness(true, prompt => { pushed.push(prompt); return true; });
+  const query = h.provider.query.bind(h.provider);
+  h.provider.query = input => ({ ...query(input), thinkingLevel: 'low' });
+  const loop = h.start();
+  try {
+    await until(() => h.active !== null);
+    const first = h.active!.id;
+    await until(() => savedLevel(first) === 'low');
+    insert('followup', { inputHandling: { mode: 'queue' } });
+    h.emit({ type: 'result', text: '<message to="web-test">First answer</message>' });
+    await until(() => pushed.length === 1 && h.active?.id !== first);
+    expect(h.prompts).toHaveLength(1);
+    expect(savedLevel(h.active!.id)).toBe('low');
+    expect(savedLevel(first)).toBe('low');
+  } finally { await h.stop(loop); }
+});
+
+it.each([undefined, 'low'])('persists thinking %s across settled turns without leaking overrides', async defaultLevel => {
   getInboundDb().exec(
     "INSERT INTO destinations (name, type, channel_type, platform_id) VALUES ('web-test', 'channel', 'web', 'room')",
   );
   insert('initial');
   const h = harness();
+  const query = h.provider.query.bind(h.provider);
+  h.provider.query = input => ({ ...query(input), thinkingLevel: input.thinkingLevel ?? defaultLevel });
   const loop = h.start();
   try {
     await until(() => h.active !== null);
     const first = h.active!.id;
+    await until(() => h.prompts.length === 1 && savedLevel(first) === defaultLevel);
     insert('deep', { thinkingLevel: 'high', inputHandling: { mode: 'steer', turnId: first } });
     insert('later', { inputHandling: { mode: 'queue' } });
     await until(() => readInputState('deep')?.queuedForNextTurn === true);
@@ -237,11 +269,16 @@ it('resumes fresh queries for thinking changes without restarting or altering th
     expect(h.prompts[1].continuation).toBe('steering-session');
     expect(h.prompts[1].prompt).toContain('deep');
     expect(h.prompts[1].prompt).not.toContain('later');
+    const deep = h.active!.id;
+    await until(() => savedLevel(deep) === 'high');
     h.emit({ type: 'result', text: '<message to="web-test">Deep answer</message>' });
     await until(() => h.prompts.length === 3);
     expect(h.prompts[2].thinkingLevel).toBeUndefined();
     expect(h.prompts[2].continuation).toBe('steering-session');
     expect(h.prompts[2].prompt).toContain('later');
+    expect(savedLevel(first)).toBe(defaultLevel);
+    expect(savedLevel(deep)).toBe('high');
+    expect(savedLevel(h.active!.id)).toBe(defaultLevel);
   } finally { await h.stop(loop); }
 });
 

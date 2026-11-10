@@ -156,6 +156,7 @@ export interface ConversationTurn {
   /** Accounting records remain keyed by their original usage IDs, never by response count. */
   usage: { id: string; value: Partial<ConversationUsage> }[];
   metadata: {
+    thinkingLevel?: string;
     status: 'provisional' | 'partial' | 'final' | 'unavailable';
     model: string | null;
     durationMs: number | null;

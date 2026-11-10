@@ -229,6 +229,8 @@ export interface QueryPushOptions {
 }
 
 export interface AgentQuery {
+  /** Effective thinking setting, when known; available before the first model request. */
+  readonly thinkingLevel?: string;
   /** Queue internal wrap-up guidance without creating a user input or another turn. */
   adviseUsage?(input: { turnId: string; prompt: string }): boolean;
   /** Queue guidance for a safe boundary in the active turn, without aborting it.

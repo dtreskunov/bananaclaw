@@ -2567,6 +2567,42 @@ describe('inline activity metrics', () => {
     },
   );
 
+  it.each(
+    (['running', 'settled'] as const).flatMap((phase) =>
+      [undefined, 'low', 'max', 'none'].map((level) => ({ phase, level })),
+    ),
+  )('shows recorded thinking $level only in the model column ($phase)', ({ phase, level }) => {
+    appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
+    applyConversationFrame(
+      testSnapshot({
+        capabilities: {
+          ...testSnapshot().conversation.capabilities,
+          thinking: { levels: ['low', 'medium', 'high'], defaultLevel: 'high' },
+        },
+        turns: [
+          {
+            ...testTurn,
+            phase,
+            metadata: { ...testTurn.metadata, ...(level !== undefined ? { thinkingLevel: level } : {}) },
+            usage: [{ id: 'usage', value: { model: 'recorded-model', cost_usd: 0 } }],
+          },
+        ],
+      }),
+      'thread',
+    );
+    const row = renderResponseStatusRow();
+    const info = findComponent(renderTechnicalDetails(row), 'TurnTechnicalInfo');
+    const usage = findComponent(info.type(info.props), 'UsageMeta');
+    find(usage.type(usage.props), 'button').props.onClick({ stopPropagation() {} });
+    const columns = renderUsageDetails(row).props.children[1].props.children;
+    expect(columns[2].props['aria-label']).toBe('Model');
+    expect(usageRow(columns[0], 'Thinking')).toBeUndefined();
+    expect(usageRow(columns[1], 'Thinking')).toBeUndefined();
+    expect(usageRow(columns[2], 'Thinking')).toBe(
+      level === 'low' ? 'Low' : level === 'max' ? 'Maximum' : level === 'none' ? 'Off' : undefined,
+    );
+  });
+
   it('groups usage into outlined timing, token and model columns', () => {
     appearance.value = { ...appearance.peek(), preferences: { ...DEFAULT_APPEARANCE, showTechnicalStatus: true } };
     const t0 = testTurn.startedAt!;

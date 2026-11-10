@@ -28,6 +28,7 @@ export interface TurnExecution extends TurnContext {
   endedAt?: string;
   failure?: boolean;
   usageAdvisory?: TurnUsageAdvisory;
+  thinkingLevel?: string;
 }
 
 /** One logical response, independent of provider attempts and corrective prompts. */
@@ -149,6 +150,7 @@ export function persistTurnMetadata(context: TurnExecution, final: boolean): voi
     model: usage?.model ?? null,
     usageId: usage ? context.usageId : null,
     usageAdvisory: context.usageAdvisory ?? null,
+    ...(context.thinkingLevel !== undefined ? { thinkingLevel: context.thinkingLevel } : {}),
     status: final
       ? usage ? (context.incomplete || context.unreported ? 'partial' : 'final') : 'unavailable'
       : usage ? 'partial' : 'provisional',

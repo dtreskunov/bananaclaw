@@ -340,6 +340,27 @@ Selecting a Groq model does not create or broaden credential grants. Connect
 the user's Groq credential and explicitly grant the agent access through Agent
 Vault; runtime model requests still use the private session egress socket.
 
+### Per-turn Thinking Stats
+
+The third stats column shows **Thinking** beneath **Model** when that turn
+recorded a known setting. `AgentQuery.thinkingLevel` exposes the configured
+query effort; native can also resolve reviewed API defaults after model
+resolution. Claude reports explicit query/group effort but does not guess the
+SDK's saved default.
+
+At the first model-ready boundary, the poll loop captures this value in
+`TurnExecution` and persists it as optional `thinkingLevel` in the existing
+`turn-metadata:<turn-id>` JSON. It survives checkpoint updates, settlement,
+reconnect and reload without adding a database column. The host validates and
+projects the recorded value through the conversation protocol. It describes
+the normal response setting, not a measured reasoning-token budget or the
+separate low-effort compaction policy.
+
+Inherited settings and message overrides are captured from the query that
+actually starts that turn, never looked up from today's agent configuration.
+Providers or old turns without known metadata omit the stats row. Historical
+message overrides are not backfilled as proof of the setting actually used.
+
 ### Native Provider: Thinking Levels
 
 Web input can carry an optional `thinkingLevel` in its existing durable JSON

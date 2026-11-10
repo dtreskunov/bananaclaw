@@ -18,6 +18,15 @@ export function nativeThinkingLevels(modelId: string): readonly string[] {
   return [];
 }
 
+/** Mirrored by the host's defaultThinkingLevel; SDK-owned defaults are not inferred. */
+export function nativeDefaultThinkingLevel(modelId: string): string | undefined {
+  const levels = nativeThinkingLevels(modelId);
+  if (levels.length === 0) return undefined;
+  if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(modelId)) return 'max';
+  if (modelId.startsWith('claude-')) return /^claude-(?:opus|haiku)-5-5(?:-\d{8})?$/.test(modelId) ? 'medium' : 'high';
+  return levels.includes('none') ? 'none' : 'medium';
+}
+
 export function nativeThinkingOptions(
   model: NativeModel,
   effort: string | undefined,
