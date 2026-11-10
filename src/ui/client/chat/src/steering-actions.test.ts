@@ -1,7 +1,6 @@
 import { UiResponse as Response, uiHeaders } from './api-test-fixtures';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearChat, respondInteraction, retryChatSend, sendChat } from './actions';
-import { approvalMessageDrafts } from './approval-messages';
 import { requestChoice } from './components/PromptModal';
 import { applyTurnState, stopActiveTurn } from './stop-turn';
 import { applyConversationFrame, conversationState } from './conversation-state';
@@ -455,33 +454,23 @@ describe('approval response requests', () => {
     const sync = await installSyncFixture();
     onTestFinished(sync.dispose);
   });
-  it('sends an optional approval message in the same decision POST and clears the draft only on success', async () => {
+  it('sends only the approval decision', async () => {
     vi.useFakeTimers();
     onTestFinished(() => {
       vi.useRealTimers();
-      approvalMessageDrafts.value = {};
     });
-    approvalMessageDrafts.value = { 'approval-one': 'Keep the old labels.', other: 'Keep this draft.' };
-    expect(await respondInteraction('approval-one', { value: 'approve', message: '  Keep the old labels.  ' })).toBe(
-      true,
-    );
+    expect(await respondInteraction('approval-one', { value: 'approve' })).toBe(true);
     expect(fetch).toHaveBeenCalledWith(
       'api/approvals/approval-one/respond',
       expect.objectContaining({
-        body: JSON.stringify({ value: 'approve', message: 'Keep the old labels.' }),
+        body: JSON.stringify({ value: 'approve' }),
       }),
     );
-    expect(approvalMessageDrafts.value).toEqual({ other: 'Keep this draft.' });
   });
 
-  it('retains the message draft if the approval POST fails', async () => {
-    approvalMessageDrafts.value = { 'approval-one': 'Do not retry.' };
-    onTestFinished(() => {
-      approvalMessageDrafts.value = {};
-    });
+  it('reports a failed approval POST', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"temporarily unavailable"}', { status: 503 }));
-    expect(await respondInteraction('approval-one', { value: 'reject', message: 'Do not retry.' })).toBe(false);
-    expect(approvalMessageDrafts.value['approval-one']).toBe('Do not retry.');
+    expect(await respondInteraction('approval-one', { value: 'reject' })).toBe(false);
   });
 
   it('submits decisions without an optional note', async () => {

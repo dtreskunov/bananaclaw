@@ -232,10 +232,7 @@ describe('assisted access approvals', () => {
       status: 409,
     });
     const configBefore = getDb().prepare('SELECT mcp_servers FROM container_configs').pluck().get();
-    await completeAccountRequest('alice', setup.id, {
-      ...selection(setup.revision),
-      message: 'Check setup before requesting access.',
-    });
+    await completeAccountRequest('alice', setup.id, selection(setup.revision));
     expect(getAccountRequest(setup.id)).toMatchObject({ kind: 'account_setup', status: 'completed' });
     expect(mocks.grant).not.toHaveBeenCalled();
     expect(connection.grants).toEqual([]);
@@ -245,7 +242,7 @@ describe('assisted access approvals', () => {
     expect(content.text).toContain('authenticated operations require a separate request_access');
     expect(content.text).not.toContain('API_KEY');
     expect(content.text).not.toContain('BIND_');
-    expect(content.approvalResponse.message).toBe('Check setup before requesting access.');
+    expect(content.approvalResponse).toBeUndefined();
     expect(mocks.wake).toHaveBeenCalled();
     await notifyApprovalWorkflow(setup.id);
     expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
@@ -307,20 +304,19 @@ describe('assisted access approvals', () => {
       'Your account setup request was rejected.',
     );
   });
-  it('includes an access approval message in its single existing outcome notification', async () => {
+  it('delivers a single access approval outcome without an inline message', async () => {
     const request = await seed();
-    await applyAccessRequest('alice', request.id, { ...selection(), message: '  Use read-only operations.  ' });
+    await applyAccessRequest('alice', request.id, selection());
     expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
     const content = JSON.parse((resultMessage(request.id) as { content: string }).content);
     expect(content.text).toContain('Access granted for');
-    expect(content.text).toContain('User message from "alice":\nUse read-only operations.');
-    expect(content.approvalResponse).toEqual({ userId: 'alice', message: 'Use read-only operations.' });
+    expect(content.approvalResponse).toBeUndefined();
     expect(mocks.grant).toHaveBeenCalledWith('alice', connection.id, session.agent_group_id, { revision: rev });
     await notifyApprovalWorkflow(request.id);
     expect([...mocks.messages.keys()].filter((id) => id.startsWith('approval-result-'))).toHaveLength(1);
   });
 
-  it('includes a decline message without granting access or changing the decision', async () => {
+  it('declines without granting access or adding an inline message', async () => {
     const request = await seed();
     const approval = getApproval(request.id)!;
     await getInteractiveApprovalHandler(approval.input.action)!(
@@ -332,7 +328,6 @@ describe('assisted access approvals', () => {
         platformId: 'admin',
         threadId: null,
         value: 'reject',
-        message: 'Already finished elsewhere; do not retry.',
       },
       'alice',
     );
@@ -340,12 +335,11 @@ describe('assisted access approvals', () => {
     expect(getAccountRequest(request.id).status).toBe('rejected');
     const content = JSON.parse((resultMessage(request.id) as { content: string }).content);
     expect(content.text).toContain('Your access request was rejected.');
-    expect(content.text).toContain('Already finished elsewhere; do not retry.');
-    expect(content.approvalResponse.userId).toBe('alice');
+    expect(content.approvalResponse).toBeUndefined();
   });
 
-  it.each([42, null, 'x'.repeat(4001)])(
-    'rejects malformed or oversized approval messages before applying access',
+  it.each([42, null, '', 'Use a different approach.', 'x'.repeat(4001)])(
+    'rejects retired approval messages before applying access or confirming account setup',
     async (message) => {
       const request = await seed();
       await expect(applyAccessRequest('alice', request.id, { ...selection(), message })).rejects.toMatchObject({
@@ -353,23 +347,22 @@ describe('assisted access approvals', () => {
       });
       expect(getAccountRequest(request.id).status).toBe('pending');
       expect(mocks.grant).not.toHaveBeenCalled();
+      const setup = prepareAccountRequest('alice', request.id, { request_revision: request.revision });
+      await expect(
+        completeAccountRequest('alice', setup.id, { ...selection(setup.revision), message }),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(getAccountRequest(setup.id).status).toBe('pending');
     },
   );
 
-  it('retains the response message in a failed application outcome', async () => {
+  it('reports a failed application outcome without an inline message', async () => {
     const request = await seed();
     mocks.grant.mockRejectedValueOnce(new Error('gateway failed'));
-    await expect(
-      applyAccessRequest('alice', request.id, {
-        ...selection(),
-        message: 'Report the error instead of retrying.',
-      }),
-    ).rejects.toThrow('gateway failed');
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('gateway failed');
     expect(getAccountRequest(request.id).status).toBe('failed');
     const content = JSON.parse((resultMessage(request.id) as { content: string }).content);
     expect(content.text).toContain('Access approval failed');
-    expect(content.text).toContain('Report the error instead of retrying.');
-    expect(content.approvalResponse.userId).toBe('alice');
+    expect(content.approvalResponse).toBeUndefined();
   });
 
   it('recovers the exact responding user and message from a persisted access application', async () => {
@@ -683,7 +676,6 @@ describe('assisted access approvals', () => {
       config_revision: preview.mcp.revision,
       mcp_server: 'example',
       account_alias: 'Personal',
-      message: 'Keep this account separate.',
     });
     expect(result.status).toBe('completed');
     const config = getDb()
@@ -706,10 +698,7 @@ describe('assisted access approvals', () => {
     expect(outcome.onWake).toBeUndefined();
     expect(JSON.parse(outcome.content).inputHandling).toEqual({ mode: 'steer' });
     expect(mocks.messages.get(`${outcome.id}-restart`)).toMatchObject({ onWake: 1 });
-    expect(JSON.parse(outcome.content).approvalResponse).toEqual({
-      userId: 'alice',
-      message: 'Keep this account separate.',
-    });
+    expect(JSON.parse(outcome.content).approvalResponse).toBeUndefined();
     expect(
       JSON.parse((mocks.messages.get(`${outcome.id}-restart`) as { content: string }).content).approvalResponse,
     ).toBeUndefined();
@@ -851,6 +840,16 @@ describe('assisted access approvals', () => {
     await applyAccessRequest('alice', request.id, selection());
     expect(deleteSession(session.id)).toBe(0);
     expect(getApprovalWorkflow(request.id)).toBeUndefined();
+  });
+  it('does not grant access if withdrawal wins while a credential preview is in flight', async () => {
+    const request = await seed('appr-access-withdraw-preview');
+    mocks.get.mockImplementationOnce(async () => {
+      await cancelAccessRequest(request.id, session.id);
+      return connection;
+    });
+    await expect(applyAccessRequest('alice', request.id, selection())).rejects.toThrow('no longer pending');
+    expect(getAccountRequest(request.id).status).toBe('cancelled');
+    expect(mocks.grant).not.toHaveBeenCalled();
   });
   it('supports cancellation, rejection and expiry without changing grants', async () => {
     const cancelled = await seed('appr-access-cancel');

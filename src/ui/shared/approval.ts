@@ -27,7 +27,6 @@ export interface ConfirmationInteraction extends InteractionIdentity, Interactio
   details: string | null;
   packages: { apt: string[]; npm: string[]; pip: string[] } | null;
   options: { label: string; selectedLabel: string; value: string }[];
-  supportsResponseMessage: boolean;
   status: 'pending' | 'applying' | 'approved' | 'rejected' | 'failed' | 'cancelled' | 'expired';
   outcomeMessage?: string | null;
   resolvedAt?: EpochMs | null;

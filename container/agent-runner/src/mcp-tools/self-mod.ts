@@ -92,6 +92,7 @@ export const installPackages: McpToolDefinition = {
       kind: 'system',
       content: JSON.stringify({
         action: 'install_packages',
+        requestId,
         apt,
         npm,
         pip,
@@ -100,7 +101,7 @@ export const installPackages: McpToolDefinition = {
     });
 
     log(`install_packages: ${requestId} → apt=[${apt.join(',')}] npm=[${npm.join(',')}] pip=[${pip.join(',')}]`);
-    return ok(`Package install request submitted. You will be notified when admin approves or rejects.`);
+    return ok(`Package install request ${requestId} submitted. You will be notified when admin approves or rejects. If no longer needed, use ncl approvals withdraw --id ${requestId}.`);
   },
 };
 
@@ -226,12 +227,12 @@ export const addMcpServer: McpToolDefinition = {
     writeMessageOut({
       id: requestId,
       kind: 'system',
-      content: JSON.stringify(payload),
+      content: JSON.stringify({ ...payload, requestId }),
     });
 
     log(`add_mcp_server: ${requestId} → "${name}" (${url ? `remote ${url}` : `stdio ${command}`})`);
     return ok(
-      'MCP server addition submitted for admin approval; the server is not installed yet. Do not resubmit or switch to the CLI. Tell the user approval is pending and finish this turn. After approval and the automatic restart, request_access for the configured server if credentials are needed, then verify its tools.',
+      `MCP server addition ${requestId} submitted for admin approval; the server is not installed yet. Do not resubmit or switch to the CLI. Tell the user approval is pending and finish this turn. After approval and the automatic restart, request_access for the configured server if credentials are needed, then verify its tools. If no longer needed, use ncl approvals withdraw --id ${requestId}.`,
     );
   },
 };

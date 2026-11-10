@@ -4656,13 +4656,6 @@ nav.tab-bar-strip.group-strip {
   cursor: default;
 }
 
-/* src/components/ApprovalMessageInput.css */
-.approval-response-message {
-  margin-top: 8px;
-  display: grid;
-  gap: 4px;
-}
-
 /* src/components/Credentials.css */
 .credentials-page {
   display: block;
@@ -4762,9 +4755,6 @@ nav.tab-bar-strip.group-strip {
 }
 .chat-main .access-approval-message .approval-title {
   font-size: inherit;
-}
-.chat-main .access-approval-message .approval-message-label {
-  color: var(--muted);
 }
 .chat-main .access-approval-message .access-account-option {
   min-height: 44px;

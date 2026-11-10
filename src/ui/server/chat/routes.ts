@@ -27,7 +27,6 @@ import { createGroup, GroupCreateError } from '../../../modules/groups/create.js
 import { deleteSubscriptionByEndpoint, upsertSubscription } from '../../../modules/push/db.js';
 import { pushAvailable, vapidPublicKey } from '../../../modules/push/sender.js';
 import { dispatchResponse } from '../../../response-registry.js';
-import { ApprovalMessageError, parseApprovalMessage } from '../../shared/approval-message.js';
 import { isVoiceDiagnostic } from '../../shared/voice.js';
 import type { SyncResponse } from '../../shared/sync.js';
 import { authenticate, recordAccess } from '../auth.js';
@@ -688,15 +687,10 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   } catch {
     return json(ctx, 400, { error: 'invalid_body' });
   }
-  let message: string | undefined;
-  try {
-    message = parseApprovalMessage(body?.message);
-  } catch (error) {
-    if (!(error instanceof ApprovalMessageError)) throw error;
-    return json(ctx, 400, { error: error.message });
-  }
-  if (message && !row?.session_id)
-    return json(ctx, 400, { error: 'This approval has no originating conversation for a message.' });
+  if (body?.message !== undefined)
+    return json(ctx, 400, {
+      error: 'Approval messages are no longer supported. Use the conversation to steer the agent.',
+    });
   if (body?.responseType !== undefined) return json(ctx, 400, { error: 'invalid_response_type' });
   if (typeof body?.value !== 'string' || !body.value) return json(ctx, 400, { error: 'value_required' });
   const response = { value: body.value };
@@ -704,7 +698,6 @@ async function handleRespondApproval(ctx: Ctx, userId: string, approvalId: strin
   const claimed = await dispatchResponse({
     approvalId,
     ...response,
-    ...(message ? { message } : {}),
     userId,
     channelType: 'web',
     platformId: userId,

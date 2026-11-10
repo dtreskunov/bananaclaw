@@ -78,7 +78,7 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
     }
 
     if (cliScope === 'group') {
-      const allowed = new Set(['groups', 'sessions', 'destinations', 'members', 'access']);
+      const allowed = new Set(['groups', 'sessions', 'destinations', 'members', 'access', 'approvals']);
       // Only allow whitelisted resources and general commands (no resource, like help)
       if (cmd.resource && !allowed.has(cmd.resource)) {
         return err(req.id, 'forbidden', `CLI access is scoped to this agent group. Cannot access "${cmd.resource}".`);
@@ -152,7 +152,7 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
 
     const display = presentCliApproval(req.command, req.args);
 
-    await requestApproval({
+    const approvalId = await requestApproval({
       session,
       originMessageId: ctx.originMessageId,
       agentName,
@@ -162,7 +162,12 @@ export async function dispatch(req: RequestFrame, ctx: CallerContext): Promise<R
       question: `Agent "${agentName}" wants to run:\n${display.summary ? `${display.summary}\n\n` : ''}\`${display.command}\``,
     });
 
-    return err(req.id, 'approval-pending', 'Approval request sent to admin. You will be notified of the result.');
+    if (!approvalId) return err(req.id, 'handler-error', 'Approval request could not be submitted.');
+    return err(
+      req.id,
+      'approval-pending',
+      `Approval request ${approvalId} sent to admin. You will be notified of the result. If no longer needed, use ncl approvals withdraw --id ${approvalId}.`,
+    );
   }
 
   let parsed: unknown;

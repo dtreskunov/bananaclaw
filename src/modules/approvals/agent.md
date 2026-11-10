@@ -55,6 +55,18 @@ starts; its follow-up system message asks you to verify and report.
 
 If denied, you'll get a chat message telling you the request was rejected. Do not retry automatically; explain to the user what was denied.
 
+### Withdrawing obsolete requests
+
+Use the normal conversation for changes of direction. When the plan changes,
+withdraw your pending requests that are no longer needed:
+`ncl approvals withdraw --id <request-id>`. Submission receipts include the ID.
+After losing context, inspect `ncl approvals list --status pending` or
+`ncl approvals get --id <request-id>`; do not poll while waiting for approval.
+These commands are restricted to your current session even with global CLI
+access. Withdrawal needs no approval and removes the card from the transcript.
+It cannot undo an action that has started or finished. Check the returned error
+instead of claiming that a failed withdrawal stopped execution.
+
 ## Credential access approvals
 
 Use `request_access` with the exact HTTPS destination and purpose, and the

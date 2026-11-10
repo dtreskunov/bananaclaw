@@ -94,7 +94,7 @@ export function projectMessagePublications(source: Database.Database, sessionId:
 
 export function projectInteractionPublications(sessionId: string, refresh = false): number {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM interactions WHERE session_id=? ORDER BY created_at,id')
+  const rows = db.prepare("SELECT * FROM interactions WHERE session_id=? AND status!='cancelled' ORDER BY created_at,id")
     .all(sessionId) as InteractionSource[];
   return replacePublications(sessionId, ['approval'], rows.flatMap(row => {
     const route = interactionRoute(row, refresh);

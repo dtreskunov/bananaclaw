@@ -984,7 +984,7 @@ function DisplayCardMessage({ message, card, reading = false }: { message: ChatM
 function ApprovalRow({ approval }: { approval: PendingApprovalDto }) {
   return <ApprovalBubble approval={approval}
     busy={respondingInteractionIds.value.has(approval.id)}
-    onRespond={(value, message) => { void respondInteraction(approval.id, { value, message }).catch(console.error); }} />;
+    onRespond={(value) => { void respondInteraction(approval.id, { value }).catch(console.error); }} />;
 }
 
 interface SingleGroup { kind: 'single'; m: ChatMessage }

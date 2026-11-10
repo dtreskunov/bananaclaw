@@ -91,7 +91,6 @@ describe('reader timeline', () => {
           packages: null,
           options: [],
           status: 'pending',
-          supportsResponseMessage: false,
           agentGroupId: 'group',
           agentGroupName: 'Group',
           createdAt: message.timestamp,

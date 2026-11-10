@@ -12,11 +12,7 @@ import { log } from '../../log.js';
 import { uiBaseUrl } from '../../ui/server/config.js';
 import { openInboundDb } from '../../session-manager.js';
 import type { Session } from '../../types.js';
-import {
-  ApprovalMessageError,
-  parseApprovalMessage,
-  type ApprovalResponseMessage,
-} from '../../ui/shared/approval-message.js';
+import type { ApprovalResponseMessage } from '../../ui/shared/approval-message.js';
 import { connectionMatchesAccess } from '../../ui/shared/access-authentication.js';
 import type { AccountRequestData } from '../../ui/shared/approval.js';
 import { accessRequestInput } from '../../ui/shared/connection-input.js';
@@ -48,6 +44,7 @@ import {
 } from './shared-connections.js';
 import { AgentVaultError, usesAgentVault } from './agent-vault-client.js';
 import { transaction } from '../../db/transaction.js';
+import { withdrawApproval } from '../approvals/withdraw.js';
 
 export const ACCESS_ACTION = 'request_access';
 const activeApplications = new Set<string>();
@@ -178,21 +175,12 @@ export function prepareAccountRequest(userId: string, id: string, raw: unknown) 
 export async function completeAccountRequest(userId: string, id: string, raw: unknown) {
   const body = objectBody(raw);
   if (
-    Object.keys(body).some(
-      (key) => !['connection_id', 'connection_revision', 'request_revision', 'message'].includes(key),
-    ) ||
+    Object.keys(body).some((key) => !['connection_id', 'connection_revision', 'request_revision'].includes(key)) ||
     typeof body.connection_id !== 'string' ||
     typeof body.connection_revision !== 'string' ||
     !Number.isSafeInteger(body.request_revision)
   )
     throw new ConnectionInputError('Select an account and confirm the exact reviewed revisions.');
-  let message;
-  try {
-    message = parseApprovalMessage(body.message);
-  } catch (error) {
-    if (!(error instanceof ApprovalMessageError)) throw error;
-    throw new ConnectionInputError(error.message);
-  }
   const request = reviewAccessRequest(userId, id);
   const preview = await accountPreview(userId, request, body.connection_id);
   if (request.kind !== 'account_setup' || request.status !== 'pending')
@@ -208,16 +196,15 @@ export async function completeAccountRequest(userId: string, id: string, raw: un
     scopes: preview.connection.kind === 'static' ? undefined : preview.connection.granted_scopes,
     scope_source: preview.connection.kind === 'static' ? undefined : preview.connection.scope_source,
   };
-  const responseMessage = message ? { userId, message } : undefined;
   transaction(getDb(), () => {
-    if (!claimApprovalWorkflow(request.id, Number(body.request_revision), { userId, responseMessage }))
+    if (!claimApprovalWorkflow(request.id, Number(body.request_revision), { userId }))
       throw new ConnectionInputError('The request changed. Refresh before confirming account setup.', 409);
     finishApprovalWorkflow(
       request.id,
       'completed',
       `Account setup confirmed. Setup metadata: ${JSON.stringify(metadata)}. No agent access was granted and no MCP binding was changed. Verify this metadata only; authenticated operations require a separate request_access and explicit user approval. Do not assume account setup grants access or automatically replay writes.`,
       false,
-      responseMessage,
+      undefined,
       userId,
     );
   })();
@@ -306,13 +293,6 @@ async function selectionGranted(id: string, selection: ApplySelection): Promise<
 
 export async function applyAccessRequest(userId: string, id: string, raw: unknown) {
   const body = objectBody(raw);
-  let message: string | undefined;
-  try {
-    message = parseApprovalMessage(body.message);
-  } catch (error) {
-    if (!(error instanceof ApprovalMessageError)) throw error;
-    throw new ConnectionInputError(error.message);
-  }
   if (
     Object.keys(body).some(
       (key) =>
@@ -324,7 +304,6 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
           'config_revision',
           'mcp_server',
           'account_alias',
-          'message',
         ].includes(key),
     ) ||
     typeof body.connection_id !== 'string' ||
@@ -364,7 +343,6 @@ export async function applyAccessRequest(userId: string, id: string, raw: unknow
     reviewedConnectionRevision: body.connection_revision,
     configureMcp: body.configure_mcp === true,
     configRevision: preview.mcp.revision,
-    ...(message ? { responseMessage: { userId, message } } : {}),
     ...(body.configure_mcp ? { mcpServer: String(body.mcp_server), accountAlias: String(body.account_alias) } : {}),
   };
   let authentication;
@@ -497,25 +475,20 @@ export function retryAccessRequest(userId: string, id: string, raw: unknown) {
 
 export async function cancelAccessRequest(id: string, sessionId: string) {
   const request = getAccountRequest(id, sessionId);
-  if (request.status !== 'pending')
-    throw new ConnectionInputError('Only a pending access request can be cancelled.', 409);
-  finishApprovalWorkflow(request.id, 'cancelled', 'Your access request was cancelled without changing credentials.');
-  await notifyApprovalWorkflow(request.id);
+  withdrawApproval(request.id, sessionId);
   return getAccountRequest(request.id, sessionId);
 }
 
 registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, userId) => {
   const request = reviewAccessRequest(userId, approval.id);
   if (request.status !== 'pending') return;
-  const message = parseApprovalMessage(response.message);
-  const responseMessage = message ? { userId, message } : undefined;
   if (response.value === 'reject') {
     finishApprovalWorkflow(
       approval.id,
       'rejected',
       `Your ${request.kind === 'account_setup' ? 'account setup' : 'access'} request was rejected. No credentials were changed. Do not repeat this request unless the user asks.`,
       false,
-      responseMessage,
+      undefined,
       userId,
     );
     await notifyApprovalWorkflow(approval.id);
@@ -526,7 +499,6 @@ registerInteractiveApprovalHandler(ACCESS_ACTION, async (approval, response, use
         session,
         `Access review is still pending. The user must privately select and confirm a credential in BananaClaw: ${reviewUrl(approval.id)}. Do not poll, search for secrets or treat review as approval.`,
         approval.origin_message_id,
-        responseMessage,
       );
   } else {
     throw new ConnectionInputError(

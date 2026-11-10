@@ -122,7 +122,6 @@ export type ConversationInteraction = ConversationApproval;
 
 export type InteractionResponse = {
   value: string;
-  message?: string;
 };
 
 export interface ConversationActivity {

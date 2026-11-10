@@ -11,8 +11,8 @@ vi.mock('../../../container-runner.js', () => ({
   killContainer: vi.fn(),
 }));
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../db/index.js';
-import { deleteSession } from '../../../db/sessions.js';
-import { createApproval, getApproval } from '../../../db/approvals.js';
+import { deleteSession, getSession } from '../../../db/sessions.js';
+import { createApproval, getApproval, updateApprovalStatus } from '../../../db/approvals.js';
 
 import { inboundDbPath, initSessionFolder, openInboundDb, writeSessionMessage } from '../../../session-manager.js';
 import { handleApprovalsResponse } from '../../../modules/approvals/response-handler.js';
@@ -23,6 +23,8 @@ import { approvalOrigin } from './approval-transcript.js';
 import { peerConversationId } from '../../shared/peer-conversation.js';
 import { refreshThreadSummaries } from '../../../thread-summaries.js';
 import { createApprovalWorkflow, finishApprovalWorkflow } from '../../../modules/approvals/workflows.js';
+import { withdrawApproval } from '../../../modules/approvals/withdraw.js';
+import { writeApprovalNotification } from '../../../modules/approvals/notification.js';
 import {
   CONVERSATION_PROTOCOL_VERSION,
   diffConversation,
@@ -84,6 +86,74 @@ const view = (thread = 'source-thread', user = 'owner') => readConversation(user
 const approvals = (conversation = view()) => conversation.interactions;
 
 describe('retained approval transcript', () => {
+  it('removes withdrawn requests from reloads, streamed timelines and unread publications without adding a status message', async () => {
+    request();
+    const before = view();
+    expect(before.interactions.map((row) => row.id)).toEqual(['approval']);
+    expect(withdrawApproval('approval', 's')).toEqual({ id: 'approval', status: 'cancelled' });
+    const after = view();
+    expect(after.interactions).toEqual([]);
+    expect(after.timeline.some((row) => row.kind === 'interaction')).toBe(false);
+    expect(after.messages).toEqual(before.messages);
+    expect(getApproval('approval')?.status).toBe('cancelled');
+    expect(
+      getDb().prepare("SELECT visible FROM conversation_publications WHERE item_id='approval'").pluck().get(),
+    ).toBe(0);
+    const changes = diffConversation(before, after);
+    expect(changes.interactions?.removeIds).toEqual(['approval']);
+    const snapshot = parseConversationFrame({
+      kind: 'snapshot',
+      protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+      streamId: 'withdrawal',
+      revision: 0,
+      conversation: before,
+    });
+    const updated = reduceConversation(
+      reduceConversation(null, snapshot),
+      parseConversationFrame({
+        kind: 'update',
+        protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+        streamId: 'withdrawal',
+        baseRevision: 0,
+        revision: 1,
+        changes,
+      }),
+    );
+    expect(updated.conversation).toEqual(after);
+    expect(
+      await handleApprovalsResponse({
+        approvalId: 'approval',
+        value: 'approve',
+        userId: 'owner',
+        channelType: 'web',
+        platformId: 'admin-dm',
+        threadId: null,
+      }),
+    ).toBe(true);
+    expect(getApproval('approval')?.status).toBe('cancelled');
+    expect(view().interactions).toEqual([]);
+    expect(view().messages).toEqual(before.messages);
+  });
+  it('refuses withdrawal once approval execution wins the race and retains the applied decision', async () => {
+    request();
+    registerApprovalHandler('history-test', async ({ notify }) => {
+      await Promise.resolve();
+      notify('Approved and applied.');
+    });
+    const response = handleApprovalsResponse({
+      approvalId: 'approval',
+      value: 'approve',
+      userId: 'owner',
+      channelType: 'web',
+      platformId: 'admin-dm',
+      threadId: null,
+    });
+    expect(getApproval('approval')?.status).toBe('applying');
+    expect(() => withdrawApproval('approval', 's')).toThrow('already being applied or resolved');
+    await response;
+    expect(getApproval('approval')?.status).toBe('approved');
+    expect(view().interactions).toMatchObject([{ id: 'approval', status: 'approved' }]);
+  });
   it('labels an unnamed approval responder with their channel handle while retaining their ID', async () => {
     getDb().prepare("UPDATE users SET display_name=NULL WHERE id='owner'").run();
     getDb()
@@ -167,67 +237,65 @@ describe('retained approval transcript', () => {
     expect(approvals(view('source-thread', 'member'))).toEqual([]);
   });
 
-  it.each(['approve', 'reject'])(
-    'retains the request, %s decision, actor and message in its authoritative row after reload',
-    async (value) => {
-      request();
-      const before = view();
-      await handleApprovalsResponse({
-        approvalId: 'approval',
-        value,
-        userId: 'owner',
-        channelType: 'web',
-        platformId: 'admin-dm',
-        threadId: null,
-        message: 'Keep existing work.',
-      });
-      expect(getApproval('approval')?.status).toBe(value === 'approve' ? 'approved' : 'rejected');
-      const after = view();
-      const bubble = approvals(after).find((item) => item.id === 'approval');
-      expect(bubble).toMatchObject({
-        status: value === 'approve' ? 'approved' : 'rejected',
-        decision: value,
-        responseMessage: 'Keep existing work.',
-        respondedBy: { userId: 'owner', displayName: 'Owner' },
-      });
-      expect(bubble?.createdAt).toBe(approvals(before)[0]?.createdAt);
-      expect(after.messages.filter((message) => message.text.includes('User message from'))).toEqual([]);
+  it.each(['approve', 'reject'])('retains historical %s decisions, actors and messages after reload', async (value) => {
+    request();
+    const before = view();
+    updateApprovalStatus('approval', value === 'approve' ? 'approved' : 'rejected', {
+      userId: 'owner',
+      decision: value,
+      message: 'Keep existing work.',
+    });
+    writeApprovalNotification(getSession('s')!, 'Historical approval outcome.', {
+      originMessageId: 'source',
+      approvalId: 'approval',
+      responseMessage: { userId: 'owner', message: 'Keep existing work.' },
+    });
+    expect(getApproval('approval')?.status).toBe(value === 'approve' ? 'approved' : 'rejected');
+    const after = view();
+    const bubble = approvals(after).find((item) => item.id === 'approval');
+    expect(bubble).toMatchObject({
+      status: value === 'approve' ? 'approved' : 'rejected',
+      decision: value,
+      responseMessage: 'Keep existing work.',
+      respondedBy: { userId: 'owner', displayName: 'Owner' },
+    });
+    expect(bubble?.createdAt).toBe(approvals(before)[0]?.createdAt);
+    expect(after.messages.filter((message) => message.text.includes('User message from'))).toEqual([]);
+    expect(
+      readChatHistory('owner', 'g', 'source-thread').some((message) => message.text.includes('User message from')),
+    ).toBe(true);
+    const db = openInboundDb('g', 's');
+    try {
       expect(
-        readChatHistory('owner', 'g', 'source-thread').some((message) => message.text.includes('User message from')),
-      ).toBe(true);
-      const db = openInboundDb('g', 's');
-      try {
-        expect(
-          db
-            .prepare("SELECT COUNT(*) FROM messages_in WHERE json_extract(content,'$.approvalId')='approval'")
-            .pluck()
-            .get(),
-        ).toBe(1);
-      } finally {
-        db.close();
-      }
-      const snapshot = {
-        kind: 'snapshot' as const,
+        db
+          .prepare("SELECT COUNT(*) FROM messages_in WHERE json_extract(content,'$.approvalId')='approval'")
+          .pluck()
+          .get(),
+      ).toBe(1);
+    } finally {
+      db.close();
+    }
+    const snapshot = {
+      kind: 'snapshot' as const,
+      protocolVersion: CONVERSATION_PROTOCOL_VERSION,
+      streamId: 'approvals',
+      revision: 0,
+      conversation: before,
+    };
+    const settled = reduceConversation(
+      reduceConversation(null, parseConversationFrame(snapshot)),
+      parseConversationFrame({
+        kind: 'update',
         protocolVersion: CONVERSATION_PROTOCOL_VERSION,
         streamId: 'approvals',
-        revision: 0,
-        conversation: before,
-      };
-      const settled = reduceConversation(
-        reduceConversation(null, parseConversationFrame(snapshot)),
-        parseConversationFrame({
-          kind: 'update',
-          protocolVersion: CONVERSATION_PROTOCOL_VERSION,
-          streamId: 'approvals',
-          baseRevision: 0,
-          revision: 1,
-          changes: diffConversation(before, after),
-        }),
-      );
-      expect(approvals(settled.conversation).find((item) => item.id === bubble?.id)).toEqual(bubble);
-      expect(approvals().find((item) => item.id === bubble?.id)).toEqual(bubble);
-    },
-  );
+        baseRevision: 0,
+        revision: 1,
+        changes: diffConversation(before, after),
+      }),
+    );
+    expect(approvals(settled.conversation).find((item) => item.id === bubble?.id)).toEqual(bubble);
+    expect(approvals().find((item) => item.id === bubble?.id)).toEqual(bubble);
+  });
 
   it('does not infer an actionable thread when a recorded origin is missing', () => {
     request();

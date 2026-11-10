@@ -24,7 +24,6 @@ const approval: ConversationApproval = {
   details: null,
   packages: null,
   options: [],
-  supportsResponseMessage: true,
   status: 'pending',
 };
 const group: SyncGroupState = {

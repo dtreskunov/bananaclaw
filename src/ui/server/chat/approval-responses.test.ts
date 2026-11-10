@@ -192,32 +192,31 @@ describe('approval response messages', () => {
       db.close();
     }
   }
-  it.each(['approve', 'reject'])('carries the note in the same authenticated %s outcome', async (value) => {
-    expect(await respond({ value, message: '  Keep the original account.  ' }, 'message-approval')).toEqual({
+  it.each(['approve', 'reject'])('delivers the authenticated %s outcome without an inline message', async (value) => {
+    expect(await respond({ value }, 'message-approval')).toEqual({
       status: 200,
       body: { ok: true },
     });
     const rows = notificationRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ channel_type: 'web', platform_id: 'group:agent', thread_id: 'thread' });
-    expect(JSON.parse(rows[0].content).approvalResponse).toEqual({
-      userId: 'web:member',
-      message: 'Keep the original account.',
-    });
-    expect(JSON.parse(rows[0].content).text).toContain('Keep the original account.');
+    expect(JSON.parse(rows[0].content).approvalResponse).toBeUndefined();
     expect(applied).toHaveBeenCalledTimes(value === 'approve' ? 1 : 0);
     if (value === 'approve') expect(applied).toHaveBeenCalledWith({ requested: 'unchanged' });
-    await respond({ value, message: 'Duplicate message' }, 'message-approval');
+    await respond({ value }, 'message-approval');
     expect(notificationRows()).toHaveLength(1);
   });
-  it.each([null, 42, {}, 'x'.repeat(4001)])('rejects invalid notes before resolving the approval', async (message) => {
-    expect((await respond({ value: 'approve', message }, 'message-approval')).status).toBe(400);
-    expect(applied).not.toHaveBeenCalled();
-    expect(notificationRows()).toEqual([]);
-    expect(getDb().prepare("SELECT status FROM interactions WHERE id='message-approval'").pluck().get()).toBe(
-      'pending',
-    );
-  });
+  it.each([null, 42, {}, '', 'Use a different approach.', 'x'.repeat(4001)])(
+    'rejects retired approval messages before resolving the approval',
+    async (message) => {
+      expect((await respond({ value: 'approve', message }, 'message-approval')).status).toBe(400);
+      expect(applied).not.toHaveBeenCalled();
+      expect(notificationRows()).toEqual([]);
+      expect(getDb().prepare("SELECT status FROM interactions WHERE id='message-approval'").pluck().get()).toBe(
+        'pending',
+      );
+    },
+  );
   it('does not deliver a note from an unauthorized responder', async () => {
     runtime.userId = 'web:other';
     expect((await respond({ value: 'reject', message: 'Forged note' }, 'message-approval')).status).toBe(403);
@@ -228,7 +227,7 @@ describe('approval response messages', () => {
     getDb().exec(
       "DELETE FROM user_roles; INSERT INTO user_roles(user_id,role,agent_group_id,granted_at) VALUES('web:member','admin','agent',1767225600000)",
     );
-    expect((await respond({ value: 'approve', message: 'Keep existing work.' }, 'message-approval')).status).toBe(200);
+    expect((await respond({ value: 'approve' }, 'message-approval')).status).toBe(200);
     expect(applied).toHaveBeenCalledOnce();
   });
   it('rejects notes for sessionless approvals rather than silently discarding them', async () => {

@@ -3,12 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection } from './CredentialsApi';
 import type { PendingApprovalDto } from '../types';
 import { testAccountInteraction } from '../conversation-test-fixtures';
-import { approvalMessageDrafts, clearApprovalMessage } from '../approval-messages';
 import { ApprovalCard } from './ApprovalCard';
-import { ApprovalMessageInput } from './ApprovalMessageInput';
-import { ComposerInput } from './ComposerInput';
 import { AccessRequestReview } from './AccessRequestReview';
-import { MAX_APPROVAL_MESSAGE_LENGTH } from '../../../../shared/approval-message';
 import { channelType, groupId, messagingGroupId, threadId } from '../state';
 
 const mocks = vi.hoisted(() => {
@@ -96,7 +92,6 @@ const approval: PendingApprovalDto = {
   agentGroupId: 'group',
   agentGroupName: 'Group',
   createdAt: 1793318400000,
-  supportsResponseMessage: true,
   origin: { agentGroupId: 'group', threadId: 'thread', channelType: 'web', messagingGroupId: 'web-mg' },
 };
 const request = testAccountInteraction({
@@ -135,7 +130,6 @@ beforeEach(() => {
   threadId.value = 'thread';
   channelType.value = 'web';
   messagingGroupId.value = null;
-  approvalMessageDrafts.value = {};
   mocks.slots = [];
   mocks.cursor = 0;
   mocks.respond.mockClear();
@@ -145,16 +139,15 @@ beforeEach(() => {
 afterEach(() => {
   groupId.value = null;
   threadId.value = null;
-  approvalMessageDrafts.value = {};
   vi.unstubAllGlobals();
 });
 
-describe('optional approval messages', () => {
+describe('approval decisions', () => {
   it('links off-thread requests without decision controls or a message input', () => {
     threadId.value = 'another-thread';
     const tree = ApprovalCard({ approval, busy: false, onRespond: vi.fn() });
     expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
-    expect(nodes(tree).some((node) => node.type === ApprovalMessageInput)).toBe(false);
+    expect(nodes(tree).some((node) => node.type === 'textarea')).toBe(false);
     expect(nodes(tree).find((node) => node.type === 'a')?.props.href).toBe('#g/group/t/thread');
   });
   it('does not submit a captured approval callback after navigating away', () => {
@@ -180,7 +173,6 @@ describe('optional approval messages', () => {
       });
       expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
       expect(text(tree)).toContain('Keep existing work.');
-      expect(text(tree)).toContain('Owner');
     },
   );
   it('hides private Allow access and Decline in the wrong thread', () => {
@@ -189,39 +181,12 @@ describe('optional approval messages', () => {
     expect(nodes(tree).filter((node) => node.type === 'button')).toEqual([]);
     expect(nodes(tree).find((node) => node.type === 'a')?.props.href).toBe('#g/group/t/thread');
   });
-  it('uses the server message limit, disables during submission, and keeps drafts scoped by approval', () => {
-    approvalMessageDrafts.value = { other: 'Other draft' };
-    const input = nodes(ApprovalMessageInput({ approvalId: 'approval', disabled: true })).find(
-      (node) => node.type === ComposerInput,
-    )!;
-    expect(input.props.textarea).toMatchObject({ value: '', disabled: true, maxLength: MAX_APPROVAL_MESSAGE_LENGTH });
-    expect(input.props.send).toBeUndefined();
-    expect(input.props.voice).toBeUndefined();
-    input.props.textarea!.onInput!({ currentTarget: { value: 'Use read-only operations.' } });
-    expect(approvalMessageDrafts.value).toEqual({ approval: 'Use read-only operations.', other: 'Other draft' });
-    clearApprovalMessage('approval');
-    expect(approvalMessageDrafts.value).toEqual({ other: 'Other draft' });
-  });
-
-  it.each(['Approve', 'Reject'])('includes the note with %s while retaining the separate decision value', (label) => {
-    approvalMessageDrafts.value = { approval: '  Keep the original account.  ' };
+  it.each(['Approve', 'Reject'])('submits only the %s decision without a message input', (label) => {
     const onRespond = vi.fn();
     const tree = ApprovalCard({ approval, busy: false, onRespond });
     button(tree, label).props.onClick!();
-    expect(onRespond).toHaveBeenCalledWith(label.toLowerCase(), 'Keep the original account.');
-  });
-
-  it('retains a draft for private credential review, and hides the input for unsupported approvals', () => {
-    approvalMessageDrafts.value = { approval: 'Keep the original account.' };
-    const unsupported = ApprovalCard({
-      approval: { ...approval, supportsResponseMessage: false },
-      busy: false,
-      onRespond: vi.fn(),
-    });
-    expect(nodes(unsupported).some((node) => node.type === ApprovalMessageInput)).toBe(false);
-    const { tree: review } = accessReview();
-    expect(nodes(review).find((node) => node.type === ApprovalMessageInput)?.props.approvalId).toBe('approval');
-    expect(approvalMessageDrafts.value.approval).toBe('Keep the original account.');
+    expect(onRespond).toHaveBeenCalledWith(label.toLowerCase());
+    expect(text(tree)).not.toContain('Message to agent');
   });
 
   it('keeps decisions without messages backward compatible', () => {
@@ -230,8 +195,7 @@ describe('optional approval messages', () => {
     expect(onRespond).toHaveBeenCalledWith('approve');
   });
 
-  it('submits the note in the same private Allow access request and clears it after success', async () => {
-    approvalMessageDrafts.value = { approval: '  Keep the original account.  ' };
+  it('submits private Allow access without a message', async () => {
     mocks.slots = [
       'connection',
       { requestRevision: request.revision, connection, matches: true },
@@ -251,13 +215,12 @@ describe('optional approval messages', () => {
       connection_id: 'connection',
       connection_revision: '"reviewed"',
       request_revision: 1,
-      message: 'Keep the original account.',
     });
-    expect(approvalMessageDrafts.value.approval).toBeUndefined();
+    expect(body).not.toHaveProperty('message');
+    expect(text(tree)).not.toContain('Message to agent');
   });
 
-  it('retains the note after failed private access application', async () => {
-    approvalMessageDrafts.value = { approval: 'Do not retry automatically.' };
+  it('refreshes after failed private access application', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('{"error":"Test failure"}', { status: 500 }));
     mocks.slots = [
       'connection',
@@ -272,17 +235,14 @@ describe('optional approval messages', () => {
     const { tree, onSaved } = accessReview();
     button(tree, 'Allow access').props.onClick!();
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
-    expect(approvalMessageDrafts.value.approval).toBe('Do not retry automatically.');
   });
 
-  it('carries the same draft when declining from private access review', async () => {
-    approvalMessageDrafts.value = { approval: 'Already finished elsewhere.' };
+  it('submits only a decision when declining from private access review', async () => {
     const { tree } = accessReview();
     button(tree, 'Decline').props.onClick!();
     await vi.waitFor(() =>
       expect(mocks.respond).toHaveBeenCalledWith('approval', {
         value: 'reject',
-        message: 'Already finished elsewhere.',
       }),
     );
   });
