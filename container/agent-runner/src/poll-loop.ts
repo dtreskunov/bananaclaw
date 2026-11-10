@@ -60,6 +60,7 @@ import { DeliveryRecovery, type SuggestedAction } from './query/recovery.js';
 import { RunawayGuard } from './query/runaway-guard.js';
 import { SteeringSession } from './query/steering.js';
 import { offerUsageAdvisory, recordUsageAdvisory } from './query/usage-advisory.js';
+import { batchThinkingLevel, thinkingBatch } from './query/thinking.js';
 
 function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
@@ -201,6 +202,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         if (messages.length === 0) continue;
       }
     }
+
+    messages = thinkingBatch(messages);
 
     // Periodic heartbeat so we know the loop is alive
     if (pollCount % 30 === 0) {
@@ -393,11 +396,13 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     markTaskAttemptsProviderInvoked(taskAttemptIds);
     let taskProviderFailed = false;
     const execution = { current: beginTurn(routing, processingIds) };
+    const thinkingLevel = batchThinkingLevel(keep);
     try {
       while (true) {
         let query: AgentQuery;
         try {
           query = config.provider.query({
+            thinkingLevel,
             prompt: promptTracker.latest,
             continuation: isTaskOnly ? undefined : continuation,
             cwd: config.cwd,
@@ -418,6 +423,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             isTaskOnly ? undefined : continuation,
             {
               provider: config.provider,
+              thinkingLevel,
               persistContinuation: !isTaskOnly,
               softTurnTokenBudget: config.softTurnTokenBudget,
               promptTracker,
@@ -836,6 +842,7 @@ interface QueryResult {
  * reached from marked `FORK-HOOK:<name>` sites.
  */
 export interface ForkQueryOptions {
+  thinkingLevel?: string;
   softTurnTokenBudget?: number;
   provider: AgentProvider;
   /**
@@ -1023,13 +1030,19 @@ export async function processQuery(
     // everything. Filtering on thread_id here caused deadlocks when the
     // initial batch and follow-ups had mismatched thread_ids (e.g. a
     // host-generated welcome trigger with null thread vs a Discord DM reply).
-    const newMessages = pending.filter((m) => m.kind !== 'system');
+    const newMessages = thinkingBatch(pending.filter((m) => m.kind !== 'system'));
     if (turnActive) {
       // FORK-HOOK:steering
       steering.offer(activeTurnRouting, turnId);
       return;
     }
     if (!newMessages.some((message) => message.trigger === 1)) return;
+    if (batchThinkingLevel(newMessages) !== fork.thinkingLevel) {
+      // SDK effort belongs to a query. Resume its continuation in a fresh query
+      // at this settled boundary, without restarting the container.
+      endStream();
+      return;
+    }
 
     // A user can answer as soon as the card is delivered, before the
     // provider has emitted the result that safely closes the asking turn.

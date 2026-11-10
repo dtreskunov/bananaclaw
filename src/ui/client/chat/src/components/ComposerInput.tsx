@@ -64,6 +64,7 @@ interface ComposerInputProps {
   className?: string;
   hidden?: boolean;
   controls?: ComponentChildren;
+  beforeSend?: ComponentChildren;
 }
 
 function onComposerKeyDown(event: JSX.TargetedKeyboardEvent<HTMLTextAreaElement>): void {
@@ -74,7 +75,7 @@ function onComposerKeyDown(event: JSX.TargetedKeyboardEvent<HTMLTextAreaElement>
 }
 
 export function ComposerInput({
-  inputRef, textarea, voice, send, multiLine, rows = 1, listening, className = '', hidden = false, controls,
+  inputRef, textarea, voice, send, multiLine, rows = 1, listening, className = '', hidden = false, controls, beforeSend,
 }: ComposerInputProps) {
   return (
     <div
@@ -84,6 +85,7 @@ export function ComposerInput({
       <textarea {...textarea} ref={inputRef} rows={rows} onKeyDown={send ? onComposerKeyDown : undefined} />
       {controls}
       {voice ? <VoiceButton {...voice} /> : null}
+      {beforeSend}
       {send ? <button
         type="submit"
         id={send.id}

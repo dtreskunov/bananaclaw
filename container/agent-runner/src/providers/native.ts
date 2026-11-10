@@ -404,7 +404,7 @@ export class NativeProvider implements AgentProvider {
               journal = turnJournal;
               abortController.signal.throwIfAborted();
               const resolved = await resolveNativeModel(configuredModel);
-              const thinkingOptions = nativeThinkingOptions(resolved, options.effort);
+              const thinkingOptions = nativeThinkingOptions(resolved, input.thinkingLevel ?? options.effort);
               const miniMaxFlash = /^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(resolved.modelId);
               const conversation = continuation;
               abortController.signal.throwIfAborted();

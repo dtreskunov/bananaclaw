@@ -9,6 +9,7 @@ import { CONVERSATION_PROTOCOL_VERSION, diffConversation } from '../../../shared
 import { presentedConversation, testAccountInteraction, testSnapshot, testTurn } from './conversation-test-fixtures';
 import {
   activeTurn,
+  composerThinking,
   canSend,
   channelType,
   chatMessages,
@@ -42,6 +43,7 @@ vi.hoisted(() => vi.stubGlobal('window', { matchMedia: () => ({ matches: false }
 vi.mock('./components/PromptModal', () => ({ requestChoice: vi.fn() }));
 vi.mock('./hash', () => ({ writeHash: vi.fn() }));
 beforeEach(() => {
+  composerThinking.value = null;
   groupId.value = 'group';
   threadId.value = 'thread';
   chatReady.value = true;
@@ -61,6 +63,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  composerThinking.value = null;
   clearChat();
   groupId.value = null;
   pending.value = [];
@@ -69,6 +72,72 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('native command intent', () => {
+  it('queues an explicit thinking level without steering or prompting, then resets only on acceptance', async () => {
+    composerThinking.value = { target: 'group:thread:composer', level: 'high', chosenAt: 0 };
+    expect(await sendChat('Think carefully', null, { thinkingLevel: 'high' })).toBe(true);
+    expect(requestChoice).not.toHaveBeenCalled();
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)).toMatchObject({
+      thinkingLevel: 'high',
+      inputHandling: { mode: 'queue', turnId: 'captured-turn' },
+    });
+    expect(pendingWebSends.value[0].thinkingLevel).toBe('high');
+    expect(composerThinking.value).toBeNull();
+  });
+
+  it('preserves thinking through failed sends and retries with the same identity', async () => {
+    composerThinking.value = { target: 'group:thread:composer', level: 'max', chosenAt: 0 };
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Rejected' }), { status: 400 }));
+    expect(await sendChat('Careful', null, { thinkingLevel: 'max' })).toBe(false);
+    expect(composerThinking.value?.level).toBe('max');
+    const packet = pendingWebSends.value[0];
+    expect(packet.thinkingLevel).toBe('max');
+    expect(await retryChatSend(packet.messageId)).toBe(true);
+    expect(vi.mocked(fetch).mock.calls[0][1]?.body).toEqual(vi.mocked(fetch).mock.calls[1][1]?.body);
+    expect(composerThinking.value).toBeNull();
+  });
+
+  it('does not clear a newer selection when retrying an older packet', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{}', { status: 500 }));
+    await sendChat('Old', null, { thinkingLevel: 'high' });
+    const packet = pendingWebSends.value[0];
+    composerThinking.value = { target: 'group:thread:composer', level: 'high', chosenAt: packet.timestamp + 1 };
+    await retryChatSend(packet.messageId);
+    expect(composerThinking.value?.level).toBe('high');
+  });
+
+  it('resets the selection when a late authoritative echo confirms an ambiguous failure', async () => {
+    composerThinking.value = { target: 'group:thread:composer', level: 'high', chosenAt: 0 };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('Network failed after acceptance'));
+    expect(await sendChat('Ambiguous', null, { thinkingLevel: 'high' })).toBe(false);
+    const packet = pendingWebSends.value[0];
+    expect(composerThinking.value?.level).toBe('high');
+    applyConversationFrame(
+      testSnapshot({
+        messages: [
+          {
+            id: packet.messageId,
+            text: packet.text,
+            timestamp: packet.timestamp,
+            direction: 'in',
+            thinkingLevel: 'high',
+          },
+        ],
+      }),
+      'thread',
+    );
+    expect(composerThinking.value).toBeNull();
+  });
+
+  it('sends thinking with attachments and never adds it to later default messages', async () => {
+    const file = new File(['x'], 'note.txt');
+    await sendChat('File', [{ name: file.name, size: file.size, file }], { thinkingLevel: 'low' });
+    const body = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
+    expect(body.get('thinkingLevel')).toBe('low');
+    await sendChat('Default', null);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string).thinkingLevel).toBeUndefined();
+  });
+
   it.each(['steer', 'queue'] as const)('sends %s with immutable identity, not proof of application', async (mode) => {
     vi.mocked(requestChoice).mockResolvedValue(mode);
     highlightMessageId.value = 'earlier-search-result';

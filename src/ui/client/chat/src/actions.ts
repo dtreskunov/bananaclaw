@@ -85,7 +85,8 @@ import { parentPath } from './utils';
 import { showToast } from './components/Toast';
 import { showClientReloadPrompt } from './notify';
 import { requestChoice } from './components/PromptModal';
-import { withWebSendState } from './web-submissions';
+import { thinkingChoiceAccepted, withWebSendState } from './web-submissions';
+import { composerThinking } from './state';
 import type {
   Thread,
   ThreadCtx,
@@ -818,13 +819,19 @@ function confirmedWebSend(gid: string, tid: string, messageId: string): boolean 
 export async function sendChat(
   text: string,
   files: PendingFile[] | null | undefined,
-  options: { onSubmitted?: () => void } = {},
+  options: { onSubmitted?: () => void; thinkingLevel?: string } = {},
 ): Promise<boolean> {
   const context = captureChatSendContext();
   if (!context?.canSubmit()) return false;
   let inputHandling: InputHandling | undefined;
   const turn = activeTurn.value;
-  if (context.isWeb && turnConnected.value && turn?.status === 'running' && turn.supportsSteering === true) {
+  if (options.thinkingLevel !== undefined && !context.isWeb) {
+    showToast('Thinking overrides are available only in web conversations.', 'err');
+    return false;
+  }
+  if (options.thinkingLevel !== undefined && turn) {
+    inputHandling = { mode: 'queue', turnId: turn.id };
+  } else if (context.isWeb && turnConnected.value && turn?.status === 'running' && turn.supportsSteering === true) {
     const choice = await requestChoice({
       title: 'Send while the agent is working',
       message: 'Steer the current turn with this message, or queue it for later.',
@@ -844,6 +851,7 @@ export async function sendChat(
       files: files?.slice() ?? [],
       timestamp: Date.now(),
       inputHandling,
+      thinkingLevel: options.thinkingLevel,
       startsResponse: !turn,
     },
     context,
@@ -852,12 +860,18 @@ export async function sendChat(
 }
 
 async function submitChatPacket(
-  { clientMessageId, text, files, timestamp, inputHandling, startsResponse }: ChatSendPacket,
+  { clientMessageId, text, files, timestamp, inputHandling, startsResponse, thinkingLevel }: ChatSendPacket,
   { gid, tid, isWeb, url, contextCurrent, canSubmit }: NonNullable<ReturnType<typeof captureChatSendContext>>,
   onSubmitted?: () => void,
 ): Promise<boolean> {
   if (!canSubmit()) return false;
   const messageId = publicWebMessageId(clientMessageId);
+  const accept = () => {
+    if (thinkingChoiceAccepted(composerThinking.peek(), { groupId: gid, threadId: tid, thinkingLevel, timestamp })) {
+      composerThinking.value = null;
+    }
+    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: 'accepted' }));
+  };
   batch(() => {
     highlightMessageId.value = null;
     requestScrollToBottom();
@@ -873,6 +887,7 @@ async function submitChatPacket(
       timestamp,
       inputHandling,
       startsResponse,
+      thinkingLevel,
       status: 'sending',
     };
     pendingWebSends.value = pendingWebSends
@@ -889,6 +904,7 @@ async function submitChatPacket(
       fd.append('text', text || '');
       fd.append('clientMessageId', clientMessageId);
       if (inputHandling) fd.append('inputHandling', JSON.stringify(inputHandling));
+      if (thinkingLevel !== undefined) fd.append('thinkingLevel', thinkingLevel);
       for (const f of files) {
         if (f.file) fd.append('file', f.file, f.name);
       }
@@ -898,7 +914,12 @@ async function submitChatPacket(
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, clientMessageId, ...(inputHandling ? { inputHandling } : {}) }),
+        body: JSON.stringify({
+          text,
+          clientMessageId,
+          ...(inputHandling ? { inputHandling } : {}),
+          ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+        }),
       });
     }
     if (!res.ok) {
@@ -911,6 +932,7 @@ async function submitChatPacket(
       }
       if (isWeb && confirmedWebSend(gid, tid, messageId)) {
         console.warn('Send request failed after authoritative confirmation', { messageId, detail });
+        accept();
         return contextCurrent();
       }
       if (contextCurrent()) showToast(`Send failed: ${detail}`, 'err');
@@ -924,12 +946,13 @@ async function submitChatPacket(
         /* ignore */
       }
     }
-    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: 'accepted' }));
+    accept();
     return contextCurrent();
   } catch (err) {
     console.error('send failed', err);
     if (isWeb && confirmedWebSend(gid, tid, messageId)) {
       console.warn('Send transport failed after authoritative confirmation', { messageId });
+      accept();
       return contextCurrent();
     }
     const m = err instanceof Error ? err.message : 'network error';

@@ -175,6 +175,8 @@ export interface FileAttachment {
 }
 
 export interface QueryInput {
+  /** One-message override, scoped to this query; omitted means the agent default. */
+  thinkingLevel?: string;
   /** Initial prompt (already formatted by agent-runner). */
   prompt: string;
 

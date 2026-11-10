@@ -34,18 +34,27 @@ export interface TurnUsageAdvisory {
 }
 
 export function isTurnUsageAdvisory(value: unknown): value is TurnUsageAdvisory {
-  if (!object(value) ||
-      Object.keys(value).length !== 6 ||
-      !integer(value.threshold) || value.threshold === 0 ||
-      !integer(value.reportedTokens) || Number(value.reportedTokens) < Number(value.threshold) ||
-      !integer(value.triggeredAt) ||
-      !(value.appliedAt === null || integer(value.appliedAt)) ||
-      !(value.finishedAt === null || integer(value.finishedAt))) return false;
+  if (
+    !object(value) ||
+    Object.keys(value).length !== 6 ||
+    !integer(value.threshold) ||
+    value.threshold === 0 ||
+    !integer(value.reportedTokens) ||
+    Number(value.reportedTokens) < Number(value.threshold) ||
+    !integer(value.triggeredAt) ||
+    !(value.appliedAt === null || integer(value.appliedAt)) ||
+    !(value.finishedAt === null || integer(value.finishedAt))
+  )
+    return false;
   switch (value.status) {
-    case 'queued': return value.appliedAt === null && value.finishedAt === null;
-    case 'applied': return value.appliedAt !== null && value.finishedAt === null;
-    case 'skipped': return value.appliedAt === null && value.finishedAt !== null;
-    default: return false;
+    case 'queued':
+      return value.appliedAt === null && value.finishedAt === null;
+    case 'applied':
+      return value.appliedAt !== null && value.finishedAt === null;
+    case 'skipped':
+      return value.appliedAt === null && value.finishedAt !== null;
+    default:
+      return false;
   }
 }
 
@@ -83,6 +92,7 @@ export interface ConversationMessage {
   timelinePosition?: number;
   inputState?: InputState;
   canEditPending?: boolean;
+  thinkingLevel?: string;
   author?: ConversationAuthor;
   recipient?: { agentGroupId: string; displayName: string };
   deliveryOrigin?: 'send_message' | 'send_file' | 'response';
@@ -155,6 +165,7 @@ export interface ConversationTurn {
 }
 
 export interface ConversationCapabilities {
+  thinking?: { levels: readonly string[]; defaultLevel: string | null };
   canSend: boolean;
   stop: boolean;
   stopTool?: boolean;

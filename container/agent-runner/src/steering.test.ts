@@ -216,6 +216,35 @@ it('applies steering to the existing batch without claiming queued or other-conv
   } finally { await h.stop(loop); }
 });
 
+it('resumes fresh queries for thinking changes without restarting or altering the active turn', async () => {
+  getInboundDb().exec(
+    "INSERT INTO destinations (name, type, channel_type, platform_id) VALUES ('web-test', 'channel', 'web', 'room')",
+  );
+  insert('initial');
+  const h = harness();
+  const loop = h.start();
+  try {
+    await until(() => h.active !== null);
+    const first = h.active!.id;
+    insert('deep', { thinkingLevel: 'high', inputHandling: { mode: 'steer', turnId: first } });
+    insert('later', { inputHandling: { mode: 'queue' } });
+    await until(() => readInputState('deep')?.queuedForNextTurn === true);
+    expect(h.steering).toHaveLength(0);
+    expect(h.active?.id).toBe(first);
+    h.emit({ type: 'result', text: '<message to="web-test">First answer</message>' });
+    await until(() => h.prompts.length === 2);
+    expect(h.prompts[1].thinkingLevel).toBe('high');
+    expect(h.prompts[1].continuation).toBe('steering-session');
+    expect(h.prompts[1].prompt).toContain('deep');
+    expect(h.prompts[1].prompt).not.toContain('later');
+    h.emit({ type: 'result', text: '<message to="web-test">Deep answer</message>' });
+    await until(() => h.prompts.length === 3);
+    expect(h.prompts[2].thinkingLevel).toBeUndefined();
+    expect(h.prompts[2].continuation).toBe('steering-session');
+    expect(h.prompts[2].prompt).toContain('later');
+  } finally { await h.stop(loop); }
+});
+
 it('steers an approval outcome, finishes the response, and restarts before consuming the verification or queued follow-up', async () => {
   getInboundDb().exec(
     "INSERT INTO destinations (name, type, channel_type, platform_id) VALUES ('web-test', 'channel', 'web', 'room')",
@@ -541,7 +570,7 @@ it('recovers already-persisted steering without appending the same guidance agai
 });
 
 it('processes startup edit requests before claiming and formatting the initial batch', async () => {
-  insert('target', { text: 'original text', inputHandling: { mode: 'queue' } });
+  insert('target', { text: 'original text', thinkingLevel: 'high', inputHandling: { mode: 'queue' } });
   getInboundDb().prepare("UPDATE messages_in SET sender_identity = 'web:owner' WHERE id = 'target'").run();
   const requestId = randomUUID();
   insert(`edit-${requestId}`, {
@@ -555,6 +584,7 @@ it('processes startup edit requests before claiming and formatting the initial b
     expect(h.prompts[0].prompt).toContain('new text');
     expect(h.prompts[0].prompt).not.toContain('original text');
     expect(h.prompts[0].prompt).not.toContain('edit_input');
+    expect(h.prompts[0].thinkingLevel).toBe('high');
     expect(readInputEditReceipt(requestId)?.status).toBe('accepted');
   } finally { await h.stop(loop); }
 });

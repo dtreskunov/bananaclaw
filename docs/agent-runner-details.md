@@ -342,6 +342,20 @@ Vault; runtime model requests still use the private session egress socket.
 
 ### Native Provider: Thinking Levels
 
+Web input can carry an optional `thinkingLevel` in its existing durable JSON
+content. The host validates it against the effective provider/model and accepts
+it only as a new-turn request, never as steering. The runner isolates that
+message's batch (allowing accumulated non-triggering context before it) and
+passes the override as `QueryInput.thinkingLevel`. No schema change or
+group-config write is involved.
+
+Effort is fixed for the lifetime of a provider query, including corrective
+delivery retries. At a settled boundary, a follow-up with a different override
+(including a return to Default) closes the warm query and resumes its stored
+continuation in a fresh one. Both native and Claude consume the override;
+later default queries use the configured agent effort again. Compaction retains
+its own existing policy. A queued override never mutates an active turn.
+
 The per-agent `effort` setting controls normal native model requests:
 OpenAI-compatible Chat Completions sends `reasoning_effort`; Anthropic Messages
 sends `output_config.effort`. Supported native Claude models also enable adaptive

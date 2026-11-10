@@ -16,13 +16,14 @@ describe('shared composer input modes', () => {
       listening: false,
     });
     expect(node.props.class).toContain('composer-input-wrap composer-passive');
-    const [textarea, controls, voice, send] = node.props.children;
+    const [textarea, controls, voice, beforeSend, send] = node.props.children;
     expect(textarea.type).toBe('textarea');
     expect(textarea.props.maxLength).toBe(4000);
     expect(textarea.props.rows).toBe(1);
     expect(textarea.props.onKeyDown).toBeUndefined();
     expect(controls).toBeUndefined();
     expect(voice).toBeNull();
+    expect(beforeSend).toBeUndefined();
     expect(send).toBeNull();
   });
   it.each([

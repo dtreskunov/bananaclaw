@@ -119,6 +119,7 @@ const message = shape({
     }),
   ),
   canEditPending: optional(bool),
+  thinkingLevel: optional(oneOf('none', 'low', 'medium', 'high', 'xhigh', 'max')),
   author: optional(
     (value) =>
       object(value) &&
@@ -238,6 +239,12 @@ const timelineRow: Check = (v) =>
   shape({ kind: oneOf('turn'), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v);
 const connection = shape({ connected: bool, activeTurnId: nullable(id) });
 const capabilities = shape({
+  thinking: optional(
+    shape({
+      levels: array(oneOf('none', 'low', 'medium', 'high', 'xhigh', 'max')),
+      defaultLevel: nullable(text),
+    }),
+  ),
   canSend: bool,
   stop: bool,
   stopTool: optional(bool),

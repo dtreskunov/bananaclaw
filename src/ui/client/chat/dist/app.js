@@ -15733,6 +15733,7 @@ var activeTurn = y3(null);
 var turnConnected = y3(false);
 var stopRequest = y3(null);
 var pendingWebSends = y3([]);
+var composerThinking = y3(null);
 var pending = y3([]);
 var searchQuery = y3("");
 var searchResults = y3(null);
@@ -18773,7 +18774,8 @@ function isReadCursor(value) {
 
 // ../../shared/conversation.ts
 function isTurnUsageAdvisory(value) {
-  if (!object(value) || Object.keys(value).length !== 6 || !integer(value.threshold) || value.threshold === 0 || !integer(value.reportedTokens) || Number(value.reportedTokens) < Number(value.threshold) || !integer(value.triggeredAt) || !(value.appliedAt === null || integer(value.appliedAt)) || !(value.finishedAt === null || integer(value.finishedAt))) return false;
+  if (!object(value) || Object.keys(value).length !== 6 || !integer(value.threshold) || value.threshold === 0 || !integer(value.reportedTokens) || Number(value.reportedTokens) < Number(value.threshold) || !integer(value.triggeredAt) || !(value.appliedAt === null || integer(value.appliedAt)) || !(value.finishedAt === null || integer(value.finishedAt)))
+    return false;
   switch (value.status) {
     case "queued":
       return value.appliedAt === null && value.finishedAt === null;
@@ -19040,6 +19042,7 @@ var message = shape({
     })
   ),
   canEditPending: optional(bool),
+  thinkingLevel: optional(oneOf("none", "low", "medium", "high", "xhigh", "max")),
   author: optional(
     (value) => object(value) && text(value.displayName) && (id(value.userId) && value.agentGroupId === void 0 || id(value.agentGroupId) && value.userId === void 0)
   ),
@@ -19152,6 +19155,12 @@ var tracePlacement = shape({ turnId: id, ordinals: array(integer), ownsTurn: boo
 var timelineRow = (v5) => shape({ kind: oneOf("message"), messageId: id, trace: optional(tracePlacement), statsTurnId: optional(id) })(v5) || shape({ kind: oneOf("interaction"), interactionId: id, trace: optional(tracePlacement) })(v5) || shape({ kind: oneOf("turn"), turnId: id, afterId: nullable(id), trace: tracePlacement, status: bool })(v5);
 var connection = shape({ connected: bool, activeTurnId: nullable(id) });
 var capabilities = shape({
+  thinking: optional(
+    shape({
+      levels: array(oneOf("none", "low", "medium", "high", "xhigh", "max")),
+      defaultLevel: nullable(text)
+    })
+  ),
   canSend: bool,
   stop: bool,
   stopTool: optional(bool),
@@ -19788,6 +19797,9 @@ function transcriptReadingTop(viewport) {
 }
 
 // src/web-submissions.ts
+function thinkingChoiceAccepted(choice, send) {
+  return choice !== null && choice.target === `${send.groupId}:${send.threadId}:composer` && choice.level === send.thinkingLevel && choice.chosenAt <= send.timestamp;
+}
 function withWebSendState(submission, state) {
   const { status: _status, error: _error, ...packet } = submission;
   return { ...packet, ...state };
@@ -19844,6 +19856,7 @@ function submissionPresentation(transcript, submissions, view, groupId3, threadI
       id: submission.messageId,
       direction: "in",
       text: submission.text,
+      ...submission.thinkingLevel ? { thinkingLevel: submission.thinkingLevel } : {},
       timestamp: submission.timestamp,
       files: submission.files.map((file) => ({
         filename: file.name,
@@ -19987,6 +20000,11 @@ function applyConversationFrame(raw, expectedThreadId) {
     if (frame2.kind === "update") {
       const response = completedResponseId(previous?.conversation ?? null, messages);
       if (response) completedResponse.value = response;
+    }
+    if (pendingWebSends.value.some(
+      (send) => send.groupId === groupId.value && send.threadId === view.threadId && thinkingChoiceAccepted(composerThinking.value, send) && view.messages.some((message2) => message2.direction === "in" && message2.id === send.messageId)
+    )) {
+      composerThinking.value = null;
     }
     pendingWebSends.value = reconcileWebSubmissions(pendingWebSends.value, view, groupId.value);
     refs.seenIds = new Set(view.messages.map((m6) => `${m6.direction}:${m6.id}`));
@@ -21662,7 +21680,13 @@ async function sendChat(text2, files, options = {}) {
   if (!context?.canSubmit()) return false;
   let inputHandling;
   const turn2 = activeTurn.value;
-  if (context.isWeb && turnConnected.value && turn2?.status === "running" && turn2.supportsSteering === true) {
+  if (options.thinkingLevel !== void 0 && !context.isWeb) {
+    showToast("Thinking overrides are available only in web conversations.", "err");
+    return false;
+  }
+  if (options.thinkingLevel !== void 0 && turn2) {
+    inputHandling = { mode: "queue", turnId: turn2.id };
+  } else if (context.isWeb && turnConnected.value && turn2?.status === "running" && turn2.supportsSteering === true) {
     const choice = await requestChoice({
       title: "Send while the agent is working",
       message: "Steer the current turn with this message, or queue it for later.",
@@ -21682,15 +21706,22 @@ async function sendChat(text2, files, options = {}) {
       files: files?.slice() ?? [],
       timestamp: Date.now(),
       inputHandling,
+      thinkingLevel: options.thinkingLevel,
       startsResponse: !turn2
     },
     context,
     options.onSubmitted
   );
 }
-async function submitChatPacket({ clientMessageId, text: text2, files, timestamp, inputHandling, startsResponse }, { gid, tid, isWeb, url, contextCurrent, canSubmit }, onSubmitted) {
+async function submitChatPacket({ clientMessageId, text: text2, files, timestamp, inputHandling, startsResponse, thinkingLevel }, { gid, tid, isWeb, url, contextCurrent, canSubmit }, onSubmitted) {
   if (!canSubmit()) return false;
   const messageId = publicWebMessageId(clientMessageId);
+  const accept = () => {
+    if (thinkingChoiceAccepted(composerThinking.peek(), { groupId: gid, threadId: tid, thinkingLevel, timestamp })) {
+      composerThinking.value = null;
+    }
+    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "accepted" }));
+  };
   n2(() => {
     highlightMessageId.value = null;
     requestScrollToBottom();
@@ -21706,6 +21737,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
       timestamp,
       inputHandling,
       startsResponse,
+      thinkingLevel,
       status: "sending"
     };
     pendingWebSends.value = pendingWebSends.peek().filter((send) => send.groupId !== gid || send.threadId !== tid || send.messageId !== messageId).concat(submission);
@@ -21719,6 +21751,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
       fd.append("text", text2 || "");
       fd.append("clientMessageId", clientMessageId);
       if (inputHandling) fd.append("inputHandling", JSON.stringify(inputHandling));
+      if (thinkingLevel !== void 0) fd.append("thinkingLevel", thinkingLevel);
       for (const f5 of files) {
         if (f5.file) fd.append("file", f5.file, f5.name);
       }
@@ -21728,7 +21761,12 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text2, clientMessageId, ...inputHandling ? { inputHandling } : {} })
+        body: JSON.stringify({
+          text: text2,
+          clientMessageId,
+          ...inputHandling ? { inputHandling } : {},
+          ...thinkingLevel !== void 0 ? { thinkingLevel } : {}
+        })
       });
     }
     if (!res.ok) {
@@ -21740,6 +21778,7 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
       }
       if (isWeb && confirmedWebSend(gid, tid, messageId)) {
         console.warn("Send request failed after authoritative confirmation", { messageId, detail });
+        accept();
         return contextCurrent();
       }
       if (contextCurrent()) showToast(`Send failed: ${detail}`, "err");
@@ -21752,12 +21791,13 @@ async function submitChatPacket({ clientMessageId, text: text2, files, timestamp
       } catch {
       }
     }
-    updateWebSend(gid, tid, messageId, (send) => withWebSendState(send, { status: "accepted" }));
+    accept();
     return contextCurrent();
   } catch (err) {
     console.error("send failed", err);
     if (isWeb && confirmedWebSend(gid, tid, messageId)) {
       console.warn("Send transport failed after authoritative confirmation", { messageId });
+      accept();
       return contextCurrent();
     }
     const m6 = err instanceof Error ? err.message : "network error";
@@ -23862,7 +23902,8 @@ function ComposerInput({
   listening,
   className = "",
   hidden = false,
-  controls
+  controls,
+  beforeSend
 }) {
   return /* @__PURE__ */ u4(
     "div",
@@ -23873,6 +23914,7 @@ function ComposerInput({
         /* @__PURE__ */ u4("textarea", { ...textarea, ref: inputRef, rows, onKeyDown: send ? onComposerKeyDown : void 0 }),
         controls,
         voice2 ? /* @__PURE__ */ u4(VoiceButton, { ...voice2 }) : null,
+        beforeSend,
         send ? /* @__PURE__ */ u4(
           "button",
           {
@@ -23887,6 +23929,132 @@ function ComposerInput({
             children: send.icon ?? "\u2191"
           }
         ) : null
+      ]
+    }
+  );
+}
+
+// ../../shared/thinking-levels.ts
+var STANDARD = ["low", "medium", "high"];
+var EXTENDED = [...STANDARD, "xhigh", "max"];
+function thinkingLevels(provider, model) {
+  if (!model || provider !== "claude" && provider !== "native") return [];
+  if (provider === "native" && model.indexOf("/") <= 0) return [];
+  const id2 = provider === "native" ? model.slice(model.indexOf("/") + 1) : model;
+  if (provider === "native") {
+    if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(id2)) return EXTENDED;
+    if (/^(?:o1|o3(?:-mini)?|o4-mini)(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
+    if (/^gpt-5(?:-mini|-nano)?(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
+    if (/^gpt-5\.[12](?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) {
+      return id2.startsWith("gpt-5.2") ? ["none", ...STANDARD, "xhigh"] : ["none", ...STANDARD];
+    }
+    if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return [...STANDARD, "xhigh"];
+  }
+  if (/^claude-(?:opus-4-[78]|(?:opus|sonnet)-5(?:-5)?|haiku-5-5)(?:-\d{8})?$/.test(id2)) return EXTENDED;
+  if (/^claude-(?:opus|sonnet)-4-6(?:-\d{8})?$/.test(id2)) return [...STANDARD, "max"];
+  if (/^claude-opus-4-5(?:-\d{8})?$/.test(id2) || provider === "claude" && /^(?:opus|sonnet)$/.test(id2))
+    return STANDARD;
+  return [];
+}
+function thinkingLevelError(provider, model, effort) {
+  if (effort == null || effort === "") return null;
+  const levels = thinkingLevels(provider, model);
+  if (typeof effort === "string" && levels.includes(effort)) return null;
+  return levels.length ? `Thinking level must be one of: ${levels.join(", ")} for ${model}.` : `Configurable thinking is not supported for ${provider ?? "this provider"}/${model ?? "the default model"}. Choose Default.`;
+}
+function thinkingLevelLabel(level) {
+  if (level === "none") return "Off";
+  if (level === "xhigh") return "Extra high";
+  if (level === "max") return "Maximum";
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+// src/components/ThinkingDial.tsx
+function ThinkingDial({
+  levels,
+  defaultLevel,
+  value,
+  disabled,
+  onChange
+}) {
+  const [open, setOpen] = h2(false);
+  const root = A2(null);
+  const trigger = A2(null);
+  const label = value ? `${thinkingLevelLabel(value)}${levels.includes(value) ? "" : " (unsupported)"} \xB7 next message` : `Agent default${defaultLevel ? ` (${thinkingLevelLabel(defaultLevel)})` : ""}`;
+  const close = () => {
+    setOpen(false);
+    trigger.current?.focus();
+  };
+  y2(() => {
+    if (!open || disabled) return;
+    (root.current?.querySelector('[aria-checked="true"]') ?? root.current?.querySelector('[role="menuitemradio"]'))?.focus();
+    const outside = (event) => {
+      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [open, disabled]);
+  return /* @__PURE__ */ u4(
+    "div",
+    {
+      class: "thinking-dial",
+      ref: root,
+      onBlur: (event) => {
+        if (event.relatedTarget instanceof Node && !root.current?.contains(event.relatedTarget)) setOpen(false);
+      },
+      onKeyDown: (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          close();
+          return;
+        }
+        if (!open || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const items = Array.from(root.current?.querySelectorAll('[role="menuitemradio"]') ?? []);
+        const current = items.findIndex((item) => item === document.activeElement);
+        const index = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[index]?.focus();
+      },
+      children: [
+        /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            ref: trigger,
+            class: `thinking-dial-trigger${value ? " overridden" : ""}`,
+            title: `Thinking: ${label}`,
+            "aria-label": `Thinking: ${label}`,
+            "aria-haspopup": "menu",
+            "aria-expanded": open && !disabled,
+            disabled,
+            onClick: () => setOpen((current) => !current),
+            onKeyDown: (event) => {
+              if (event.key === "ArrowDown" && !open) {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpen(true);
+              }
+            },
+            children: /* @__PURE__ */ u4("svg", { viewBox: "0 0 16 16", "aria-hidden": "true", children: [
+              /* @__PURE__ */ u4("path", { d: "M2 12V9a6 6 0 0 1 12 0v3M3.5 9H2m12 0h-1.5M8 3v1.5M4 5l1 1m7-1-1 1M8 10l3-3" }),
+              /* @__PURE__ */ u4("circle", { cx: "8", cy: "10", r: "1" })
+            ] })
+          }
+        ),
+        open && !disabled ? /* @__PURE__ */ u4("div", { class: "thinking-dial-menu flush-menu-panel", role: "menu", "aria-label": "Thinking for next message", children: [void 0, ...levels].map((level) => /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            role: "menuitemradio",
+            "aria-checked": value === level,
+            onClick: () => {
+              onChange(level);
+              close();
+            },
+            children: level ? thinkingLevelLabel(level) : "Agent default"
+          },
+          level ?? "default"
+        )) }) : null
       ]
     }
   );
@@ -28946,6 +29114,10 @@ function Message({ m: m6, allowContinue = false, isLatest = false, reading = fal
   const showContinue = isWebChannel && allowContinue && m6.direction === "out" && !m6.files?.length && action != null && !pendingWebSends.value.some((send) => send.groupId === groupId.value && send.threadId === threadId.value && send.status !== "failed");
   const midTurnUpdate = m6.deliveryOrigin === "send_message" && !!conversationState.value?.conversation.turns.some((turn2) => turn2.id === m6.turnId && turn2.phase !== "settled");
   const metadata = /* @__PURE__ */ u4(k, { children: [
+    m6.thinkingLevel ? /* @__PURE__ */ u4("span", { class: "input-state-caption", title: "Thinking override for this message", children: [
+      "Thinking: ",
+      thinkingLevelLabel(m6.thinkingLevel)
+    ] }) : null,
     inputPresentation ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: inputPresentation.caption }) : null,
     submission?.status === "sending" && !m6.hideInitialQueuedCaption ? /* @__PURE__ */ u4("span", { class: "input-state-caption", role: "status", children: [
       "Sending",
@@ -29730,8 +29902,15 @@ function Composer() {
   const groupName = groups.value.find((group) => group.id === gid)?.name || "the agent";
   const tid = threadId.value;
   const target = `${gid}:${tid}:composer`;
+  const thinking = composerThinking.value;
+  const thinkingLevel = thinking?.target === target ? thinking.level : void 0;
+  const thinkingCapability = conversationState.value?.conversation.capabilities.thinking;
+  const hasThinking = isWeb && (!!thinkingCapability?.levels.length || thinkingLevel !== void 0);
   const channel = channelType.value;
   const mg = messagingGroupId.value;
+  y2(() => {
+    composerThinking.value = null;
+  }, [target, channel, mg]);
   const voiceState = voice.state.value;
   const activeVoice = voiceState.target === target;
   const voiceLocked = activeVoice && (voiceState.phase !== "error" || voiceState.sending);
@@ -29752,6 +29931,8 @@ function Composer() {
   const doSubmit = async () => {
     if (sendBusyRef.current || !canSend.value || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg || isWeb && !chatReady.value) return false;
     const text2 = (inputRef.current?.value || "").trim();
+    const choice = composerThinking.peek();
+    const submittedThinking = isWeb && choice?.target === target ? choice.level : void 0;
     const files = pending.value.slice();
     if (!text2 && files.length === 0) return false;
     const pins = pinnedContext.value;
@@ -29774,7 +29955,10 @@ function Composer() {
         if (pinnedContext.value === pins) clearPinnedContext();
         if (isMobile.value) document.getElementById("chat-log")?.focus({ preventScroll: true });
       };
-      const sent = await sendChat(fullText, files, { onSubmitted: clearSubmittedDraft });
+      const sent = await sendChat(fullText, files, {
+        onSubmitted: clearSubmittedDraft,
+        ...submittedThinking ? { thinkingLevel: submittedThinking } : {}
+      });
       if (!sent || groupId.value !== gid || threadId.value !== tid || channelType.value !== channel || messagingGroupId.value !== mg) return false;
       clearSubmittedDraft();
       return true;
@@ -29886,6 +30070,7 @@ function Composer() {
           /* @__PURE__ */ u4(
             ComposerInput,
             {
+              className: hasThinking && !edit.editing ? "has-thinking" : "",
               inputRef,
               multiLine,
               listening: activeVoice && voiceState.phase === "listening",
@@ -29926,6 +30111,19 @@ function Composer() {
                 unavailable,
                 disabled: edit.editing || composerDisabled || isRecording.value
               },
+              beforeSend: hasThinking && !edit.editing ? /* @__PURE__ */ u4(
+                ThinkingDial,
+                {
+                  levels: thinkingCapability?.levels ?? [],
+                  defaultLevel: thinkingCapability?.defaultLevel ?? null,
+                  value: thinkingLevel,
+                  disabled: composerDisabled || composerSendInFlight.value || voiceState.sending || isRecording.value,
+                  onChange: (level) => {
+                    composerThinking.value = level ? { target, level, chosenAt: Date.now() } : null;
+                  }
+                },
+                target
+              ) : null,
               send: {
                 id: "chat-send",
                 label: edit.editing ? edit.state?.busy ? "Saving\u2026" : edit.state?.retry ? "Retry save" : "Save edit" : "Send",
@@ -36178,41 +36376,6 @@ function SkillsSection({
       }
     ) : null
   ] });
-}
-
-// ../../shared/thinking-levels.ts
-var STANDARD = ["low", "medium", "high"];
-var EXTENDED = [...STANDARD, "xhigh", "max"];
-function thinkingLevels(provider, model) {
-  if (!model || provider !== "claude" && provider !== "native") return [];
-  if (provider === "native" && model.indexOf("/") <= 0) return [];
-  const id2 = provider === "native" ? model.slice(model.indexOf("/") + 1) : model;
-  if (provider === "native") {
-    if (/^MiniMax-M3\.1-Flash(?:-Preview)?$/i.test(id2)) return EXTENDED;
-    if (/^(?:o1|o3(?:-mini)?|o4-mini)(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
-    if (/^gpt-5(?:-mini|-nano)?(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return STANDARD;
-    if (/^gpt-5\.[12](?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) {
-      return id2.startsWith("gpt-5.2") ? ["none", ...STANDARD, "xhigh"] : ["none", ...STANDARD];
-    }
-    if (/^gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?$/.test(id2)) return [...STANDARD, "xhigh"];
-  }
-  if (/^claude-(?:opus-4-[78]|(?:opus|sonnet)-5(?:-5)?|haiku-5-5)(?:-\d{8})?$/.test(id2)) return EXTENDED;
-  if (/^claude-(?:opus|sonnet)-4-6(?:-\d{8})?$/.test(id2)) return [...STANDARD, "max"];
-  if (/^claude-opus-4-5(?:-\d{8})?$/.test(id2) || provider === "claude" && /^(?:opus|sonnet)$/.test(id2))
-    return STANDARD;
-  return [];
-}
-function thinkingLevelError(provider, model, effort) {
-  if (effort == null || effort === "") return null;
-  const levels = thinkingLevels(provider, model);
-  if (typeof effort === "string" && levels.includes(effort)) return null;
-  return levels.length ? `Thinking level must be one of: ${levels.join(", ")} for ${model}.` : `Configurable thinking is not supported for ${provider ?? "this provider"}/${model ?? "the default model"}. Choose Default.`;
-}
-function thinkingLevelLabel(level) {
-  if (level === "none") return "Off";
-  if (level === "xhigh") return "Extra high";
-  if (level === "max") return "Maximum";
-  return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
 // src/components/ThinkingLevelSelect.tsx

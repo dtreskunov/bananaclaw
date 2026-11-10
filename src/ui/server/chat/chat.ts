@@ -102,6 +102,7 @@ import { INPUT_EDIT_ID } from '../../../pending-input-edit.js';
 import { cancelPendingInput, editPendingInput } from './pending-input-edit.js';
 import { attachSyncSocket } from './sync-socket.js';
 import { transaction } from '../../../db/transaction.js';
+import { conversationThinking } from './thinking.js';
 
 /**
  * Idempotently ensure the shared `web` messaging group exists for this agent
@@ -279,6 +280,7 @@ interface ParsedUpload {
   text: string;
   clientMessageId?: string;
   inputHandling?: unknown;
+  thinkingLevel?: unknown;
   files: { filename: string; contentType: string; buffer: Buffer }[];
 }
 
@@ -319,6 +321,7 @@ function readMultipartBody(req: http.IncomingMessage): Promise<ParsedUpload> {
     bb.on('field', (name, value) => {
       if (name === 'text' && typeof value === 'string') out.text = value;
       if (name === 'clientMessageId' && typeof value === 'string') out.clientMessageId = value;
+      if (name === 'thinkingLevel') out.thinkingLevel = value;
       if (name === 'inputHandling') {
         try {
           out.inputHandling = JSON.parse(value);
@@ -575,6 +578,7 @@ export async function handleChatRequest(
     let text = '';
     let clientMessageId: unknown;
     let rawInputHandling: unknown;
+    let thinkingLevel: unknown;
     let attachments: { filename: string; contentType: string; data: string; size: number }[] = [];
     if (ctype.startsWith('multipart/form-data')) {
       try {
@@ -582,6 +586,7 @@ export async function handleChatRequest(
         text = parsed.text;
         clientMessageId = parsed.clientMessageId;
         rawInputHandling = parsed.inputHandling;
+        thinkingLevel = parsed.thinkingLevel;
         attachments = parsed.files.map((f) => ({
           filename: f.filename,
           contentType: f.contentType,
@@ -607,6 +612,7 @@ export async function handleChatRequest(
       if (typeof t === 'string') text = t;
       clientMessageId = (body as { clientMessageId?: unknown })?.clientMessageId;
       rawInputHandling = (body as { inputHandling?: unknown })?.inputHandling;
+      thinkingLevel = (body as { thinkingLevel?: unknown })?.thinkingLevel;
     }
     let inputHandling: InputHandling | undefined;
     try {
@@ -637,6 +643,10 @@ export async function handleChatRequest(
     }
 
     if (override && override.channelType !== WEB_CHANNEL_TYPE) {
+      if (thinkingLevel !== undefined) {
+        writeJson(res, 400, { error: 'Thinking overrides are available only in web conversations.' });
+        return true;
+      }
       if (inputHandling) {
         writeJson(res, 400, { error: 'invalid_input_handling_context' });
         return true;
@@ -670,6 +680,17 @@ export async function handleChatRequest(
       writeJson(res, 403, { error: 'forbidden' });
       return true;
     }
+    if (thinkingLevel !== undefined) {
+      const { levels } = conversationThinking(m.groupId);
+      if (typeof thinkingLevel !== 'string' || !levels.includes(thinkingLevel)) {
+        writeJson(res, 400, { error: `Unsupported thinking level. Choose ${levels.join(', ') || 'agent default'}.` });
+        return true;
+      }
+      if (inputHandling?.mode === 'steer') {
+        writeJson(res, 400, { error: 'A thinking override must be queued for a new turn, not used as steering.' });
+        return true;
+      }
+    }
     if (inputHandling?.mode === 'steer' && context.sessionId) {
       const current = getSessionActiveTurn(context.sessionId);
       // A stale captured target remains a follow-up, never a steer of its successor.
@@ -698,6 +719,7 @@ export async function handleChatRequest(
         text,
         clientMessageId: clientMessageId as string | undefined,
         inputHandling,
+        thinkingLevel: typeof thinkingLevel === 'string' ? thinkingLevel : undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
       });
       writeJson(res, 200, { id });

@@ -1,5 +1,17 @@
 import type { Conversation } from '../../../shared/conversation';
-import type { ChatMessage, InputState, PendingWebSend, TranscriptRow, WebSendState } from './types';
+import type { ChatMessage, InputState, PendingWebSend, ThinkingChoice, TranscriptRow, WebSendState } from './types';
+
+export function thinkingChoiceAccepted(
+  choice: ThinkingChoice | null,
+  send: Pick<PendingWebSend, 'groupId' | 'threadId' | 'thinkingLevel' | 'timestamp'>,
+): boolean {
+  return (
+    choice !== null &&
+    choice.target === `${send.groupId}:${send.threadId}:composer` &&
+    choice.level === send.thinkingLevel &&
+    choice.chosenAt <= send.timestamp
+  );
+}
 
 export function withWebSendState(submission: PendingWebSend, state: WebSendState): PendingWebSend {
   const { status: _status, error: _error, ...packet } = submission;
@@ -28,7 +40,8 @@ function classifySubmission(send: PendingWebSend, context: ReturnType<typeof sub
     !context.ownedIds.has(send.messageId) &&
     !hasFollowupDisposition(input?.inputState) &&
     input?.inputState?.status !== 'cancelled';
-  const awaitingOwnership = (input?.inputState?.status === 'queued' || input?.inputState?.status === 'processing') &&
+  const awaitingOwnership =
+    (input?.inputState?.status === 'queued' || input?.inputState?.status === 'processing') &&
     !context.ownedIds.has(send.messageId);
   return {
     echoed: !!input,
@@ -80,6 +93,7 @@ export function submissionPresentation(
       id: submission.messageId,
       direction: 'in',
       text: submission.text,
+      ...(submission.thinkingLevel ? { thinkingLevel: submission.thinkingLevel } : {}),
       timestamp: submission.timestamp,
       files: submission.files.map((file) => ({
         filename: file.name,
