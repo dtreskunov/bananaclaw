@@ -178,6 +178,27 @@
 .chat-main .msg:has(> .message-scroll.scroll-fade-bottom)::after { opacity: 1; }
 .chat-main .log .msg:has(> .message-scroll:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .chat-main .message-scroll:focus-visible { outline: none; }
+.chat-main .message-reader-button {
+  position: absolute;
+  inset-block-start: var(--message-padding-top);
+  inset-inline-end: var(--message-padding-inline);
+  z-index: 2;
+  width: var(--control-action-size);
+  height: var(--control-action-size);
+  border-color: var(--border-control);
+  background: var(--surface);
+  color: var(--surface-fg);
+  box-shadow: 0 2px 8px var(--shadow-color);
+  opacity: 0;
+  pointer-events: none;
+}
+.chat-main .message-reader-button:hover,
+.chat-main .message-reader-button:focus-visible {
+  background: linear-gradient(var(--wash), var(--wash)) var(--surface);
+  border-color: var(--border-strong);
+}
+.chat-main .message-reader-button.visible { opacity: 1; pointer-events: auto; }
+.chat-main .message-reader-button .msg-action-icon { width: 18px; height: 18px; }
 .chat-main .transcript-copy-content { min-width: 0; }
 .chat-main .msg.in { --bubble-tint: var(--accent); align-self: flex-end; background: linear-gradient(var(--accent), var(--accent)) var(--surface); }
 .chat-main .msg .message-author { margin-bottom: 3px; color: var(--muted); font-size: var(--font-2xs); font-weight: 700; }

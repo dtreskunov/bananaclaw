@@ -2755,6 +2755,33 @@ nav.tab-bar-strip.group-strip {
 .chat-main .message-scroll:focus-visible {
   outline: none;
 }
+.chat-main .message-reader-button {
+  position: absolute;
+  inset-block-start: var(--message-padding-top);
+  inset-inline-end: var(--message-padding-inline);
+  z-index: 2;
+  width: var(--control-action-size);
+  height: var(--control-action-size);
+  border-color: var(--border-control);
+  background: var(--surface);
+  color: var(--surface-fg);
+  box-shadow: 0 2px 8px var(--shadow-color);
+  opacity: 0;
+  pointer-events: none;
+}
+.chat-main .message-reader-button:hover,
+.chat-main .message-reader-button:focus-visible {
+  background: linear-gradient(var(--wash), var(--wash)) var(--surface);
+  border-color: var(--border-strong);
+}
+.chat-main .message-reader-button.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.chat-main .message-reader-button .msg-action-icon {
+  width: 18px;
+  height: 18px;
+}
 .chat-main .transcript-copy-content {
   min-width: 0;
 }

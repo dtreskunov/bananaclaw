@@ -1,5 +1,5 @@
 import type { ComponentChildren, RefObject } from 'preact';
-import { useLayoutEffect, useRef } from 'preact/hooks';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { attachScrollEdges } from '../scroll-edges';
 import { RelativeTime } from './RelativeTime';
 import type { EpochMs } from '../../../../shared/time';
@@ -30,6 +30,7 @@ export function MessageBubble({
   const ownRef = useRef<HTMLDivElement | null>(null);
   const ref = elementRef ?? ownRef;
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [readerButtonVisible, setReaderButtonVisible] = useState(false);
   useLayoutEffect(() => {
     const bubble = scrollRef.current;
     if (!bubble) return;
@@ -56,28 +57,43 @@ export function MessageBubble({
         match.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  const content = from || timestamp != null || metadata || read ? <>
+  useLayoutEffect(() => {
+    if (!readerButtonVisible) return;
+    const hide = () => setReaderButtonVisible(false);
+    document.addEventListener('scroll', hide, true);
+    return () => document.removeEventListener('scroll', hide, true);
+  }, [readerButtonVisible]);
+  const content = from || timestamp != null || metadata ? <>
     {from ? <div class="message-author">{from}</div> : null}
     {children}
-    {timestamp != null || metadata || read ? <div class="meta turn-info">
+    {timestamp != null || metadata ? <div class="meta turn-info">
       {timestamp != null ? <RelativeTime ts={timestamp} /> : null}
       {metadata}
-      {read ? <span class="msg-inline-actions">
-        <button type="button" class="msg-action-btn" title="Read full screen" aria-label="Read full screen"
-          aria-haspopup="dialog" onClick={(event) => {
-            event.stopPropagation();
-            openTranscriptReader(read);
-          }}><FullFrameIcon /></button>
-      </span> : null}
     </div> : null}
   </> : children;
   return (
     <div class={className + (revealedMobileMessageActionsId.value === id ? ' mobile-actions-visible' : '')}
       data-msg-id={id} id={elementId} tabIndex={tabIndex}
       data-attention-target={attentionTarget} onFocus={onFocus} ref={ref}>
-      <div class="message-scroll" ref={scrollRef}>
+      <div class="message-scroll" ref={scrollRef} onClick={(event) => {
+        const target = event.target;
+        if (!read || event.defaultPrevented || !(target instanceof Element) ||
+          target.closest('a, button, input, textarea, select, summary, audio, video, [role="button"], [contenteditable]:not([contenteditable="false"])') ||
+          !target.closest('.transcript-copy-content, .display-card-title, .display-card-description, .display-card-block') ||
+          window.getSelection()?.isCollapsed === false) return;
+        setReaderButtonVisible((visible) => !visible);
+      }}>
         {content}
       </div>
+      {read ? <button type="button"
+        class={`msg-action-btn message-reader-button${readerButtonVisible ? ' visible' : ''}`}
+        title="Read full screen" aria-label="Read full screen" aria-haspopup="dialog"
+        onFocus={() => setReaderButtonVisible(true)}
+        onClick={(event) => {
+          event.stopPropagation();
+          setReaderButtonVisible(false);
+          openTranscriptReader(read);
+        }}><FullFrameIcon /></button> : null}
     </div>
   );
 }

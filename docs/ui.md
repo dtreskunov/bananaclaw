@@ -611,7 +611,7 @@ bubble's tint-over-surface colors, fading continuously from the bubble's outer
 edge into the content, and keeps the bubble's corners and provenance rail. Overflowing content
 supports keyboard focus and scrolling; search
 navigation reveals matching text inside them. Copy still includes the complete
-message, not just its visible portion. There is no separate full-message reader.
+message, not just its visible portion. Full-frame reading is available separately.
 Edge tracking reads only enabled scroll axes and updates fade classes only when
 an edge changes. Focusability and accessibility attributes update only when
 content starts or stops overflowing, not on each scroll event.
@@ -885,6 +885,13 @@ group metadata is unavailable it uses **Message the agent…**. Editing and reco
 
 **Full-frame reading mode.** Readable transcript bubbles offer **Read full screen**
 using the file browser's shared full-frame icon and native preview dialog.
+The button floats over the text at the bubble's top-right on an opaque, neutral
+theme surface, with the same responsive square touch target as the composer's
+Send button. It starts hidden; clicking
+message text toggles it, and scrolling the message or transcript hides it.
+Links, embedded controls and text selection do not toggle it. Keyboard focus
+also reveals the button. Copy, Edit and Fork stay at the far right of the metadata
+footer without a full-screen action taking up space there.
 The reader uses the same Markdown preview component, typography, spacing and
 code-block styling as FILES `.md` previews. It shows message bodies and attachments without sender metadata,
 activity, statistics, composer controls, or the agent selector. User and agent

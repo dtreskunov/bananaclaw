@@ -24989,6 +24989,7 @@ function MessageBubble({
   const ownRef = A2(null);
   const ref = elementRef ?? ownRef;
   const scrollRef = A2(null);
+  const [readerButtonVisible, setReaderButtonVisible] = h2(false);
   _2(() => {
     const bubble = scrollRef.current;
     if (!bubble) return;
@@ -25014,27 +25015,18 @@ function MessageBubble({
       bubble.scrollTop += match2.getBoundingClientRect().top - bubble.getBoundingClientRect().top - bubble.clientHeight / 2;
     }
   }, [reveal]);
-  const content = from || timestamp != null || metadata || read ? /* @__PURE__ */ u4(k, { children: [
+  _2(() => {
+    if (!readerButtonVisible) return;
+    const hide = () => setReaderButtonVisible(false);
+    document.addEventListener("scroll", hide, true);
+    return () => document.removeEventListener("scroll", hide, true);
+  }, [readerButtonVisible]);
+  const content = from || timestamp != null || metadata ? /* @__PURE__ */ u4(k, { children: [
     from ? /* @__PURE__ */ u4("div", { class: "message-author", children: from }) : null,
     children,
-    timestamp != null || metadata || read ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
+    timestamp != null || metadata ? /* @__PURE__ */ u4("div", { class: "meta turn-info", children: [
       timestamp != null ? /* @__PURE__ */ u4(RelativeTime, { ts: timestamp }) : null,
-      metadata,
-      read ? /* @__PURE__ */ u4("span", { class: "msg-inline-actions", children: /* @__PURE__ */ u4(
-        "button",
-        {
-          type: "button",
-          class: "msg-action-btn",
-          title: "Read full screen",
-          "aria-label": "Read full screen",
-          "aria-haspopup": "dialog",
-          onClick: (event) => {
-            event.stopPropagation();
-            openTranscriptReader(read);
-          },
-          children: /* @__PURE__ */ u4(FullFrameIcon, {})
-        }
-      ) }) : null
+      metadata
     ] }) : null
   ] }) : children;
   return /* @__PURE__ */ u4(
@@ -25047,7 +25039,30 @@ function MessageBubble({
       "data-attention-target": attentionTarget,
       onFocus,
       ref,
-      children: /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, children: content })
+      children: [
+        /* @__PURE__ */ u4("div", { class: "message-scroll", ref: scrollRef, onClick: (event) => {
+          const target = event.target;
+          if (!read || event.defaultPrevented || !(target instanceof Element) || target.closest('a, button, input, textarea, select, summary, audio, video, [role="button"], [contenteditable]:not([contenteditable="false"])') || !target.closest(".transcript-copy-content, .display-card-title, .display-card-description, .display-card-block") || window.getSelection()?.isCollapsed === false) return;
+          setReaderButtonVisible((visible) => !visible);
+        }, children: content }),
+        read ? /* @__PURE__ */ u4(
+          "button",
+          {
+            type: "button",
+            class: `msg-action-btn message-reader-button${readerButtonVisible ? " visible" : ""}`,
+            title: "Read full screen",
+            "aria-label": "Read full screen",
+            "aria-haspopup": "dialog",
+            onFocus: () => setReaderButtonVisible(true),
+            onClick: (event) => {
+              event.stopPropagation();
+              setReaderButtonVisible(false);
+              openTranscriptReader(read);
+            },
+            children: /* @__PURE__ */ u4(FullFrameIcon, {})
+          }
+        ) : null
+      ]
     }
   );
 }
