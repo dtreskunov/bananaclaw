@@ -126,12 +126,14 @@ describe('safe service and app editors', () => {
       default_scopes: ['read'],
       identity: 'oidc',
       token_scope_separator: 'space',
+      token_headers: { Authorization: 'Bearer pk_test_synthetic' },
     };
     const config = appConfiguration(app);
     expect(config).not.toHaveProperty('client_secret_set');
     expect(config).not.toHaveProperty('source');
     expect(config).not.toHaveProperty('id');
     expect(validateAppConfiguration(config)).toMatchObject({ client_id: 'public-client' });
+    expect(config.token_headers).toEqual(app.token_headers);
     const unsafe = { ...config, client_secret: 'not-safe' };
     expect(() => validateAppConfiguration(unsafe)).toThrow('separate password');
     expect(() => validateAppConfiguration({ ...config, authorization_params: { client_secret: 'not-safe' } })).toThrow(

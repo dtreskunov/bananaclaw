@@ -1,3 +1,5 @@
+export const OAUTH_CALLBACK_PATH = '/ui/oauth/callback';
+
 export interface OAuthAppConfiguration {
   label: string;
   issuer: string;
@@ -8,6 +10,7 @@ export interface OAuthAppConfiguration {
   api_hosts: string[];
   default_scopes: string[];
   authorization_params?: Record<string, string>;
+  token_headers?: Record<string, string>;
   revocation_endpoint?: string;
   identity: 'none' | 'oidc' | 'google' | 'github';
   jwks_uri?: string;

@@ -22,8 +22,9 @@ import { finishSignIn, getSignIn } from '../../modules/credentials/sign-ins.js';
 import { authenticate, recordAccess } from './auth.js';
 import { synchronizeManagedUser } from '../../modules/credentials/managed-users.js';
 import { ConnectionInputError, getConnection } from '../../modules/credentials/shared-connections.js';
+import { OAUTH_CALLBACK_PATH } from '../shared/oauth-app.js';
 
-export const OAUTH_CALLBACK_PATH = '/ui/oauth/callback';
+export { OAUTH_CALLBACK_PATH };
 export const CLIENT_METADATA_PATH = '/oauth/client-metadata.json';
 const METADATA_CACHE_MS = 5 * 60_000;
 

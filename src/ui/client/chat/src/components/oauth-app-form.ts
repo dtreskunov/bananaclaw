@@ -9,11 +9,12 @@ import { displayDestination } from './credential-presentation';
 
 export interface OAuthAppDraft extends Omit<
   OAuthAppConfiguration,
-  'api_hosts' | 'default_scopes' | 'authorization_params'
+  'api_hosts' | 'default_scopes' | 'authorization_params' | 'token_headers'
 > {
   apiHosts: string;
   scopes: string;
   parameters: { name: string; value: string }[];
+  tokenHeaders: { name: string; value: string }[];
 }
 
 export function oauthAppDraft(app?: AppInfo): OAuthAppDraft {
@@ -29,17 +30,18 @@ export function oauthAppDraft(app?: AppInfo): OAuthAppDraft {
         identity: 'none',
         token_scope_separator: 'space',
       };
-  const { api_hosts, default_scopes, authorization_params, ...fields } = config;
+  const { api_hosts, default_scopes, authorization_params, token_headers, ...fields } = config;
   return {
     ...fields,
     apiHosts: api_hosts.map(displayDestination).join('\n'),
     scopes: default_scopes.join('\n'),
     parameters: Object.entries(authorization_params ?? {}).map(([name, value]) => ({ name, value })),
+    tokenHeaders: Object.entries(token_headers ?? {}).map(([name, value]) => ({ name, value })),
   };
 }
 
 export function compileOAuthApp(draft: OAuthAppDraft): OAuthAppConfiguration {
-  const { apiHosts, scopes, parameters, ...fields } = draft;
+  const { apiHosts, scopes, parameters, tokenHeaders, ...fields } = draft;
   const names = new Set<string>();
   const reserved = new Set([
     'state',
@@ -70,6 +72,16 @@ export function compileOAuthApp(draft: OAuthAppDraft): OAuthAppConfiguration {
       return [key, value];
     }),
   );
+  const headerNames = new Set<string>();
+  const token_headers = Object.fromEntries(
+    tokenHeaders.map(({ name, value }) => {
+      const key = name.trim();
+      if (headerNames.has(key.toLowerCase()))
+        throw new CredentialsError('Token header names must be unique regardless of case.');
+      headerNames.add(key.toLowerCase());
+      return [key, value];
+    }),
+  );
   const api_hosts = [
     ...new Set(
       apiHosts
@@ -92,6 +104,7 @@ export function compileOAuthApp(draft: OAuthAppDraft): OAuthAppConfiguration {
     api_hosts,
     default_scopes: [...new Set(scopes.split(/\s+/).filter(Boolean))],
     authorization_params,
+    token_headers,
     authorization_endpoint: fields.authorization_endpoint?.trim() ?? '',
     token_endpoint: fields.token_endpoint?.trim() ?? '',
     revocation_endpoint: fields.revocation_endpoint?.trim() ?? '',

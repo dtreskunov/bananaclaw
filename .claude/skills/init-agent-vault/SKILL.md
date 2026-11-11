@@ -11,8 +11,8 @@ Follow [the release and upgrade guide](../../../docs/agent-vault-upgrades.md).
 
 **Compatibility requirement:** this checkout requires the revision-7 native
 managed-user contract, user-owned connections, explicit group grants and
-group-bound OAuth placeholders. The reviewed pin is `gw-v0.3.0`, source
-`2c33abdec211328075b50b9280def06bf51b89d4`. Earlier group-owned gateway releases,
+group-bound OAuth placeholders. The reviewed pin is `gw-v0.4.0`, source
+`7f7c3fc2f3e88138d3e36ed53a15f33aab2a561b`. Earlier group-owned gateway releases,
 including `gw-v0.1.1`, are incompatible. Do not invent release metadata or bypass provenance checks.
 The initial `gw-v0.2.0` release also lacks current whole-credential grants,
 named MCP binding selection and API-key query placement. Its existing
@@ -40,7 +40,7 @@ Rollback requires the matching previous binary and consistent state backup.
 
 ## 2. Download and verify the sanctioned release
 
-The pin is `agent-vault-gateway` in `versions.json`, currently `gw-v0.3.0`.
+The pin is `agent-vault-gateway` in `versions.json`, currently `gw-v0.4.0`.
 Reviewed source and three platform hashes live in `setup/agent-vault-release.ts`.
 The binaries are standalone executables, not archives.
 

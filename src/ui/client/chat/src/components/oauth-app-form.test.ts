@@ -19,6 +19,7 @@ const app: AppInfo = {
   identity: 'oidc',
   token_scope_separator: 'comma',
   authorization_params: { access_type: 'offline', include_granted_scopes: 'false' },
+  token_headers: { Authorization: 'Bearer pk_test_synthetic' },
 };
 
 describe('OAuth app form', () => {
@@ -47,6 +48,7 @@ describe('OAuth app form', () => {
       identity: app.identity,
       token_scope_separator: app.token_scope_separator,
       authorization_params: app.authorization_params,
+      token_headers: app.token_headers,
     });
     expect(config).not.toHaveProperty('client_secret_set');
     expect(config).not.toHaveProperty('source');
@@ -61,6 +63,7 @@ describe('OAuth app form', () => {
       jwks_uri: '',
       identity: 'none',
       parameters: [],
+      tokenHeaders: [],
     });
     expect(config).toMatchObject({
       authorization_endpoint: '',
@@ -68,6 +71,7 @@ describe('OAuth app form', () => {
       revocation_endpoint: '',
       jwks_uri: '',
       authorization_params: {},
+      token_headers: {},
     });
   });
   it('rejects duplicate parameters instead of silently overwriting one', () => {
@@ -80,6 +84,35 @@ describe('OAuth app form', () => {
         ],
       }),
     ).toThrow('Duplicate');
+  });
+  it('rejects case-insensitive duplicate token headers instead of overwriting one', () => {
+    expect(() =>
+      compileOAuthApp({
+        ...oauthAppDraft(app),
+        tokenHeaders: [
+          { name: 'Authorization', value: 'Bearer pk_test_one' },
+          { name: 'authorization', value: 'Bearer pk_test_two' },
+        ],
+      }),
+    ).toThrow('unique regardless of case');
+  });
+  it.each([
+    ['Bad Header', 'value'],
+    ['Host', 'other.example'],
+    ['Content-Type', 'application/json'],
+    ['Cookie', 'value'],
+    ['X-Client', 'bad\r\nvalue'],
+    ['X-Client', '\u0085'],
+  ])('rejects invalid token header %s', (name, value) => {
+    expect(() => compileOAuthApp({ ...oauthAppDraft(app), tokenHeaders: [{ name, value }] })).toThrow();
+  });
+  it('rejects a token Authorization header with HTTP Basic client authentication', () => {
+    expect(() =>
+      compileOAuthApp({
+        ...oauthAppDraft(app),
+        token_endpoint_auth_method: 'client_secret_basic',
+      }),
+    ).toThrow('conflicts with HTTP Basic');
   });
   it.each(['client_secret', 'redirect_uri', 'STATE', 'scope', 'resource', 'access_token'])(
     'does not allow parameter %s to override OAuth security fields',

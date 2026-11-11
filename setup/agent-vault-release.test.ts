@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));
-vi.mock('./lib/version-pins.js', () => ({ readVersionPin: vi.fn(() => 'gw-v0.3.0') }));
+vi.mock('./lib/version-pins.js', () => ({ readVersionPin: vi.fn(() => 'gw-v0.4.0') }));
 
 import { downloadGatewayRelease, gatewayRelease, verifyGatewayRelease } from './agent-vault-release.js';
 import { readVersionPin } from './lib/version-pins.js';
@@ -17,7 +17,7 @@ let directory: string;
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(execFileSync).mockReset();
-  vi.mocked(readVersionPin).mockReturnValue('gw-v0.3.0');
+  vi.mocked(readVersionPin).mockReturnValue('gw-v0.4.0');
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-gateway-release-'));
 });
 
@@ -27,14 +27,14 @@ afterEach(() => {
 
 describe('pinned gateway release', () => {
   it.each([
-    ['linux', 'x64', 'linux_amd64', 'f996ac17b75ff82599c3ad48f9a615dad822b2f7dc7d77f29fdbe2bad8967fb0'],
-    ['linux', 'arm64', 'linux_arm64', 'cafa5be915031e7b26d25f68af38a03954570ba579508ce0b5846b5aad911f2a'],
-    ['darwin', 'arm64', 'darwin_arm64', '5ba45316b406590d4bcf1d41551c4908e73f043d65b54606135c60d7b847ea67'],
+    ['linux', 'x64', 'linux_amd64', '0085bc9008b637c256dbd29079ddccacba1a4014b8590d58fea5c95b17f8fa25'],
+    ['linux', 'arm64', 'linux_arm64', 'f9c0e28ea23733155802133c40ef22e04066b1712556ed004849a4aaf299c7b6'],
+    ['darwin', 'arm64', 'darwin_arm64', 'ec0c1c2685e403e743f800a5f3fd3e93fddcf9858042efae682fb906bc1e9ff6'],
   ])('pins %s/%s to the reviewed standalone asset', (platform, arch, target, sha256) => {
     expect(gatewayRelease(platform, arch)).toEqual({
-      version: 'gw-v0.3.0',
-      commit: '2c33abdec211328075b50b9280def06bf51b89d4',
-      asset: `agent-vault_gw-v0.3.0_${target}`,
+      version: 'gw-v0.4.0',
+      commit: '7f7c3fc2f3e88138d3e36ed53a15f33aab2a561b',
+      asset: `agent-vault_gw-v0.4.0_${target}`,
       sha256,
     });
     expect(readVersionPin).toHaveBeenCalledWith('agent-vault-gateway');
@@ -49,7 +49,7 @@ describe('pinned gateway release', () => {
   });
 
   it('refuses a version pin without reviewed source and checksum metadata', () => {
-    vi.mocked(readVersionPin).mockReturnValue('gw-v0.4.0');
+    vi.mocked(readVersionPin).mockReturnValue('gw-v0.5.0');
     expect(() => gatewayRelease()).toThrow('No reviewed');
   });
 
@@ -71,7 +71,7 @@ describe('pinned gateway release', () => {
       [
         'release',
         'download',
-        'gw-v0.3.0',
+        'gw-v0.4.0',
         '--repo',
         'dtreskunov/agent-vault',
         '--dir',
@@ -142,9 +142,9 @@ describe('fail-closed release verification', () => {
         '--signer-workflow',
         'dtreskunov/agent-vault/.github/workflows/gateway-release.yml',
         '--source-ref',
-        'refs/tags/gw-v0.3.0',
+        'refs/tags/gw-v0.4.0',
         '--source-digest',
-        '2c33abdec211328075b50b9280def06bf51b89d4',
+        '7f7c3fc2f3e88138d3e36ed53a15f33aab2a561b',
         '--deny-self-hosted-runners',
       ],
       { stdio: 'inherit' },

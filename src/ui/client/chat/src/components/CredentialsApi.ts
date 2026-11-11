@@ -302,6 +302,7 @@ export function appConfiguration(app: AppInfo): OAuthAppConfiguration {
     api_hosts: app.api_hosts,
     default_scopes: app.default_scopes,
     authorization_params: app.authorization_params,
+    token_headers: app.token_headers,
     revocation_endpoint: app.revocation_endpoint,
     identity: app.identity,
     jwks_uri: app.jwks_uri,
@@ -345,6 +346,44 @@ export function validateAppConfiguration(config: OAuthAppConfiguration): OAuthAp
       Object.values(config.authorization_params).some((value) => typeof value !== 'string'))
   )
     throw new CredentialsError('authorization_params must map parameter names to string values.');
+  if (config.token_headers !== undefined) {
+    if (
+      !isRecord(config.token_headers) ||
+      Object.values(config.token_headers).some((value) => typeof value !== 'string')
+    )
+      throw new CredentialsError('token_headers must map header names to string values.');
+    const names = new Set<string>();
+    const reserved = new Set([
+      'host',
+      'content-length',
+      'content-type',
+      'content-encoding',
+      'transfer-encoding',
+      'connection',
+      'keep-alive',
+      'proxy-authenticate',
+      'proxy-authorization',
+      'proxy-connection',
+      'te',
+      'trailer',
+      'upgrade',
+      'cookie',
+      'set-cookie',
+    ]);
+    for (const [name, value] of Object.entries(config.token_headers)) {
+      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name))
+        throw new CredentialsError('Token headers require valid HTTP header names.');
+      if (/[^\x20-\x7e]/.test(value))
+        throw new CredentialsError('Token header values must contain only printable ASCII characters.');
+      const key = name.toLowerCase();
+      if (names.has(key)) throw new CredentialsError('Token header names must be unique regardless of case.');
+      names.add(key);
+      if (reserved.has(key))
+        throw new CredentialsError('Token headers cannot override HTTP transport or cookie headers.');
+      if (key === 'authorization' && config.token_endpoint_auth_method === 'client_secret_basic')
+        throw new CredentialsError('Token Authorization header conflicts with HTTP Basic client authentication.');
+    }
+  }
   const secretFields = (value: unknown): boolean =>
     isRecord(value) &&
     Object.entries(value).some(

@@ -4,6 +4,17 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-10
+
+- **Provider-specific OAuth token headers.** Configure non-secret headers in
+  OAuth Apps → Advanced settings for hosted providers such as Stripe Link.
+  Headers apply to code exchange, refresh and revocation; rotation updates
+  existing connections and pending sign-ins without changing grants or scopes.
+  The app form now displays and copies the host's actual credential callback URL.
+  Deploy with gateway `gw-v0.4.0`; run `/init-agent-vault` using the
+  [verification and rollback procedure](docs/agent-vault-upgrades.md).
+  Existing Google/GitHub apps require no changes or repeated consent.
+
 - **[BREAKING] Canonical turn usage and opt-in wrap-up guidance.** Host,
   session and runner storage is v3 and runner links use protocol v7.
   Usage facts live on usage records; advisory-only changes do not rewrite them.

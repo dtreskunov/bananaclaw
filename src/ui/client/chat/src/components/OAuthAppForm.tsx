@@ -7,11 +7,30 @@ import { showToast } from './Toast';
 import type { OAuthAppDraft } from './oauth-app-form';
 import { displayDestination } from './credential-presentation';
 import { OAuthScopePicker } from './OAuthScopePicker';
+import { OAUTH_CALLBACK_PATH } from '../../../../shared/oauth-app';
+
+function renderNameValueRows({ rows, label, namePlaceholder, valuePlaceholder, onChange }: {
+  rows: OAuthAppDraft['parameters']; label: string; namePlaceholder: string; valuePlaceholder: string;
+  onChange: (rows: OAuthAppDraft['parameters']) => void;
+}): JSX.Element {
+  return <>
+    {rows.map((row, index) => <div class="credential-inline-field" key={index}>
+      <input type="text" aria-label={`${label} ${index + 1} name`} placeholder={namePlaceholder} value={row.name}
+        onInput={(event) => onChange(rows.map((item, at) => at === index ? { ...item, name: event.currentTarget.value } : item))} />
+      <input type="text" aria-label={`${label} ${index + 1} value`} placeholder={valuePlaceholder} value={row.value}
+        onInput={(event) => onChange(rows.map((item, at) => at === index ? { ...item, value: event.currentTarget.value } : item))} />
+      <CredentialAction label={`Remove ${label.toLowerCase()} ${index + 1}`} onClick={() =>
+        onChange(rows.filter((_, at) => at !== index))}><TrashIcon /></CredentialAction>
+    </div>)}
+    <button type="button" class="ghost" onClick={() => onChange([...rows, { name: '', value: '' }])}>{`Add ${label.toLowerCase()}`}</button>
+  </>;
+}
 
 export function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }: {
   draft: OAuthAppDraft; busy: boolean; onChange: Dispatch<StateUpdater<OAuthAppDraft>>; selectDiscovered?: boolean;
 }): JSX.Element {
   const update = (patch: Partial<OAuthAppDraft>): void => onChange(current => ({ ...current, ...patch }));
+  const callbackUrl = `${location.origin}${OAUTH_CALLBACK_PATH}`;
   return <>
     <input class="credential-name-input" type="text" aria-label="App name" placeholder="App name" value={draft.label}
       disabled={busy} onInput={(event) => update({ label: event.currentTarget.value })} />
@@ -39,9 +58,9 @@ export function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }
     <OAuthScopePicker label="Default scopes" issuer={draft.issuer} value={draft.scopes} disabled={busy}
       selectDiscovered={selectDiscovered} onChange={scopes => update({ scopes })} />
     <Field label="Callback URL" info="Register this redirect URL in your provider console.">
-      <div class="credential-inline-field"><code class="credential-callback">{`${location.origin}/oauth/callback`}</code>
+      <div class="credential-inline-field"><code class="credential-callback">{callbackUrl}</code>
         <CredentialAction label="Copy callback URL" disabled={busy} onClick={() => {
-          void navigator.clipboard.writeText(`${location.origin}/oauth/callback`).then(
+          void navigator.clipboard.writeText(callbackUrl).then(
             () => showToast('Callback URL copied'),
             () => showToast('Could not copy the callback URL', 'err', 5000, { transient: true }),
           );
@@ -82,15 +101,14 @@ export function OAuthAppForm({ draft, busy, onChange, selectDiscovered = false }
       </select></Field>
       <fieldset class="credential-app-parameters" disabled={busy}>
         <legend>Authorization parameters</legend>
-        {draft.parameters.map((parameter, index) => <div class="credential-inline-field" key={index}>
-          <input type="text" aria-label={`Parameter ${index + 1} name`} placeholder="Parameter" value={parameter.name}
-            onInput={(event) => update({ parameters: draft.parameters.map((item, at) => at === index ? { ...item, name: event.currentTarget.value } : item) })} />
-          <input type="text" aria-label={`Parameter ${index + 1} value`} placeholder="Value" value={parameter.value}
-            onInput={(event) => update({ parameters: draft.parameters.map((item, at) => at === index ? { ...item, value: event.currentTarget.value } : item) })} />
-          <CredentialAction label={`Remove parameter ${index + 1}`} onClick={() =>
-            update({ parameters: draft.parameters.filter((_, at) => at !== index) })}><TrashIcon /></CredentialAction>
-        </div>)}
-        <button type="button" class="ghost" onClick={() => update({ parameters: [...draft.parameters, { name: '', value: '' }] })}>Add parameter</button>
+        {renderNameValueRows({ rows: draft.parameters, label: 'Parameter', namePlaceholder: 'Parameter', valuePlaceholder: 'Value',
+          onChange: parameters => update({ parameters }) })}
+      </fieldset>
+      <fieldset class="credential-app-parameters" disabled={busy}>
+        <legend>Token request headers</legend>
+        <p>Non-secret values only, such as a publishable key. These are visible app settings, sent during token exchange, refresh and revocation.</p>
+        {renderNameValueRows({ rows: draft.tokenHeaders, label: 'Token header', namePlaceholder: 'Header name', valuePlaceholder: 'Public value',
+          onChange: tokenHeaders => update({ tokenHeaders }) })}
       </fieldset>
     </details>
   </>;

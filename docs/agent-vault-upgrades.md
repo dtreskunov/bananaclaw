@@ -1,12 +1,20 @@
 # Agent Vault gateway releases and upgrades
 
-## Coordinated release: NanoClaw 2.5.0 and gateway gw-v0.3.0
+## Coordinated release: NanoClaw 2.6.0 and gateway gw-v0.4.0
 
 [Revision 7 of the plan of record](credential-gateway-agent-vault-fork-proposal.md)
 defines the native managed-user and user-owned connection model.
 It is a coordinated host/gateway/runner/schema release. The reviewed gateway
-pin is `gw-v0.3.0`, source `2c33abdec211328075b50b9280def06bf51b89d4`.
+pin is `gw-v0.4.0`, source `7f7c3fc2f3e88138d3e36ed53a15f33aab2a561b`.
 The former `gw-v0.1.1` binary does not implement this contract.
+
+`gw-v0.4.0` adds validated non-secret OAuth token headers for hosted providers
+such as Stripe Link, with exchange, refresh, RFC 7009 revocation and rotation
+for existing connections and pending sign-ins. It also retains the deployed
+callback-registration error explanation and connection-scoped service names.
+This upgrade adds no database migration or grant expansion and does not require
+Google/GitHub reconnection. Register Link's confidential client separately; a
+successful upgrade does not imply Stripe consent or account access.
 
 The `gw-v0.2.0` release introduced native AgentVault managed users and personal libraries,
 user-owned static/OAuth connections, connection-scoped OAuth refresh/client
@@ -67,6 +75,28 @@ The remaining sections describe the published contract and its verified
 historical rollout; they are not the target revision-7 management API.
 
 ### Canonical host API and CLI
+
+OAuth app configuration supports optional non-secret `token_headers`, editable
+under OAuth Apps → Advanced settings → Token request headers. These are public
+app metadata, not write-only secrets. A gateway build with the matching field is
+required; deploy the host and the reviewed `gw-v0.4.0` gateway together, without
+changing live credentials. Verify the pinned checksums and signed source/tag
+provenance before replacing the gateway executable.
+
+For Stripe Link, use `client_secret_post`,
+`authorization_params: {"key":"pk_live_YOUR_PUBLISHABLE_KEY"}` and
+`token_headers: {"Authorization":"Bearer pk_live_YOUR_PUBLISHABLE_KEY"}`.
+Enter the registered OAuth client secret only in the separate password field.
+The gateway attaches these headers on code exchange, refresh and RFC 7009
+revocation, not discovery or ordinary API requests. HTTP transport/cookie headers,
+malformed headers, case-insensitive duplicates and `Authorization` overrides
+with HTTP Basic authentication are rejected.
+
+Omitting headers preserves them; removing all rows saves `{}` to clear them.
+Header rotation updates existing connections and pending exchanges without
+changing scopes, grants or client identity. Register the exact redirect URI
+advertised by `/oauth/client-metadata.json`; this installation's credential
+callback is `/ui/oauth/callback`, not the OIDC login callback.
 
 The revision-7 host exposes `/ui/chat/api/credentials` for the signed-in user's
 connections, accessible groups and configured OAuth apps. Connection CRUD and

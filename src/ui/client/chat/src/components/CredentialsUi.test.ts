@@ -1203,6 +1203,52 @@ describe('connection UI safety and ownership', () => {
     );
   });
 
+  it('shows and copies the credential callback rather than a guessed OAuth route', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const form = OAuthAppForm({ draft: oauthAppDraft(), busy: false, onChange: vi.fn() });
+    expect(descendants(form).find((child) => child.props.class === 'credential-callback')!.props.children).toBe(
+      'https://nanoclaw.example/ui/oauth/callback',
+    );
+    descendants(form)
+      .find((child) => child.props.label === 'Copy callback URL')!
+      .props.onClick();
+    await vi.waitFor(() =>
+      expect(writeText).toHaveBeenCalledExactlyOnceWith('https://nanoclaw.example/ui/oauth/callback'),
+    );
+  });
+
+  it('adds, edits and removes public OAuth token headers', () => {
+    let draft = oauthAppDraft();
+    const draw = (): TestNode =>
+      OAuthAppForm({
+        draft,
+        busy: false,
+        onChange: (update) => {
+          draft = typeof update === 'function' ? update(draft) : update;
+        },
+      }) as TestNode;
+    descendants(draw())
+      .find((child) => child.props.children === 'Add token header')!
+      .props.onClick();
+    expect(draft.tokenHeaders).toEqual([{ name: '', value: '' }]);
+    descendants(draw())
+      .find((child) => child.props['aria-label'] === 'Token header 1 name')!
+      .props.oninput({
+        currentTarget: { value: 'Authorization' },
+      });
+    descendants(draw())
+      .find((child) => child.props['aria-label'] === 'Token header 1 value')!
+      .props.oninput({
+        currentTarget: { value: 'Bearer pk_test_synthetic' },
+      });
+    expect(draft.tokenHeaders).toEqual([{ name: 'Authorization', value: 'Bearer pk_test_synthetic' }]);
+    descendants(draw())
+      .find((child) => child.props.label === 'Remove token header 1')!
+      .props.onClick();
+    expect(draft.tokenHeaders).toEqual([]);
+  });
+
   it.each([false, true])('uses the standard account dialog and authorization table (mobile=%s)', (mobile) => {
     credentialsOpen.value = true;
     isMobile.value = mobile;

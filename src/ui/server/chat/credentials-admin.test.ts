@@ -591,12 +591,19 @@ describe('user-owned Credentials API', () => {
     expect(
       (
         await call('PUT', '/ui/chat/api/credentials/oauth-apps/google?scope=user', {
-          config: { issuer: 'https://auth.example.test', client_id: 'client' },
+          config: {
+            issuer: 'https://auth.example.test',
+            client_id: 'client',
+            authorization_params: { key: 'pk_test_synthetic' },
+            token_headers: { Authorization: 'Bearer pk_test_synthetic' },
+          },
           clientSecret: 'test-client-secret',
         })
       ).status,
     ).toBe(200);
     expect(requests.at(-1)?.body.client_secret).toBe('test-client-secret');
+    expect(requests.at(-1)?.body.token_headers).toEqual({ Authorization: 'Bearer pk_test_synthetic' });
+    expect(requests.at(-1)?.body.authorization_params).toEqual({ key: 'pk_test_synthetic' });
   });
 
   it('rejects cross-origin writes and malformed secret JSON without reflecting it', async () => {

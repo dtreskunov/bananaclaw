@@ -18,7 +18,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe('readVersionPin', () => {
   it('resolves the Agent Vault gateway pin from the real versions.json', () => {
-    expect(readVersionPin('agent-vault-gateway')).toBe('gw-v0.3.0');
+    expect(readVersionPin('agent-vault-gateway')).toBe('gw-v0.4.0');
   });
 
   it('keeps installation guidance on the reviewed release and user-owned contract', () => {
